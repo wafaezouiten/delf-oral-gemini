@@ -15,7 +15,9 @@
     "db:push": "drizzle-kit push",
     "exp:audio": "tsx experiments/audio-vs-text.ts",
     "smoke": "tsx scripts/smoke-gemini.ts",
-    "verify:live": "tsx scripts/verify-live.ts"
+    "verify:live": "tsx scripts/verify-live.ts",
+    "verify:eval": "cross-env NODE_OPTIONS=--conditions=react-server tsx scripts/verify-eval.ts",
+    "models": "node scripts/list-models.mjs"
   },
   "dependencies": {
     "@clerk/localizations": "^4.14.2",
@@ -34,6 +36,7 @@
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "cross-env": "^10.1.0",
     "dotenv": "^17.4.2",
     "drizzle-kit": "^0.31.10",
     "eslint": "^9",

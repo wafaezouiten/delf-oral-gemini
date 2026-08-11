@@ -107,9 +107,17 @@ survives.
   the handle, the examiner recalled a specific argument made before the
   reconnect, in character.
 
-Everything learned by actually connecting — including four API behaviours that
-present as a healthy session behaving wrongly — is written up in
-[`docs/GEMINI_LIVE_FINDINGS.md`](docs/GEMINI_LIVE_FINDINGS.md).
+**Verified evaluation** — `pnpm verify:eval`, 8/8: a strong, a weak and an
+*uneven* transcript graded through the real model. Scores land on legal bands,
+the /25 is recomputed rather than trusted, a 20-point gap separates strong from
+weak, and — the check that matters — the uneven fixture scores morphosyntaxe 3
+while argumentation stays 5, proving criteria are judged independently rather
+than by global impression. The audio path uploads and grades end to end.
+
+Everything learned by actually connecting — including four Live API behaviours
+that present as a healthy session behaving wrongly, and two dead model ids — is
+written up in [`docs/GEMINI_LIVE_FINDINGS.md`](docs/GEMINI_LIVE_FINDINGS.md) and
+[`docs/EVALUATION_FINDINGS.md`](docs/EVALUATION_FINDINGS.md).
 
 **Still not verified:**
 
@@ -121,3 +129,9 @@ present as a healthy session behaving wrongly — is written up in
 - The audio-vs-text evaluation result. `docs/AUDIO_EVALUATION.md` states the
   hypothesis and its control; the harness (`pnpm exp:audio`) is written and the
   results table is deliberately empty until real learner recordings exist.
+- **Corrector calibration against human examiners.** The corrector is internally
+  consistent and discriminating, but it is generous: 23/25 for a transcript with
+  agreement errors in every turn. Nothing here shows that a 23 from this model
+  means what a 23 from France Éducation international means, so results should be
+  shown to learners as indicative feedback, not a predicted exam mark. See
+  `docs/EVALUATION_FINDINGS.md`.

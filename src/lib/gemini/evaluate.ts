@@ -33,9 +33,22 @@ import { formatTranscript, type TranscriptEntry } from "@/lib/delf/transcript";
 import type { OralTopic } from "@/lib/delf/topics";
 import type { EvaluationFeedback } from "@/lib/db/schema";
 
-/** The corrector model. Not the Live model: this is a reasoning task, not a
- *  conversation, and it must accept audio input. */
-export const EVAL_MODEL = process.env.GEMINI_EVAL_MODEL ?? "gemini-3-pro-preview";
+/**
+ * The corrector model. Deliberately NOT the Live model: grading is a careful
+ * reasoning task rather than a conversation, and it must accept audio input.
+ *
+ * Two lessons are baked into this default, both learned by calling the API:
+ *
+ *  - `gemini-3-pro-preview` returned 404: already retired. `pnpm models` lists
+ *    what the key can actually reach, which beats guessing plausible ids.
+ *  - `gemini-3.1-pro-preview` exists but has a FREE-TIER QUOTA OF ZERO, so on a
+ *    free key it 429s on the very first call rather than degrading.
+ *
+ * So the default is the strongest model that a free key can actually run.
+ * Override with `GEMINI_EVAL_MODEL` on a billed key — a pro model is a better
+ * corrector, and grading is exactly the task worth spending capability on.
+ */
+export const EVAL_MODEL = process.env.GEMINI_EVAL_MODEL ?? "gemini-3.6-flash";
 
 export const EVAL_PROMPT_VERSION = "2026-08-11.1";
 
