@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "delf-oral-gemini",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["--dir", "C:\\Users\\lenovo\\Desktop\\delf-oral-gemini", "dev", "--port", "3100"],
+      "port": 3100
+    }
+  ]
+}

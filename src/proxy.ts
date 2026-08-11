@@ -1,30 +1,28 @@
 /**
- * Route protection.
+ * Clerk request handling.
  *
  * Next.js 16 renamed the `middleware` file convention to `proxy` (see
- * node_modules/next/dist/docs/01-app/03-api-reference/03-file-conventions/proxy.md);
- * Clerk's own Next 16 guidance says the same. The export is otherwise an
- * ordinary `clerkMiddleware`.
+ * node_modules/next/dist/docs/01-app/03-api-reference/03-file-conventions/proxy.md).
  *
- * Everything under /app and every exam API route requires a signed-in user. The
- * brief is explicit that unauthenticated users must not reach the oral
- * examination, and the token route matters most of all: it mints Gemini
- * credentials, so leaving it open would let anyone spend the project's quota.
+ * Note what this deliberately does NOT do: match protected paths here.
+ * `createRouteMatcher` is deprecated in Clerk v7, and the reason given is worth
+ * heeding rather than silencing — middleware auth relies on path matching, which
+ * can diverge from how Next.js actually routes a request and leave a protected
+ * resource reachable. For a route that mints Gemini credentials, "probably
+ * matched" is not good enough.
+ *
+ * So authorisation lives with each resource instead:
+ *   - `app/app/layout.tsx`               redirects an unauthenticated visitor
+ *   - `api/live-token/route.ts`          checks `auth()` before minting a token
+ *   - `api/exams/route.ts`               checks `auth()` before creating an exam
+ *   - `api/exams/[examId]/finish/route.ts` checks `auth()` before grading
+ *
+ * This file only establishes the Clerk request context those checks read from.
  */
 
-import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
+import { clerkMiddleware } from "@clerk/nextjs/server";
 
-const isProtectedRoute = createRouteMatcher([
-  "/app(.*)",
-  "/api/live-token(.*)",
-  "/api/exams(.*)",
-]);
-
-export default clerkMiddleware(async (auth, request) => {
-  if (isProtectedRoute(request)) {
-    await auth.protect();
-  }
-});
+export default clerkMiddleware();
 
 export const config = {
   matcher: [

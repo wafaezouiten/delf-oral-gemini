@@ -46,3 +46,6 @@ next-env.d.ts
 
 # ...but the template belongs in the repo.
 !.env.example
+
+# clerk configuration (can include secrets)
+/.clerk/
