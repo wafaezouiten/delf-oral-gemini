@@ -143,6 +143,16 @@ export class ExamController {
   private started = false;
   private closing = false;
   private finished = false;
+  /**
+   * Whether the monologue's `activityEnd` has already gone out.
+   *
+   * It is what both releases the floor AND causes Gemini to emit the
+   * candidate's transcription (verified: during a manual-VAD activity NOTHING
+   * is transcribed; the whole monologue arrives in one fragment at
+   * `activityEnd`). Sending it twice would be a second, empty turn boundary, so
+   * the closing handshake and the phase transition coordinate through this.
+   */
+  private activityEnded = false;
   private phaseSeconds = { monologue: 0, debate: 0 };
 
   private session: LiveSessionLike | null = null;
@@ -321,7 +331,7 @@ export class ExamController {
     this.closing = true;
     this.log("closing-handshake");
 
-    if (this.phase === "monologue") this.session?.endCandidateActivity();
+    if (this.phase === "monologue") this.endMonologueActivity();
     this.session?.sendDirective(closingInstruction(this.phase));
 
     this.closingTimer = setTimeout(() => {
@@ -358,9 +368,11 @@ export class ExamController {
     this.log("phase-transition", `${current} -> ${target}`);
 
     if (current === "monologue") {
-      // Release the candidate's turn, then drop the session: a system
-      // instruction cannot be changed in place, so the débat needs a new one.
-      this.session?.endCandidateActivity();
+      // Normally already sent by the closing handshake, which then WAITED for
+      // the examiner's turn — and that wait is what gives the candidate's
+      // transcription time to arrive before the socket goes away. This call
+      // only covers the path where the phase ends without a handshake.
+      this.endMonologueActivity();
       this.closeSession();
     } else if (current === "debate") {
       this.closeSession();
@@ -415,6 +427,13 @@ export class ExamController {
       // model has no turn boundary at which it could interrupt.
       session.beginCandidateActivity();
     }
+  }
+
+  /** Release the monologue floor exactly once. See `activityEnded`. */
+  private endMonologueActivity(): void {
+    if (this.activityEnded) return;
+    this.activityEnded = true;
+    this.session?.endCandidateActivity();
   }
 
   private closeSession(): void {

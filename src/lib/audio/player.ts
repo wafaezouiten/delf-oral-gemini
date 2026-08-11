@@ -12,7 +12,7 @@
  * already abandoned.
  */
 
-import { OUTPUT_SAMPLE_RATE } from "@/lib/gemini/live-config";
+import { OUTPUT_SAMPLE_RATE } from "@/lib/gemini/constants";
 import { base64ToInt16 } from "./recorder";
 
 export class ExaminerAudioPlayer {

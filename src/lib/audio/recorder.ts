@@ -14,7 +14,7 @@
  * else can read it — see `toWavBlob`.
  */
 
-import { INPUT_SAMPLE_RATE } from "@/lib/gemini/live-config";
+import { INPUT_SAMPLE_RATE } from "@/lib/gemini/constants";
 
 export interface RecorderCallbacks {
   /** One ~40 ms chunk of base64 PCM16, ready for `sendRealtimeInput`. */

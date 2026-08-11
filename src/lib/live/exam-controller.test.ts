@@ -216,6 +216,16 @@ describe("full DELF B2 exam, with a forced reconnect mid-debate", () => {
     assert.equal(monologueSession.activityEnds, 1, "the floor is released only at the end");
     await completeClosing(h);
 
+    // Exactly once, across the closing handshake AND the phase transition.
+    // `activityEnd` is what makes Gemini emit the monologue's transcription
+    // (verified live: nothing is transcribed until the floor is released), so a
+    // second one is a spurious empty turn boundary rather than a no-op.
+    assert.equal(
+      monologueSession.activityEnds,
+      1,
+      "activityEnd is sent once, not again by the phase transition",
+    );
+
     // 7-8. The débat starts on a NEW session, seeded with the monologue so the
     //      examiner can quote the candidate back at them.
     assert.equal(h.controller.getSnapshot().phase, "debate");

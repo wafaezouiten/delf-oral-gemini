@@ -35,18 +35,9 @@ import { Modality, type LiveConnectConfig } from "@google/genai";
 
 import { buildExaminerInstruction } from "@/lib/delf/examiner-prompt";
 import type { OralTopic } from "@/lib/delf/topics";
+import { LIVE_MODEL } from "./constants";
 
-/**
- * The Live model. Native-audio, so the examiner's French has real prosody
- * rather than TTS flatness. Overridable by env because preview model ids are
- * renamed without warning and a hard-coded string is a time bomb.
- */
-export const LIVE_MODEL = process.env.NEXT_PUBLIC_GEMINI_LIVE_MODEL ?? "gemini-3.1-flash-live-preview";
-
-/** Gemini Live audio contract: 16 kHz PCM16 in, 24 kHz PCM16 out. */
-export const INPUT_SAMPLE_RATE = 16000;
-export const OUTPUT_SAMPLE_RATE = 24000;
-export const INPUT_MIME_TYPE = `audio/pcm;rate=${INPUT_SAMPLE_RATE}`;
+export { LIVE_MODEL };
 
 /**
  * A measured, adult French voice. `Charon` is one of the prebuilt Live voices
@@ -61,11 +52,19 @@ const EXAMINER_SPEECH = {
 /**
  * Enabled on every phase so the server keeps issuing resumption handles. Without
  * this field the server sends no `sessionResumptionUpdate` at all, and a
- * reconnect has nothing to resume from — the exam would restart. `transparent`
- * asks the server to also report the last consumed client message index, which
- * is what makes a reconnect seamless rather than merely possible.
+ * reconnect has nothing to resume from — the exam would restart.
+ *
+ * Deliberately EMPTY. The obvious thing to add is `transparent: true`, which
+ * asks the server to report the last consumed client message index; the SDK
+ * accepts it and the docs describe it. The Developer API then rejects the
+ * connection outright at runtime:
+ *
+ *   "transparent parameter is only supported in Gemini Enterprise Agent
+ *    Platform mode, not in Gemini Developer API mode."
+ *
+ * Found by connecting, not by reading. Resumption itself works fine without it.
  */
-const RESUMPTION = { transparent: true } as const;
+const RESUMPTION = {} as const;
 
 /**
  * Sliding-window compression. Without it an audio-only session is capped at 15

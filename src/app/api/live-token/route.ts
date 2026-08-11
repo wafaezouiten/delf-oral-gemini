@@ -1,36 +1,55 @@
 /**
- * POST /api/live-token — mint a short-lived Gemini Live credential.
+ * POST /api/live-token — mint a Gemini Live credential scoped to one exam phase.
  *
- * The permanent `GEMINI_API_KEY` never reaches the browser. Instead the client
- * asks this route for an ephemeral token, which is scoped, single-use and
- * expires in minutes. That is the architecture the brief asks for:
+ * The architecture the brief asks for:
  *
  *     Browser -> our server -> ephemeral token -> Gemini Live
  *
- * Called on every connect INCLUDING reconnects, because `uses: 1` means a token
- * is spent the moment a session opens and a resumed session is a new session.
+ * The permanent `GEMINI_API_KEY` never reaches the browser. What makes this
+ * stronger than a bare token is `liveConnectConstraints`: the server builds the
+ * WHOLE session config here — including the examiner's system instruction — and
+ * pins it into the token. Two consequences, both verified by connecting rather
+ * than assumed:
  *
- * Clerk-gated by `src/proxy.ts`; the explicit `auth()` check here is defence in
- * depth, since a matcher typo is a quiet way to hand out API credits.
+ *  1. **The examiner prompt never leaves the server.** Not in the client bundle,
+ *     not over the wire. The browser connects with `responseModalities` alone
+ *     and the pinned config is what actually governs the session.
+ *  2. **A leaked token is worth almost nothing.** It is single-use, expires in
+ *     minutes, and can only ever open the exact session it was minted for.
+ *
+ * Sharp edge, found the hard way: a constraint carrying ONLY `{ model }` makes
+ * the server accept the socket and then kill it with code 1011 "Internal error
+ * encountered" — no useful diagnostic. The constraint must carry the config too.
+ *
+ * The client chooses only the phase, the topic slug and (on a reconnect) its
+ * resumption handle. All three are validated here; the prompt is assembled from
+ * server-owned source, so a client cannot inject examiner instructions.
  */
 
 import { auth } from "@clerk/nextjs/server";
 import { GoogleGenAI } from "@google/genai";
 import { NextResponse } from "next/server";
 
-import { LIVE_MODEL } from "@/lib/gemini/live-config";
+import { LIVE_MODEL } from "@/lib/gemini/constants";
+import { liveConfigForPhase } from "@/lib/gemini/live-config";
+import { findTopic } from "@/lib/delf/topics";
 
 export const runtime = "nodejs";
 /** Tokens are per-request secrets; nothing here may be cached. */
 export const dynamic = "force-dynamic";
 
-/** How long a minted token stays valid. Comfortably longer than one reconnect
- *  round trip, short enough that a leaked token is worthless within the hour. */
+/** How long a minted token stays valid. */
 const TOKEN_TTL_MINUTES = 15;
 /** How long the client has to actually open a session with it. */
 const NEW_SESSION_WINDOW_MINUTES = 2;
 
-export async function POST() {
+interface TokenRequest {
+  phase?: unknown;
+  topicSlug?: unknown;
+  resumptionHandle?: unknown;
+}
+
+export async function POST(request: Request) {
   const { userId } = await auth();
   if (!userId) {
     return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
@@ -45,6 +64,25 @@ export async function POST() {
     );
   }
 
+  const body = (await request.json().catch(() => ({}))) as TokenRequest;
+
+  const phase = body.phase;
+  if (phase !== "monologue" && phase !== "debate") {
+    return NextResponse.json({ error: "Phase invalide" }, { status: 400 });
+  }
+
+  const topic = typeof body.topicSlug === "string" ? findTopic(body.topicSlug) : undefined;
+  if (!topic) {
+    return NextResponse.json({ error: "Sujet inconnu" }, { status: 400 });
+  }
+
+  // A handle is opaque to us, but it is client-supplied, so bound its size
+  // rather than forwarding an arbitrary string to Google.
+  const resumptionHandle =
+    typeof body.resumptionHandle === "string" && body.resumptionHandle.length <= 4096
+      ? body.resumptionHandle
+      : undefined;
+
   try {
     const client = new GoogleGenAI({ apiKey });
     const now = Date.now();
@@ -54,9 +92,11 @@ export async function POST() {
         uses: 1,
         expireTime: new Date(now + TOKEN_TTL_MINUTES * 60_000).toISOString(),
         newSessionExpireTime: new Date(now + NEW_SESSION_WINDOW_MINUTES * 60_000).toISOString(),
-        // Pin the token to the model we actually use, so a leaked token cannot
-        // be spent on a different (more expensive) one.
-        liveConnectConstraints: { model: LIVE_MODEL },
+        liveConnectConstraints: {
+          model: LIVE_MODEL,
+          // Both fields are required. Model alone => 1011 on connect.
+          config: liveConfigForPhase(phase, { topic, resumptionHandle }),
+        },
       },
     });
 

@@ -27,7 +27,7 @@
 
 import { GoogleGenAI, type LiveServerMessage, type Session } from "@google/genai";
 
-import { LIVE_MODEL, INPUT_MIME_TYPE, liveConfigForPhase } from "@/lib/gemini/live-config";
+import { CLIENT_CONNECT_CONFIG, INPUT_MIME_TYPE, LIVE_MODEL } from "@/lib/gemini/constants";
 import type { OralTopic } from "@/lib/delf/topics";
 
 export type LivePhase = "monologue" | "debate";
@@ -107,14 +107,24 @@ export class ExamLiveSession {
   }
 
   /**
-   * Mint a short-lived ephemeral token.
+   * Mint a short-lived ephemeral token for this phase.
    *
-   * Fetched fresh on EVERY connect, including reconnects, because tokens default
-   * to a single use and a one-minute window to open a new session. The permanent
-   * key never leaves the server.
+   * Fetched fresh on EVERY connect, including reconnects, because a token is
+   * single-use and a resumed session is a new session. The phase, topic and
+   * resumption handle go to the server, which builds the real session config
+   * (examiner prompt included) and pins it into the token — so this client never
+   * holds the prompt, and the token cannot be used for anything else.
    */
   private async fetchToken(): Promise<string> {
-    const response = await fetch("/api/live-token", { method: "POST" });
+    const response = await fetch("/api/live-token", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        phase: this.phase,
+        topicSlug: this.topic.slug,
+        resumptionHandle: this.resumptionHandle,
+      }),
+    });
     if (!response.ok) {
       const body = await response.text().catch(() => "");
       throw new Error(`Could not mint a Gemini token (${response.status}): ${body}`);
@@ -138,14 +148,22 @@ export class ExamLiveSession {
 
     try {
       const token = await this.fetchToken();
-      const ai = new GoogleGenAI({ apiKey: token });
+      // `apiVersion: "v1alpha"` is REQUIRED when authenticating with an
+      // ephemeral token: the SDK's token support only exists on v1alpha, and
+      // without it the connection is rejected. The SDK warns about this at
+      // runtime rather than typing it, so it is easy to miss.
+      const ai = new GoogleGenAI({
+        apiKey: token,
+        httpOptions: { apiVersion: "v1alpha" },
+      });
 
       this.session = await ai.live.connect({
         model: LIVE_MODEL,
-        config: liveConfigForPhase(this.phase, {
-          topic: this.topic,
-          resumptionHandle: this.resumptionHandle,
-        }),
+        // Modalities only. The real config — instruction, VAD mode, resumption,
+        // compression — is pinned in the token minted above. Verified: this
+        // yields identical audio, transcripts and handles to sending the full
+        // config, whereas an entirely EMPTY config silently yields no audio.
+        config: CLIENT_CONNECT_CONFIG,
         callbacks: {
           onopen: () => {
             this.reconnectAttempts = 0;
@@ -320,10 +338,12 @@ export class ExamLiveSession {
   sendDirective(text: string): void {
     if (!this.session) return;
     try {
-      this.session.sendClientContent({
-        turns: [{ role: "user", parts: [{ text }] }],
-        turnComplete: true,
-      });
+      // `sendRealtimeInput({text})`, NOT `sendClientContent`. On
+      // gemini-3.1-flash-live the latter only seeds history: it accepts the
+      // turn and the model never speaks, which presents as a session that
+      // connects fine and then sits in silence forever. Confirmed by testing
+      // both against the live service.
+      this.session.sendRealtimeInput({ text });
       this.callbacks.onEvent("directive-sent");
     } catch (error) {
       this.callbacks.onEvent("directive-failed", String(error));

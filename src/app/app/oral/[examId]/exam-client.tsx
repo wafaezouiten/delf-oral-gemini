@@ -300,8 +300,14 @@ function SpeakingPanel({
 
         <div className="mt-4 flex-1 space-y-3 overflow-y-auto text-sm leading-relaxed">
           {entries.length === 0 && (
+            // Verified against the live service: during a monologue nothing is
+            // transcribed until the floor is released, so the whole exposé
+            // arrives at once at the end. Saying so is better than showing an
+            // empty panel for seven minutes and looking broken.
             <p className="text-muted-foreground text-sm">
-              La transcription apparaîtra ici au fil de la parole.
+              {phase === "monologue"
+                ? "Votre enregistrement est en cours. La transcription de votre exposé s'affichera à la fin du monologue, en une seule fois."
+                : "La transcription apparaîtra ici au fil de l'échange."}
             </p>
           )}
           {entries.map((entry, index) => (

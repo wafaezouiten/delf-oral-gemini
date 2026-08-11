@@ -89,19 +89,35 @@ minutes.
 
 ## Status
 
-Verified by running it:
+**Verified offline** — `pnpm check` clean, `pnpm build` succeeds, 54/54 unit
+tests pass. That includes the §17 acceptance scenario end to end (preparation →
+monologue → débat → forced reconnect → finish), asserting the transcript stays
+continuous, the débat clock does not reset, and the examiner's seeded memory
+survives.
 
-- `pnpm check` clean, `pnpm build` succeeds.
-- 33/33 unit tests pass, including the §17 acceptance scenario end to end
-  (preparation → monologue → débat → forced reconnect → finish) with assertions
-  that the transcript stays continuous, the débat clock does not reset, and the
-  examiner's seeded memory survives.
+**Verified against the real Gemini service** — `pnpm verify:live`, 6/6:
 
-Not yet verified against the live service — these need `GEMINI_API_KEY` and a
-microphone, and are marked as untested until then:
+- A server-minted, config-constrained ephemeral token opens a session governed by
+  an examiner instruction the client never sends.
+- **The monologue mechanism, with a control.** The same French speech through the
+  débat config produces 69 chunks of reply; through the monologue config it
+  produces **0**. Then `activityEnd` releases the floor and the examiner speaks
+  immediately. Silence is a protocol guarantee, not a hope.
+- **Resumption carries memory.** After dropping the socket and reconnecting with
+  the handle, the examiner recalled a specific argument made before the
+  reconnect, in character.
 
-- The real microphone → Gemini → speaker loop.
-- Whether the manual-VAD mechanism keeps the examiner silent in practice.
-- Real `GoAway` handling at the true ~10 minute limit.
-- The audio-vs-text evaluation result (`docs/AUDIO_EVALUATION.md` states the
-  hypothesis; the number is not in yet).
+Everything learned by actually connecting — including four API behaviours that
+present as a healthy session behaving wrongly — is written up in
+[`docs/GEMINI_LIVE_FINDINGS.md`](docs/GEMINI_LIVE_FINDINGS.md).
+
+**Still not verified:**
+
+- The browser half: `getUserMedia`, the AudioWorklet and playback. The wire
+  format is confirmed (the checks above run the same protocol from Node), but the
+  microphone path needs a human with a microphone.
+- A real `GoAway` at the true ~10 minute limit. The reconnect path is proven by
+  forced reconnection; the trigger has not been observed in the wild.
+- The audio-vs-text evaluation result. `docs/AUDIO_EVALUATION.md` states the
+  hypothesis and its control; the harness (`pnpm exp:audio`) is written and the
+  results table is deliberately empty until real learner recordings exist.
