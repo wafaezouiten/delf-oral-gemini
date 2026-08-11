@@ -1,0 +1,78 @@
+@import "tailwindcss";
+
+/**
+ * A small, deliberate token set.
+ *
+ * The brief says not to spend time on polish before the Gemini core works, so
+ * this is the minimum that keeps the exam readable: neutrals stay grey, and the
+ * only colours carry meaning — blue for the product voice, amber for "the clock
+ * is running out", red for a lost connection, green for a passing score.
+ */
+
+:root {
+  --background: #ffffff;
+  --foreground: #14161a;
+  --muted: #f4f5f7;
+  --muted-foreground: #5f6570;
+  --border: #e3e5ea;
+  --card: #ffffff;
+
+  --primary: #2563eb;
+  --primary-foreground: #ffffff;
+
+  --success: #15803d;
+  --success-subtle: #eaf6ee;
+  --warning: #b45309;
+  --warning-subtle: #fdf3e3;
+  --danger: #b91c1c;
+  --danger-subtle: #fdeeee;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0c0e12;
+    --foreground: #eceef2;
+    --muted: #171a20;
+    --muted-foreground: #9aa1ad;
+    --border: #262b33;
+    --card: #12151a;
+
+    --primary: #5b8def;
+    --primary-foreground: #0c0e12;
+
+    --success: #4ade80;
+    --success-subtle: #10241a;
+    --warning: #fbbf24;
+    --warning-subtle: #2a2010;
+    --danger: #f87171;
+    --danger-subtle: #2a1414;
+  }
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-border: var(--border);
+  --color-card: var(--card);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-success: var(--success);
+  --color-success-subtle: var(--success-subtle);
+  --color-warning: var(--warning);
+  --color-warning-subtle: var(--warning-subtle);
+  --color-danger: var(--danger);
+  --color-danger-subtle: var(--danger-subtle);
+  --font-sans: var(--font-inter);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+}
+
+/* Numbers in clocks and scores must not jitter as they tick. */
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
