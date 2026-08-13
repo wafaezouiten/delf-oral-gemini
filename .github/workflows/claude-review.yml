@@ -28,6 +28,11 @@ jobs:
       # The token is a repository secret that has to be minted by a human
       # (`claude setup-token`). Until it exists, warn and skip rather than fail
       # every pull request with a red X. See docs/ENGINEERING_WORKFLOW.md.
+      #
+      # A job reads secrets when it starts, so a run queued BEFORE the secret was
+      # added keeps reporting it missing however many times you look at it. Push
+      # again or re-run the workflow; the warning names this case because it is
+      # the one that looks like a bug and is not.
       - name: Check for Claude credentials
         id: creds
         env:
@@ -35,7 +40,7 @@ jobs:
         run: |
           if [ -z "$CLAUDE_TOKEN" ]; then
             echo "configured=false" >> "$GITHUB_OUTPUT"
-            echo "::warning::CLAUDE_CODE_OAUTH_TOKEN is not set — skipping the Claude review. Run 'claude setup-token' and add it under Settings → Secrets and variables → Actions."
+            echo "::warning::CLAUDE_CODE_OAUTH_TOKEN is not set — skipping the Claude review. Mint it with 'claude setup-token' and add it under Settings → Secrets and variables → Actions. If you just added it, this run started before it existed: re-run the workflow or push again."
           else
             echo "configured=true" >> "$GITHUB_OUTPUT"
           fi
