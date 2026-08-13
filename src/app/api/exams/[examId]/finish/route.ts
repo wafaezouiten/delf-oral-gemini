@@ -157,6 +157,12 @@ export async function POST(
     });
 
     if (persistedExamId !== null) {
+      // The three writes below are not atomic, and cannot be as written: this
+      // driver is `neon-http`, whose `db.transaction()` throws. A failure after
+      // the UPDATE leaves a sitting marked finished with no correction attached.
+      // `db.batch()` — which neon-http implements as a real transaction — is the
+      // fix, and belongs with the read path that would expose the inconsistency
+      // in the first place. See #16.
       try {
         const db = getDb();
         const id = persistedExamId;

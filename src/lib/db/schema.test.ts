@@ -19,6 +19,10 @@ import { ORAL_CRITERIA } from "@/lib/delf/criteria";
 import { GRILLE_BANDS } from "@/lib/delf/grille";
 import { ORAL_PHASES } from "@/lib/delf/phases";
 import {
+  GRILLE_BANDS as RUBRIC_BANDS,
+  ORAL_CRITERIA as RUBRIC_CRITERIA,
+} from "@/lib/delf/rubric";
+import {
   evaluationMode,
   evaluations,
   oralExamPhases,
@@ -37,6 +41,23 @@ const phasesConfig = getTableConfig(oralExamPhases);
 function columnsByName(table: Parameters<typeof getTableConfig>[0]) {
   return new Map(getTableConfig(table).columns.map((column) => [column.name, column]));
 }
+
+/**
+ * The schema's `satisfies Record<OralCriterion, …>` is anchored to the ported
+ * `criteria.ts` / `grille.ts`, because those are the modules the audit makes
+ * canonical and the ones that survive the reconciliation in #9. The row that
+ * actually reaches the INSERT, though, is built by `rubric.ts` — `evaluate.ts`
+ * types `EvaluationResult.criteria` with its `CriteriaScores`, and the route
+ * spreads that straight into `.values()`.
+ *
+ * So the compile-time net only covers the write path for as long as the two
+ * agree. This asserts that they do. When #9 deletes `rubric.ts`, this test stops
+ * compiling — which is the right way to find out.
+ */
+test("the ported criteria and the ones that build the row are the same five", () => {
+  assert.deepEqual([...RUBRIC_CRITERIA], [...ORAL_CRITERIA]);
+  assert.deepEqual([...RUBRIC_BANDS], [...GRILLE_BANDS]);
+});
 
 test("the phase enum mirrors the exam state machine", () => {
   assert.deepEqual([...oralPhase.enumValues], [...ORAL_PHASES]);
