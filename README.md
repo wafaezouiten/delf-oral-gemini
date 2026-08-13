@@ -135,3 +135,11 @@ written up in [`docs/GEMINI_LIVE_FINDINGS.md`](docs/GEMINI_LIVE_FINDINGS.md) and
   means what a 23 from France Éducation international means, so results should be
   shown to learners as indicative feedback, not a predicted exam mark. See
   `docs/EVALUATION_FINDINGS.md`.
+
+## Working on it
+
+`feature/*` → `develop` → `staging` → `main`, one issue and one pull request per
+phase, with lint, typecheck, unit tests, build, a secret scan and an automatic
+Claude review on every pull request. The process — branch model, the phase-to-issue
+mapping, and the two setup steps only a human can do — is written up in
+[`docs/ENGINEERING_WORKFLOW.md`](docs/ENGINEERING_WORKFLOW.md).

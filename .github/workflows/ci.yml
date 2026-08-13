@@ -1,0 +1,101 @@
+name: CI
+
+# Four gates on every pull request — lint, typecheck, unit tests, build.
+# They are separate jobs (not four steps of one job) so each reports as its own
+# status check and can be named individually in the branch protection rules for
+# develop / staging / main. Any failing job fails the workflow.
+
+on:
+  push:
+    branches:
+      - main
+      - staging
+      - develop
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+# Cancel an in-flight run when a newer commit lands on the same ref, so rapid
+# pushes don't pile up redundant CI.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Lint
+    if: github.event_name == 'push' || github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: ESLint
+        run: pnpm lint
+
+  typecheck:
+    name: Typecheck
+    if: github.event_name == 'push' || github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Typecheck
+        run: pnpm typecheck
+
+  test:
+    name: Unit tests
+    if: github.event_name == 'push' || github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Unit tests
+        run: pnpm test:unit
+
+  build:
+    name: Build
+    if: github.event_name == 'push' || github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      # Reuse Next.js's compiler cache across runs to speed up `next build`.
+      # Keyed on the lockfile + source so unrelated runs still hit the cache,
+      # with progressively looser restore-keys for a partial (warm) restore.
+      - name: Cache Next.js build
+        uses: actions/cache@v6
+        with:
+          path: .next/cache
+          key: nextjs-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}-${{ hashFiles('src/**', 'next.config.ts') }}
+          restore-keys: |
+            nextjs-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}-
+            nextjs-${{ runner.os }}-
+      # No secrets are injected: every route is server-rendered on demand, so the
+      # build never needs a real Gemini / Clerk / Neon credential. Verified by
+      # building with .env.local removed. If a future page prerenders behind
+      # Clerk, add placeholder env here rather than real keys.
+      - name: Build
+        run: pnpm build

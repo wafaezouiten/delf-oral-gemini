@@ -1,0 +1,80 @@
+name: Claude Code Review
+
+# Automatic review on every pull request. Mirrors the company's DELF repository
+# workflow of the same name, with the review brief widened to the four areas
+# issue #0 asks for: architecture, code quality, bugs, security.
+
+on:
+  pull_request:
+    types: [opened, synchronize, ready_for_review]
+
+concurrency:
+  group: claude-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  claude-review:
+    name: Claude review
+    if: github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+      issues: read
+      id-token: write
+
+    steps:
+      # The token is a repository secret that has to be minted by a human
+      # (`claude setup-token`). Until it exists, warn and skip rather than fail
+      # every pull request with a red X. See docs/ENGINEERING_WORKFLOW.md.
+      - name: Check for Claude credentials
+        id: creds
+        env:
+          CLAUDE_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: |
+          if [ -z "$CLAUDE_TOKEN" ]; then
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::CLAUDE_CODE_OAUTH_TOKEN is not set — skipping the Claude review. Run 'claude setup-token' and add it under Settings → Secrets and variables → Actions."
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout repository
+        if: steps.creds.outputs.configured == 'true'
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+
+      - name: Run Claude Code Review
+        id: claude-review
+        if: steps.creds.outputs.configured == 'true'
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          prompt: |
+            REPO: ${{ github.repository }}
+            PR NUMBER: ${{ github.event.pull_request.number }}
+
+            Please review this pull request and provide feedback on:
+            - Architecture: does the change sit at the right layer, and does it
+              respect the boundary between the pure DELF logic in `src/lib/delf`
+              and everything with I/O (Gemini Live, Clerk, Neon, routes, UI)?
+            - Code quality and best practices
+            - Potential bugs or issues
+            - Performance considerations
+            - Security concerns — leaked credentials, a server-only key reaching
+              the browser, missing auth on a route, unvalidated input
+            - Test coverage
+
+            Use the repository's CLAUDE.md and AGENTS.md for guidance on style and
+            conventions — note that this project pins a Next.js version whose APIs
+            differ from what you may remember, so check `node_modules/next/dist/docs/`
+            before asserting that Next.js code is wrong.
+
+            Be constructive and specific: point at lines, and say what to do instead.
+
+            Use `gh pr comment` with your Bash tool to leave your review as a comment on the PR.
+
+          # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
+          # or https://code.claude.com/docs/en/cli-reference for available options
+          claude_args: '--allowed-tools "Bash(gh issue view:*),Bash(gh search:*),Bash(gh issue list:*),Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr list:*)"'
