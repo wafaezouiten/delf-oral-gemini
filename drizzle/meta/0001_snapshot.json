@@ -1,0 +1,564 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "tables": {
+    "public.evaluations": {
+      "name": "evaluations",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "exam_id": {
+          "name": "exam_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "recording_id": {
+          "name": "recording_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "mode": {
+          "name": "mode",
+          "type": "evaluation_mode",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "realisation_tache": {
+          "name": "realisation_tache",
+          "type": "smallint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "interaction": {
+          "name": "interaction",
+          "type": "smallint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "lexique": {
+          "name": "lexique",
+          "type": "smallint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "morphosyntaxe": {
+          "name": "morphosyntaxe",
+          "type": "smallint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "phonologie": {
+          "name": "phonologie",
+          "type": "smallint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "raw_score_25": {
+          "name": "raw_score_25",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "duration_penalty": {
+          "name": "duration_penalty",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "score_25": {
+          "name": "score_25",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "meets_floor": {
+          "name": "meets_floor",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "feedback": {
+          "name": "feedback",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "model": {
+          "name": "model",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "prompt_version": {
+          "name": "prompt_version",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "latency_seconds": {
+          "name": "latency_seconds",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "evaluations_exam_id_idx": {
+          "name": "evaluations_exam_id_idx",
+          "columns": [
+            {
+              "expression": "exam_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "evaluations_exam_id_oral_exams_id_fk": {
+          "name": "evaluations_exam_id_oral_exams_id_fk",
+          "tableFrom": "evaluations",
+          "tableTo": "oral_exams",
+          "columnsFrom": [
+            "exam_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "evaluations_recording_id_oral_recordings_id_fk": {
+          "name": "evaluations_recording_id_oral_recordings_id_fk",
+          "tableFrom": "evaluations",
+          "tableTo": "oral_recordings",
+          "columnsFrom": [
+            "recording_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "evaluations_bands_check": {
+          "name": "evaluations_bands_check",
+          "value": "\"realisation_tache\" in (0, 1, 3, 5)\n        and \"interaction\" in (0, 1, 3, 5)\n        and \"lexique\" in (0, 1, 3, 5)\n        and \"morphosyntaxe\" in (0, 1, 3, 5)\n        and \"phonologie\" in (0, 1, 3, 5)"
+        },
+        "evaluations_score_range_check": {
+          "name": "evaluations_score_range_check",
+          "value": "\"raw_score_25\" between 0 and 25 and \"score_25\" between 0 and 25 and \"duration_penalty\" >= 0"
+        },
+        "evaluations_score_25_check": {
+          "name": "evaluations_score_25_check",
+          "value": "\"score_25\" = greatest(\"raw_score_25\" - \"duration_penalty\", 0)"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.oral_exam_phases": {
+      "name": "oral_exam_phases",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "exam_id": {
+          "name": "exam_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "phase": {
+          "name": "phase",
+          "type": "oral_speaking_phase",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "spoken_seconds": {
+          "name": "spoken_seconds",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "started_at": {
+          "name": "started_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "ended_at": {
+          "name": "ended_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "oral_exam_phases_exam_phase_idx": {
+          "name": "oral_exam_phases_exam_phase_idx",
+          "columns": [
+            {
+              "expression": "exam_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "phase",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "oral_exam_phases_exam_id_oral_exams_id_fk": {
+          "name": "oral_exam_phases_exam_id_oral_exams_id_fk",
+          "tableFrom": "oral_exam_phases",
+          "tableTo": "oral_exams",
+          "columnsFrom": [
+            "exam_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "oral_exam_phases_spoken_seconds_check": {
+          "name": "oral_exam_phases_spoken_seconds_check",
+          "value": "\"spoken_seconds\" >= 0"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.oral_exams": {
+      "name": "oral_exams",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "topic_id": {
+          "name": "topic_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "phase": {
+          "name": "phase",
+          "type": "oral_phase",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'preparation'"
+        },
+        "transcript": {
+          "name": "transcript",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "reconnect_count": {
+          "name": "reconnect_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "started_at": {
+          "name": "started_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "finished_at": {
+          "name": "finished_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "oral_exams_user_id_idx": {
+          "name": "oral_exams_user_id_idx",
+          "columns": [
+            {
+              "expression": "user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "oral_exams_topic_id_oral_topics_id_fk": {
+          "name": "oral_exams_topic_id_oral_topics_id_fk",
+          "tableFrom": "oral_exams",
+          "tableTo": "oral_topics",
+          "columnsFrom": [
+            "topic_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.oral_recordings": {
+      "name": "oral_recordings",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "exam_id": {
+          "name": "exam_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "uri": {
+          "name": "uri",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "mime_type": {
+          "name": "mime_type",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'audio/wav'"
+        },
+        "byte_size": {
+          "name": "byte_size",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "duration_seconds": {
+          "name": "duration_seconds",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "deleted_at": {
+          "name": "deleted_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "oral_recordings_exam_id_idx": {
+          "name": "oral_recordings_exam_id_idx",
+          "columns": [
+            {
+              "expression": "exam_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "oral_recordings_exam_id_oral_exams_id_fk": {
+          "name": "oral_recordings_exam_id_oral_exams_id_fk",
+          "tableFrom": "oral_recordings",
+          "tableTo": "oral_exams",
+          "columnsFrom": [
+            "exam_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.oral_topics": {
+      "name": "oral_topics",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "slug": {
+          "name": "slug",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "title": {
+          "name": "title",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "document": {
+          "name": "document",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "consigne": {
+          "name": "consigne",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "oral_topics_slug_unique": {
+          "name": "oral_topics_slug_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "slug"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    }
+  },
+  "enums": {
+    "public.evaluation_mode": {
+      "name": "evaluation_mode",
+      "schema": "public",
+      "values": [
+        "text",
+        "audio"
+      ]
+    },
+    "public.oral_phase": {
+      "name": "oral_phase",
+      "schema": "public",
+      "values": [
+        "preparation",
+        "monologue",
+        "debate",
+        "finished"
+      ]
+    },
+    "public.oral_speaking_phase": {
+      "name": "oral_speaking_phase",
+      "schema": "public",
+      "values": [
+        "monologue",
+        "debate"
+      ]
+    }
+  },
+  "schemas": {},
+  "sequences": {},
+  "roles": {},
+  "policies": {},
+  "views": {},
+  "_meta": {
+    "columns": {},
+    "schemas": {},
+    "tables": {}
+  },
+  "id": "5a4a8fd2-9464-452a-be4d-1f4c774cd5ac",
+  "prevId": "8294c8da-88df-4b4c-9c08-c78576396916"
+}

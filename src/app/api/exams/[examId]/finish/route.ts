@@ -14,7 +14,10 @@ import { auth } from "@clerk/nextjs/server";
 import { eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
 
-import { evaluations, getDb, isDatabaseConfigured, oralExams } from "@/lib/db";
+import { evaluations, getDb, isDatabaseConfigured, oralExamPhases, oralExams } from "@/lib/db";
+// The floor is the one rule the two rubric copies on `develop` agree on, so
+// reading it from the ported module settles nothing that Phase 2 shouldn't.
+import { meetsCompetencyFloor } from "@/lib/delf/orale-rubric";
 import { findTopic } from "@/lib/delf/topics";
 import { candidateWordCount, type TranscriptEntry } from "@/lib/delf/transcript";
 import { evaluateExam, type EvaluationMode } from "@/lib/gemini/evaluate";
@@ -96,24 +99,43 @@ export async function POST(
     if (isDatabaseConfigured() && /^\d+$/.test(examId)) {
       try {
         const db = getDb();
+        const id = Number(examId);
+
         await db
           .update(oralExams)
           .set({
             phase: "finished",
-            monologueSeconds: payload.monologueSeconds,
-            debateSeconds: payload.debateSeconds,
             reconnectCount: payload.reconnectCount,
             transcript: payload.transcript,
             finishedAt: new Date(),
           })
-          .where(eq(oralExams.id, Number(examId)));
+          .where(eq(oralExams.id, id));
+
+        // Per-phase speaking time is a row per phase, not a column pair on the
+        // sitting. `doNothing` because a repeated finish must not rewrite how
+        // long the candidate spoke; the real duplicate guard is Phase 11.
+        await db
+          .insert(oralExamPhases)
+          .values([
+            {
+              examId: id,
+              phase: "monologue",
+              spokenSeconds: Math.round(payload.monologueSeconds),
+            },
+            { examId: id, phase: "debate", spokenSeconds: Math.round(payload.debateSeconds) },
+          ])
+          .onConflictDoNothing();
 
         await db.insert(evaluations).values({
-          examId: Number(examId),
+          examId: id,
           mode: result.mode,
-          criteria: result.criteria,
+          // The five bands are columns; `criteria` is keyed by the same five
+          // criterion names, so it spreads straight in.
+          ...result.criteria,
           rawScore25: result.rawScore25,
+          durationPenalty: result.rawScore25 - result.score25,
           score25: result.score25,
+          meetsFloor: meetsCompetencyFloor(result.score25),
           feedback: result.feedback,
           model: result.model,
           promptVersion: result.promptVersion,
