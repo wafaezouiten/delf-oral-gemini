@@ -33,7 +33,12 @@ async function findExamOwner(examId: number): Promise<ExamOwnerRow | undefined> 
 }
 
 /** The one wiring of policy to sources. Both entry points below go through it. */
-async function accessFor(userId: string | null, examId: string): Promise<ExamAccess> {
+async function accessFor(
+  userId: string | null,
+  examId: string,
+  /** Which entry point asked. Only the log reads it — see below. */
+  via: "page" | "api",
+): Promise<ExamAccess> {
   const access = await resolveExamAccess({
     userId,
     examId,
@@ -42,8 +47,12 @@ async function accessFor(userId: string | null, examId: string): Promise<ExamAcc
   });
   // `exam-access.ts` does no I/O, so the log for an unanswered ownership
   // question is raised here, where there is a request to name it against.
+  //
+  // It carries the entry point because the two react oppositely: a page turns
+  // this into a 500 the candidate sees, the API grades and silently persists
+  // nothing. During an incident, "which one was it?" is the first question.
   if (access.status === "no-sitting" && access.reason === "lookup-failed") {
-    console.error("[exam-guard] could not verify ownership of exam", examId);
+    console.error(`[exam-guard] (${via}) could not verify ownership of exam`, examId);
   }
   return access;
 }
@@ -56,7 +65,7 @@ async function accessFor(userId: string | null, examId: string): Promise<ExamAcc
  */
 export async function authorizeExam(examId: string): Promise<ExamAccess> {
   const { userId } = await auth();
-  return accessFor(userId, examId);
+  return accessFor(userId, examId, "api");
 }
 
 /**
@@ -93,15 +102,21 @@ export async function requireUserId(): Promise<string> {
  * {@link pageGate} for why that is not the same as "nothing to own".
  */
 export async function requireExamAccess(examId: string): Promise<number | null> {
-  const access = await authorizeExam(examId);
+  // One `auth()` for both answers: whether there is a caller, and where to send
+  // them if there is not. Clerk memoises per request, but re-deriving
+  // `redirectToSignIn` from a second call would only hide that it was here.
+  const { userId, redirectToSignIn } = await auth();
+  const access = await accessFor(userId, examId, "page");
 
   switch (pageGate(access)) {
-    case "sign-in": {
-      const { redirectToSignIn } = await auth();
+    case "sign-in":
       return redirectToSignIn();
-    }
     case "not-found":
-      notFound();
+      // `return` rather than a bare call: `notFound()` is typed `never` and
+      // throws, so falling through is impossible — but a `case` with no exit
+      // reads as a forgotten `break`, and the next person should not have to
+      // know Next's type signature to see why this is safe.
+      return notFound();
     case "unverifiable":
       // Deliberately not `notFound()`: the sitting may well exist and be theirs.
       // What failed is our ability to say so, and that is a server error.
