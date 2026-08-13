@@ -13,8 +13,9 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # The job id is the check name. Left un-named on purpose so the pull request
+  # shows "Claude Code Review / claude-review", matching the DELF repository.
   claude-review:
-    name: Claude review
     if: github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     permissions:

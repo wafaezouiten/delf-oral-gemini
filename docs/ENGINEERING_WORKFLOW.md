@@ -75,19 +75,29 @@ silently.
 
 ## Checks on every pull request
 
-| Check                | Workflow                                | Gate?                                     |
-| -------------------- | --------------------------------------- | ----------------------------------------- |
-| Lint                 | `.github/workflows/ci.yml`              | yes                                       |
-| Typecheck            | `.github/workflows/ci.yml`              | yes                                       |
-| Unit tests           | `.github/workflows/ci.yml`              | yes                                       |
-| Build                | `.github/workflows/ci.yml`              | yes                                       |
-| Secret scan          | `.github/workflows/secret-scan.yml`     | yes                                       |
-| Claude review        | `.github/workflows/claude-code-review.yml` | advisory — a comment, not a pass/fail  |
-| Vercel preview       | Vercel Git integration                  | reports its own status on the pull request |
+Six, in this order — the same six the company's DELF repository shows, verified
+against the checks on its PR #429:
 
-The four CI checks are separate jobs rather than four steps of one job, so each
-reports as its own status check and can be named individually in the branch
-protection rules. Any failing job fails the workflow.
+| # | Check                                        | Comes from                                 | Gate?                                       |
+| - | -------------------------------------------- | ------------------------------------------ | ------------------------------------------- |
+| 1 | `Build / Lint, typecheck, unit tests & build` | `.github/workflows/build.yml`              | **yes** — the one gate                      |
+| 2 | `Claude Code Review / claude-review`          | `.github/workflows/claude-review.yml`      | advisory — a comment, not a pass/fail       |
+| 3 | `Fallow / Codebase Intelligence`              | `.github/workflows/fallow.yml`             | report-only, by design                      |
+| 4 | `GitGuardian Security Checks`                 | the GitGuardian GitHub App                 | yes, once installed                         |
+| 5 | `Vercel`                                      | the Vercel GitHub integration              | reports the deployment                      |
+| 6 | `Vercel Preview Comments`                     | the Vercel GitHub integration              | reports the preview comment                 |
+
+Two details make the names come out right, and both are easy to break:
+
+- A check's name is the **job's `name:`**, or its **job id** when un-named — not
+  the `Workflow / Job` label the pull request page shows. `claude-review` has no
+  `name:` on purpose, so it reads `Claude Code Review / claude-review`.
+- GitHub lists checks alphabetically, so matching the names is what produces the
+  matching order. There is nothing else to configure.
+
+Lint, typecheck, unit tests and build are **one job**, not four. Four separate
+jobs would each show as their own check and would not match the reference.
+Any failing step fails the job, and the job is the gate.
 
 Run the same gates locally before pushing:
 
@@ -109,25 +119,57 @@ prerenders behind Clerk. Verified by building with `.env.local` removed. If a
 future page does prerender behind auth, add placeholder env to the build job
 rather than real keys.
 
-## Secret scanning
+## Codebase intelligence (Fallow)
 
-`.github/workflows/secret-scan.yml` runs [gitleaks](https://github.com/gitleaks/gitleaks)
-(pinned version, binary fetched from the release page rather than a third-party
-action) against both the working tree and the commits the pull request adds — a
-secret that was committed and then deleted still leaked.
+`.github/workflows/fallow.yml`, ported from the DELF repository along with
+`scripts/fallow-ci-summary.mjs`, runs [Fallow](https://docs.fallow.tools) on
+every pull request: unused code and dependencies, duplication, complexity
+hotspots, maintainability. It posts a Before/After table as a pull request
+comment and writes a job summary.
 
-GitHub's own secret scanning and push protection are **not** available here: the
-repository is private on a Free plan, where they require GitHub Advanced Security
-or a public repository. Enable them alongside gitleaks if either changes.
+**It never fails the build.** The step is `continue-on-error: true` — it exists
+to surface a trend, not to block. To turn it into a gate later, save a baseline
+(`fallow --baseline`) and fail on new issues only.
 
-If the scan fires: rotate the credential first — deleting the commit does not
-un-leak it — then remove it from the history and re-push. For a genuine false
-positive, add a narrow allowlist entry to `.gitleaks.toml` with a comment saying
-why it is not a credential.
+The version is pinned (`FALLOW_VERSION`) because unpinned `pnpm dlx fallow`
+pulls latest and the scores drift between runs. Bump it deliberately.
+
+Audits are taken against `develop`, this repository's trunk. To reproduce what
+CI reports:
+
+```bash
+git fetch origin develop && pnpm dlx fallow@2.86.0 audit --base origin/develop
+```
+
+## Secret scanning (GitGuardian)
+
+`GitGuardian Security Checks` comes from the **GitGuardian GitHub App**, not from
+a workflow in this repository — the same way the DELF repository gets it. There
+is no YAML to write; the app watches pushes and pull requests and reports its own
+check.
+
+**Installing it is a human step** and the only way this check can appear:
+
+1. Sign in at [dashboard.gitguardian.com](https://dashboard.gitguardian.com) with GitHub.
+2. Integrations → GitHub → install the app on `wafaezouiten/delf-oral-gemini`.
+3. Enable the pull request check for the repository.
+
+GitHub's own secret scanning and push protection are a separate thing and are
+**not** available here: the repository is private on a Free plan, where they
+require GitHub Advanced Security or a public repository. Enable them alongside
+GitGuardian if either changes.
+
+If the check fires: rotate the credential first — deleting the commit does not
+un-leak it — then remove it from the history and re-push. Resolve or ignore the
+incident in the GitGuardian dashboard, with a reason, rather than silencing the
+check.
+
+> This replaced a gitleaks workflow that ran in CI and was verified to fire on a
+> planted key. GitGuardian was chosen for parity with the DELF repository.
 
 ## Claude review
 
-`.github/workflows/claude-code-review.yml` reviews every non-draft pull request
+`.github/workflows/claude-review.yml` reviews every non-draft pull request
 for architecture, code quality, bugs, performance, security and test coverage.
 `.github/workflows/claude.yml` responds to `@claude` in an issue, a comment or a
 review.
@@ -187,11 +229,16 @@ bash scripts/apply-branch-protection.sh
 
 What the script applies:
 
-| Branch    | Pull request required | Required checks                                   | Extra                                           |
-| --------- | --------------------- | ------------------------------------------------- | ----------------------------------------------- |
-| `develop` | yes                   | Lint, Typecheck, Unit tests, Build, Secret scan   | conversations resolved; no force push or delete |
-| `staging` | yes                   | same                                              | branch must be up to date before merging        |
-| `main`    | yes                   | same                                              | up to date, **and admins included** — nobody pushes directly |
+| Branch    | Pull request required | Required checks                                                      | Extra                                           |
+| --------- | --------------------- | -------------------------------------------------------------------- | ----------------------------------------------- |
+| `develop` | yes                   | `Lint, typecheck, unit tests & build` + `GitGuardian Security Checks` | conversations resolved; no force push or delete |
+| `staging` | yes                   | same                                                                 | branch must be up to date before merging        |
+| `main`    | yes                   | same                                                                 | up to date, **and admins included** — nobody pushes directly |
+
+Claude review and Fallow are deliberately not required: one is a comment, the
+other is report-only. `GitGuardian Security Checks` only starts reporting once
+the app is installed — requiring it before then leaves every pull request waiting
+on a check that cannot arrive.
 
 `required_approving_review_count` is 0: GitHub does not let you approve your own
 pull request, so a non-zero count deadlocks a solo repository. Raise it to 1 for
@@ -200,8 +247,9 @@ pull request, so a non-zero count deadlocks a solo repository. Raise it to 1 for
 ## Status of this setup
 
 - [x] Pull request template configured
-- [x] CI workflow configured — lint, typecheck, unit tests, build
-- [x] Claude review workflows configured — **pending** the `CLAUDE_CODE_OAUTH_TOKEN` secret, which only a human can mint
-- [x] Secret scanning configured (gitleaks in CI; GitHub's own scanner needs a public repo or a paid plan)
-- [x] Vercel preview deployments pinned in `vercel.json` — **pending** confirmation that the Vercel Git integration is connected, which is done in the Vercel dashboard
+- [x] `Build / Lint, typecheck, unit tests & build` — one workflow, one job, green
+- [x] `Claude Code Review / claude-review` — **pending** the `CLAUDE_CODE_OAUTH_TOKEN` secret, which only a human can mint; the job warns and skips until then
+- [x] `Fallow / Codebase Intelligence` — running, report-only
+- [ ] `GitGuardian Security Checks` — **pending** the GitGuardian GitHub App install, which only a human can do; nothing in this repository can make this check appear
+- [x] `Vercel` and `Vercel Preview Comments` — confirmed live on a pull request
 - [ ] Branch protection rules — written and ready, **blocked** by the Free-plan private repository

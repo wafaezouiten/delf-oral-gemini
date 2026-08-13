@@ -22,17 +22,24 @@ set -euo pipefail
 
 REPO="${REPO:-wafaezouiten/delf-oral-gemini}"
 
-# The status checks that must be green. These are the *job names* from
-# .github/workflows/ci.yml and secret-scan.yml — if you rename a job, rename it
-# here too, or the rule will wait forever on a check that never reports.
+# The status checks that must be green. A context is the *check name*, which for
+# a GitHub Actions job is its `name:` (or its job id when un-named) — not the
+# "Workflow / Job" label the pull request page displays. Rename a job and you
+# must rename it here, or the rule waits forever on a check that never reports.
 #
 # Deliberately excluded:
-#   "Claude review" — advisory. A review comment is not a pass/fail gate, and the
-#                     job is skipped outright until CLAUDE_CODE_OAUTH_TOKEN exists.
-#   "Vercel"        — the preview deployment reports its own status; requiring it
-#                     couples merges to a third-party service being up. Add
-#                     "Vercel – delf-oral-gemini" below if you want it as a gate.
-CHECKS='["Lint","Typecheck","Unit tests","Build","Secret scan"]'
+#   "claude-review"         — advisory. A review comment is not a pass/fail gate,
+#                             and the job skips until CLAUDE_CODE_OAUTH_TOKEN exists.
+#   "Codebase Intelligence" — Fallow is report-only by design; it never fails.
+#   "Vercel", "Vercel Preview Comments"
+#                           — the deployment reports its own status; requiring it
+#                             couples merges to a third-party service being up.
+#
+# "GitGuardian Security Checks" is included, but it only starts reporting once
+# the GitGuardian GitHub App is installed on the repository. Drop it from this
+# list if you apply protection before installing the app, or every pull request
+# will sit waiting for a check that cannot arrive.
+CHECKS='["Lint, typecheck, unit tests & build","GitGuardian Security Checks"]'
 
 protect() {
   local branch="$1" enforce_admins="$2" strict="$3"

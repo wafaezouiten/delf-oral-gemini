@@ -44,8 +44,9 @@ Closes #
 
 ## Definition of done
 
-- [ ] All CI checks green (lint, typecheck, unit tests, build)
-- [ ] Secret scan clean
+- [ ] `Build / Lint, typecheck, unit tests & build` green
+- [ ] `GitGuardian Security Checks` clean
+- [ ] `Fallow / Codebase Intelligence` read — nothing new introduced, or it is justified above
 - [ ] Claude review addressed — every comment either fixed or answered
 - [ ] Vercel preview deployment builds and the change is verified on it
 - [ ] The issue's own definition of done is fully ticked

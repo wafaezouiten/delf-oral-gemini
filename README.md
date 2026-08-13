@@ -139,7 +139,9 @@ written up in [`docs/GEMINI_LIVE_FINDINGS.md`](docs/GEMINI_LIVE_FINDINGS.md) and
 ## Working on it
 
 `feature/*` → `develop` → `staging` → `main`, one issue and one pull request per
-phase, with lint, typecheck, unit tests, build, a secret scan and an automatic
-Claude review on every pull request. The process — branch model, the phase-to-issue
-mapping, and the two setup steps only a human can do — is written up in
+phase. Every pull request shows the same six checks as the company's DELF
+repository: `Build / Lint, typecheck, unit tests & build`, `Claude Code Review /
+claude-review`, `Fallow / Codebase Intelligence`, `GitGuardian Security Checks`,
+`Vercel` and `Vercel Preview Comments`. The process — branch model, the
+phase-to-issue mapping, and the setup steps only a human can do — is written up in
 [`docs/ENGINEERING_WORKFLOW.md`](docs/ENGINEERING_WORKFLOW.md).
