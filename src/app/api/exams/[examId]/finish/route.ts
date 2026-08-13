@@ -10,12 +10,12 @@
  * page can render even when no database is configured.
  */
 
-import { auth } from "@clerk/nextjs/server";
 import { and, eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { evaluations, getDb, isDatabaseConfigured, oralExamPhases, oralExams } from "@/lib/db";
+import { authorizeExam, examAccessDenial } from "@/lib/auth/exam-guard";
+import { evaluations, getDb, oralExamPhases, oralExams } from "@/lib/db";
 // The floor is the one rule the two rubric copies on `develop` agree on, so
 // reading it from the ported module settles nothing that Phase 2 shouldn't.
 import { meetsCompetencyFloor } from "@/lib/delf/orale-rubric";
@@ -59,10 +59,29 @@ export async function POST(
   request: Request,
   context: { params: Promise<{ examId: string }> },
 ) {
-  const { userId } = await auth();
-  if (!userId) return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
-
   const { examId } = await context.params;
+
+  /**
+   * Authentication and ownership, before anything else this route does.
+   *
+   * Exam ids are sequential serials, so without the second check any signed-in
+   * user could finish — and overwrite the transcript of — a neighbouring id's
+   * exam. It runs first rather than after validation for two reasons: a caller
+   * who does not own the sitting learns nothing about the payload it would have
+   * accepted, and the (paid, minutes-long) model call has not started yet.
+   *
+   * `no-sitting` is not a refusal. The request is legal, it just addresses no
+   * row we can verify — no database, a degraded `local-…` id, or a lookup that
+   * failed — so the exam is graded and nothing is written. That is the same
+   * bargain the route has always made with a missing `DATABASE_URL`.
+   */
+  const access = await authorizeExam(examId);
+  if (access.status === "denied") {
+    const { status, error } = examAccessDenial(access);
+    return NextResponse.json({ error }, { status });
+  }
+  const { userId } = access;
+  const persistedExamId = access.status === "owned" ? access.examId : null;
 
   let form: FormData;
   try {
@@ -105,37 +124,6 @@ export async function POST(
       },
       { status: 422 },
     );
-  }
-
-  /**
-   * The sitting this request may write to, or null when it may write to none.
-   *
-   * Exam ids are sequential serials, so ownership has to be established before
-   * anything is written: without this, any signed-in user could finish, and
-   * overwrite the transcript of, a neighbouring id's exam. Checked here rather
-   * than in the UPDATE's WHERE so a mismatch costs nothing — the model call has
-   * not run yet.
-   *
-   * A database that cannot answer degrades to "grade, but persist nothing",
-   * which is what a request with no `DATABASE_URL` already does. Refusing to
-   * verify and writing anyway is the one option that is not available.
-   */
-  let persistedExamId: number | null = null;
-  if (isDatabaseConfigured() && /^\d+$/.test(examId)) {
-    try {
-      const [owned] = await getDb()
-        .select({ id: oralExams.id })
-        .from(oralExams)
-        .where(and(eq(oralExams.id, Number(examId)), eq(oralExams.userId, userId)))
-        .limit(1);
-
-      // 404 rather than 403: whether someone else's exam exists is not this
-      // caller's business.
-      if (!owned) return NextResponse.json({ error: "Épreuve introuvable" }, { status: 404 });
-      persistedExamId = owned.id;
-    } catch (error) {
-      console.error("[finish] could not verify exam ownership:", error);
-    }
   }
 
   const audioFile = form.get("audio");
