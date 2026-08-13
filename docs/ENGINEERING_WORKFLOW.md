@@ -95,6 +95,15 @@ Run the same gates locally before pushing:
 pnpm lint && pnpm typecheck && pnpm test:unit && pnpm build
 ```
 
+`pnpm typecheck` is `next typegen && tsc --noEmit`, not bare `tsc`. Next 16
+generates the route-aware global helpers (`PageProps`, `LayoutProps`,
+`RouteContext`) into `.next/types` during `next dev` / `next build`, so a bare
+`tsc --noEmit` passes on a warm working copy and fails on a cold CI checkout with
+`TS2304: Cannot find name 'PageProps'`. `next typegen` produces them without a
+full build — this is the documented way to typecheck in CI
+(`node_modules/next/dist/docs/01-app/03-api-reference/06-cli/next.md`). It also
+regenerates `next-env.d.ts`, which is untracked.
+
 The build needs no secrets — every route is server-rendered on demand, so nothing
 prerenders behind Clerk. Verified by building with `.env.local` removed. If a
 future page does prerender behind auth, add placeholder env to the build job
