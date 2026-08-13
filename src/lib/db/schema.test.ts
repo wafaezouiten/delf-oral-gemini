@@ -15,12 +15,15 @@ import { test } from "node:test";
 
 import { getTableConfig } from "drizzle-orm/pg-core";
 
+import { COMPETENCY_FLOOR, COMPETENCY_MAX } from "@/lib/delf/constants";
 import { ORAL_CRITERIA } from "@/lib/delf/criteria";
 import { GRILLE_BANDS } from "@/lib/delf/grille";
 import { ORAL_PHASES } from "@/lib/delf/phases";
 import {
   GRILLE_BANDS as RUBRIC_BANDS,
   ORAL_CRITERIA as RUBRIC_CRITERIA,
+  SCORE_FLOOR as RUBRIC_FLOOR,
+  SCORE_MAX as RUBRIC_MAX,
 } from "@/lib/delf/rubric";
 import {
   evaluationMode,
@@ -57,6 +60,18 @@ function columnsByName(table: Parameters<typeof getTableConfig>[0]) {
 test("the ported criteria and the ones that build the row are the same five", () => {
   assert.deepEqual([...RUBRIC_CRITERIA], [...ORAL_CRITERIA]);
   assert.deepEqual([...RUBRIC_BANDS], [...GRILLE_BANDS]);
+});
+
+/**
+ * Same reasoning one level down. `meets_floor` is written by `orale-rubric.ts`'s
+ * `meetsCompetencyFloor`, against a score `rubric.ts` produced — two
+ * independently declared thresholds meeting in one row, with no constraint tying
+ * `meets_floor` back to `score_25` the way `evaluations_score_25_check` ties the
+ * three scores together.
+ */
+test("the two rubric copies agree on the floor a stored score is judged against", () => {
+  assert.equal(RUBRIC_FLOOR, COMPETENCY_FLOOR);
+  assert.equal(RUBRIC_MAX, COMPETENCY_MAX);
 });
 
 test("the phase enum mirrors the exam state machine", () => {

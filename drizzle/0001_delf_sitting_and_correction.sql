@@ -1,3 +1,7 @@
+-- PRECONDITION: "evaluations" must be empty when this runs. The five band
+-- columns and "meets_floor" are added NOT NULL with no DEFAULT, so an existing
+-- row would abort the migration; adding them to a populated table needs a
+-- backfill step first.
 CREATE TYPE "public"."evaluation_mode" AS ENUM('text', 'audio');--> statement-breakpoint
 CREATE TYPE "public"."oral_phase" AS ENUM('preparation', 'monologue', 'debate', 'finished');--> statement-breakpoint
 CREATE TYPE "public"."oral_speaking_phase" AS ENUM('monologue', 'debate');--> statement-breakpoint
