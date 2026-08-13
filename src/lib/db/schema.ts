@@ -179,10 +179,14 @@ export const oralExamPhases = pgTable(
     phase: oralSpeakingPhase("phase").notNull(),
 
     /**
-     * Candidate speaking time in this phase, in seconds. The DELF duration
-     * penalty is measured per part (`minDurationSeconds(tache)` → 168 s for the
-     * monologue, 312 s for the débat), so this is the number the rubric reads,
-     * not a decorative one.
+     * Candidate speaking time in this phase, in seconds.
+     *
+     * Stored per phase because the ported rule measures the duration penalty per
+     * part — `minDurationSeconds(tache)` gives 168 s for the monologue and 312 s
+     * for the débat. Nothing on the active grading path reads it that way yet:
+     * `gemini/evaluate.ts` calls `rubric.ts`, which penalises against a single
+     * combined floor. This column is what a per-part penalty needs when the two
+     * rubric copies are reconciled, not something already wired up.
      */
     spokenSeconds: integer("spoken_seconds").notNull().default(0),
 
