@@ -196,7 +196,7 @@ export const oralExamPhases = pgTable(
   },
   (table) => [
     uniqueIndex("oral_exam_phases_exam_phase_idx").on(table.examId, table.phase),
-    check("oral_exam_phases_spoken_seconds_check", sql`"spoken_seconds" >= 0`),
+    check("oral_exam_phases_spoken_seconds_check", sql`${table.spokenSeconds} >= 0`),
   ],
 );
 
@@ -311,7 +311,16 @@ export const evaluations = pgTable(
 
     /** Sum of the five bands, before the duration penalty. */
     rawScore25: integer("raw_score_25").notNull(),
-    /** Points docked because the candidate spoke for less than the épreuve asks. */
+    /**
+     * Points docked because the candidate spoke for less than the épreuve asks.
+     *
+     * This is the penalty *effectively* applied, not the one the rubric nominally
+     * asked for: the rubric floors the result at 0, so a 2/25 hit with a 5-point
+     * penalty records a 2 here, which is what keeps `score_25 = raw − penalty`
+     * true. The nominal figure is not recoverable from the row — `applyDurationPenalty`
+     * does not surface it, and changing that belongs to the phase that reconciles
+     * the two rubric copies (#9).
+     */
     durationPenalty: integer("duration_penalty").notNull().default(0),
     /** What the candidate is shown: `raw_score_25 − duration_penalty`, floored at 0. */
     score25: integer("score_25").notNull(),
@@ -338,24 +347,27 @@ export const evaluations = pgTable(
     index("evaluations_exam_id_idx").on(table.examId),
     // The grille has no 2 and no 4. `snapToBand` is the net in application code;
     // this is the net under the net, for anything that writes a row without it.
+    // Written through the typed columns rather than as name strings: this file's
+    // whole thesis is that drift is a compile error, and a renamed column with a
+    // stale string here would only surface as a failed migration.
     check(
       "evaluations_bands_check",
-      sql`"realisation_tache" in (0, 1, 3, 5)
-        and "interaction" in (0, 1, 3, 5)
-        and "lexique" in (0, 1, 3, 5)
-        and "morphosyntaxe" in (0, 1, 3, 5)
-        and "phonologie" in (0, 1, 3, 5)`,
+      sql`${table.realisationTache} in (0, 1, 3, 5)
+        and ${table.interaction} in (0, 1, 3, 5)
+        and ${table.lexique} in (0, 1, 3, 5)
+        and ${table.morphosyntaxe} in (0, 1, 3, 5)
+        and ${table.phonologie} in (0, 1, 3, 5)`,
     ),
     check(
       "evaluations_score_range_check",
-      sql`"raw_score_25" between 0 and 25 and "score_25" between 0 and 25 and "duration_penalty" >= 0`,
+      sql`${table.rawScore25} between 0 and 25 and ${table.score25} between 0 and 25 and ${table.durationPenalty} >= 0`,
     ),
     // Keeps the three score columns telling one story. Both rubric copies apply
     // the penalty the same way — subtract, floor at 0 — so this constraint is
     // neutral in the disagreement between them.
     check(
       "evaluations_score_25_check",
-      sql`"score_25" = greatest("raw_score_25" - "duration_penalty", 0)`,
+      sql`${table.score25} = greatest(${table.rawScore25} - ${table.durationPenalty}, 0)`,
     ),
   ],
 );

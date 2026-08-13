@@ -8,7 +8,7 @@ CREATE TABLE "oral_exam_phases" (
 	"spoken_seconds" integer DEFAULT 0 NOT NULL,
 	"started_at" timestamp with time zone,
 	"ended_at" timestamp with time zone,
-	CONSTRAINT "oral_exam_phases_spoken_seconds_check" CHECK ("spoken_seconds" >= 0)
+	CONSTRAINT "oral_exam_phases_spoken_seconds_check" CHECK ("oral_exam_phases"."spoken_seconds" >= 0)
 );
 --> statement-breakpoint
 CREATE TABLE "oral_recordings" (
@@ -44,10 +44,10 @@ ALTER TABLE "evaluations" DROP COLUMN "criteria";--> statement-breakpoint
 ALTER TABLE "oral_exams" DROP COLUMN "monologue_seconds";--> statement-breakpoint
 ALTER TABLE "oral_exams" DROP COLUMN "debate_seconds";--> statement-breakpoint
 ALTER TABLE "oral_exams" DROP COLUMN "audio_url";--> statement-breakpoint
-ALTER TABLE "evaluations" ADD CONSTRAINT "evaluations_bands_check" CHECK ("realisation_tache" in (0, 1, 3, 5)
-        and "interaction" in (0, 1, 3, 5)
-        and "lexique" in (0, 1, 3, 5)
-        and "morphosyntaxe" in (0, 1, 3, 5)
-        and "phonologie" in (0, 1, 3, 5));--> statement-breakpoint
-ALTER TABLE "evaluations" ADD CONSTRAINT "evaluations_score_range_check" CHECK ("raw_score_25" between 0 and 25 and "score_25" between 0 and 25 and "duration_penalty" >= 0);--> statement-breakpoint
-ALTER TABLE "evaluations" ADD CONSTRAINT "evaluations_score_25_check" CHECK ("score_25" = greatest("raw_score_25" - "duration_penalty", 0));
+ALTER TABLE "evaluations" ADD CONSTRAINT "evaluations_bands_check" CHECK ("evaluations"."realisation_tache" in (0, 1, 3, 5)
+        and "evaluations"."interaction" in (0, 1, 3, 5)
+        and "evaluations"."lexique" in (0, 1, 3, 5)
+        and "evaluations"."morphosyntaxe" in (0, 1, 3, 5)
+        and "evaluations"."phonologie" in (0, 1, 3, 5));--> statement-breakpoint
+ALTER TABLE "evaluations" ADD CONSTRAINT "evaluations_score_range_check" CHECK ("evaluations"."raw_score_25" between 0 and 25 and "evaluations"."score_25" between 0 and 25 and "evaluations"."duration_penalty" >= 0);--> statement-breakpoint
+ALTER TABLE "evaluations" ADD CONSTRAINT "evaluations_score_25_check" CHECK ("evaluations"."score_25" = greatest("evaluations"."raw_score_25" - "evaluations"."duration_penalty", 0));
