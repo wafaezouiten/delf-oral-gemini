@@ -11,10 +11,14 @@
  */
 
 import { auth } from "@clerk/nextjs/server";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
+import { z } from "zod";
 
-import { evaluations, getDb, isDatabaseConfigured, oralExams } from "@/lib/db";
+import { evaluations, getDb, isDatabaseConfigured, oralExamPhases, oralExams } from "@/lib/db";
+// The floor is the one rule the two rubric copies on `develop` agree on, so
+// reading it from the ported module settles nothing that Phase 2 shouldn't.
+import { meetsCompetencyFloor } from "@/lib/delf/orale-rubric";
 import { findTopic } from "@/lib/delf/topics";
 import { candidateWordCount, type TranscriptEntry } from "@/lib/delf/transcript";
 import { evaluateExam, type EvaluationMode } from "@/lib/gemini/evaluate";
@@ -24,13 +28,32 @@ export const dynamic = "force-dynamic";
 /** A full audio evaluation is slow; the default serverless budget is not enough. */
 export const maxDuration = 300;
 
-interface FinishPayload {
-  topicSlug: string;
-  transcript: TranscriptEntry[];
-  monologueSeconds: number;
-  debateSeconds: number;
-  reconnectCount: number;
-}
+/**
+ * The client's payload, validated rather than asserted.
+ *
+ * The seconds fields end up in `oral_exam_phases.spoken_seconds`, a NOT NULL
+ * integer with a `>= 0` constraint, so a missing field used to travel as far as
+ * `Math.round(undefined)` → NaN and fail at the INSERT — after a paid model call
+ * had already run, and inside a catch that only logs. Failing here costs
+ * nothing and says what was wrong.
+ *
+ * `z.number()` rejects NaN and Infinity on its own in Zod 4; the explicit checks
+ * below are the domain's, not the format's.
+ */
+const transcriptEntrySchema = z.object({
+  phase: z.enum(["monologue", "debate"]),
+  speaker: z.enum(["candidate", "examiner"]),
+  timestamp: z.number(),
+  text: z.string(),
+}) satisfies z.ZodType<TranscriptEntry>;
+
+const finishPayloadSchema = z.object({
+  topicSlug: z.string().min(1),
+  transcript: z.array(transcriptEntrySchema),
+  monologueSeconds: z.number().nonnegative(),
+  debateSeconds: z.number().nonnegative(),
+  reconnectCount: z.number().int().nonnegative(),
+});
 
 export async function POST(
   request: Request,
@@ -53,12 +76,21 @@ export async function POST(
     return NextResponse.json({ error: "payload manquant" }, { status: 400 });
   }
 
-  let payload: FinishPayload;
+  let parsedJson: unknown;
   try {
-    payload = JSON.parse(payloadRaw) as FinishPayload;
+    parsedJson = JSON.parse(payloadRaw);
   } catch {
     return NextResponse.json({ error: "payload invalide" }, { status: 400 });
   }
+
+  const parsed = finishPayloadSchema.safeParse(parsedJson);
+  if (!parsed.success) {
+    return NextResponse.json(
+      { error: "payload invalide", details: z.treeifyError(parsed.error) },
+      { status: 400 },
+    );
+  }
+  const payload = parsed.data;
 
   const topic = findTopic(payload.topicSlug);
   if (!topic) return NextResponse.json({ error: "Sujet inconnu" }, { status: 404 });
@@ -73,6 +105,37 @@ export async function POST(
       },
       { status: 422 },
     );
+  }
+
+  /**
+   * The sitting this request may write to, or null when it may write to none.
+   *
+   * Exam ids are sequential serials, so ownership has to be established before
+   * anything is written: without this, any signed-in user could finish, and
+   * overwrite the transcript of, a neighbouring id's exam. Checked here rather
+   * than in the UPDATE's WHERE so a mismatch costs nothing — the model call has
+   * not run yet.
+   *
+   * A database that cannot answer degrades to "grade, but persist nothing",
+   * which is what a request with no `DATABASE_URL` already does. Refusing to
+   * verify and writing anyway is the one option that is not available.
+   */
+  let persistedExamId: number | null = null;
+  if (isDatabaseConfigured() && /^\d+$/.test(examId)) {
+    try {
+      const [owned] = await getDb()
+        .select({ id: oralExams.id })
+        .from(oralExams)
+        .where(and(eq(oralExams.id, Number(examId)), eq(oralExams.userId, userId)))
+        .limit(1);
+
+      // 404 rather than 403: whether someone else's exam exists is not this
+      // caller's business.
+      if (!owned) return NextResponse.json({ error: "Épreuve introuvable" }, { status: 404 });
+      persistedExamId = owned.id;
+    } catch (error) {
+      console.error("[finish] could not verify exam ownership:", error);
+    }
   }
 
   const audioFile = form.get("audio");
@@ -93,27 +156,55 @@ export async function POST(
       audio,
     });
 
-    if (isDatabaseConfigured() && /^\d+$/.test(examId)) {
+    if (persistedExamId !== null) {
+      // The three writes below are not atomic, and cannot be as written: this
+      // driver is `neon-http`, whose `db.transaction()` throws. A failure after
+      // the UPDATE leaves a sitting marked finished with no correction attached.
+      // `db.batch()` — which neon-http implements as a real transaction — is the
+      // fix, and belongs with the read path that would expose the inconsistency
+      // in the first place. See #16.
       try {
         const db = getDb();
+        const id = persistedExamId;
+
         await db
           .update(oralExams)
           .set({
             phase: "finished",
-            monologueSeconds: payload.monologueSeconds,
-            debateSeconds: payload.debateSeconds,
             reconnectCount: payload.reconnectCount,
             transcript: payload.transcript,
             finishedAt: new Date(),
           })
-          .where(eq(oralExams.id, Number(examId)));
+          // The ownership predicate is repeated here on purpose: the check above
+          // is what makes the request legal, this is what keeps the statement
+          // itself safe if the two ever drift apart.
+          .where(and(eq(oralExams.id, id), eq(oralExams.userId, userId)));
+
+        // Per-phase speaking time is a row per phase, not a column pair on the
+        // sitting. `doNothing` because a repeated finish must not rewrite how
+        // long the candidate spoke; the real duplicate guard is Phase 11.
+        await db
+          .insert(oralExamPhases)
+          .values([
+            {
+              examId: id,
+              phase: "monologue",
+              spokenSeconds: Math.round(payload.monologueSeconds),
+            },
+            { examId: id, phase: "debate", spokenSeconds: Math.round(payload.debateSeconds) },
+          ])
+          .onConflictDoNothing();
 
         await db.insert(evaluations).values({
-          examId: Number(examId),
+          examId: id,
           mode: result.mode,
-          criteria: result.criteria,
+          // The five bands are columns; `criteria` is keyed by the same five
+          // criterion names, so it spreads straight in.
+          ...result.criteria,
           rawScore25: result.rawScore25,
+          durationPenalty: result.rawScore25 - result.score25,
           score25: result.score25,
+          meetsFloor: meetsCompetencyFloor(result.score25),
           feedback: result.feedback,
           model: result.model,
           promptVersion: result.promptVersion,

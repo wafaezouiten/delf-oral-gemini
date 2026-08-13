@@ -31,7 +31,7 @@ import {
 } from "@/lib/delf/rubric";
 import { formatTranscript, type TranscriptEntry } from "@/lib/delf/transcript";
 import type { OralTopic } from "@/lib/delf/topics";
-import type { EvaluationFeedback } from "@/lib/db/schema";
+import type { EvaluationFeedback, EvaluationMode } from "@/lib/db/schema";
 
 /**
  * The corrector model. Deliberately NOT the Live model: grading is a careful
@@ -52,7 +52,9 @@ export const EVAL_MODEL = process.env.GEMINI_EVAL_MODEL ?? "gemini-3.6-flash";
 
 export const EVAL_PROMPT_VERSION = "2026-08-11.1";
 
-export type EvaluationMode = "text" | "audio";
+/** Re-exported, not redeclared: the mode is a stored column, and `evaluations.mode`
+ *  is where its legal values are defined. */
+export type { EvaluationMode };
 
 /**
  * The band scale, spelled out. The wording matters: without the explicit
