@@ -187,6 +187,25 @@ repository secret**, named `CLAUDE_CODE_OAUTH_TOKEN`.
 Until it exists, both workflows emit a warning and skip, so pull requests are not
 blocked by a red X for a token that has not been minted yet.
 
+Two things about this check look like bugs and are not:
+
+- **A run reads secrets when it starts.** Adding the secret does not retroactively
+  fix a run that started before it existed — that run keeps printing
+  `CLAUDE_CODE_OAUTH_TOKEN is not set` no matter how often you reload it. Push
+  again, or `gh run rerun <id>`, and check the new run.
+- **`claude-code-action` refuses to run until the workflow file is on the default
+  branch.** It exchanges an OIDC token for an app token and validates that the
+  workflow file is identical to the version on `develop`; on the pull request
+  that *introduces* the workflow there is no such version, so it logs
+  `Skipping action due to workflow validation` and exits successfully. The check
+  is green and no review is posted. It starts reviewing on the first pull request
+  opened after this workflow lands on `develop`. Note the same rule bites any
+  pull request that *edits* `claude-review.yml`.
+
+Reviews are posted by `claude[bot]`, a GitHub App identity obtained through that
+OIDC exchange — which is why `pull-requests: read` is enough here, in both this
+repository and the reference.
+
 ## Vercel preview deployments
 
 The repository is linked to the Vercel project `delf-oral-gemini`
@@ -248,7 +267,7 @@ pull request, so a non-zero count deadlocks a solo repository. Raise it to 1 for
 
 - [x] Pull request template configured
 - [x] `Build / Lint, typecheck, unit tests & build` — one workflow, one job, green
-- [x] `Claude Code Review / claude-review` — **pending** the `CLAUDE_CODE_OAUTH_TOKEN` secret, which only a human can mint; the job warns and skips until then
+- [x] `Claude Code Review / claude-review` — secret added and read; the action self-skips until the workflow file is on `develop`, then reviews every pull request
 - [x] `Fallow / Codebase Intelligence` — running, report-only
 - [ ] `GitGuardian Security Checks` — **pending** the GitGuardian GitHub App install, which only a human can do; nothing in this repository can make this check appear
 - [x] `Vercel` and `Vercel Preview Comments` — confirmed live on a pull request
