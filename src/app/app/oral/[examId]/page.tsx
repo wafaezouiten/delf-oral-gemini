@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 
-import { requireOwnedExam } from "@/lib/auth/exam-guard";
+import { requireExamAccess } from "@/lib/auth/exam-guard";
 import { findTopic } from "@/lib/delf/topics";
 import { ExamClient } from "./exam-client";
 
@@ -19,7 +19,7 @@ export default async function OralExamPage({
   searchParams,
 }: PageProps<"/app/oral/[examId]">) {
   const { examId } = await params;
-  await requireOwnedExam(examId);
+  await requireExamAccess(examId);
 
   const query = await searchParams;
   const slug = typeof query.sujet === "string" ? query.sujet : undefined;

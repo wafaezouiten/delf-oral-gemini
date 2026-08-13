@@ -28,16 +28,17 @@ export interface ExamOwnerRow {
 export type ExamOwnerLookup = (examId: number) => Promise<ExamOwnerRow | undefined>;
 
 /** Why the request is refused outright. */
-export type ExamAccessDenial = "unauthenticated" | "not-found";
+type ExamAccessDenial = "unauthenticated" | "not-found";
 
 /**
  * Why the request is legal but addresses no verified sitting.
  *
- * All three mean the same thing to a caller — touch no row — but they are
- * distinguished because they are worth different log lines, and because
- * `lookup-failed` is the one that should page somebody.
+ * The three are told apart because {@link pageGate} acts on the difference:
+ * `no-database` and `unpersisted-id` mean no sitting exists to own, while
+ * `lookup-failed` means the question went unanswered — which is not the same
+ * thing and must not be treated as if it were.
  */
-export type NoSittingReason =
+type NoSittingReason =
   /** No `DATABASE_URL`; the exam loop runs anyway and persists nothing. */
   | "no-database"
   /** An id no row can have — the `local-…` ids `/api/exams` hands out when it degrades. */
@@ -104,14 +105,42 @@ export async function resolveExamAccess({
   let row: ExamOwnerRow | undefined;
   try {
     row = await lookup(id);
-  } catch (error) {
-    // An outage must not be an authorisation bypass. The caller degrades to
-    // "persist nothing", which is what a request with no database already does.
-    console.error("[exam-access] could not verify ownership of exam", id, error);
+  } catch {
+    // An outage must not be an authorisation bypass. What to do about it is the
+    // caller's call — an API route degrades to "persist nothing", a page refuses
+    // to render — and so is the log line, which only the caller can attach to a
+    // request. This module does no I/O, which is what keeps it testable.
     return { status: "no-sitting", userId, reason: "lookup-failed" };
   }
 
   if (!row || row.userId !== userId) return { status: "denied", reason: "not-found" };
 
   return { status: "owned", userId, examId: row.id };
+}
+
+/** What a page should do with an outcome. */
+export type PageGate = "render" | "sign-in" | "not-found" | "unverifiable";
+
+/**
+ * The page-side policy, kept here rather than in the guard so it can be tested.
+ *
+ * The interesting case is `lookup-failed`, and it is `"unverifiable"` — refuse —
+ * rather than `"render"`. Both `/app/oral/[examId]` and `/app/results/[examId]`
+ * render nothing owned by anybody today, so rendering would leak nothing; the
+ * reason to refuse anyway is that these gates exist for the read path that is
+ * coming, and a gate that opens whenever the database hiccups is not a gate. An
+ * attacker who can exhaust connections would otherwise get to choose when it
+ * opens.
+ *
+ * Note this is the opposite call from the one the finish route makes on the same
+ * outcome, and deliberately so: that route degrades to "grade, persist nothing",
+ * which touches no row and loses no work. A page has no equivalent — it either
+ * renders a sitting or it does not.
+ */
+export function pageGate(access: ExamAccess): PageGate {
+  if (access.status === "owned") return "render";
+  if (access.status === "denied") {
+    return access.reason === "unauthenticated" ? "sign-in" : "not-found";
+  }
+  return access.reason === "lookup-failed" ? "unverifiable" : "render";
 }

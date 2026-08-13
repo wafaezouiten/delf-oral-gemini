@@ -14,7 +14,8 @@ import { and, eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { authorizeExam, examAccessDenial } from "@/lib/auth/exam-guard";
+import { EXAM_ACCESS_DENIALS } from "@/lib/auth/exam-access";
+import { authorizeExam } from "@/lib/auth/exam-guard";
 import { evaluations, getDb, oralExamPhases, oralExams } from "@/lib/db";
 // The floor is the one rule the two rubric copies on `develop` agree on, so
 // reading it from the ported module settles nothing that Phase 2 shouldn't.
@@ -77,7 +78,7 @@ export async function POST(
    */
   const access = await authorizeExam(examId);
   if (access.status === "denied") {
-    const { status, error } = examAccessDenial(access);
+    const { status, error } = EXAM_ACCESS_DENIALS[access.reason];
     return NextResponse.json({ error }, { status });
   }
   const { userId } = access;

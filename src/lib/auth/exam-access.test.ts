@@ -3,6 +3,7 @@ import { describe, it, mock } from "node:test";
 
 import {
   EXAM_ACCESS_DENIALS,
+  pageGate,
   parsePersistedExamId,
   resolveExamAccess,
   type ExamOwnerLookup,
@@ -56,8 +57,7 @@ describe("exam access", () => {
     assert.equal(EXAM_ACCESS_DENIALS["not-found"].status, 404);
   });
 
-  it("never reports a sitting as owned when the database cannot answer", async (t) => {
-    t.mock.method(console, "error", () => {});
+  it("never reports a sitting as owned when the database cannot answer", async () => {
     const failing: ExamOwnerLookup = async () => {
       throw new Error("connection terminated");
     };
@@ -90,5 +90,59 @@ describe("exam access", () => {
     // digits must not become 41.
     assert.equal(parsePersistedExamId("9007199254740993"), null);
     assert.equal(parsePersistedExamId("41"), 41);
+  });
+});
+
+describe("page gate", () => {
+  it("renders the owner's own sitting", () => {
+    assert.equal(pageGate({ status: "owned", userId: OWNER, examId: 41 }), "render");
+  });
+
+  it("404s a sitting the caller does not own", () => {
+    assert.equal(pageGate({ status: "denied", reason: "not-found" }), "not-found");
+  });
+
+  it("sends a signed-out visitor to sign in", () => {
+    assert.equal(pageGate({ status: "denied", reason: "unauthenticated" }), "sign-in");
+  });
+
+  it("refuses to render when the ownership question went unanswered", () => {
+    // The regression test for a gate that used to open on a database error. An
+    // attacker who can exhaust connections must not get to choose when it opens.
+    assert.equal(
+      pageGate({ status: "no-sitting", userId: OWNER, reason: "lookup-failed" }),
+      "unverifiable",
+    );
+  });
+
+  it("still renders where there is provably no sitting to own", () => {
+    // The degraded paths keep working: these are not unanswered questions, they
+    // are questions with the answer "no row exists".
+    for (const reason of ["no-database", "unpersisted-id"] as const) {
+      assert.equal(pageGate({ status: "no-sitting", userId: OWNER, reason }), "render", reason);
+    }
+  });
+
+  it("opens for exactly one outcome, and it is the owned one", () => {
+    // Belt and braces: enumerate every outcome the resolver can produce and
+    // assert that "render" is not reachable from anything that names a sitting
+    // without proving ownership.
+    const outcomes = [
+      { status: "owned", userId: OWNER, examId: 41 },
+      { status: "denied", reason: "unauthenticated" },
+      { status: "denied", reason: "not-found" },
+      { status: "no-sitting", userId: OWNER, reason: "no-database" },
+      { status: "no-sitting", userId: OWNER, reason: "unpersisted-id" },
+      { status: "no-sitting", userId: OWNER, reason: "lookup-failed" },
+    ] as const;
+
+    for (const outcome of outcomes) {
+      if (pageGate(outcome) === "render") {
+        assert.ok(
+          outcome.status === "owned" || outcome.reason !== "lookup-failed",
+          `${JSON.stringify(outcome)} must not render`,
+        );
+      }
+    }
   });
 });

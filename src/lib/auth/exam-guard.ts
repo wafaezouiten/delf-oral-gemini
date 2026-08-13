@@ -5,12 +5,7 @@ import { eq } from "drizzle-orm";
 import { notFound } from "next/navigation";
 
 import { getDb, isDatabaseConfigured, oralExams } from "@/lib/db";
-import {
-  EXAM_ACCESS_DENIALS,
-  resolveExamAccess,
-  type ExamAccess,
-  type ExamOwnerRow,
-} from "./exam-access";
+import { pageGate, resolveExamAccess, type ExamAccess, type ExamOwnerRow } from "./exam-access";
 
 /**
  * The server binding for `exam-access.ts` — Clerk on one side, Drizzle on the
@@ -37,25 +32,31 @@ async function findExamOwner(examId: number): Promise<ExamOwnerRow | undefined> 
   return row;
 }
 
-/**
- * Ownership of `examId` for the current request.
- *
- * Never throws and never redirects, so a Route Handler stays in charge of its
- * own response shape. Pages want {@link requireOwnedExam} instead.
- */
-export async function authorizeExam(examId: string): Promise<ExamAccess> {
-  const { userId } = await auth();
-  return resolveExamAccess({
+/** The one wiring of policy to sources. Both entry points below go through it. */
+async function accessFor(userId: string | null, examId: string): Promise<ExamAccess> {
+  const access = await resolveExamAccess({
     userId,
     examId,
     databaseConfigured: isDatabaseConfigured(),
     lookup: findExamOwner,
   });
+  // `exam-access.ts` does no I/O, so the log for an unanswered ownership
+  // question is raised here, where there is a request to name it against.
+  if (access.status === "no-sitting" && access.reason === "lookup-failed") {
+    console.error("[exam-guard] could not verify ownership of exam", examId);
+  }
+  return access;
 }
 
-/** The JSON body and status a denial turns into. Routes build the response. */
-export function examAccessDenial(access: Extract<ExamAccess, { status: "denied" }>) {
-  return EXAM_ACCESS_DENIALS[access.reason];
+/**
+ * Ownership of `examId` for the current request.
+ *
+ * Never throws and never redirects, so a Route Handler stays in charge of its
+ * own response shape. Pages want {@link requireExamAccess} instead.
+ */
+export async function authorizeExam(examId: string): Promise<ExamAccess> {
+  const { userId } = await auth();
+  return accessFor(userId, examId);
 }
 
 /**
@@ -78,22 +79,34 @@ export async function requireUserId(): Promise<string> {
 }
 
 /**
- * The same, plus ownership of `examId`.
+ * Gate a page on `examId`, and hand back the sitting's row id when there is one.
  *
- * A sitting the caller does not own is a 404, exactly as it is over the API. The
- * `no-sitting` outcomes render: they expose nothing owned by anyone — the exam
- * page renders a topic from the public catalogue, and the results page renders
- * whatever is in the visitor's own `sessionStorage` — and refusing them would
- * break the documented "runs before a database exists" path.
+ * The return type is the point: **this cannot return a number unless ownership
+ * was established.** `null` means there is provably no sitting to own — no
+ * database, or one of the degraded `local-…` ids — so a caller that reads
+ * persisted data keys off the id and has no way to reach a row it did not earn.
+ * Nothing needs the id today; it is here so the Phase 8 read path cannot be
+ * written any other way.
+ *
+ * A sitting the caller does not own is a 404, exactly as it is over the API. An
+ * ownership question the database could not answer is a 500 — see
+ * {@link pageGate} for why that is not the same as "nothing to own".
  */
-export async function requireOwnedExam(examId: string): Promise<ExamAccess> {
+export async function requireExamAccess(examId: string): Promise<number | null> {
   const access = await authorizeExam(examId);
-  if (access.status === "denied") {
-    if (access.reason === "unauthenticated") {
+
+  switch (pageGate(access)) {
+    case "sign-in": {
       const { redirectToSignIn } = await auth();
       return redirectToSignIn();
     }
-    notFound();
+    case "not-found":
+      notFound();
+    case "unverifiable":
+      // Deliberately not `notFound()`: the sitting may well exist and be theirs.
+      // What failed is our ability to say so, and that is a server error.
+      throw new Error(`[exam-guard] ownership of exam ${examId} could not be verified`);
+    case "render":
+      return access.status === "owned" ? access.examId : null;
   }
-  return access;
 }

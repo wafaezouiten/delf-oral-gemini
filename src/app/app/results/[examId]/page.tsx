@@ -1,4 +1,4 @@
-import { requireOwnedExam } from "@/lib/auth/exam-guard";
+import { requireExamAccess } from "@/lib/auth/exam-guard";
 import { ResultsClient } from "./results-client";
 
 /**
@@ -10,11 +10,12 @@ import { ResultsClient } from "./results-client";
  * The ownership check is here now rather than when that revision lands. Today it
  * guards a route whose data happens to come from the visitor's own browser; the
  * moment the page reads the correction back from Neon, the gate is already in
- * place instead of being the thing someone remembers to add.
+ * place instead of being the thing someone remembers to add. `requireExamAccess`
+ * returns that read's row id, and returns it only when ownership is proven.
  */
 export default async function ResultsPage({ params }: PageProps<"/app/results/[examId]">) {
   const { examId } = await params;
-  await requireOwnedExam(examId);
+  await requireExamAccess(examId);
 
   return <ResultsClient examId={examId} />;
 }

@@ -15,8 +15,8 @@
  *
  * So authorisation lives with each resource instead, through `lib/auth`:
  *   - `app/app/page.tsx`                   `requireUserId()`
- *   - `app/app/oral/[examId]/page.tsx`     `requireOwnedExam()`
- *   - `app/app/results/[examId]/page.tsx`  `requireOwnedExam()`
+ *   - `app/app/oral/[examId]/page.tsx`     `requireExamAccess()`
+ *   - `app/app/results/[examId]/page.tsx`  `requireExamAccess()`
  *   - `app/app/layout.tsx`                 `requireUserId()`, for the shell only
  *   - `api/live-token/route.ts`            `auth()` before minting a token
  *   - `api/exams/route.ts`                 `auth()` before creating an exam
