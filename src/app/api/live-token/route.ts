@@ -53,6 +53,19 @@ const TOKEN_TTL_MINUTES = 15;
 const NEW_SESSION_WINDOW_MINUTES = 2;
 
 export async function POST(request: Request) {
+  // Before anything that costs a round trip. A misconfigured environment would
+  // otherwise pay for two queries against `oral_exams` on every request —
+  // including every reconnect — only to fail at the end for a reason that was
+  // knowable at the start.
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    console.error("[live-token] GEMINI_API_KEY is not set");
+    return NextResponse.json(
+      { error: "Le service vocal n'est pas configuré sur le serveur" },
+      { status: 500 },
+    );
+  }
+
   const parsed = parseLiveTokenRequest(await request.json().catch(() => null));
   if (!parsed.ok) {
     return NextResponse.json({ error: parsed.error }, { status: parsed.status });
@@ -90,15 +103,6 @@ export async function POST(request: Request) {
         ? "owned sitting has no readable subject"
         : `no sitting to read (${access.reason})`;
     console.warn(`[live-token] minting for the requested subject, ${why}:`, examId);
-  }
-
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) {
-    console.error("[live-token] GEMINI_API_KEY is not set");
-    return NextResponse.json(
-      { error: "Le service vocal n'est pas configuré sur le serveur" },
-      { status: 500 },
-    );
   }
 
   try {

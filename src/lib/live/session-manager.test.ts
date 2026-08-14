@@ -169,6 +169,7 @@ class FakeTransport implements LiveTransport {
 class TestTimers implements SessionTimers {
   scheduled: Array<{ ms: number; fn: () => void; cancelled: boolean }> = [];
   slept: number[] = [];
+  private sleepGate: Promise<void> | null = null;
 
   schedule(fn: () => void, ms: number): CancelTimer {
     const entry = { ms, fn, cancelled: false };
@@ -178,9 +179,20 @@ class TestTimers implements SessionTimers {
     };
   }
 
+  /** Park the next backoff until released, so a test can land something else
+   *  in the middle of it. */
+  holdSleep(): () => void {
+    let release!: () => void;
+    this.sleepGate = new Promise<void>((resolve) => (release = resolve));
+    return () => {
+      this.sleepGate = null;
+      release();
+    };
+  }
+
   sleep(ms: number): Promise<void> {
     this.slept.push(ms);
-    return Promise.resolve();
+    return this.sleepGate ?? Promise.resolve();
   }
 
   /** Fire every live scheduled callback. */
@@ -563,6 +575,33 @@ describe("reconnection", () => {
     // And the live socket is still held: audio goes out rather than to the buffer.
     h.session.sendAudio("chunk-after");
     assert.deepEqual(h.transport.socket.audioChunks, ["chunk-after"]);
+  });
+
+  it("opens one socket when a forced reconnect lands during a backoff", async () => {
+    // Two independent callers can each reach connect(): the parked
+    // scheduleReconnect() and the candidate pressing the button. What stops a
+    // duplicate socket is connect()'s state guard, which is checked before any
+    // await — so the backoff finds the session already connected and gives up
+    // rather than opening a second one on top of it.
+    const h = harness();
+    await h.session.connect();
+    h.transport.socket.emit(resumptionUpdate("handle-one"));
+
+    const releaseSleep = h.timers.holdSleep();
+    h.transport.socket.drop();
+    await flush();
+    assert.equal(h.session.connectionState, "reconnecting", "backoff is parked");
+
+    const forced = h.session.reconnect();
+    await flush();
+    assert.equal(h.session.connectionState, "connected", "the forced attempt won the race");
+
+    releaseSleep();
+    await forced;
+    await flush();
+
+    assert.equal(h.transport.sockets.length, 2, "one replacement socket, not two");
+    assert.equal(h.session.connectionState, "connected");
   });
 
   it("ignores a retired socket's messages, so it cannot rewind the handle", async () => {
