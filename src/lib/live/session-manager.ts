@@ -15,7 +15,9 @@
  *  2. **Session resumption.** Every `sessionResumptionUpdate` carries a handle;
  *     we keep the newest one and pass it to the next `connect()`. Gemini
  *     restores the conversation, so the examiner still remembers the argument
- *     the candidate made four minutes ago.
+ *     the candidate made four minutes ago. A connect carrying a handle is a
+ *     `resuming`, not a `connecting` — see `state-machine.ts` for why those are
+ *     two states and not one.
  *  3. **Reconnect on unexpected close.** A dropped socket with no warning falls
  *     back to the same resumption path, with backoff.
  *
@@ -23,22 +25,41 @@
  * exam phase. Those live above it and survive across sessions — which is exactly
  * why a reconnect cannot reset them. The class reports events; the controller
  * decides what they mean.
+ *
+ * Everything that touches the outside world — minting a token, opening a socket,
+ * waiting — arrives through {@link LiveTransport} and {@link SessionTimers}.
+ * That is not ceremony: a resumption path exercised only in production is a
+ * resumption path that does not work, and before those seams existed the only
+ * testable thing in this file was a duration parser.
  */
 
-import { GoogleGenAI, type LiveServerMessage, type Session } from "@google/genai";
+import {
+  GoogleGenAI,
+  type LiveSendClientContentParameters,
+  type LiveSendRealtimeInputParameters,
+  type LiveConnectConfig,
+  type LiveServerMessage,
+} from "@google/genai";
 
 import { CLIENT_CONNECT_CONFIG, INPUT_MIME_TYPE, LIVE_MODEL } from "@/lib/gemini/constants";
 import type { OralTopic } from "@/lib/delf/topics";
+import {
+  canTransition,
+  describeTransition,
+  type SessionState,
+} from "./state-machine";
 
 export type LivePhase = "monologue" | "debate";
 
-export type ConnectionState =
-  | "idle"
-  | "connecting"
-  | "connected"
-  | "reconnecting"
-  | "closed"
-  | "failed";
+/**
+ * The connection's state.
+ *
+ * Re-exported under its original name because the UI imports it from here, and
+ * because "connection state" is what a badge renders. The machine itself —
+ * states, legal transitions, and how this combines with the exam phase — lives
+ * in `state-machine.ts`.
+ */
+export type ConnectionState = SessionState;
 
 export interface SessionManagerCallbacks {
   onStateChange: (state: ConnectionState) => void;
@@ -56,74 +77,84 @@ export interface SessionManagerCallbacks {
   onEvent: (event: string, detail?: unknown) => void;
 }
 
-const MAX_RECONNECT_ATTEMPTS = 5;
-/** Reconnect this long before the server's stated deadline. */
-const GOAWAY_SAFETY_MS = 1500;
+// ---------------------------------------------------------------- the seams
 
-export class ExamLiveSession {
-  private session: Session | null = null;
-  private state: ConnectionState = "idle";
+/** The subset of the SDK's `Session` this module actually uses. */
+export interface LiveSocket {
+  sendRealtimeInput(params: LiveSendRealtimeInputParameters): void;
+  sendClientContent(params: LiveSendClientContentParameters): void;
+  close(): void;
+}
 
-  /** The newest resumption handle. The single most important field here. */
-  private resumptionHandle: string | undefined;
+/** What a socket reports back. Mirrors the SDK's `LiveCallbacks`, loosely typed
+ *  so a fake does not have to construct DOM events. */
+export interface LiveSocketCallbacks {
+  onopen?: () => void;
+  onmessage: (message: LiveServerMessage) => void;
+  onerror?: (error: unknown) => void;
+  onclose?: (event?: { reason?: string }) => void;
+}
 
-  /** Set while we are deliberately tearing a session down, so `onclose` knows
-   *  the close was ours and must not trigger a reconnect. */
-  private closingIntentionally = false;
+/** What the server needs to mint a token for one connect. */
+export interface LiveTokenClientRequest {
+  examId: string;
+  phase: LivePhase;
+  topicSlug: string;
+  /** Present on a resume. Its presence is what the server pins into the token. */
+  resumptionHandle?: string;
+}
 
-  private reconnectAttempts = 0;
-  private goAwayTimer: ReturnType<typeof setTimeout> | null = null;
+/**
+ * Everything outside this module's control: the token endpoint and the socket.
+ *
+ * Injected so the whole lifecycle — first connect, goAway, resume, backoff,
+ * exhaustion — runs headlessly against fakes. The production implementation is
+ * {@link browserLiveTransport}.
+ */
+export interface LiveTransport {
+  mintToken(request: LiveTokenClientRequest): Promise<string>;
+  open(params: {
+    token: string;
+    model: string;
+    config: LiveConnectConfig;
+    callbacks: LiveSocketCallbacks;
+  }): Promise<LiveSocket>;
+}
 
-  /** Queued while disconnected, replayed on reconnect. Bounded: mid-reconnect
-   *  audio is unrecoverable anyway, and an unbounded buffer would blow memory
-   *  on a long outage. */
-  private pendingAudio: string[] = [];
-  private static readonly MAX_PENDING_CHUNKS = 50;
+/** Cancels a scheduled callback. Idempotent. */
+export type CancelTimer = () => void;
 
-  constructor(
-    private readonly phase: LivePhase,
-    private readonly topic: OralTopic,
-    private readonly callbacks: SessionManagerCallbacks,
-    /** History to seed a fresh session with (the monologue, for the débat). */
-    private readonly initialHistory: Array<{
-      role: "user" | "model";
-      parts: Array<{ text: string }>;
-    }> = [],
-  ) {}
+/** Injected so backoff and the goAway deadline do not cost real seconds in tests. */
+export interface SessionTimers {
+  schedule(fn: () => void, ms: number): CancelTimer;
+  sleep(ms: number): Promise<void>;
+}
 
-  get connectionState(): ConnectionState {
-    return this.state;
-  }
+export const realTimers: SessionTimers = {
+  schedule(fn, ms) {
+    const handle = setTimeout(fn, ms);
+    return () => clearTimeout(handle);
+  },
+  sleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  },
+};
 
-  /** Whether the exam has ever successfully connected (drives first-run UI). */
-  get hasResumptionHandle(): boolean {
-    return Boolean(this.resumptionHandle);
-  }
-
-  private setState(state: ConnectionState): void {
-    if (this.state === state) return;
-    this.state = state;
-    this.callbacks.onStateChange(state);
-  }
-
-  /**
-   * Mint a short-lived ephemeral token for this phase.
-   *
-   * Fetched fresh on EVERY connect, including reconnects, because a token is
-   * single-use and a resumed session is a new session. The phase, topic and
-   * resumption handle go to the server, which builds the real session config
-   * (examiner prompt included) and pins it into the token — so this client never
-   * holds the prompt, and the token cannot be used for anything else.
-   */
-  private async fetchToken(): Promise<string> {
+/**
+ * The real transport: our token route, then the Gemini socket.
+ *
+ * A token is fetched fresh on EVERY connect, including reconnects, because it is
+ * single-use and a resumed session is a new session. The phase, exam, topic and
+ * resumption handle go to the server, which builds the real session config
+ * (examiner prompt included) and pins it into the token — so this client never
+ * holds the prompt, and the token cannot be used for anything else.
+ */
+export const browserLiveTransport: LiveTransport = {
+  async mintToken(request) {
     const response = await fetch("/api/live-token", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        phase: this.phase,
-        topicSlug: this.topic.slug,
-        resumptionHandle: this.resumptionHandle,
-      }),
+      body: JSON.stringify(request),
     });
     if (!response.ok) {
       const body = await response.text().catch(() => "");
@@ -132,32 +163,151 @@ export class ExamLiveSession {
     const { token } = (await response.json()) as { token?: string };
     if (!token) throw new Error("Token endpoint returned no token");
     return token;
+  },
+
+  async open({ token, model, config, callbacks }) {
+    // `apiVersion: "v1alpha"` is REQUIRED when authenticating with an ephemeral
+    // token: the SDK's token support only exists on v1alpha, and without it the
+    // connection is rejected. The SDK warns about this at runtime rather than
+    // typing it, so it is easy to miss.
+    const ai = new GoogleGenAI({ apiKey: token, httpOptions: { apiVersion: "v1alpha" } });
+    return ai.live.connect({ model, config, callbacks });
+  },
+};
+
+// ---------------------------------------------------------------- the session
+
+const DEFAULT_MAX_RECONNECT_ATTEMPTS = 5;
+/** Reconnect this long before the server's stated deadline. */
+const GOAWAY_SAFETY_MS = 1500;
+const BACKOFF_BASE_MS = 400;
+const BACKOFF_CAP_MS = 5000;
+
+/**
+ * Why the socket is being torn down, which is what `onclose` needs to know.
+ *
+ * Three cases, and conflating any two of them breaks something: `none` means the
+ * server dropped us and we must reconnect; `final` means the phase is over and
+ * we must not; `reconnect` means WE are cycling the socket, so `onclose` must
+ * stay silent and let {@link ExamLiveSession.reconnect} drive the states. That
+ * last one is why a forced reconnect never passes through `closed`, which the
+ * state machine treats as terminal.
+ */
+type Teardown = "none" | "final" | "reconnect";
+
+export interface ExamLiveSessionOptions {
+  /** The sitting this session belongs to. Sent to the token route, which binds
+   *  the token to it after checking the caller owns it. */
+  examId: string;
+  phase: LivePhase;
+  topic: OralTopic;
+  callbacks: SessionManagerCallbacks;
+  /** History to seed a fresh session with (the monologue, for the débat). */
+  initialHistory?: Array<{ role: "user" | "model"; parts: Array<{ text: string }> }>;
+  transport?: LiveTransport;
+  timers?: SessionTimers;
+  maxReconnectAttempts?: number;
+}
+
+export class ExamLiveSession {
+  private socket: LiveSocket | null = null;
+  private state: SessionState = "idle";
+
+  /** The newest resumption handle. The single most important field here. */
+  private resumptionHandle: string | undefined;
+
+  private teardown: Teardown = "none";
+  private reconnectAttempts = 0;
+  private cancelGoAway: CancelTimer | null = null;
+
+  /** Queued while disconnected, replayed on reconnect. Bounded: mid-reconnect
+   *  audio is unrecoverable anyway, and an unbounded buffer would blow memory
+   *  on a long outage. */
+  private pendingAudio: string[] = [];
+  private static readonly MAX_PENDING_CHUNKS = 50;
+
+  private readonly examId: string;
+  private readonly phase: LivePhase;
+  private readonly topic: OralTopic;
+  private readonly callbacks: SessionManagerCallbacks;
+  private readonly initialHistory: Array<{
+    role: "user" | "model";
+    parts: Array<{ text: string }>;
+  }>;
+  private readonly transport: LiveTransport;
+  private readonly timers: SessionTimers;
+  private readonly maxReconnectAttempts: number;
+
+  constructor(options: ExamLiveSessionOptions) {
+    this.examId = options.examId;
+    this.phase = options.phase;
+    this.topic = options.topic;
+    this.callbacks = options.callbacks;
+    this.initialHistory = options.initialHistory ?? [];
+    this.transport = options.transport ?? browserLiveTransport;
+    this.timers = options.timers ?? realTimers;
+    this.maxReconnectAttempts = options.maxReconnectAttempts ?? DEFAULT_MAX_RECONNECT_ATTEMPTS;
+  }
+
+  get connectionState(): SessionState {
+    return this.state;
+  }
+
+  /** Whether a resume is possible — i.e. whether the examiner's memory survives
+   *  the next reconnect. */
+  get hasResumptionHandle(): boolean {
+    return Boolean(this.resumptionHandle);
   }
 
   /**
-   * Open a session. Passing the stored resumption handle turns this into a
-   * *resume* rather than a fresh start; the handle is only absent on the very
-   * first connect of a phase.
+   * Move the machine, refusing nothing but reporting anything illegal.
+   *
+   * Applied rather than thrown on purpose: an unexpected transition is a bug in
+   * this file, and freezing a live exam over it would turn a cosmetic fault into
+   * a lost épreuve. It lands in the session log, and `session-manager.test.ts`
+   * asserts the real lifecycle never produces one — so the check has teeth in CI
+   * without having teeth on a candidate.
+   */
+  private setState(next: SessionState): void {
+    if (this.state === next) return;
+    if (!canTransition(this.state, next)) {
+      this.callbacks.onEvent("invalid-transition", describeTransition(this.state, next));
+    }
+    this.state = next;
+    this.callbacks.onStateChange(next);
+  }
+
+  private tokenRequest(): LiveTokenClientRequest {
+    return {
+      examId: this.examId,
+      phase: this.phase,
+      topicSlug: this.topic.slug,
+      resumptionHandle: this.resumptionHandle,
+    };
+  }
+
+  /**
+   * Open a session.
+   *
+   * Passing the stored resumption handle turns this into a *resume* rather than
+   * a fresh start; the handle is only absent on the very first connect of a
+   * phase. The two are separate states because only one of them keeps the
+   * examiner's memory of the exam so far.
    */
   async connect(): Promise<void> {
-    if (this.state === "connecting" || this.state === "connected") return;
+    if (this.state === "connecting" || this.state === "resuming" || this.state === "connected") {
+      return;
+    }
 
     const resuming = Boolean(this.resumptionHandle);
-    this.setState(resuming ? "reconnecting" : "connecting");
-    this.closingIntentionally = false;
+    this.setState(resuming ? "resuming" : "connecting");
+    this.teardown = "none";
 
     try {
-      const token = await this.fetchToken();
-      // `apiVersion: "v1alpha"` is REQUIRED when authenticating with an
-      // ephemeral token: the SDK's token support only exists on v1alpha, and
-      // without it the connection is rejected. The SDK warns about this at
-      // runtime rather than typing it, so it is easy to miss.
-      const ai = new GoogleGenAI({
-        apiKey: token,
-        httpOptions: { apiVersion: "v1alpha" },
-      });
+      const token = await this.transport.mintToken(this.tokenRequest());
 
-      this.session = await ai.live.connect({
+      this.socket = await this.transport.open({
+        token,
         model: LIVE_MODEL,
         // Modalities only. The real config — instruction, VAD mode, resumption,
         // compression — is pinned in the token minted above. Verified: this
@@ -177,16 +327,7 @@ export class ExamLiveSession {
           onerror: (error) => {
             this.callbacks.onEvent("error", String(error));
           },
-          onclose: (event) => {
-            this.session = null;
-            this.clearGoAwayTimer();
-            if (this.closingIntentionally) {
-              this.setState("closed");
-              return;
-            }
-            this.callbacks.onEvent("closed-unexpectedly", event?.reason ?? "");
-            void this.scheduleReconnect();
-          },
+          onclose: (event) => this.handleClose(event),
         },
       });
 
@@ -195,13 +336,40 @@ export class ExamLiveSession {
       // candidate. On a RESUME the handle already carries the history, so
       // re-seeding would duplicate the monologue in context.
       if (!resuming && this.initialHistory.length > 0) {
-        this.session.sendClientContent({ turns: this.initialHistory, turnComplete: false });
+        this.socket.sendClientContent({ turns: this.initialHistory, turnComplete: false });
         this.callbacks.onEvent("history-seeded", { turns: this.initialHistory.length });
       }
+
+      // Flushed HERE and not only in `onopen`, because `open()` resolves after
+      // the socket is open: `onopen` therefore runs while `this.socket` is still
+      // null, `sendAudio` refuses, and every buffered chunk is quietly pushed
+      // straight back onto the queue. That is the audio captured during a
+      // reconnect — precisely the audio the buffer exists to save. Calling it in
+      // both places is safe: it is a no-op on an empty queue, and it refuses
+      // unless the state says connected.
+      this.flushPendingAudio();
     } catch (error) {
       this.callbacks.onEvent("connect-failed", String(error));
-      this.session = null;
+      this.socket = null;
       await this.scheduleReconnect();
+    }
+  }
+
+  private handleClose(event?: { reason?: string }): void {
+    this.socket = null;
+    this.clearGoAwayTimer();
+
+    switch (this.teardown) {
+      case "final":
+        this.setState("closed");
+        return;
+      case "reconnect":
+        // Our own doing. `reconnect()` is mid-flight and owns the states from
+        // here; emitting `closed` would end the session machine for good.
+        return;
+      case "none":
+        this.callbacks.onEvent("closed-unexpectedly", event?.reason ?? "");
+        void this.scheduleReconnect();
     }
   }
 
@@ -211,13 +379,12 @@ export class ExamLiveSession {
     const update = message.sessionResumptionUpdate;
     if (update?.resumable && update.newHandle) {
       this.resumptionHandle = update.newHandle;
+      this.callbacks.onEvent("resumption-handle", { handle: update.newHandle.slice(0, 12) });
     }
 
     // The server is about to hang up. Reconnect slightly early, on our terms.
     if (message.goAway) {
-      const timeLeftMs = parseDurationMs(message.goAway.timeLeft) ?? 0;
-      this.callbacks.onEvent("go-away", { timeLeftMs });
-      this.scheduleGoAwayReconnect(timeLeftMs);
+      this.handleGoAway(message.goAway.timeLeft);
     }
 
     const content = message.serverContent;
@@ -239,66 +406,95 @@ export class ExamLiveSession {
     if (content.turnComplete) this.callbacks.onTurnComplete();
   }
 
-  /** Reconnect just before the server's deadline, so no audio is lost. */
-  private scheduleGoAwayReconnect(timeLeftMs: number): void {
+  /**
+   * `goAway`: the server's warning that it is about to hang up.
+   *
+   * Handled explicitly rather than left to the `onclose` path, because the two
+   * are not equivalent. Waiting for the close means the socket dies mid-sentence
+   * and the audio in flight is lost; acting on the warning means the new socket
+   * opens while the old one is still healthy. This is the difference between a
+   * seamless 13-minute débat and one with a hole in it.
+   *
+   * An unparseable `timeLeft` reconnects immediately, which is the safe reading
+   * of "the server is about to hang up" — being early costs nothing, being late
+   * costs the candidate's words.
+   */
+  private handleGoAway(timeLeft: unknown): void {
+    const parsed = parseDurationMs(timeLeft);
+    const timeLeftMs = parsed ?? 0;
+    this.callbacks.onEvent("go-away", { timeLeftMs, parsed: parsed !== null });
+
     this.clearGoAwayTimer();
     const delay = Math.max(0, timeLeftMs - GOAWAY_SAFETY_MS);
-    this.goAwayTimer = setTimeout(() => {
+    this.cancelGoAway = this.timers.schedule(() => {
+      this.cancelGoAway = null;
       this.callbacks.onEvent("reconnecting-before-goaway");
       void this.reconnect();
     }, delay);
   }
 
   private clearGoAwayTimer(): void {
-    if (this.goAwayTimer) {
-      clearTimeout(this.goAwayTimer);
-      this.goAwayTimer = null;
-    }
+    this.cancelGoAway?.();
+    this.cancelGoAway = null;
   }
 
-  /** Backoff reconnect after an unexpected close. */
+  /**
+   * Whether the phase has been ended for good.
+   *
+   * A method rather than a bare `this.teardown === "final"`, because the check
+   * is made on both sides of an `await` and the compiler narrows the field at
+   * the first one — then reports the second as unreachable. It is not: `close()`
+   * can land while the backoff is sleeping, and dropping that check would have
+   * a torn-down session reconnect itself after the exam ended.
+   */
+  private isFinished(): boolean {
+    return this.teardown === "final";
+  }
+
+  /** Backoff reconnect after an unexpected close or a failed connect. */
   private async scheduleReconnect(): Promise<void> {
-    if (this.closingIntentionally) return;
-    if (this.reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+    if (this.isFinished()) return;
+    if (this.reconnectAttempts >= this.maxReconnectAttempts) {
       this.callbacks.onEvent("reconnect-exhausted", { attempts: this.reconnectAttempts });
       this.setState("failed");
       return;
     }
     this.reconnectAttempts += 1;
     this.setState("reconnecting");
-    const delay = Math.min(400 * 2 ** (this.reconnectAttempts - 1), 5000);
+    const delay = Math.min(BACKOFF_BASE_MS * 2 ** (this.reconnectAttempts - 1), BACKOFF_CAP_MS);
     this.callbacks.onEvent("reconnect-scheduled", { attempt: this.reconnectAttempts, delay });
-    await new Promise((resolve) => setTimeout(resolve, delay));
+    await this.timers.sleep(delay);
+    if (this.isFinished()) return;
     await this.connect();
   }
 
   /**
    * Close the current socket and immediately reopen it with the stored handle.
    *
-   * This is the public seam the forced-reconnect test drives (§16 of the brief):
-   * it exercises the exact code path a real GoAway takes, so the acceptance test
-   * does not have to sit through ten minutes of débat to reach it.
+   * This is the public seam the forced-reconnect test drives: it exercises the
+   * exact code path a real GoAway takes, so the acceptance test does not have to
+   * sit through ten minutes of débat to reach it.
    */
   async reconnect(): Promise<void> {
     this.clearGoAwayTimer();
     this.callbacks.onEvent("reconnect-forced", { hasHandle: this.hasResumptionHandle });
-    this.closingIntentionally = true;
+    this.teardown = "reconnect";
     this.closeSocket();
-    this.closingIntentionally = false;
+    this.teardown = "none";
     this.setState("reconnecting");
     await this.connect();
   }
 
   /** Stream one base64 PCM16 chunk of candidate audio. */
   sendAudio(base64: string): void {
-    if (!this.session || this.state !== "connected") {
+    if (!this.socket || this.state !== "connected") {
       if (this.pendingAudio.length < ExamLiveSession.MAX_PENDING_CHUNKS) {
         this.pendingAudio.push(base64);
       }
       return;
     }
     try {
-      this.session.sendRealtimeInput({ audio: { data: base64, mimeType: INPUT_MIME_TYPE } });
+      this.socket.sendRealtimeInput({ audio: { data: base64, mimeType: INPUT_MIME_TYPE } });
     } catch (error) {
       this.callbacks.onEvent("send-audio-failed", String(error));
     }
@@ -318,15 +514,15 @@ export class ExamLiveSession {
    * interrupt — the guarantee the monologue rests on.
    */
   beginCandidateActivity(): void {
-    if (!this.session) return;
-    this.session.sendRealtimeInput({ activityStart: {} });
+    if (!this.socket) return;
+    this.socket.sendRealtimeInput({ activityStart: {} });
     this.callbacks.onEvent("activity-start");
   }
 
   /** Close the candidate's turn, handing the floor to the examiner. */
   endCandidateActivity(): void {
-    if (!this.session) return;
-    this.session.sendRealtimeInput({ activityEnd: {} });
+    if (!this.socket) return;
+    this.socket.sendRealtimeInput({ activityEnd: {} });
     this.callbacks.onEvent("activity-end");
   }
 
@@ -336,14 +532,14 @@ export class ExamLiveSession {
    * evaluator must never grade a control prompt as something the candidate said.
    */
   sendDirective(text: string): void {
-    if (!this.session) return;
+    if (!this.socket) return;
     try {
       // `sendRealtimeInput({text})`, NOT `sendClientContent`. On
       // gemini-3.1-flash-live the latter only seeds history: it accepts the
       // turn and the model never speaks, which presents as a session that
       // connects fine and then sits in silence forever. Confirmed by testing
       // both against the live service.
-      this.session.sendRealtimeInput({ text });
+      this.socket.sendRealtimeInput({ text });
       this.callbacks.onEvent("directive-sent");
     } catch (error) {
       this.callbacks.onEvent("directive-failed", String(error));
@@ -352,16 +548,16 @@ export class ExamLiveSession {
 
   private closeSocket(): void {
     try {
-      this.session?.close();
+      this.socket?.close();
     } catch {
       /* already closed */
     }
-    this.session = null;
+    this.socket = null;
   }
 
-  /** End the phase for good. No reconnect follows. */
+  /** End the phase for good. No reconnect follows. Safe to call twice. */
   close(): void {
-    this.closingIntentionally = true;
+    this.teardown = "final";
     this.clearGoAwayTimer();
     this.pendingAudio = [];
     this.closeSocket();

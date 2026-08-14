@@ -89,7 +89,7 @@ export function ExamClient({ examId, topic }: { examId: string; topic: OralTopic
     [examId, topic, router],
   );
 
-  const { state, controller } = useExamController({ topic, onFinished });
+  const { state, controller } = useExamController({ examId, topic, onFinished });
 
   if (!state.started) {
     return <Briefing topic={topic} onStart={() => controller.start()} />;

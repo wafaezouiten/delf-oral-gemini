@@ -21,22 +21,26 @@ import { ExamLiveSession } from "./session-manager";
 export type { ExamEvent, ExamState } from "./exam-controller";
 
 export function useExamController(options: {
+  /** The sitting. Reaches the token route, which refuses to mint for a sitting
+   *  the caller does not own — so it stops here rather than in the controller,
+   *  which has no business knowing about row ids. */
+  examId: string;
   topic: OralTopic;
   onFinished: (payload: ExamFinishedPayload) => void;
 }) {
-  const { topic, onFinished } = options;
+  const { examId, topic, onFinished } = options;
 
   const controller = useMemo(
     () =>
       new ExamController({
         topic,
-        createSession: (phase, sessionTopic, callbacks, history) =>
-          new ExamLiveSession(phase, sessionTopic, callbacks, history),
+        createSession: (phase, sessionTopic, callbacks, initialHistory) =>
+          new ExamLiveSession({ examId, phase, topic: sessionTopic, callbacks, initialHistory }),
         createRecorder: (onChunk) => new MicRecorder({ onChunk }),
         createPlayer: (onSpeakingChange) => new ExaminerAudioPlayer(onSpeakingChange),
         onFinished,
       }),
-    [topic, onFinished],
+    [examId, topic, onFinished],
   );
 
   // Release the microphone and the socket when the candidate leaves the page.
