@@ -3,7 +3,7 @@ import { describe, it } from "node:test";
 
 import { INPUT_SAMPLE_RATE } from "@/lib/gemini/constants";
 import { FRAME_SAMPLES, frameSamplesAt } from "./framing";
-import { base64ToInt16 } from "./pcm";
+import { base64ToInt16, wavDurationSeconds } from "./pcm";
 import { MicRecorder, type CaptureStream, type MicrophoneOpener } from "./recorder";
 
 // ------------------------------------------------------------------ the fake
@@ -15,6 +15,7 @@ import { MicRecorder, type CaptureStream, type MicrophoneOpener } from "./record
 
 class FakeCapture implements CaptureStream {
   onBlock: ((block: Float32Array) => void) | null = null;
+  onLost: ((reason: string) => void) | null = null;
   closes = 0;
 
   constructor(readonly sampleRate: number = INPUT_SAMPLE_RATE) {}
@@ -22,11 +23,19 @@ class FakeCapture implements CaptureStream {
   async close(): Promise<void> {
     this.closes += 1;
     this.onBlock = null;
+    this.onLost = null;
   }
 
   /** What the audio thread does 25 times a second. */
   emit(samples: number, fill = 0.25): void {
     this.onBlock?.(new Float32Array(samples).fill(fill));
+  }
+
+  /** The headset comes out of the socket. The track ends; nothing else happens,
+   *  and in particular no more blocks arrive. */
+  unplug(reason = "the audio track ended"): void {
+    this.onLost?.(reason);
+    this.onBlock = null;
   }
 
   get isReleased(): boolean {
@@ -46,6 +55,7 @@ function harness(
   const captures: FakeCapture[] = [];
   const chunks: string[] = [];
   const events: Array<{ name: string; detail?: unknown }> = [];
+  const losses: string[] = [];
   const collect = options.collect ?? true;
   let sent = 0;
 
@@ -63,6 +73,7 @@ function harness(
       if (collect) chunks.push(base64);
     },
     onEvent: (name, detail) => events.push({ name, detail }),
+    onLost: (reason) => losses.push(reason),
     openMicrophone,
   });
 
@@ -71,11 +82,17 @@ function harness(
     captures,
     chunks,
     events,
+    losses,
     sent: () => sent,
     capture: () => captures[captures.length - 1],
     /** Samples actually streamed to Gemini. */
     streamed: () => chunks.reduce((n, base64) => n + base64ToInt16(base64).length, 0),
   };
+}
+
+/** Seconds of audio in a WAV, read back out of the blob the recorder produced. */
+async function wavSeconds(blob: Blob): Promise<number | null> {
+  return wavDurationSeconds(await blob.arrayBuffer());
 }
 
 function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
@@ -102,9 +119,10 @@ describe("framing what reaches Gemini", () => {
     }
   });
 
-  it("keeps the archive and the stream in step, remainder included", async () => {
+  it("keeps the recording and the stream in step, remainder included", async () => {
     const h = harness();
     await h.recorder.start();
+    h.recorder.beginPhase("monologue");
 
     const total = FRAME_SAMPLES * 3 + 200;
     h.capture().emit(total);
@@ -124,6 +142,7 @@ describe("framing what reaches Gemini", () => {
     // endpoint that will read them as 16 kHz.
     const h = harness({ sampleRate: 48000 });
     await h.recorder.start();
+    h.recorder.beginPhase("monologue");
 
     assert.equal(h.recorder.captureRate, 48000);
     assert.ok(
@@ -150,23 +169,27 @@ describe("framing what reaches Gemini", () => {
     );
   });
 
-  it("archives at 16 kHz regardless of the device rate", async () => {
+  it("records at 16 kHz regardless of the device rate", async () => {
     const h = harness({ sampleRate: 44100 });
     await h.recorder.start();
+    h.recorder.beginPhase("monologue");
     h.capture().emit(44_100);
     await h.recorder.stop();
 
-    const blob = h.recorder.toWavBlob();
-    assert.ok(blob);
-    const view = new DataView(await blob.arrayBuffer());
+    const recording = h.recorder.recordingFor("monologue");
+    assert.ok(recording);
+    const view = new DataView(await recording.blob.arrayBuffer());
     assert.equal(view.getUint32(24, true), INPUT_SAMPLE_RATE, "the header is not a lie");
   });
 
-  it("returns no blob for a silent sitting, rather than an empty one", async () => {
+  it("returns no recording for a silent sitting, rather than an empty one", async () => {
     const h = harness();
     await h.recorder.start();
+    h.recorder.beginPhase("monologue");
     await h.recorder.stop();
-    assert.equal(h.recorder.toWavBlob(), null);
+
+    assert.equal(h.recorder.recordingFor("monologue"), null);
+    assert.deepEqual(h.recorder.recordings(), []);
   });
 });
 
@@ -306,6 +329,197 @@ describe("the microphone's lifetime", () => {
   });
 });
 
+describe("one recording per phase", () => {
+  it("cuts the monologue and the débat apart, tail included", async () => {
+    const h = harness();
+    await h.recorder.start();
+
+    // The monologue: two whole frames and a remainder still in the framer.
+    h.recorder.beginPhase("monologue");
+    const monologueSamples = FRAME_SAMPLES * 2 + 100;
+    h.capture().emit(monologueSamples);
+    h.recorder.endPhase();
+
+    // The remainder is the candidate's last words of THIS task. If the framer
+    // carried it across the boundary it would surface inside the débat, where
+    // it was never spoken.
+    assert.equal(h.recorder.measuredSeconds("monologue"), monologueSamples / INPUT_SAMPLE_RATE);
+
+    const debateSamples = FRAME_SAMPLES + 50;
+    h.recorder.beginPhase("debate");
+    h.capture().emit(debateSamples);
+    await h.recorder.stop();
+
+    assert.equal(h.recorder.measuredSeconds("debate"), debateSamples / INPUT_SAMPLE_RATE);
+
+    const recordings = h.recorder.recordings();
+    assert.deepEqual(
+      recordings.map((recording) => recording.phase),
+      ["monologue", "debate"],
+      "in exam order, which is what the evaluator's prompt promises the model",
+    );
+    assert.equal(recordings[0].sampleCount, monologueSamples);
+    assert.equal(recordings[1].sampleCount, debateSamples);
+  });
+
+  it("produces a playable WAV whose header agrees with the measurement", async () => {
+    // The measured duration reaches the database and the duration penalty; the
+    // blob reaches a player and the evaluator. A recording whose header says
+    // something else is a recording that will be graded against the wrong floor.
+    const h = harness();
+    await h.recorder.start();
+    h.recorder.beginPhase("monologue");
+    for (let i = 0; i < 100; i += 1) h.capture().emit(FRAME_SAMPLES); // four seconds
+    await h.recorder.stop();
+
+    const recording = h.recorder.recordingFor("monologue");
+    assert.ok(recording);
+    assert.equal(recording.durationSeconds, 4);
+    assert.equal(await wavSeconds(recording.blob), 4);
+    assert.equal(recording.byteSize, 44 + 4 * INPUT_SAMPLE_RATE * 2, "header plus PCM");
+  });
+
+  it("measures the audio it received, not the time that passed", async () => {
+    // The property the whole phase exists for. Two seconds of blocks arrive; the
+    // device then goes quiet — a suspended audio graph behind a backgrounded
+    // tab — while the phase carries on. The recording is two seconds, and
+    // nothing anywhere is entitled to round that up to the phase's length.
+    const h = harness();
+    await h.recorder.start();
+    h.recorder.beginPhase("debate");
+    for (let i = 0; i < 50; i += 1) h.capture().emit(FRAME_SAMPLES);
+
+    // …and now nothing, for as long as you like.
+    h.recorder.endPhase();
+
+    assert.equal(h.recorder.measuredSeconds("debate"), 2);
+  });
+
+  it("keeps recording across a phase, whatever the transport is doing", async () => {
+    // The independence the issue asks for, stated as a test: the recorder has no
+    // idea whether there is a socket. Nothing here consumes the streamed chunks,
+    // and the recording is unaffected.
+    const h = harness({ collect: false });
+    await h.recorder.start();
+    h.recorder.beginPhase("debate");
+    for (let i = 0; i < 25; i += 1) h.capture().emit(FRAME_SAMPLES);
+    await h.recorder.stop();
+
+    assert.equal(h.recorder.measuredSeconds("debate"), 1);
+  });
+
+  it("re-entering the same phase continues its recording rather than resetting it", async () => {
+    // The controller ensures the microphone is ready on more than one path into
+    // a phase. A second `beginPhase` that truncated the artefact would lose
+    // whatever came before it, silently and only sometimes.
+    const h = harness();
+    await h.recorder.start();
+    h.recorder.beginPhase("monologue");
+    h.capture().emit(FRAME_SAMPLES * 25);
+    h.recorder.beginPhase("monologue");
+    h.capture().emit(FRAME_SAMPLES * 25);
+    h.recorder.endPhase();
+
+    assert.equal(h.recorder.measuredSeconds("monologue"), 2);
+  });
+});
+
+describe("nothing is recorded before there is something to record", () => {
+  it("opens no device until it is asked to", async () => {
+    // Consent, at its narrowest: constructing a recorder must not touch the
+    // microphone. The permission prompt belongs to `start()`, which the exam
+    // calls at the monologue boundary and not before.
+    const h = harness();
+    assert.equal(h.captures.length, 0);
+    assert.deepEqual(h.recorder.recordings(), []);
+  });
+
+  it("streams but records nothing until a phase is open", async () => {
+    // Between the permission prompt and the exposé there is a moment of room
+    // tone. It reaches Gemini, which is warming up its turn detection on it, and
+    // it belongs to neither task — so it is in no artefact.
+    const h = harness();
+    await h.recorder.start();
+    h.capture().emit(FRAME_SAMPLES * 10);
+
+    assert.ok(h.chunks.length > 0, "the transport is running");
+    assert.equal(h.recorder.recordedSeconds, 0, "and nothing is being recorded");
+    assert.deepEqual(h.recorder.recordings(), []);
+    assert.equal(h.recorder.recordingPhase, null);
+
+    h.recorder.beginPhase("monologue");
+    h.capture().emit(FRAME_SAMPLES * 25);
+    assert.equal(h.recorder.measuredSeconds("monologue"), 1, "and now it is");
+  });
+
+  it("stops recording at the end of a phase while the session is still open", async () => {
+    // The examiner's closing sentence arrives after the phase has ended, and the
+    // candidate is often still audible over it. Neither belongs to the task.
+    const h = harness();
+    await h.recorder.start();
+    h.recorder.beginPhase("monologue");
+    h.capture().emit(FRAME_SAMPLES * 25);
+    h.recorder.endPhase();
+
+    h.capture().emit(FRAME_SAMPLES * 25);
+    assert.equal(h.recorder.measuredSeconds("monologue"), 1, "the closing minute is not in it");
+    assert.ok(h.chunks.length > 25, "though it was still streamed to the examiner");
+  });
+});
+
+describe("when the microphone goes away mid-phase", () => {
+  it("keeps what it recorded and says so exactly once", async () => {
+    const h = harness();
+    await h.recorder.start();
+    h.recorder.beginPhase("debate");
+    for (let i = 0; i < 25; i += 1) h.capture().emit(FRAME_SAMPLES); // one second
+
+    h.capture().unplug("the audio track ended");
+    h.capture().unplug("and again, because engines differ");
+
+    assert.deepEqual(h.losses, ["the audio track ended"], "reported once, not per event");
+    assert.equal(h.recorder.isLost, true);
+    assert.equal(h.recorder.isRecording, false);
+    assert.ok(h.events.some((event) => event.name === "capture-lost"));
+
+    // The second the device died is not a reason to lose the minute before it.
+    await h.recorder.stop();
+    const recording = h.recorder.recordingFor("debate");
+    assert.ok(recording, "the audio captured before the loss survives");
+    assert.equal(recording.durationSeconds, 1);
+    assert.equal(await wavSeconds(recording.blob), 1);
+  });
+
+  it("still releases the device it was handed", async () => {
+    // A lost track is not a closed AudioContext. The graph is still up and still
+    // ours to tear down, and `stop()` remains the only thing that does it.
+    const h = harness();
+    await h.recorder.start();
+    const capture = h.capture();
+    capture.unplug();
+
+    await h.recorder.stop();
+    assert.equal(capture.closes, 1);
+  });
+
+  it("does not report an ordinary teardown as a lost device", async () => {
+    // `stop()` ends the tracks, and on some engines that fires `ended`. A
+    // candidate whose épreuve finished cleanly must not be told their microphone
+    // failed.
+    const h = harness();
+    await h.recorder.start();
+    // The recorder's own handler, kept from before the teardown detached it —
+    // which is exactly the shape of a late event fired by a track that has just
+    // been stopped.
+    const notify = h.capture().onLost;
+    await h.recorder.stop();
+
+    notify?.("late ended event");
+    assert.deepEqual(h.losses, []);
+    assert.equal(h.recorder.isLost, false);
+  });
+});
+
 describe("a full monologue and débat", () => {
   it("archives twenty minutes without the clock drifting", async () => {
     // What "no audio drift" means on the capture side: the seconds archived have
@@ -313,6 +527,7 @@ describe("a full monologue and débat", () => {
     // block would lose a little every 40 ms and nothing would ever say so.
     const h = harness({ sampleRate: 48000, collect: false });
     await h.recorder.start();
+    h.recorder.beginPhase("monologue");
 
     const capture = h.capture();
     const block = frameSamplesAt(48000);

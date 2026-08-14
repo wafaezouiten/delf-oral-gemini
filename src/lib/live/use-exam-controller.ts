@@ -76,11 +76,45 @@ export function useExamController(options: {
     };
   }, [controller]);
 
+  /**
+   * Ask before a reload throws the recording away.
+   *
+   * The candidate's audio lives in this tab's memory and nowhere else until the
+   * épreuve ends and it is uploaded — deliberately, since streaming it somewhere
+   * as it is captured would mean retaining audio for a sitting that may be
+   * abandoned. The cost is that F5 during a débat destroys eighteen minutes of
+   * recording AND restarts the épreuve from preparation, silently, on a
+   * keystroke people press by reflex when a page looks stuck.
+   *
+   * `beforeunload` is the only hook the browser offers for saying so, and all it
+   * buys is the generic "leave site?" dialog — which is enough to turn an
+   * accident into a decision. It does NOT replace the `pagehide` teardown above:
+   * a candidate who confirms still leaves, and must still leave with the
+   * microphone released.
+   *
+   * The listener is added and removed as recording starts and stops, rather
+   * than registered once and made a no-op from inside. That distinction is not
+   * cosmetic: several engines disqualify a page from the back/forward cache for
+   * *having* a `beforeunload` listener at all, whether or not it ever calls
+   * `preventDefault` — so a handler installed for the whole sitting would
+   * quietly cost the bfcache behaviour the `pagehide` effect above is written to
+   * rely on, through thirty minutes of preparation when there is nothing to
+   * protect. It also stops the dialog appearing on the way out of a finished
+   * exam, which is the fastest way to teach someone to click through it without
+   * reading it.
+   */
   const state: ExamState = useSyncExternalStore(
     controller.subscribe,
     controller.getSnapshot,
     controller.getSnapshot,
   );
+
+  useEffect(() => {
+    if (!state.recording) return;
+    const warn = (event: BeforeUnloadEvent) => event.preventDefault();
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [state.recording]);
 
   return { state, controller };
 }

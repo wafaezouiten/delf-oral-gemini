@@ -15,6 +15,13 @@
       "when": 1786640483449,
       "tag": "0001_delf_sitting_and_correction",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1786731046134,
+      "tag": "0002_per_phase_recordings",
+      "breakpoints": true
     }
   ]
 }

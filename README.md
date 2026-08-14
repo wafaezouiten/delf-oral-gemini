@@ -28,7 +28,7 @@ Required to run an exam:
 
 ```bash
 pnpm check       # typecheck + lint
-pnpm test:unit   # 33 tests, including the full-exam acceptance test
+pnpm test:unit   # 280 tests, including the full-exam acceptance test
 pnpm build
 ```
 
@@ -41,13 +41,13 @@ MONOLOGUE ───── 5-7 min ── candidate speaks; examiner structurally
      │
 DEBAT ───────── ~13 min ── adversarial examiner; survives reconnects
      │
-FINISHED ────────────────── transcript + audio -> evaluation -> /25
+FINISHED ────────────────── transcript + two recordings -> evaluation -> /25
 ```
 
 Each phase owns its own clock, its own UI and its own Gemini configuration.
 There is no single exam-wide timer, and no single generic conversation.
 
-## Three decisions worth knowing
+## Decisions worth knowing
 
 **The monologue's silence is a protocol guarantee, not a prompt.** Asking a
 conversational model to stay quiet does not work; it will still say "d'accord"
@@ -78,6 +78,17 @@ through none. `resuming` is deliberately distinct from `reconnecting`: only one
 of them carries a handle, and therefore only one of them keeps the examiner's
 memory of the exam. See `docs/SESSION_STATE_MACHINE.md`.
 
+**The recording's duration is measured, never assumed.** Each speaking phase
+produces its own WAV, and its length comes from counting the samples in it —
+then, on the server, from re-reading the uploaded file's own header. The phase
+clock is stored beside it but is not the same number: a suspended audio graph
+behind a backgrounded tab, a headset unplugged four minutes in, a permission
+revoked mid-sentence all leave a phase that *ran* seven minutes and *recorded*
+ninety seconds. The DELF duration penalty is computed from the recording,
+because the recording is the only evidence the performance happened. The
+divergence is what the candidate is warned about, on screen, while there is
+still time to fix it.
+
 **Tokens are scoped to a sitting.** `/api/live-token` takes the exam id, answers
 "is this sitting theirs?" through the same `lib/auth` module every other exam
 route uses, and reads the subject off the row rather than trusting the browser —
@@ -89,7 +100,7 @@ so a token opens one phase, of one subject, of one sitting, for its owner, once.
 src/lib/delf/         Pure exam logic: phases, transcript, rubric, examiner prompt, topics
 src/lib/gemini/       Live configuration per phase; the /25 evaluator
 src/lib/live/         Session lifecycle (resumption, GoAway), state machine, exam controller
-src/lib/audio/        16 kHz PCM capture, 24 kHz playback, WAV encoding
+src/lib/audio/        16 kHz PCM capture, 24 kHz playback, WAV encoding, the per-phase recording
 src/app/              Routes: landing, Clerk, /app dashboard, exam, results
 experiments/          The audio-vs-text evaluation experiment
 ```
@@ -101,7 +112,7 @@ minutes.
 
 ## Status
 
-**Verified offline** — `pnpm check` clean, `pnpm build` succeeds, 220/220 unit
+**Verified offline** — `pnpm check` clean, `pnpm build` succeeds, 280/280 unit
 tests pass. That includes the acceptance scenario end to end (preparation →
 monologue → débat → forced reconnect → finish), asserting the transcript stays
 continuous, the débat clock does not reset, and the examiner's seeded memory
@@ -115,6 +126,13 @@ thirty thousand playback chunks scheduled exactly end to end, and every path
 that can abandon a device — two callers opening at once, one that resolves after
 the sitting ended, a teardown racing the permission prompt — asserted to release
 it.
+
+The recording is covered against the same fakes: the monologue and the débat cut
+apart with the boundary's partial frame landing in the phase it was spoken in,
+the duration read back out of the WAV's own header, and the failures that make a
+recording shorter than its phase — a track that ends mid-débat, a capture that
+quietly stops delivering, a phase entered before the microphone was asked for —
+each asserted to keep what was recorded and to say so.
 
 **Verified against the real Gemini service** — `pnpm verify:live`, 6/6:
 
@@ -142,9 +160,12 @@ written up in [`docs/GEMINI_LIVE_FINDINGS.md`](docs/GEMINI_LIVE_FINDINGS.md) and
 
 **Still not verified:**
 
-- The browser half: `getUserMedia`, the AudioWorklet and playback. The wire
-  format is confirmed (the checks above run the same protocol from Node), but the
-  microphone path needs a human with a microphone.
+- The browser half: `getUserMedia`, the AudioWorklet, playback, and the
+  recording that comes off them. The wire format is confirmed (the checks above
+  run the same protocol from Node) and the recording's arithmetic is unit-tested
+  against a fake device, but whether a real headset unplugged mid-débat fires
+  `ended` on every engine — and whether a real backgrounded tab suspends its
+  capture — needs a human with a microphone.
 - A real `GoAway` at the true ~10 minute limit. The reconnect path is proven by
   forced reconnection; the trigger has not been observed in the wild.
 - The audio-vs-text evaluation result. `docs/AUDIO_EVALUATION.md` states the
