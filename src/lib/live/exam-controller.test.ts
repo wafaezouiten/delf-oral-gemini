@@ -58,10 +58,12 @@ class FakeSession implements LiveSessionLike {
   }
 
   /** Mirrors the real manager: a reconnect reports `reconnecting`, then
-   *  `connected`, and never touches anything above the session. */
+   *  `resuming` once it has a handle, then `connected` — and never touches
+   *  anything above the session. */
   async reconnect(): Promise<void> {
     this.reconnects += 1;
     this.callbacks.onStateChange("reconnecting");
+    this.callbacks.onStateChange("resuming");
     this.callbacks.onStateChange("connected");
   }
 
@@ -79,6 +81,12 @@ class FakeSession implements LiveSessionLike {
 
   endCandidateActivity(): void {
     this.activityEnds += 1;
+  }
+
+  /** Drive an arbitrary connection-state sequence, as the real manager can —
+   *  including a backoff that needed several attempts. */
+  emitStates(...states: Array<Parameters<SessionManagerCallbacks["onStateChange"]>[0]>): void {
+    for (const state of states) this.callbacks.onStateChange(state);
   }
 
   /** Test helpers: pretend the examiner spoke / the candidate was transcribed. */
@@ -323,6 +331,98 @@ describe("full DELF B2 exam, with a forced reconnect mid-debate", () => {
     assert.equal(h.controller.getSnapshot().phase, "monologue", "still in the monologue");
   });
 
+  it("keeps the timer as the sole authority on when a phase ends", async () => {
+    // The requirement in one test: Gemini must not decide the exam's structure.
+    // The examiner finishes turns constantly during a débat — every objection is
+    // one — and none of them may end the phase. Only the clock (or the
+    // candidate) opens a closing handshake, and only inside that window does the
+    // model's turn ending mean anything.
+    const h = harness();
+    h.controller.start();
+    await h.controller.advanceEarly();
+    await new Promise((resolve) => setImmediate(resolve));
+
+    h.advanceClock(60);
+    for (let i = 0; i < 5; i += 1) {
+      h.session().finishTurn();
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+
+    assert.equal(h.controller.getSnapshot().phase, "monologue", "five turns did not end anything");
+    assert.equal(h.controller.getSnapshot().closing, false);
+    assert.equal(h.sessions.length, 1, "and no débat session was opened behind the clock's back");
+  });
+
+  it("reports one flattened status, and calls a reconnect a continuation", async () => {
+    const h = harness();
+    h.controller.start();
+    assert.equal(h.controller.getSnapshot().status, "preparation");
+
+    await h.controller.advanceEarly();
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(h.controller.getSnapshot().status, "monologue");
+
+    // Mid-reconnect the phase is still the monologue underneath, and the clock
+    // never stopped — but what the candidate is told is that the exam continues.
+    const seen: string[] = [];
+    const unsubscribe = h.controller.subscribe(() => {
+      seen.push(h.controller.getSnapshot().status);
+    });
+    await h.controller.forceReconnect();
+    unsubscribe();
+
+    assert.ok(seen.includes("reconnecting"));
+    assert.ok(seen.includes("resuming"), "the resume is distinguishable from a bare reconnect");
+    assert.equal(h.controller.getSnapshot().status, "monologue", "and it lands back in the phase");
+    assert.equal(h.controller.getSnapshot().reconnectCount, 1, "counted once, not twice");
+  });
+
+  it("ignores a second recovery request while one is already running", async () => {
+    // The candidate's "reprendre la connexion" is a real button and gets
+    // double-clicked. The session's generation guard means that cannot open two
+    // sockets, but every press still mints and discards an ephemeral token.
+    const h = harness();
+    h.controller.start();
+    await h.controller.advanceEarly();
+    await new Promise((resolve) => setImmediate(resolve));
+
+    h.session().emitStates("reconnecting");
+    await h.controller.forceReconnect();
+
+    assert.equal(h.session().reconnects, 0, "the recovery in flight was left to finish");
+    assert.ok(
+      h.controller.getSnapshot().events.some((event) => event.detail === "already recovering"),
+    );
+  });
+
+  it("counts one reconnection per outage, not one per attempt inside it", async () => {
+    // The number is persisted on the sitting as a reliability signal. A backoff
+    // sequence re-enters `reconnecting` once per failed attempt, so counting
+    // every entry reported three reconnections for one flaky ten-second
+    // episode — and a signal that cannot tell one bad minute from three
+    // separate ones is not a signal.
+    const h = harness();
+    h.controller.start();
+    await h.controller.advanceEarly();
+    await new Promise((resolve) => setImmediate(resolve));
+
+    // One outage that took three attempts to come back from.
+    h.session().emitStates(
+      "reconnecting",
+      "resuming",
+      "reconnecting",
+      "resuming",
+      "reconnecting",
+      "resuming",
+      "connected",
+    );
+    assert.equal(h.controller.getSnapshot().reconnectCount, 1);
+
+    // A second, genuinely separate outage.
+    h.session().emitStates("reconnecting", "resuming", "connected");
+    assert.equal(h.controller.getSnapshot().reconnectCount, 2);
+  });
+
   it("advances anyway when the examiner never delivers its closing line", async () => {
     const h = harness();
     h.controller.start();
@@ -333,8 +433,13 @@ describe("full DELF B2 exam, with a forced reconnect mid-debate", () => {
     await h.controller.advanceEarly();
     assert.equal(h.controller.getSnapshot().closing, true);
 
-    // The safety timeout is the guard against a silent examiner freezing the exam.
-    await new Promise((resolve) => setTimeout(resolve, 12_100));
+    // The safety timeout is the guard against a silent examiner freezing the
+    // exam. Driven off the injected clock like every other deadline here, so
+    // reaching it costs a tick rather than a real twelve seconds.
+    h.advanceClock(11);
+    assert.equal(h.controller.getSnapshot().phase, "monologue", "not yet");
+
+    h.advanceClock(2);
     await new Promise((resolve) => setImmediate(resolve));
     assert.equal(h.controller.getSnapshot().phase, "debate");
   });

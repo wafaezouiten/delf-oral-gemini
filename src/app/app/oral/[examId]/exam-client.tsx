@@ -89,7 +89,7 @@ export function ExamClient({ examId, topic }: { examId: string; topic: OralTopic
     [examId, topic, router],
   );
 
-  const { state, controller } = useExamController({ topic, onFinished });
+  const { state, controller } = useExamController({ examId, topic, onFinished });
 
   if (!state.started) {
     return <Briefing topic={topic} onStart={() => controller.start()} />;
@@ -163,18 +163,40 @@ export function ExamClient({ examId, topic }: { examId: string; topic: OralTopic
           {advanceLabel(state.phase, state.elapsed)}
         </button>
 
-        {/* The forced-reconnect control from §16. Kept visible in development
-            only: it drives the same path a real GoAway takes, so the 13-minute
-            resumption behaviour can be tested in seconds. */}
-        {process.env.NODE_ENV !== "production" && state.phase !== "preparation" && (
+        {/* The candidate's way out of a dead session, and the reason the state
+            machine treats `failed` as recoverable rather than terminal. Five
+            automatic attempts can be spent by ten seconds of bad network in a
+            twenty-minute exam; without this the only escape is reloading, which
+            starts the épreuve over. Shown in every environment — it used to be
+            folded into the development control below, which meant the documented
+            recovery did not exist in production. */}
+        {state.status === "error" && (
           <button
             type="button"
             onClick={() => void controller.forceReconnect()}
-            className="border-border text-muted-foreground rounded-lg border px-3 py-1.5 text-xs font-semibold"
+            className="bg-danger-subtle text-danger rounded-lg px-4 py-2 text-sm font-semibold"
           >
-            Forcer une reconnexion ({state.reconnectCount})
+            Reprendre la connexion
           </button>
         )}
+
+        {/* The same call, as a development affordance: it drives the path a real
+            GoAway takes, so the 13-minute resumption behaviour can be exercised
+            in seconds instead of waiting for the connection limit. Stands down
+            once the real recovery control is on screen — two buttons doing the
+            same thing side by side is how a developer ends up testing the wrong
+            one. */}
+        {process.env.NODE_ENV !== "production" &&
+          state.phase !== "preparation" &&
+          state.status !== "error" && (
+            <button
+              type="button"
+              onClick={() => void controller.forceReconnect()}
+              className="border-border text-muted-foreground rounded-lg border px-3 py-1.5 text-xs font-semibold"
+            >
+              Forcer une reconnexion ({state.reconnectCount})
+            </button>
+          )}
       </footer>
 
       {process.env.NODE_ENV !== "production" && <EventLog events={state.events} />}

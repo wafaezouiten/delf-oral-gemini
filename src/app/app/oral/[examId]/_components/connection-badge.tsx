@@ -13,6 +13,9 @@ const COPY: Record<ConnectionState, { label: string; tone: string }> = {
   connecting: { label: "Connexion…", tone: "bg-muted text-muted-foreground" },
   connected: { label: "Examinateur en ligne", tone: "bg-success-subtle text-success" },
   reconnecting: { label: "Reconnexion, l'épreuve continue", tone: "bg-warning-subtle text-warning" },
+  // A resume is the good half of a reconnect: the handle is in hand, so the
+  // examiner will still remember the exam. Same amber, more reassuring words.
+  resuming: { label: "Reprise de l'épreuve en cours", tone: "bg-warning-subtle text-warning" },
   closed: { label: "Session close", tone: "bg-muted text-muted-foreground" },
   failed: { label: "Connexion perdue", tone: "bg-danger-subtle text-danger" },
 };

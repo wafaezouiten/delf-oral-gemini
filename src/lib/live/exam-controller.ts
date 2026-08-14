@@ -41,6 +41,7 @@ import {
   type TranscriptPhase,
 } from "@/lib/delf/transcript";
 import type { ConnectionState, SessionManagerCallbacks } from "./session-manager";
+import { examStatus, type ExamStatus } from "./state-machine";
 
 /** What the controller needs from a Gemini session. */
 export interface LiveSessionLike {
@@ -80,6 +81,14 @@ export interface ExamState {
   elapsed: number;
   remaining: number;
   connection: ConnectionState;
+  /**
+   * The two machines flattened into one value (`lib/live/state-machine.ts`).
+   *
+   * Derived on every snapshot rather than stored, so it cannot drift from the
+   * phase and the connection it is derived from. `phase` and `connection` are
+   * still exposed: this is the summary, not a replacement.
+   */
+  status: ExamStatus;
   examinerSpeaking: boolean;
   transcript: readonly TranscriptEntry[];
   events: readonly ExamEvent[];
@@ -160,7 +169,8 @@ export class ExamController {
   private player: PlayerLike | null = null;
 
   private ticker: ReturnType<typeof setInterval> | null = null;
-  private closingTimer: ReturnType<typeof setTimeout> | null = null;
+  /** When the closing handshake started, for its safety deadline. See `tick()`. */
+  private closingStartedAt: number | null = null;
 
   private readonly now: () => number;
 
@@ -185,6 +195,7 @@ export class ExamController {
       elapsed: this.elapsed,
       remaining: remainingSeconds(this.phase, this.elapsed),
       connection: this.connection,
+      status: examStatus(this.phase, this.connection),
       examinerSpeaking: this.examinerSpeaking,
       transcript: this.transcript,
       events: this.events,
@@ -306,6 +317,15 @@ export class ExamController {
       this.log("force-reconnect-skipped", "no active session");
       return;
     }
+    // A recovery already under way does not need helping along. The candidate's
+    // button is a real button and gets double-clicked; the session's generation
+    // guard means that cannot open two sockets, but each press still mints and
+    // discards an ephemeral token, and the second press does nothing the first
+    // is not already doing.
+    if (this.connection === "reconnecting" || this.connection === "resuming") {
+      this.log("force-reconnect-skipped", "already recovering");
+      return;
+    }
     await this.session.reconnect();
   }
 
@@ -334,21 +354,23 @@ export class ExamController {
     if (this.phase === "monologue") this.endMonologueActivity();
     this.session?.sendDirective(closingInstruction(this.phase));
 
-    this.closingTimer = setTimeout(() => {
-      if (!this.closing) return;
-      this.closing = false;
-      this.log("closing-safety-timeout");
-      void this.advance();
-    }, CLOSING_SAFETY_MS);
+    // Stamped, not scheduled. The deadline is checked from `tick()` against the
+    // injected clock, like every other timing decision here — this used to be a
+    // real `setTimeout`, the one path in the file that ignored `deps.now()`, and
+    // it cost the unit suite a genuine twelve-second sleep to reach.
+    this.closingStartedAt = this.now();
 
     this.emit();
   }
 
+  /** Whether the examiner has had its promised sentence and then some. */
+  private closingHasTimedOut(): boolean {
+    if (!this.closing || this.closingStartedAt === null) return false;
+    return this.now() - this.closingStartedAt >= CLOSING_SAFETY_MS;
+  }
+
   private clearClosingTimer(): void {
-    if (this.closingTimer) {
-      clearTimeout(this.closingTimer);
-      this.closingTimer = null;
-    }
+    this.closingStartedAt = null;
   }
 
   /** Every phase transition runs through here, so ordering lives in one place. */
@@ -391,9 +413,28 @@ export class ExamController {
   }
 
   private async openSession(target: TranscriptPhase): Promise<void> {
+    // Each phase gets its own session, and therefore its own connection
+    // machine. Without this the previous phase's terminal `closed` would show
+    // as the new session's starting state until its first callback arrived.
+    this.connection = "idle";
+
     const callbacks: SessionManagerCallbacks = {
       onStateChange: (state) => {
-        if (state === "reconnecting") this.reconnectCount += 1;
+        // Counts OUTAGES, not attempts, and the `from connected` is what makes
+        // the difference. A backoff sequence re-enters `reconnecting` once per
+        // failed attempt — `resuming` → throw → `reconnecting` → `resuming` —
+        // so counting every entry reported three reconnections for one flaky
+        // ten-second episode. That number is persisted on the sitting as a
+        // reliability signal, and a signal that cannot tell one bad minute from
+        // three separate ones is not one.
+        //
+        // Only a transition out of a HEALTHY connection starts a new episode.
+        // A first connect that fails goes `connecting` → `reconnecting` and is
+        // deliberately not counted either: nothing was ever connected, so
+        // nothing reconnected.
+        if (state === "reconnecting" && this.connection === "connected") {
+          this.reconnectCount += 1;
+        }
         this.connection = state;
         this.emit();
       },
@@ -402,7 +443,13 @@ export class ExamController {
       onExaminerAudio: (base64) => this.player?.enqueue(base64),
       onInterrupted: () => this.player?.interrupt(),
       onTurnComplete: () => {
-        // The examiner has delivered its closing sentence: the phase may end.
+        // The ONLY thing Gemini is allowed to influence about the exam's flow,
+        // and only inside a window the app opened: once the clock has run out
+        // and the closing directive has gone out, the examiner's turn ending is
+        // what releases the phase. Outside a closing handshake this is ignored —
+        // the examiner finishing a sentence mid-débat must not end the débat.
+        // The timer decides when a phase ends; the model only decides when it
+        // has stopped talking about it.
         if (this.closing) {
           this.closing = false;
           this.clearClosingTimer();
@@ -495,6 +542,18 @@ export class ExamController {
     if (seconds !== this.elapsed) {
       this.elapsed = seconds;
       this.emit();
+    }
+
+    // The examiner was asked for one closing sentence and never delivered it.
+    // Advancing anyway is what stops a silent model stranding the candidate on
+    // a frozen clock — the failure the reference implementation hit in
+    // production.
+    if (this.closingHasTimedOut()) {
+      this.closing = false;
+      this.clearClosingTimer();
+      this.log("closing-safety-timeout");
+      void this.advance();
+      return;
     }
 
     if (isPhaseTimeUp(this.phase, seconds) && !this.closing) {
