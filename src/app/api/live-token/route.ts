@@ -78,10 +78,18 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Sujet inconnu" }, { status: 404 });
   }
   if (gate.source === "request") {
-    // Not an error — the exam runs without a database on purpose — but in a
-    // deployed instance it means persistence is degraded, and the subject is
-    // whatever the browser said.
-    console.warn("[live-token] no sitting to read; minting for the requested subject:", examId);
+    // The subject is whatever the browser said. Two very different reasons land
+    // here and the log has to tell them apart, because one is routine and the
+    // other is an incident: no sitting at all is expected in local development
+    // and on the degraded `local-…` ids, whereas an OWNED row whose subject
+    // could not be joined means a persisted sitting is broken. Reading
+    // "minting for the requested subject" and having to guess which is not a
+    // position to put an on-call in.
+    const why =
+      access.status === "owned"
+        ? "owned sitting has no readable subject"
+        : `no sitting to read (${access.reason})`;
+    console.warn(`[live-token] minting for the requested subject, ${why}:`, examId);
   }
 
   const apiKey = process.env.GEMINI_API_KEY;
