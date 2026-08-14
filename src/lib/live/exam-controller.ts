@@ -317,6 +317,15 @@ export class ExamController {
       this.log("force-reconnect-skipped", "no active session");
       return;
     }
+    // A recovery already under way does not need helping along. The candidate's
+    // button is a real button and gets double-clicked; the session's generation
+    // guard means that cannot open two sockets, but each press still mints and
+    // discards an ephemeral token, and the second press does nothing the first
+    // is not already doing.
+    if (this.connection === "reconnecting" || this.connection === "resuming") {
+      this.log("force-reconnect-skipped", "already recovering");
+      return;
+    }
     await this.session.reconnect();
   }
 

@@ -82,7 +82,12 @@ export const SESSION_STATES: readonly SessionState[] = [
  *    event its own teardown raises.
  */
 export const SESSION_TRANSITIONS: Record<SessionState, readonly SessionState[]> = {
-  idle: ["connecting", "resuming", "closed"],
+  // Not `resuming`: a handle can only arrive on a message from a socket, so a
+  // session that has never connected cannot have one. The table says what is
+  // legal, and an edge nothing can take is noise in it — if resuming a handle
+  // persisted across a page reload is ever wanted, this is the edge to add back,
+  // deliberately and with a test.
+  idle: ["connecting", "closed"],
   connecting: ["connected", "reconnecting", "failed", "closed"],
   resuming: ["connected", "reconnecting", "failed", "closed"],
   connected: ["reconnecting", "failed", "closed"],

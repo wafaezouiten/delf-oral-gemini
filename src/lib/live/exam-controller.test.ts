@@ -377,6 +377,24 @@ describe("full DELF B2 exam, with a forced reconnect mid-debate", () => {
     assert.equal(h.controller.getSnapshot().reconnectCount, 1, "counted once, not twice");
   });
 
+  it("ignores a second recovery request while one is already running", async () => {
+    // The candidate's "reprendre la connexion" is a real button and gets
+    // double-clicked. The session's generation guard means that cannot open two
+    // sockets, but every press still mints and discards an ephemeral token.
+    const h = harness();
+    h.controller.start();
+    await h.controller.advanceEarly();
+    await new Promise((resolve) => setImmediate(resolve));
+
+    h.session().emitStates("reconnecting");
+    await h.controller.forceReconnect();
+
+    assert.equal(h.session().reconnects, 0, "the recovery in flight was left to finish");
+    assert.ok(
+      h.controller.getSnapshot().events.some((event) => event.detail === "already recovering"),
+    );
+  });
+
   it("counts one reconnection per outage, not one per attempt inside it", async () => {
     // The number is persisted on the sitting as a reliability signal. A backoff
     // sequence re-enters `reconnecting` once per failed attempt, so counting
