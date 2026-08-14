@@ -3,77 +3,226 @@
  *
  * Does two jobs at once from a single microphone stream:
  *
- *  1. **Streams** 16 kHz PCM16 chunks to Gemini Live, as base64.
- *  2. **Archives** every chunk in memory so the candidate's own audio can be
+ *  1. **Streams** 16 kHz PCM16 frames to Gemini Live, as base64.
+ *  2. **Archives** every frame in memory so the candidate's own audio can be
  *     handed to the evaluator afterwards. This is the point of §20 of the brief:
  *     phonologie graded from a transcript is guesswork (the reference
  *     implementation openly instructs the model to infer fluency from the number
  *     of "euh"s), whereas graded from audio it is an actual measurement.
  *
  * The archive is raw PCM, so it must be wrapped in a WAV header before anything
- * else can read it — see `toWavBlob`.
+ * else can read it — see `pcm16ToWav`.
+ *
+ * The browser lives behind {@link MicrophoneOpener}. What is left here — framing,
+ * the archive, and the lifetime of a device that a candidate can revoke, deny or
+ * navigate away from mid-prompt — is then testable, which is what the leak
+ * assertions in `recorder.test.ts` rest on.
  */
 
 import { INPUT_SAMPLE_RATE } from "@/lib/gemini/constants";
+import { PcmFramer, frameSamplesAt } from "./framing";
+import { int16ToBase64, pcm16ToWav } from "./pcm";
+
+// ---------------------------------------------------------------- the seam
+
+/** An open microphone, reduced to what capture actually needs from it. */
+export interface CaptureStream {
+  /**
+   * The rate blocks actually arrive at — **not necessarily the one requested**.
+   * Whether the browser honoured 16 kHz is the single fact that decides whether
+   * the framer has to resample.
+   */
+  readonly sampleRate: number;
+  /** Float32 blocks from the audio thread. Set to null to stop listening. */
+  onBlock: ((block: Float32Array) => void) | null;
+  /** Release the device and the audio graph. */
+  close(): Promise<void>;
+}
+
+export type MicrophoneOpener = (request: { requestedRate: number }) => Promise<CaptureStream>;
+
+/**
+ * The real microphone.
+ *
+ * Two things here are load-bearing:
+ *
+ *  - **Echo cancellation.** The examiner's voice comes out of the same speakers
+ *    the microphone hears, and without it Gemini transcribes its own questions as
+ *    candidate speech and grades them.
+ *  - **The catch.** Everything after `getUserMedia` resolves can throw — a
+ *    missing worklet file, a context the browser refuses, a candidate revoking
+ *    permission — and every one of those paths used to leave a LIVE microphone
+ *    behind. The recording indicator stays lit on a page that has given up, which
+ *    is both a leak and, to the candidate, a lie.
+ */
+export const browserMicrophone: MicrophoneOpener = async ({ requestedRate }) => {
+  const stream = await navigator.mediaDevices.getUserMedia({
+    audio: {
+      channelCount: 1,
+      echoCancellation: true,
+      noiseSuppression: true,
+      autoGainControl: true,
+    },
+  });
+
+  let context: AudioContext | null = null;
+  try {
+    const audio = openContextAt(requestedRate);
+    context = audio;
+    await audio.audioWorklet.addModule("/worklets/pcm-capture.js");
+
+    const source = audio.createMediaStreamSource(stream);
+    const node = new AudioWorkletNode(audio, "pcm-capture", {
+      // Sized from the rate we actually got, so one message is ~40 ms of audio
+      // whether the context runs at 16 kHz or fell back to 48.
+      processorOptions: { frameSamples: frameSamplesAt(audio.sampleRate) },
+    });
+
+    const capture: CaptureStream = {
+      sampleRate: audio.sampleRate,
+      onBlock: null,
+      async close() {
+        node.port.onmessage = null;
+        this.onBlock = null;
+        node.disconnect();
+        source.disconnect();
+        stream.getTracks().forEach((track) => track.stop());
+        if (audio.state !== "closed") {
+          await audio.close().catch(() => {
+            /* already closing */
+          });
+        }
+      },
+    };
+
+    node.port.onmessage = (event: MessageEvent<ArrayBuffer>) => {
+      capture.onBlock?.(new Float32Array(event.data));
+    };
+
+    // The worklet has no output worth hearing; connecting it to the destination
+    // would echo the candidate's own voice back at them. Connecting
+    // source -> node is enough to pull frames through the graph.
+    source.connect(node);
+    return capture;
+  } catch (error) {
+    stream.getTracks().forEach((track) => track.stop());
+    if (context && context.state !== "closed") {
+      await context.close().catch(() => {
+        /* already closing */
+      });
+    }
+    throw error;
+  }
+};
+
+/**
+ * An `AudioContext` at the rate we asked for, if the browser will give us one.
+ *
+ * Asking is much better than resampling ourselves — the browser's converter is
+ * properly filtered and ours is a box average. But Safari has historically
+ * rejected a requested rate by throwing, and a thrown constructor here would
+ * present to the candidate as "le microphone n'est pas accessible" on a machine
+ * whose microphone is fine.
+ */
+function openContextAt(sampleRate: number): AudioContext {
+  try {
+    return new AudioContext({ sampleRate });
+  } catch {
+    return new AudioContext();
+  }
+}
+
+// ---------------------------------------------------------------- the recorder
 
 export interface RecorderCallbacks {
-  /** One ~40 ms chunk of base64 PCM16, ready for `sendRealtimeInput`. */
+  /** One ~40 ms frame of base64 PCM16, ready for `sendRealtimeInput`. */
   onChunk: (base64: string) => void;
+  /** Diagnostics for the session log. */
+  onEvent?: (name: string, detail?: unknown) => void;
+}
+
+export interface MicRecorderOptions extends RecorderCallbacks {
+  openMicrophone?: MicrophoneOpener;
 }
 
 export class MicRecorder {
-  private context: AudioContext | null = null;
-  private stream: MediaStream | null = null;
-  private node: AudioWorkletNode | null = null;
-  private source: MediaStreamAudioSourceNode | null = null;
+  private capture: CaptureStream | null = null;
+  private framer: PcmFramer | null = null;
 
-  /** Every captured chunk, kept for the post-exam audio evaluation. */
+  /** Deduplicates concurrent `start()` calls. Without it, two of them open two
+   *  microphones and only the second is ever closed. */
+  private starting: Promise<void> | null = null;
+  /**
+   * Bumped by {@link stop}. A `getUserMedia` prompt can sit on screen for as
+   * long as the candidate takes to click it, and the sitting can end in that
+   * window; the device that arrives afterwards belongs to nobody.
+   */
+  private generation = 0;
+
+  /** Every captured frame, kept for the post-exam audio evaluation. */
   private archive: Int16Array[] = [];
   private archivedSamples = 0;
 
-  /** Paused capture still archives nothing and streams nothing. */
+  /** Paused capture archives nothing and streams nothing. */
   private paused = false;
 
-  constructor(private readonly callbacks: RecorderCallbacks) {}
+  private readonly callbacks: RecorderCallbacks;
+  private readonly openMicrophone: MicrophoneOpener;
 
-  /**
-   * Open the microphone and start streaming.
-   *
-   * The AudioContext is created at 16 kHz so the browser resamples for us. Echo
-   * cancellation matters more than usual here: the examiner's voice comes out of
-   * the same speakers the microphone hears, and without it Gemini transcribes
-   * its own questions as candidate speech and grades them.
-   */
+  constructor(options: MicRecorderOptions) {
+    this.callbacks = options;
+    this.openMicrophone = options.openMicrophone ?? browserMicrophone;
+  }
+
+  /** Open the microphone and start streaming. Safe to call twice. */
   async start(): Promise<void> {
-    if (this.context) return;
+    if (this.capture) return;
+    this.starting ??= this.open();
+    try {
+      await this.starting;
+    } finally {
+      this.starting = null;
+    }
+  }
 
-    this.stream = await navigator.mediaDevices.getUserMedia({
-      audio: {
-        channelCount: 1,
-        echoCancellation: true,
-        noiseSuppression: true,
-        autoGainControl: true,
-      },
+  private async open(): Promise<void> {
+    const generation = this.generation;
+    const capture = await this.openMicrophone({ requestedRate: INPUT_SAMPLE_RATE });
+
+    if (generation !== this.generation) {
+      await closeQuietly(capture);
+      this.callbacks.onEvent?.("capture-discarded", "the sitting ended while the mic was opening");
+      return;
+    }
+
+    const framer = new PcmFramer({
+      inputRate: capture.sampleRate,
+      outputRate: INPUT_SAMPLE_RATE,
     });
+    if (framer.isResampling) {
+      // Worth saying out loud. It is not an error — the audio still reaches
+      // Gemini at 16 kHz — but it means the samples went through our box filter
+      // rather than the browser's, on an exam that grades pronunciation.
+      this.callbacks.onEvent?.("capture-rate-mismatch", {
+        got: capture.sampleRate,
+        want: INPUT_SAMPLE_RATE,
+      });
+    }
 
-    this.context = new AudioContext({ sampleRate: INPUT_SAMPLE_RATE });
-    await this.context.audioWorklet.addModule("/worklets/pcm-capture.js");
+    this.framer = framer;
+    this.capture = capture;
+    this.paused = false;
+    capture.onBlock = (block) => this.consume(block);
+    this.callbacks.onEvent?.("capture-started", { sampleRate: capture.sampleRate });
+  }
 
-    this.source = this.context.createMediaStreamSource(this.stream);
-    this.node = new AudioWorkletNode(this.context, "pcm-capture");
-
-    this.node.port.onmessage = (event: MessageEvent<ArrayBuffer>) => {
-      if (this.paused) return;
-      const samples = new Int16Array(event.data);
-      this.archive.push(samples);
-      this.archivedSamples += samples.length;
-      this.callbacks.onChunk(int16ToBase64(samples));
-    };
-
-    // The worklet has no output; connecting it to the destination would echo the
-    // candidate's own voice back at them. Connecting source -> node is enough to
-    // pull frames through the graph.
-    this.source.connect(this.node);
+  private consume(block: Float32Array): void {
+    if (this.paused || !this.framer) return;
+    for (const frame of this.framer.push(block)) {
+      this.archive.push(frame);
+      this.archivedSamples += frame.length;
+      this.callbacks.onChunk(int16ToBase64(frame));
+    }
   }
 
   /** Stop streaming and archiving without releasing the microphone. */
@@ -82,7 +231,7 @@ export class MicRecorder {
   }
 
   resume(): void {
-    this.paused = false;
+    if (this.capture) this.paused = false;
   }
 
   /** Seconds of audio archived so far. */
@@ -91,16 +240,22 @@ export class MicRecorder {
   }
 
   get isRecording(): boolean {
-    return this.context !== null && !this.paused;
+    return this.capture !== null && !this.paused;
+  }
+
+  /** The rate the microphone is running at, or null before it opens. Differs
+   *  from {@link INPUT_SAMPLE_RATE} only when the browser refused our request. */
+  get captureRate(): number | null {
+    return this.capture?.sampleRate ?? null;
   }
 
   /** Everything captured so far, as one PCM16 buffer. */
   private flattenArchive(): Int16Array {
     const all = new Int16Array(this.archivedSamples);
     let offset = 0;
-    for (const chunk of this.archive) {
-      all.set(chunk, offset);
-      offset += chunk.length;
+    for (const frame of this.archive) {
+      all.set(frame, offset);
+      offset += frame.length;
     }
     return all;
   }
@@ -108,92 +263,53 @@ export class MicRecorder {
   /**
    * The archived audio as a playable/uploadable WAV blob. Returns null when
    * nothing was captured, so callers can distinguish "silent exam" from "bug".
+   *
+   * Always at {@link INPUT_SAMPLE_RATE}, whatever the device ran at: the framer
+   * has already converted, so the header is not a claim about the hardware.
    */
   toWavBlob(): Blob | null {
     if (this.archivedSamples === 0) return null;
     return pcm16ToWav(this.flattenArchive(), INPUT_SAMPLE_RATE);
   }
 
-  /** Release the microphone and the audio graph. Safe to call twice. */
+  /** Release the microphone and the audio graph. Safe to call twice, and safe
+   *  to call while `start()` is still waiting on the permission prompt. */
   async stop(): Promise<void> {
     this.paused = true;
-    if (this.node) {
-      this.node.port.onmessage = null;
-      this.node.disconnect();
-      this.node = null;
-    }
-    this.source?.disconnect();
-    this.source = null;
-    this.stream?.getTracks().forEach((track) => track.stop());
-    this.stream = null;
-    if (this.context && this.context.state !== "closed") {
-      await this.context.close().catch(() => {
-        /* already closing */
+    this.generation += 1;
+
+    // Awaited so a caller that awaits `stop()` really has released the device,
+    // rather than releasing it a tick after the page decided it had. `open()`
+    // sees the bumped generation and closes what it opened instead of
+    // installing it.
+    if (this.starting) {
+      await this.starting.catch(() => {
+        /* the failure is the caller of start()'s to report, not ours */
       });
     }
-    this.context = null;
+
+    const capture = this.capture;
+    this.capture = null;
+    if (capture) capture.onBlock = null;
+
+    // The last partial frame is the candidate's final words. It is too late to
+    // send — the session is closing — but it belongs in the archive that gets
+    // graded, and dropping it silently loses up to 40 ms of every sitting.
+    const tail = this.framer?.flush();
+    if (tail && tail.length > 0) {
+      this.archive.push(tail);
+      this.archivedSamples += tail.length;
+    }
+    this.framer = null;
+
+    if (capture) await closeQuietly(capture);
   }
 }
 
-/**
- * Base64-encode PCM samples for the Live API's `audio.data` field.
- *
- * Chunked because `String.fromCharCode(...array)` blows the argument limit on
- * anything larger than a few tens of kB — a failure that only shows up once
- * someone speaks for a while, which is the worst time to find it.
- */
-export function int16ToBase64(samples: Int16Array): string {
-  const bytes = new Uint8Array(samples.buffer, samples.byteOffset, samples.byteLength);
-  let binary = "";
-  const CHUNK = 0x8000;
-  for (let i = 0; i < bytes.length; i += CHUNK) {
-    binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+async function closeQuietly(capture: CaptureStream): Promise<void> {
+  try {
+    await capture.close();
+  } catch {
+    /* already gone */
   }
-  return btoa(binary);
-}
-
-/** Decode base64 PCM (Gemini's audio output) back into samples. */
-export function base64ToInt16(base64: string): Int16Array {
-  const binary = atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-  return new Int16Array(bytes.buffer);
-}
-
-/**
- * Wrap raw PCM16 in a 44-byte canonical WAV header.
- *
- * Needed because the archive is headerless samples: Gemini's file API, an
- * <audio> element and every desktop player all need the header to know the
- * sample rate. Written by hand rather than pulled from a dependency — it is 44
- * bytes of well-specified format.
- */
-export function pcm16ToWav(samples: Int16Array, sampleRate: number): Blob {
-  const dataBytes = samples.byteLength;
-  const buffer = new ArrayBuffer(44 + dataBytes);
-  const view = new DataView(buffer);
-
-  const writeAscii = (offset: number, text: string) => {
-    for (let i = 0; i < text.length; i++) view.setUint8(offset + i, text.charCodeAt(i));
-  };
-
-  writeAscii(0, "RIFF");
-  view.setUint32(4, 36 + dataBytes, true); // file size minus the first 8 bytes
-  writeAscii(8, "WAVE");
-  writeAscii(12, "fmt ");
-  view.setUint32(16, 16, true); // PCM fmt chunk size
-  view.setUint16(20, 1, true); // format 1 = PCM
-  view.setUint16(22, 1, true); // mono
-  view.setUint32(24, sampleRate, true);
-  view.setUint32(28, sampleRate * 2, true); // byte rate = rate * channels * 2
-  view.setUint16(32, 2, true); // block align
-  view.setUint16(34, 16, true); // bits per sample
-  writeAscii(36, "data");
-  view.setUint32(40, dataBytes, true);
-
-  new Uint8Array(buffer, 44).set(
-    new Uint8Array(samples.buffer, samples.byteOffset, samples.byteLength),
-  );
-
-  return new Blob([buffer], { type: "audio/wav" });
 }

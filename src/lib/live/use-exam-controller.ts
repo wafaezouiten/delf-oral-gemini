@@ -36,8 +36,8 @@ export function useExamController(options: {
         topic,
         createSession: (phase, sessionTopic, callbacks, initialHistory) =>
           new ExamLiveSession({ examId, phase, topic: sessionTopic, callbacks, initialHistory }),
-        createRecorder: (onChunk) => new MicRecorder({ onChunk }),
-        createPlayer: (onSpeakingChange) => new ExaminerAudioPlayer(onSpeakingChange),
+        createRecorder: (callbacks) => new MicRecorder(callbacks),
+        createPlayer: (callbacks) => new ExaminerAudioPlayer(callbacks),
         onFinished,
       }),
     [examId, topic, onFinished],
