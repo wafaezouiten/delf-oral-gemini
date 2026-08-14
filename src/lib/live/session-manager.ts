@@ -183,22 +183,6 @@ const GOAWAY_SAFETY_MS = 1500;
 const BACKOFF_BASE_MS = 400;
 const BACKOFF_CAP_MS = 5000;
 
-/**
- * Why the socket is being torn down, which is what `onclose` needs to know.
- *
- * `none` means the server dropped us and we must reconnect; `reconnect` means WE
- * are cycling the socket, so `onclose` must stay silent and let
- * {@link ExamLiveSession.reconnect} drive the states. That second case is why a
- * forced reconnect never passes through `closed`, which the state machine treats
- * as terminal.
- *
- * The third case — the phase is over — is deliberately NOT here. It is a sticky
- * flag (`finished`) instead, because this one is reset on every connect and
- * cleared halfway through every reconnect, and "the exam ended" must survive
- * both.
- */
-type Teardown = "none" | "reconnect";
-
 export interface ExamLiveSessionOptions {
   /** The sitting this session belongs to. Sent to the token route, which binds
    *  the token to it after checking the caller owns it. */
@@ -220,8 +204,28 @@ export class ExamLiveSession {
   /** The newest resumption handle. The single most important field here. */
   private resumptionHandle: string | undefined;
 
-  private teardown: Teardown = "none";
-  /** Set once by {@link close}, never cleared. See {@link Teardown}. */
+  /**
+   * Which socket this session is currently listening to.
+   *
+   * A socket's callbacks capture the generation they were opened under, and go
+   * quiet the moment it moves on. This exists because **`close()` on a real
+   * WebSocket does not deliver `onclose` synchronously** — `NodeWebSocket.close()`
+   * is a bare `ws.close()`, and the event lands on a later tick, typically while
+   * the replacement connect is still awaiting its token. A flag flipped around
+   * the synchronous teardown (which is what this used to be) only covers that
+   * call stack, so the late event arrived looking exactly like an unannounced
+   * drop. Three things went wrong when it did: a second reconnect stacked on the
+   * one already in flight, `reconnectCount` inflated in the finished payload,
+   * and — worst — the handler's unconditional `this.socket = null` cleared the
+   * reference to the NEW, healthy socket, so audio was silently buffered while
+   * the badge still read "examinateur en ligne".
+   *
+   * A stale socket must also not be able to speak: its `sessionResumptionUpdate`
+   * would overwrite a newer handle with an older one, and its transcript
+   * fragments would land in the exam having been said to nobody.
+   */
+  private generation = 0;
+  /** Set once by {@link close}, never cleared: `closed` is terminal. */
   private finished = false;
   private reconnectAttempts = 0;
   private cancelGoAway: CancelTimer | null = null;
@@ -314,13 +318,18 @@ export class ExamLiveSession {
 
     const resuming = Boolean(this.resumptionHandle);
     this.setState(resuming ? "resuming" : "connecting");
-    this.teardown = "none";
+
+    // Everything below belongs to this attempt. If a close or another reconnect
+    // supersedes it mid-flight, the generation moves on and every line that
+    // checks it becomes a no-op.
+    const generation = this.generation;
+    const isCurrent = () => generation === this.generation;
 
     try {
       const token = await this.transport.mintToken(this.tokenRequest());
-      // `close()` can land while a connect is still awaiting the token. Bail
-      // before spending a socket on an exam that has ended.
-      if (this.isFinished()) return;
+      // A close (or a second reconnect) can land while the token is minting.
+      // Bail before spending a socket on it.
+      if (!isCurrent()) return;
 
       const socket = await this.transport.open({
         token,
@@ -332,9 +341,9 @@ export class ExamLiveSession {
         config: CLIENT_CONNECT_CONFIG,
         callbacks: {
           onopen: () => {
-            // The socket can open after the phase ended — see the guard below,
+            // The socket can open after we stopped caring — see the guard below,
             // which is what actually closes it.
-            if (this.isFinished()) return;
+            if (!isCurrent()) return;
             this.reconnectAttempts = 0;
             this.setState("connected");
             this.callbacks.onEvent(resuming ? "resumed" : "connected", {
@@ -346,25 +355,25 @@ export class ExamLiveSession {
             // one after the await below.
             this.flushPendingAudio();
           },
-          onmessage: (message) => this.handleMessage(message),
+          onmessage: (message) => {
+            if (!isCurrent()) return;
+            this.handleMessage(message);
+          },
           onerror: (error) => {
+            if (!isCurrent()) return;
             this.callbacks.onEvent("error", String(error));
           },
-          onclose: (event) => this.handleClose(event),
+          onclose: (event) => this.handleClose(generation, event),
         },
       });
 
-      // The socket only becomes ours once it exists. `close()` works by closing
-      // `this.socket`, so anything that ran while `open()` was in flight found
-      // null and did nothing — the socket would then open, stay open, and be
-      // referenced by nobody, leaking until Gemini's own idle limit reaped it.
-      // A candidate navigating away mid-connect is enough to hit this.
-      if (this.isFinished()) {
-        try {
-          socket.close();
-        } catch {
-          /* never opened */
-        }
+      // The socket only becomes ours once it exists. Anything that ran while
+      // `open()` was in flight found `this.socket` null and closed nothing — the
+      // socket would then open, stay open, and be referenced by nobody, leaking
+      // until Gemini's own idle limit reaped it. A candidate navigating away
+      // mid-connect is enough to hit this.
+      if (!isCurrent()) {
+        this.discard(socket);
         this.callbacks.onEvent("closed-late-open");
         return;
       }
@@ -394,17 +403,22 @@ export class ExamLiveSession {
     }
   }
 
-  private handleClose(event?: { reason?: string }): void {
+  private handleClose(generation: number, event?: { reason?: string }): void {
+    // A close event from a socket we already retired. It arrives late by
+    // definition — see {@link generation} — and acting on it would stack a
+    // second reconnect on the one already running and null out the live socket.
+    if (generation !== this.generation) {
+      this.callbacks.onEvent("stale-close-ignored");
+      return;
+    }
+
+    // This socket is done, so nothing further from it counts either.
+    this.generation += 1;
     this.socket = null;
     this.clearGoAwayTimer();
 
     if (this.isFinished()) {
       this.setState("closed");
-      return;
-    }
-    if (this.teardown === "reconnect") {
-      // Our own doing. `reconnect()` is mid-flight and owns the states from
-      // here; emitting `closed` would end the session machine for good.
       return;
     }
     this.callbacks.onEvent("closed-unexpectedly", event?.reason ?? "");
@@ -524,9 +538,11 @@ export class ExamLiveSession {
     }
     this.clearGoAwayTimer();
     this.callbacks.onEvent("reconnect-forced", { hasHandle: this.hasResumptionHandle });
-    this.teardown = "reconnect";
-    this.closeSocket();
-    this.teardown = "none";
+    // Retiring bumps the generation, so the old socket's `onclose` — which
+    // arrives on a later tick, well after this method has returned — is already
+    // stale by the time it lands and cannot be mistaken for a fresh drop. This
+    // is also why a forced reconnect never passes through `closed`.
+    this.retireSocket();
     this.setState("reconnecting");
     await this.connect();
   }
@@ -534,15 +550,27 @@ export class ExamLiveSession {
   /** Stream one base64 PCM16 chunk of candidate audio. */
   sendAudio(base64: string): void {
     if (!this.socket || this.state !== "connected") {
-      if (this.pendingAudio.length < ExamLiveSession.MAX_PENDING_CHUNKS) {
-        this.pendingAudio.push(base64);
-      }
+      this.bufferAudio(base64);
       return;
     }
     try {
       this.socket.sendRealtimeInput({ audio: { data: base64, mimeType: INPUT_MIME_TYPE } });
     } catch (error) {
+      // A dead socket reports its close on a LATER tick, so `state` still says
+      // connected for a moment after sending stops working — and the microphone
+      // does not pause for it. This used to log and drop the chunk. Buffering it
+      // instead means the candidate's words in that window survive to the
+      // reconnect like every other chunk; the send threw, so nothing was sent
+      // and there is nothing to duplicate.
       this.callbacks.onEvent("send-audio-failed", String(error));
+      this.bufferAudio(base64);
+    }
+  }
+
+  /** Hold a chunk for the next connect, up to the cap. */
+  private bufferAudio(base64: string): void {
+    if (this.pendingAudio.length < ExamLiveSession.MAX_PENDING_CHUNKS) {
+      this.pendingAudio.push(base64);
     }
   }
 
@@ -592,12 +620,26 @@ export class ExamLiveSession {
     }
   }
 
-  private closeSocket(): void {
+  /** Close a socket this session has no further interest in. */
+  private discard(socket: LiveSocket): void {
     try {
-      this.socket?.close();
+      socket.close();
     } catch {
       /* already closed */
     }
+  }
+
+  /**
+   * Stop listening to the current socket and close it.
+   *
+   * The generation bump is the load-bearing half, not the `close()`: it is what
+   * makes every callback still holding a reference to that socket a no-op from
+   * this line onward, including the `onclose` its own teardown is about to
+   * raise several ticks from now.
+   */
+  private retireSocket(): void {
+    this.generation += 1;
+    if (this.socket) this.discard(this.socket);
     this.socket = null;
   }
 
@@ -606,7 +648,7 @@ export class ExamLiveSession {
     this.finished = true;
     this.clearGoAwayTimer();
     this.pendingAudio = [];
-    this.closeSocket();
+    this.retireSocket();
     this.setState("closed");
   }
 }

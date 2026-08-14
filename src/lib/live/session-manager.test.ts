@@ -59,10 +59,21 @@ class FakeSocket implements LiveSocket {
     this.contents.push(params);
   }
 
+  /**
+   * Close, delivering `onclose` on a LATER tick, exactly as a real WebSocket
+   * does — `NodeWebSocket.close()` is a bare `ws.close()` and the event is
+   * dispatched asynchronously.
+   *
+   * This fake used to fire it synchronously, inside the caller's stack, and that
+   * accident is what let a whole class of bug through: any guard held only for
+   * the duration of a synchronous teardown looked airtight here and covered
+   * nothing in production, because the real event lands while the replacement
+   * connect is still awaiting its token.
+   */
   close(): void {
     if (this.closed) return;
     this.closed = true;
-    this.callbacks.onclose?.({ reason: "closed by client" });
+    queueMicrotask(() => this.callbacks.onclose?.({ reason: "closed by client" }));
   }
 
   /** The server pushes a message. */
@@ -70,11 +81,11 @@ class FakeSocket implements LiveSocket {
     this.callbacks.onmessage(message);
   }
 
-  /** The server hangs up without warning. */
+  /** The server hangs up without warning. Also asynchronous. */
   drop(reason = "1011 internal error"): void {
     if (this.closed) return;
     this.closed = true;
-    this.callbacks.onclose?.({ reason });
+    queueMicrotask(() => this.callbacks.onclose?.({ reason }));
   }
 
   /** Base64 audio chunks the candidate actually got to send. */
@@ -516,6 +527,64 @@ describe("reconnection", () => {
     await flush();
 
     assert.equal(h.transport.socket.audioChunks.length, 50);
+  });
+
+  it("ignores the retired socket's close, which lands mid-reconnect", async () => {
+    // The race: `close()` on a real WebSocket delivers `onclose` on a later
+    // tick, so a forced reconnect's own teardown event arrives while the
+    // replacement connect is still awaiting its token. Read as a fresh drop it
+    // stacks a second reconnect on the one in flight, inflates reconnectCount
+    // in the finished payload, and — worst — nulls the reference to the NEW,
+    // healthy socket, so audio is silently buffered while the badge still says
+    // the examiner is online.
+    const h = harness();
+    await h.session.connect();
+    h.transport.socket.emit(resumptionUpdate("handle-one"));
+
+    const retired = h.transport.socket;
+    const release = h.transport.holdMint();
+    const reconnecting = h.session.reconnect();
+    // The old socket's close lands here, with the connect still mid-mint.
+    await flush();
+    assert.ok(h.eventNames().includes("stale-close-ignored"));
+    release();
+    await reconnecting;
+
+    assert.equal(h.transport.sockets.length, 2, "one replacement, not two");
+    assert.notEqual(h.transport.socket, retired);
+    assert.equal(h.session.connectionState, "connected");
+    assert.deepEqual(h.timers.slept, [], "no backoff cycle was started behind it");
+    assert.deepEqual(
+      h.log.events.filter((event) => event.name === "closed-unexpectedly"),
+      [],
+      "our own teardown was never mistaken for a drop",
+    );
+
+    // And the live socket is still held: audio goes out rather than to the buffer.
+    h.session.sendAudio("chunk-after");
+    assert.deepEqual(h.transport.socket.audioChunks, ["chunk-after"]);
+  });
+
+  it("ignores a retired socket's messages, so it cannot rewind the handle", async () => {
+    // A stale socket that could still speak would overwrite the newer
+    // resumption handle with an older one, and drop transcript fragments into
+    // an exam they were not said in.
+    const h = harness();
+    await h.session.connect();
+    h.transport.socket.emit(resumptionUpdate("handle-one"));
+
+    const retired = h.transport.socket;
+    await h.session.reconnect();
+    h.transport.socket.emit(resumptionUpdate("handle-two"));
+
+    retired.emit(resumptionUpdate("handle-stale"));
+    retired.emit({
+      serverContent: { inputTranscription: { text: "d'un examen précédent" } },
+    } as LiveServerMessage);
+
+    assert.deepEqual(h.log.candidate, [], "the retired socket said nothing");
+    await h.session.reconnect();
+    assert.equal(h.transport.tokenRequests.at(-1)?.resumptionHandle, "handle-two");
   });
 
   it("closes a socket that finishes opening after the phase ended", async () => {

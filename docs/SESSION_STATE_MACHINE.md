@@ -93,6 +93,29 @@ that would not.
 `failed` is deliberately *not* terminal — the candidate can still press "forcer
 une reconnexion", and an exam that cannot be retried is worse than one that can.
 
+### Why a socket is retired by generation, not by a flag
+
+`close()` on a real WebSocket does **not** deliver `onclose` synchronously —
+`NodeWebSocket.close()` is a bare `ws.close()`, and the event lands on a later
+tick, typically while the replacement connect is still awaiting its token. So a
+flag flipped around the synchronous teardown covers the wrong window entirely,
+and the retired socket's close arrives looking exactly like an unannounced drop.
+
+Instead, every socket's callbacks capture the **generation** they were opened
+under, and go quiet the moment the session moves on. Retiring a socket bumps the
+counter; that bump, not the `close()`, is what silences it. Three things this
+prevents, all of which a synchronous fake socket hides:
+
+- a second reconnect stacking on the one already in flight, and `reconnectCount`
+  inflating in the finished payload;
+- the close handler's `this.socket = null` clearing the reference to the **new,
+  healthy** socket, so audio is silently buffered while the badge still reads
+  "examinateur en ligne";
+- a retired socket's `sessionResumptionUpdate` overwriting a newer handle with an
+  older one, or its transcript fragments landing in an exam they were not said in.
+
+The test fake's `close()` fires `onclose` on a later tick for this reason.
+
 ### Enforcement
 
 `setState` checks every move against `SESSION_TRANSITIONS`. An illegal one is
