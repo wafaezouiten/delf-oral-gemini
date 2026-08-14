@@ -18,7 +18,7 @@
  *   - `app/app/oral/[examId]/page.tsx`     `requireExamAccess()`
  *   - `app/app/results/[examId]/page.tsx`  `requireExamAccess()`
  *   - `app/app/layout.tsx`                 `requireUserId()`, for the shell only
- *   - `api/live-token/route.ts`            `auth()` before minting a token
+ *   - `api/live-token/route.ts`            `authorizeExam()` before minting a token
  *   - `api/exams/route.ts`                 `auth()` before creating an exam
  *   - `api/exams/[examId]/finish/route.ts` `authorizeExam()` before grading
  *
