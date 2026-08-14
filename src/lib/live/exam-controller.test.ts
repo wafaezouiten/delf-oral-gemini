@@ -441,9 +441,9 @@ describe("full DELF B2 exam, with a forced reconnect mid-debate", () => {
     assert.ok(monologue && debate);
     assert.ok(monologue.recordedSeconds >= MONOLOGUE_MIN_SECONDS);
     assert.ok(debate.recordedSeconds > 0);
-    assert.equal(monologue.startedAt !== null && monologue.endedAt !== null, true);
+    assert.notEqual(monologue.endedAt, null, "a phase that was left has an end stamp");
     assert.ok(
-      debate.startedAt !== null && monologue.endedAt !== null && debate.startedAt >= monologue.endedAt,
+      monologue.endedAt !== null && debate.startedAt >= monologue.endedAt,
       "the débat starts where the monologue stopped",
     );
 

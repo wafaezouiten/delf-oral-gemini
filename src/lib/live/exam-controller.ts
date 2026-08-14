@@ -154,8 +154,15 @@ export interface PhaseReport {
   elapsedSeconds: number;
   /** Measured from the samples: how much audio exists. */
   recordedSeconds: number;
-  /** Epoch ms, for the audit trail. Null only if the phase was never entered. */
-  startedAt: number | null;
+  /**
+   * Epoch ms, for the audit trail. Never null: a phase is reported only because
+   * it was entered, and entering it is what stamps this. The nullability lives
+   * on `phaseStamps`, where "not entered" is a real state; by the time a report
+   * exists that state has been filtered out, and the type should say so rather
+   * than making every reader re-derive it.
+   */
+  startedAt: number;
+  /** Null for a phase entered but never left. */
   endedAt: number | null;
 }
 
@@ -796,15 +803,22 @@ export class ExamController {
    * zero seconds of a task that never happened.
    */
   private phaseReports(recorder: RecorderLike | null): PhaseReport[] {
-    return SPEAKING_PHASES.filter((phase) => this.phaseStamps[phase].startedAt !== null).map(
-      (phase) => ({
+    const reports: PhaseReport[] = [];
+    for (const phase of SPEAKING_PHASES) {
+      const { startedAt, endedAt } = this.phaseStamps[phase];
+      // Not entered. Written as a narrowing `continue` rather than a filter so
+      // `startedAt` is a number below without an assertion talking the compiler
+      // out of something it was right about.
+      if (startedAt === null) continue;
+      reports.push({
         phase,
         elapsedSeconds: this.phaseSeconds[phase],
         recordedSeconds: recorder?.measuredSeconds(phase) ?? 0,
-        startedAt: this.phaseStamps[phase].startedAt,
-        endedAt: this.phaseStamps[phase].endedAt,
-      }),
-    );
+        startedAt,
+        endedAt,
+      });
+    }
+    return reports;
   }
 
   // -------------------------------------------------------------------- clock

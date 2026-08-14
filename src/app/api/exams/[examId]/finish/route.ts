@@ -38,61 +38,18 @@ import {
 // reading it from the ported module settles nothing that Phase 2 shouldn't.
 import { meetsCompetencyFloor } from "@/lib/delf/orale-rubric";
 import { findTopic } from "@/lib/delf/topics";
-import { candidateWordCount, type TranscriptEntry } from "@/lib/delf/transcript";
+import { candidateWordCount } from "@/lib/delf/transcript";
+// Lives outside this file so it can be unit-tested: nothing in a route that
+// imports `server-only`, Clerk and the database client can be loaded by
+// `node --test`, and the request validation is the last thing that should go
+// uncovered for that reason. See `finish-payload.test.ts`.
+import { finishPayloadSchema } from "@/lib/exams/finish-payload";
 import { evaluateExam, type EvaluationMode } from "@/lib/gemini/evaluate";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 /** A full audio evaluation is slow; the default serverless budget is not enough. */
 export const maxDuration = 300;
-
-/**
- * The client's payload, validated rather than asserted.
- *
- * These numbers end up in NOT NULL integer columns with `>= 0` constraints, so a
- * missing field used to travel as far as `Math.round(undefined)` → NaN and fail
- * at the INSERT — after a paid model call had already run, and inside a catch
- * that only logs. Failing here costs nothing and says what was wrong.
- *
- * `z.number()` rejects NaN and Infinity on its own in Zod 4; the explicit checks
- * below are the domain's, not the format's.
- */
-const transcriptEntrySchema = z.object({
-  phase: z.enum(["monologue", "debate"]),
-  speaker: z.enum(["candidate", "examiner"]),
-  timestamp: z.number(),
-  text: z.string(),
-}) satisfies z.ZodType<TranscriptEntry>;
-
-/**
- * One phase, as the browser saw it. Deliberately carries no recorded duration:
- * the recording's length is measured from the recording, below, and a second
- * copy of it here would be a number that can disagree with the file it
- * describes.
- */
-const phaseReportSchema = z
-  .object({
-    phase: z.enum(["monologue", "debate"]),
-    /**
-     * Wall clock. What the candidate watched count down.
-     *
-     * Bounded because it is the one number here the server cannot check against
-     * anything: it decides nothing (the penalty is computed from the measured
-     * recording below), but it is written to an audit column, and an audit trail
-     * that will accept a four-figure hour count is decoration rather than
-     * evidence. Four hours is absurd for a 13-minute task and still far outside
-     * anything a stalled tab's clock could plausibly produce.
-     */
-    elapsedSeconds: z.number().nonnegative().max(4 * 60 * 60),
-    /** Epoch ms. Null when the phase was entered but never left — an abandoned
-     *  sitting that reached the finish handler another way. */
-    startedAt: z.number().int().nonnegative().nullable(),
-    endedAt: z.number().int().nonnegative().nullable(),
-  })
-  .refine(
-    (report) => report.startedAt === null || report.endedAt === null || report.endedAt >= report.startedAt,
-    "a phase cannot end before it started",
-  );
 
 /**
  * The largest recording this endpoint will read.
@@ -117,20 +74,6 @@ const phaseReportSchema = z
 const MAX_RECORDING_BYTES = 64 * 1024 * 1024;
 /** Both recordings, plus the transcript JSON and multipart overhead. */
 const MAX_REQUEST_BYTES = 2 * MAX_RECORDING_BYTES + 8 * 1024 * 1024;
-
-const finishPayloadSchema = z.object({
-  topicSlug: z.string().min(1),
-  transcript: z.array(transcriptEntrySchema),
-  /** At most one entry per phase, and only for phases actually entered. */
-  phases: z
-    .array(phaseReportSchema)
-    .max(2)
-    .refine(
-      (reports) => new Set(reports.map((report) => report.phase)).size === reports.length,
-      "a phase cannot be reported twice",
-    ),
-  reconnectCount: z.number().int().nonnegative(),
-});
 
 const SPEAKING_PHASES = ["monologue", "debate"] as const satisfies readonly OralSpeakingPhase[];
 
@@ -157,17 +100,26 @@ interface UploadedRecording {
  * against a length someone else chose. The upper bound on that length is the
  * upload cap, not a separate check: at 32 kB a second, {@link
  * MAX_RECORDING_BYTES} cannot express more than about 35 minutes.
+ *
+ * One pass over the two phases, and the size check happens inside it — before
+ * the `arrayBuffer()` that is the expensive half. Two loops reading the same two
+ * form fields is one edit away from being two loops in the wrong order.
  */
+type RecordingRejection = { rejected: OralSpeakingPhase; reason: "too-large" | "unreadable" };
+
 async function readRecordings(
   form: FormData,
-): Promise<{ recordings: UploadedRecording[] } | { rejected: OralSpeakingPhase }> {
+): Promise<{ recordings: UploadedRecording[] } | RecordingRejection> {
   const recordings: UploadedRecording[] = [];
   for (const phase of SPEAKING_PHASES) {
     const file = form.get(`audio-${phase}`);
     if (!(file instanceof Blob) || file.size === 0) continue;
+    if (file.size > MAX_RECORDING_BYTES) return { rejected: phase, reason: "too-large" };
 
     const format = readWavFormat(await file.arrayBuffer());
-    if (!format || !checkWavFormat(format, INPUT_SAMPLE_RATE)) return { rejected: phase };
+    if (!format || !checkWavFormat(format, INPUT_SAMPLE_RATE)) {
+      return { rejected: phase, reason: "unreadable" };
+    }
 
     recordings.push({
       phase,
@@ -257,27 +209,21 @@ export async function POST(
     );
   }
 
-  const oversized = SPEAKING_PHASES.find((phase) => {
-    const file = form.get(`audio-${phase}`);
-    return file instanceof Blob && file.size > MAX_RECORDING_BYTES;
-  });
-  if (oversized) {
-    return NextResponse.json(
-      { error: `L'enregistrement du ${oversized} est trop volumineux.` },
-      { status: 413 },
-    );
-  }
-
   // In exam order, because that is what the evaluator's prompt promises the
   // model about the files it is being handed.
   const read = await readRecordings(form);
   if ("rejected" in read) {
-    return NextResponse.json(
-      {
-        error: `L'enregistrement du ${read.rejected} n'est pas exploitable. Réessayez depuis l'application.`,
-      },
-      { status: 400 },
-    );
+    return read.reason === "too-large"
+      ? NextResponse.json(
+          { error: `L'enregistrement du ${read.rejected} est trop volumineux.` },
+          { status: 413 },
+        )
+      : NextResponse.json(
+          {
+            error: `L'enregistrement du ${read.rejected} n'est pas exploitable. Réessayez depuis l'application.`,
+          },
+          { status: 400 },
+        );
   }
   const { recordings } = read;
 
@@ -310,11 +256,21 @@ export async function POST(
   const monologueSeconds = measuredSeconds("monologue");
   const debateSeconds = measuredSeconds("debate");
 
-  // Audio-aware grading whenever we actually have a recording; the text path is
-  // the documented fallback, and the experiment harness can force either.
-  const requestedMode = form.get("mode");
-  const mode: EvaluationMode =
-    requestedMode === "text" || recordings.length === 0 ? "text" : "audio";
+  /**
+   * Audio-aware grading whenever we actually have a recording; the text path is
+   * the fallback for a sitting that produced none.
+   *
+   * The caller does NOT get a say. This route used to honour a `mode=text` form
+   * field, described as an escape hatch for the experiment harness — but the
+   * harness has never used it (`experiments/audio-vs-text.ts` and
+   * `scripts/verify-eval.ts` both call `evaluateExam` directly, which is the
+   * right way to run an experiment: no auth, no route, no sitting). So the field
+   * was reachable only by a candidate hand-crafting a request for their own
+   * exam, and the two modes grade phonologie differently — one listens, one
+   * infers fluency from counting hesitations in the transcript. Letting the
+   * graded party pick which is not an escape hatch, it is a choice of mark.
+   */
+  const mode: EvaluationMode = recordings.length === 0 ? "text" : "audio";
 
   try {
     const result = await evaluateExam({
