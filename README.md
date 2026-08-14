@@ -71,12 +71,24 @@ waiting to be cut off, and falls back to backoff reconnection on an unexpected
 close. The transcript, the phase and the phase clock all live above the session,
 so none of them is touched. See `docs/SESSION_RESUMPTION.md`.
 
+**The two state machines are declared, not implied.** The exam phase (DELF
+business logic) and the session (transport) are separate machines at separate
+lifetimes, and a resume moves the lower one through four states and the upper one
+through none. `resuming` is deliberately distinct from `reconnecting`: only one
+of them carries a handle, and therefore only one of them keeps the examiner's
+memory of the exam. See `docs/SESSION_STATE_MACHINE.md`.
+
+**Tokens are scoped to a sitting.** `/api/live-token` takes the exam id, answers
+"is this sitting theirs?" through the same `lib/auth` module every other exam
+route uses, and reads the subject off the row rather than trusting the browser —
+so a token opens one phase, of one subject, of one sitting, for its owner, once.
+
 ## Layout
 
 ```
 src/lib/delf/         Pure exam logic: phases, transcript, rubric, examiner prompt, topics
 src/lib/gemini/       Live configuration per phase; the /25 evaluator
-src/lib/live/         Session lifecycle (resumption, GoAway) and the exam controller
+src/lib/live/         Session lifecycle (resumption, GoAway), state machine, exam controller
 src/lib/audio/        16 kHz PCM capture, 24 kHz playback, WAV encoding
 src/app/              Routes: landing, Clerk, /app dashboard, exam, results
 experiments/          The audio-vs-text evaluation experiment
@@ -89,11 +101,13 @@ minutes.
 
 ## Status
 
-**Verified offline** — `pnpm check` clean, `pnpm build` succeeds, 54/54 unit
-tests pass. That includes the §17 acceptance scenario end to end (preparation →
+**Verified offline** — `pnpm check` clean, `pnpm build` succeeds, 151/151 unit
+tests pass. That includes the acceptance scenario end to end (preparation →
 monologue → débat → forced reconnect → finish), asserting the transcript stays
 continuous, the débat clock does not reset, and the examiner's seeded memory
-survives.
+survives — plus the session lifecycle driven directly against a fake transport:
+a `goAway` and its deadline, a resume carrying the handle, an unannounced drop,
+backoff to exhaustion, and the buffered audio flushed on the way back.
 
 **Verified against the real Gemini service** — `pnpm verify:live`, 6/6:
 
