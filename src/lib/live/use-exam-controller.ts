@@ -58,9 +58,14 @@ export function useExamController(options: {
    * button, and a suspended tab holding the microphone is worse than one that
    * has to be restarted.
    *
-   * `destroy()` stops the tracks before its first await, so the device is
-   * released inside the event's own call stack rather than on a tick the
-   * browser may never give a page it is unloading.
+   * When the microphone is already open — the case that matters, because that
+   * is when a device is actually held — `destroy()` reaches
+   * `stream.getTracks().forEach(stop)` before its first await, so the release
+   * happens inside this event's own call stack rather than on a tick the
+   * browser owes an unloading page nothing. It is not an unconditional
+   * guarantee: if capture is still waiting on the permission prompt, `stop()`
+   * awaits that first. Nothing is held yet in that case, and the controller's
+   * own teardown flag stops the device being adopted if it does arrive.
    */
   useEffect(() => {
     const release = () => controller.destroy();

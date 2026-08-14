@@ -103,10 +103,25 @@ class FakeSession implements LiveSessionLike {
   }
 }
 
+/**
+ * A device that can be made slow or made to fail.
+ *
+ * The gate is what makes the teardown races reachable: a real microphone
+ * resolves whenever the candidate gets round to clicking the permission prompt,
+ * and everything interesting happens to a controller inside that window.
+ */
+interface DeviceOptions {
+  gate?: Promise<void>;
+  fail?: Error;
+}
+
 class FakeRecorder implements RecorderLike {
   started = false;
   stopped = false;
+  constructor(private readonly options: DeviceOptions = {}) {}
   async start(): Promise<void> {
+    if (this.options.gate) await this.options.gate;
+    if (this.options.fail) throw this.options.fail;
     this.started = true;
   }
   async stop(): Promise<void> {
@@ -118,25 +133,51 @@ class FakeRecorder implements RecorderLike {
 }
 
 class FakePlayer implements PlayerLike {
-  async resume(): Promise<void> {}
+  resumed = false;
+  closed = false;
+  interrupts = 0;
+  constructor(private readonly options: DeviceOptions = {}) {}
+  async resume(): Promise<void> {
+    if (this.options.gate) await this.options.gate;
+    if (this.options.fail) throw this.options.fail;
+    this.resumed = true;
+  }
   enqueue(): void {}
-  interrupt(): void {}
-  async close(): Promise<void> {}
+  interrupt(): void {
+    this.interrupts += 1;
+  }
+  async close(): Promise<void> {
+    this.closed = true;
+  }
+}
+
+function deferred(): { promise: Promise<void>; resolve: () => void } {
+  let resolve!: () => void;
+  const promise = new Promise<void>((r) => {
+    resolve = r;
+  });
+  return { promise, resolve };
 }
 
 interface Harness {
   controller: ExamController;
   sessions: FakeSession[];
+  /** The first microphone opened — the only one a healthy exam opens. */
   recorder: FakeRecorder;
+  recorders: FakeRecorder[];
+  players: FakePlayer[];
   finished: ExamFinishedPayload[];
   advanceClock: (seconds: number) => void;
   session: () => FakeSession;
 }
 
-function harness(): Harness {
+function harness(devices: { recorder?: DeviceOptions; player?: DeviceOptions } = {}): Harness {
   let now = 0;
   const sessions: FakeSession[] = [];
-  const recorder = new FakeRecorder();
+  // Built per call rather than shared, so "how many devices did this open?" is
+  // a question the harness can answer.
+  const recorders: FakeRecorder[] = [];
+  const players: FakePlayer[] = [];
   const finished: ExamFinishedPayload[] = [];
 
   const controller = new ExamController({
@@ -146,8 +187,16 @@ function harness(): Harness {
       sessions.push(session);
       return session;
     },
-    createRecorder: () => recorder,
-    createPlayer: () => new FakePlayer(),
+    createRecorder: () => {
+      const recorder = new FakeRecorder(devices.recorder);
+      recorders.push(recorder);
+      return recorder;
+    },
+    createPlayer: () => {
+      const player = new FakePlayer(devices.player);
+      players.push(player);
+      return player;
+    },
     onFinished: (payload) => finished.push(payload),
     now: () => now,
     autoTick: false,
@@ -156,7 +205,11 @@ function harness(): Harness {
   return {
     controller,
     sessions,
-    recorder,
+    get recorder() {
+      return recorders[0];
+    },
+    recorders,
+    players,
     finished,
     advanceClock: (seconds: number) => {
       now += seconds * 1000;
@@ -442,5 +495,97 @@ describe("full DELF B2 exam, with a forced reconnect mid-debate", () => {
     h.advanceClock(2);
     await new Promise((resolve) => setImmediate(resolve));
     assert.equal(h.controller.getSnapshot().phase, "debate");
+  });
+});
+
+/**
+ * Opening the two devices, and the ways that goes wrong.
+ *
+ * `prepareAudio()` runs at the monologue boundary precisely so the permission
+ * prompt appears when the candidate is about to speak — which means the exam's
+ * most ordinary interactions (pressing the button again, closing the tab,
+ * denying the microphone) all land INSIDE the window where the devices are
+ * half-open. `MicRecorder` and `ExaminerAudioPlayer` each guard their own half
+ * of that; these are the same races one layer up, where only the controller can
+ * see them.
+ */
+describe("opening the microphone and the speaker", () => {
+  it("opens one pair of devices however many times the button is pressed", async () => {
+    const gate = deferred();
+    const h = harness({ recorder: { gate: gate.promise } });
+    h.controller.start();
+
+    const attempts = [
+      h.controller.prepareAudio(),
+      h.controller.prepareAudio(),
+      h.controller.prepareAudio(),
+    ];
+    gate.resolve();
+    const results = await Promise.all(attempts);
+
+    assert.deepEqual(results, [true, true, true]);
+    assert.equal(h.recorders.length, 1, "a second microphone would never be released");
+    assert.equal(h.players.length, 1, "nor a second AudioContext");
+  });
+
+  it("closes the speaker when the microphone is refused", async () => {
+    // The common failure, and the asymmetric one: the microphone is the half
+    // that needs permission, and it fails AFTER the speaker is already open.
+    const h = harness({
+      recorder: { fail: new DOMException("Permission denied", "NotAllowedError") },
+    });
+    h.controller.start();
+
+    assert.equal(await h.controller.prepareAudio(), false);
+    assert.equal(h.players[0].closed, true, "the speaker's context does not outlive the failure");
+    assert.match(h.controller.getSnapshot().micError ?? "", /microphone a été refusé/);
+  });
+
+  it("does not open a second speaker when the candidate retries", async () => {
+    const h = harness({ recorder: { fail: new Error("device busy") } });
+    h.controller.start();
+
+    await h.controller.prepareAudio();
+    await h.controller.prepareAudio();
+
+    assert.equal(h.players.length, 2, "a retry legitimately builds a new pair");
+    assert.deepEqual(
+      h.players.map((player) => player.closed),
+      [true, true],
+      "and every abandoned one is closed",
+    );
+  });
+
+  it("releases devices that finish opening after the sitting ended", async () => {
+    // The candidate closes the tab while the permission prompt is up. `destroy()`
+    // runs, finds both fields still null — they are assigned only once BOTH
+    // devices are open — and closes nothing. Without the check in `openAudio()`
+    // the microphone and the AudioContext are then handed to a controller that
+    // no longer exists, and nothing will ever stop them again.
+    const gate = deferred();
+    const h = harness({ recorder: { gate: gate.promise } });
+    h.controller.start();
+
+    const preparing = h.controller.prepareAudio();
+    h.controller.destroy();
+    gate.resolve();
+
+    assert.equal(await preparing, false, "the audio never became this exam's");
+    assert.equal(h.recorders[0].stopped, true, "the late microphone was released");
+    assert.equal(h.players[0].closed, true, "and so was the late AudioContext");
+    assert.ok(
+      h.controller.getSnapshot().events.some((event) => event.name === "audio-discarded"),
+      "and it is in the session log rather than silent",
+    );
+  });
+
+  it("refuses to open anything once the exam has been torn down", async () => {
+    const h = harness();
+    h.controller.start();
+    h.controller.destroy();
+
+    assert.equal(await h.controller.prepareAudio(), false);
+    assert.equal(h.recorders.length, 0);
+    assert.equal(h.players.length, 0);
   });
 });

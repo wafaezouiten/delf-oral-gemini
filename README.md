@@ -101,13 +101,20 @@ minutes.
 
 ## Status
 
-**Verified offline** — `pnpm check` clean, `pnpm build` succeeds, 151/151 unit
+**Verified offline** — `pnpm check` clean, `pnpm build` succeeds, 220/220 unit
 tests pass. That includes the acceptance scenario end to end (preparation →
 monologue → débat → forced reconnect → finish), asserting the transcript stays
 continuous, the débat clock does not reset, and the examiner's seeded memory
 survives — plus the session lifecycle driven directly against a fake transport:
 a `goAway` and its deadline, a resume carrying the handle, an unannounced drop,
 backoff to exhaustion, and the buffered audio flushed on the way back.
+
+The audio transport is covered the same way, against a fake AudioContext and a
+fake microphone: twenty minutes of capture archived without the clock drifting,
+thirty thousand playback chunks scheduled exactly end to end, and every path
+that can abandon a device — two callers opening at once, one that resolves after
+the sitting ended, a teardown racing the permission prompt — asserted to release
+it.
 
 **Verified against the real Gemini service** — `pnpm verify:live`, 6/6:
 

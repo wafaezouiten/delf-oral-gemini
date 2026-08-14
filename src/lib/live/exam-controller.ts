@@ -181,6 +181,9 @@ export class ExamController {
   /** In flight, so a second `prepareAudio()` joins it rather than opening a
    *  second pair of devices. */
   private preparingAudio: Promise<boolean> | null = null;
+  /** Set once by {@link destroy}. Terminal, like the session's `closed`: the
+   *  controller is gone and nothing it opens afterwards has an owner. */
+  private destroyed = false;
 
   private ticker: ReturnType<typeof setInterval> | null = null;
   /** When the closing handshake started, for its safety deadline. See `tick()`. */
@@ -277,6 +280,7 @@ export class ExamController {
    * candidate is about to speak, not thirty minutes earlier.
    */
   async prepareAudio(): Promise<boolean> {
+    if (this.destroyed) return false;
     if (this.recorder) return true;
     // A second attempt after a failed one used to build a second player and
     // abandon the first, still holding an open AudioContext. `advanceEarly()`
@@ -312,6 +316,21 @@ export class ExamController {
         onEvent: (name, detail) => this.log(name, detail),
       });
       await recorder.start();
+
+      // `destroy()` can land while the permission prompt is up — which is the
+      // very window this method was moved late in the exam to create. The
+      // devices are installed on the controller only at the lines below, so a
+      // teardown that ran meanwhile found both fields null and closed nothing;
+      // without this check they are then adopted by a controller that is
+      // already gone, and nothing will ever stop them again. The microphone
+      // and the speaker each guard their own version of this internally; this
+      // is the same race one layer up, where only the controller can see it.
+      if (this.destroyed) {
+        await recorder.stop().catch(() => {});
+        await player.close().catch(() => {});
+        this.log("audio-discarded", "the sitting ended while the devices were opening");
+        return false;
+      }
 
       this.player = player;
       this.recorder = recorder;
@@ -614,6 +633,10 @@ export class ExamController {
 
   /** Release everything. Safe to call twice. */
   destroy(): void {
+    // Set before anything else: a `prepareAudio()` still waiting on the
+    // permission prompt reads this when it resolves, and closes what it opened
+    // rather than handing it to a controller that no longer exists.
+    this.destroyed = true;
     this.stopTicker();
     this.clearClosingTimer();
     this.closeSession();
