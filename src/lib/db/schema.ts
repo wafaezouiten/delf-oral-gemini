@@ -205,7 +205,7 @@ export const oralExamPhases = pgTable(
 // =====================================================
 
 /**
- * A reference to one recording of one sitting — never the audio itself.
+ * A reference to one recording of one speaking phase — never the audio itself.
  *
  * The recording is the whole point of the project (phonologie heard rather than
  * inferred from the number of "euh"s in a transcript) and simultaneously the
@@ -215,10 +215,16 @@ export const oralExamPhases = pgTable(
  *
  * So the row outlives the bytes on purpose. `uri` is null whenever the recording
  * was transient — the ordinary case today — while the size, the duration and
- * `deleted_at` remain as an honest record that a recording existed, how big it
+ * `deleted_at` remain as an honest record that a recording existed, how long it
  * was, and that it was disposed of. An audio-mode correction points here, which
  * is how "which artefact produced this score?" stays answerable after the
  * artefact is gone.
+ *
+ * **One row per phase, not per sitting** (Phase 6). The candidate speaks twice,
+ * against two different duration floors, and one 20-minute artefact cannot say
+ * which half ran short. `phase` is what makes the two rows tell those two
+ * stories apart, and the unique index is what stops a repeated finish quietly
+ * filing a third.
  */
 export const oralRecordings = pgTable(
   "oral_recordings",
@@ -228,18 +234,30 @@ export const oralRecordings = pgTable(
       .notNull()
       .references(() => oralExams.id, { onDelete: "cascade" }),
 
+    /** Which task this is the recording of. Same closed set as the phase rows. */
+    phase: oralSpeakingPhase("phase").notNull(),
+
     /** Where the audio lives, when it lives anywhere. Null = transient upload. */
     uri: text("uri"),
     mimeType: varchar("mime_type", { length: 64 }).notNull().default("audio/wav"),
     byteSize: integer("byte_size"),
-    /** Length of the recording itself, which is not the sum of the phase clocks. */
+    /**
+     * Length of the recording, **measured from its samples** — not the phase
+     * clock, which is `oral_exam_phases.started_at`/`ended_at`. The two diverge
+     * whenever the microphone stopped delivering mid-phase, and this is the one
+     * the duration penalty is computed from, so it has to be the measured one.
+     */
     durationSeconds: integer("duration_seconds"),
 
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     /** When the bytes were purged. Null = still referenced by `uri`. */
     deletedAt: timestamp("deleted_at", { withTimezone: true }),
   },
-  (table) => [index("oral_recordings_exam_id_idx").on(table.examId)],
+  (table) => [
+    index("oral_recordings_exam_id_idx").on(table.examId),
+    uniqueIndex("oral_recordings_exam_phase_idx").on(table.examId, table.phase),
+    check("oral_recordings_duration_check", sql`${table.durationSeconds} >= 0`),
+  ],
 );
 
 // =====================================================

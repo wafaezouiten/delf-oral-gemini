@@ -7,6 +7,7 @@ import {
   floatToPcm16,
   int16ToBase64,
   pcm16ToWav,
+  wavDurationSeconds,
 } from "./pcm";
 
 describe("float -> PCM16", () => {
@@ -103,5 +104,93 @@ describe("WAV wrapping", () => {
     const view = new DataView(await pcm16ToWav(new Int16Array(4), 24000).arrayBuffer());
     assert.equal(view.getUint32(24, true), 24000);
     assert.equal(view.getUint32(28, true), 48000);
+  });
+});
+
+/**
+ * Measuring a WAV back.
+ *
+ * The server reads this out of the bytes it received rather than trusting the
+ * duration a browser reported alongside them, because that number decides the
+ * DELF duration penalty. So it has to be right on the files we write, and honest
+ * about the ones we cannot read.
+ */
+describe("reading a WAV's duration", () => {
+  /** A WAV assembled by hand, so the chunk walk can be given something other
+   *  than our own canonical 44-byte header. */
+  function wav(options: {
+    dataBytes: number;
+    /** What the header claims, if that differs from what is there. */
+    declaredDataBytes?: number;
+    byteRate?: number;
+    /** An extra chunk before `fmt `, of this many bytes. */
+    extraChunk?: number;
+  }): ArrayBuffer {
+    const extra = options.extraChunk ?? 0;
+    const extraTotal = extra === 0 ? 0 : 8 + extra + (extra % 2);
+    const buffer = new ArrayBuffer(12 + extraTotal + 24 + 8 + options.dataBytes);
+    const view = new DataView(buffer);
+    const ascii = (offset: number, text: string) => {
+      for (let i = 0; i < text.length; i += 1) view.setUint8(offset + i, text.charCodeAt(i));
+    };
+
+    ascii(0, "RIFF");
+    view.setUint32(4, buffer.byteLength - 8, true);
+    ascii(8, "WAVE");
+
+    let offset = 12;
+    if (extra > 0) {
+      ascii(offset, "LIST");
+      view.setUint32(offset + 4, extra, true);
+      offset += extraTotal;
+    }
+
+    ascii(offset, "fmt ");
+    view.setUint32(offset + 4, 16, true);
+    view.setUint16(offset + 8, 1, true);
+    view.setUint16(offset + 10, 1, true);
+    view.setUint32(offset + 12, 16000, true);
+    view.setUint32(offset + 16, options.byteRate ?? 32000, true);
+    view.setUint16(offset + 20, 2, true);
+    view.setUint16(offset + 22, 16, true);
+    offset += 24;
+
+    ascii(offset, "data");
+    view.setUint32(offset + 4, options.declaredDataBytes ?? options.dataBytes, true);
+    return buffer;
+  }
+
+  it("measures what the recorder writes", async () => {
+    const seconds = 6;
+    const blob = pcm16ToWav(new Int16Array(seconds * 16000), 16000);
+    assert.equal(wavDurationSeconds(await blob.arrayBuffer()), seconds);
+  });
+
+  it("agrees with the sample count at any rate", async () => {
+    const blob = pcm16ToWav(new Int16Array(12_000), 24000);
+    assert.equal(wavDurationSeconds(await blob.arrayBuffer()), 0.5);
+  });
+
+  it("walks past chunks it does not care about, pad byte included", () => {
+    // Not something we write, but something a re-encode adds. An odd-sized chunk
+    // carries a pad byte that is not part of it, and a walk that misses it lands
+    // one byte into the next chunk id and finds nothing at all.
+    assert.equal(wavDurationSeconds(wav({ dataBytes: 32_000, extraChunk: 5 })), 1);
+  });
+
+  it("believes the file over the header when the upload was truncated", () => {
+    // A short upload is short audio. Trusting the declared size would report the
+    // recording the candidate meant to send rather than the one that arrived,
+    // and the penalty would be computed against audio nobody has.
+    assert.equal(
+      wavDurationSeconds(wav({ dataBytes: 16_000, declaredDataBytes: 32_000 })),
+      0.5,
+    );
+  });
+
+  it("returns null rather than a plausible zero for anything it cannot read", () => {
+    assert.equal(wavDurationSeconds(new ArrayBuffer(0)), null);
+    assert.equal(wavDurationSeconds(new ArrayBuffer(64)), null, "not RIFF/WAVE");
+    assert.equal(wavDurationSeconds(wav({ dataBytes: 32_000, byteRate: 0 })), null);
   });
 });

@@ -76,6 +76,36 @@ export function useExamController(options: {
     };
   }, [controller]);
 
+  /**
+   * Ask before a reload throws the recording away.
+   *
+   * The candidate's audio lives in this tab's memory and nowhere else until the
+   * épreuve ends and it is uploaded — deliberately, since streaming it somewhere
+   * as it is captured would mean retaining audio for a sitting that may be
+   * abandoned. The cost is that F5 during a débat destroys eighteen minutes of
+   * recording AND restarts the épreuve from preparation, silently, on a
+   * keystroke people press by reflex when a page looks stuck.
+   *
+   * `beforeunload` is the only hook the browser offers for saying so, and all it
+   * buys is the generic "leave site?" dialog — which is enough to turn an
+   * accident into a decision. It does NOT replace the `pagehide` teardown above:
+   * a candidate who confirms still leaves, and must still leave with the
+   * microphone released.
+   *
+   * Registered only while something is actually being recorded. An unconditional
+   * handler blocks the bfcache for the whole sitting and nags on the way out of
+   * a finished exam, which is the fastest way to teach someone to click through
+   * the dialog without reading it.
+   */
+  useEffect(() => {
+    const warn = (event: BeforeUnloadEvent) => {
+      if (!controller.getSnapshot().recording) return;
+      event.preventDefault();
+    };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [controller]);
+
   const state: ExamState = useSyncExternalStore(
     controller.subscribe,
     controller.getSnapshot,

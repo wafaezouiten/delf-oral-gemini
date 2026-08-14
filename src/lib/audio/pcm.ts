@@ -108,3 +108,58 @@ export function pcm16ToWav(samples: Int16Array, sampleRate: number): Blob {
 
   return new Blob([buffer], { type: "audio/wav" });
 }
+
+/**
+ * How long a WAV actually is, read out of the file itself.
+ *
+ * The counterpart to `pcm16ToWav`, and the reason it lives here: the duration
+ * that feeds the DELF duration penalty must be *measured*, and the strongest
+ * available measurement is the one taken from the bytes that were received
+ * rather than from a number a browser sent alongside them. The recorder counts
+ * its own samples too; this is the server checking that count against the
+ * artefact instead of trusting it.
+ *
+ * Walks the chunk list rather than assuming the canonical 44-byte header, so a
+ * file that picked up a `LIST` or `fact` chunk on the way still measures. The
+ * declared data size is clamped to what the file actually contains: a truncated
+ * upload is short audio, not a long recording with a promise attached.
+ *
+ * Returns null when this is not a WAV we can measure — the caller then knows it
+ * has no duration rather than a plausible zero.
+ */
+export function wavDurationSeconds(bytes: ArrayBuffer): number | null {
+  if (bytes.byteLength < 12) return null;
+  const view = new DataView(bytes);
+
+  const ascii = (offset: number, length: number) => {
+    let text = "";
+    for (let i = 0; i < length; i += 1) text += String.fromCharCode(view.getUint8(offset + i));
+    return text;
+  };
+
+  if (ascii(0, 4) !== "RIFF" || ascii(8, 4) !== "WAVE") return null;
+
+  let byteRate = 0;
+  let dataSize: number | null = null;
+
+  let offset = 12;
+  while (offset + 8 <= bytes.byteLength) {
+    const id = ascii(offset, 4);
+    const size = view.getUint32(offset + 4, true);
+    const body = offset + 8;
+
+    if (id === "fmt " && size >= 16 && body + 16 <= bytes.byteLength) {
+      byteRate = view.getUint32(body + 8, true);
+    } else if (id === "data") {
+      dataSize = Math.min(size, bytes.byteLength - body);
+      break;
+    }
+
+    // Chunks are word-aligned: an odd size carries a pad byte that is not part
+    // of it. Skipping it is what keeps the walk in step on a file that has one.
+    offset = body + size + (size % 2);
+  }
+
+  if (dataSize === null || byteRate <= 0) return null;
+  return dataSize / byteRate;
+}

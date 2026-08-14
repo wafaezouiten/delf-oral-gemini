@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
+import type { PhaseRecording, RecordedPhase } from "@/lib/audio/archive";
 import { PHASE_DURATIONS, MONOLOGUE_MIN_SECONDS } from "@/lib/delf/phases";
 import type { OralTopic } from "@/lib/delf/topics";
 import type { SessionManagerCallbacks } from "./session-manager";
@@ -115,20 +116,72 @@ interface DeviceOptions {
   fail?: Error;
 }
 
+/**
+ * A microphone with a ledger instead of a device.
+ *
+ * `capture()` is the audio thread: it adds seconds to whichever phase is open,
+ * which is what lets the tests drive the two things the controller now watches —
+ * how much audio a phase produced, and whether that number is still moving.
+ */
 class FakeRecorder implements RecorderLike {
   started = false;
   stopped = false;
+  discarded = false;
+  /** Every `beginPhase` / `endPhase`, in order, as a readable trace. */
+  calls: string[] = [];
+  recordedSeconds = 0;
+
+  private openPhase: RecordedPhase | null = null;
+  private readonly seconds: Record<RecordedPhase, number> = { monologue: 0, debate: 0 };
+
   constructor(private readonly options: DeviceOptions = {}) {}
+
   async start(): Promise<void> {
     if (this.options.gate) await this.options.gate;
     if (this.options.fail) throw this.options.fail;
     this.started = true;
   }
+
   async stop(): Promise<void> {
     this.stopped = true;
+    this.openPhase = null;
   }
-  toWavBlob(): Blob | null {
-    return new Blob([new Uint8Array([1, 2, 3])], { type: "audio/wav" });
+
+  beginPhase(phase: RecordedPhase): void {
+    this.calls.push(phase);
+    this.openPhase = phase;
+  }
+
+  endPhase(): void {
+    if (this.openPhase) this.calls.push(`end:${this.openPhase}`);
+    this.openPhase = null;
+  }
+
+  measuredSeconds(phase: RecordedPhase): number {
+    return this.seconds[phase];
+  }
+
+  recordings(): PhaseRecording[] {
+    return (["monologue", "debate"] as const)
+      .filter((phase) => this.seconds[phase] > 0)
+      .map((phase) => ({
+        phase,
+        blob: new Blob([new Uint8Array([1, 2, 3])], { type: "audio/wav" }),
+        durationSeconds: this.seconds[phase],
+        sampleCount: this.seconds[phase] * 16000,
+        byteSize: 3,
+      }));
+  }
+
+  discard(): void {
+    this.discarded = true;
+  }
+
+  /** The audio thread delivering `seconds` of audio for the open phase. */
+  capture(seconds: number): void {
+    if (!this.openPhase) return;
+    this.seconds[this.openPhase] += seconds;
+    this.recordedSeconds += seconds;
   }
 }
 
@@ -167,8 +220,17 @@ interface Harness {
   recorders: FakeRecorder[];
   players: FakePlayer[];
   finished: ExamFinishedPayload[];
+  /** Time passes AND the microphone delivers, which is what a healthy exam
+   *  looks like. */
   advanceClock: (seconds: number) => void;
+  /** Time passes and no audio arrives: a suspended audio graph, a device the OS
+   *  took away. The page looks identical, which is the problem. */
+  advanceClockSilently: (seconds: number) => void;
+  /** The device ends its track under us. */
+  loseMicrophone: (reason?: string) => void;
   session: () => FakeSession;
+  /** The phase report for one phase of the finished payload. */
+  report: (phase: RecordedPhase) => ExamFinishedPayload["phases"][number] | undefined;
 }
 
 function harness(devices: { recorder?: DeviceOptions; player?: DeviceOptions } = {}): Harness {
@@ -179,6 +241,7 @@ function harness(devices: { recorder?: DeviceOptions; player?: DeviceOptions } =
   const recorders: FakeRecorder[] = [];
   const players: FakePlayer[] = [];
   const finished: ExamFinishedPayload[] = [];
+  let notifyLost: ((reason: string) => void) | null = null;
 
   const controller = new ExamController({
     topic: TOPIC,
@@ -187,7 +250,8 @@ function harness(devices: { recorder?: DeviceOptions; player?: DeviceOptions } =
       sessions.push(session);
       return session;
     },
-    createRecorder: () => {
+    createRecorder: (callbacks) => {
+      notifyLost = callbacks.onLost;
       const recorder = new FakeRecorder(devices.recorder);
       recorders.push(recorder);
       return recorder;
@@ -213,9 +277,17 @@ function harness(devices: { recorder?: DeviceOptions; player?: DeviceOptions } =
     finished,
     advanceClock: (seconds: number) => {
       now += seconds * 1000;
+      for (const recorder of recorders) recorder.capture(seconds);
       controller.tick();
     },
+    advanceClockSilently: (seconds: number) => {
+      now += seconds * 1000;
+      controller.tick();
+    },
+    loseMicrophone: (reason = "the audio track ended") => notifyLost?.(reason),
     session: () => sessions[sessions.length - 1],
+    report: (phase: RecordedPhase) =>
+      finished[0]?.phases.find((entry) => entry.phase === phase),
   };
 }
 
@@ -350,16 +422,37 @@ describe("full DELF B2 exam, with a forced reconnect mid-debate", () => {
 
     const payload = h.finished[0];
     assert.equal(payload.reconnectCount, 1);
-    assert.ok(payload.audio, "the candidate's audio was captured");
-    assert.ok(payload.monologueSeconds >= MONOLOGUE_MIN_SECONDS);
-    assert.ok(payload.debateSeconds > 0);
+
+    // One artefact per task, both with audio in them. The reconnect at step 10
+    // happened inside the débat and left no hole: the recording is independent
+    // of the socket, and this is where that is asserted end to end.
+    assert.deepEqual(
+      payload.recordings.map((recording) => recording.phase),
+      ["monologue", "debate"],
+    );
+    assert.deepEqual(
+      h.recorder.calls,
+      ["monologue", "end:monologue", "debate", "end:debate"],
+      "each phase opened and closed its own recording, in order",
+    );
+
+    const monologue = h.report("monologue");
+    const debate = h.report("debate");
+    assert.ok(monologue && debate);
+    assert.ok(monologue.recordedSeconds >= MONOLOGUE_MIN_SECONDS);
+    assert.ok(debate.recordedSeconds > 0);
+    assert.equal(monologue.startedAt !== null && monologue.endedAt !== null, true);
+    assert.ok(
+      debate.startedAt !== null && monologue.endedAt !== null && debate.startedAt >= monologue.endedAt,
+      "the débat starts where the monologue stopped",
+    );
 
     // The final transcript keeps both tasks, distinctly.
     const phases = new Set(payload.transcript.map((entry) => entry.phase));
     assert.deepEqual([...phases].sort(), ["debate", "monologue"]);
 
     t.diagnostic(
-      `monologue ${payload.monologueSeconds}s · débat ${payload.debateSeconds}s · ` +
+      `monologue ${monologue.recordedSeconds}s · débat ${debate.recordedSeconds}s · ` +
         `${payload.transcript.length} tours · ${payload.reconnectCount} reconnexion`,
     );
   });
@@ -587,5 +680,197 @@ describe("opening the microphone and the speaker", () => {
     assert.equal(await h.controller.prepareAudio(), false);
     assert.equal(h.recorders.length, 0);
     assert.equal(h.players.length, 0);
+  });
+});
+
+/**
+ * Recording the candidate.
+ *
+ * The controller's half of Phase 6: which phase is being recorded and when, what
+ * the finished payload says about it, and the three ways a working microphone
+ * stops being one mid-épreuve.
+ */
+describe("recording the candidate", () => {
+  /** Preparation to the monologue, with the devices open. */
+  async function intoMonologue(h: Harness): Promise<void> {
+    h.controller.start();
+    await h.controller.advanceEarly();
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+
+  it("records nothing until the candidate has been asked", async () => {
+    // Consent, as the candidate can check it: the indicator is dark for the whole
+    // of preparation, and the microphone has not been touched.
+    const h = harness();
+    h.controller.start();
+    h.advanceClock(600);
+
+    assert.equal(h.controller.getSnapshot().recording, false);
+    assert.equal(h.recorders.length, 0, "no permission prompt during preparation");
+
+    await intoMonologue(h);
+    assert.equal(h.controller.getSnapshot().recording, true);
+    assert.deepEqual(h.recorder.calls, ["monologue"]);
+  });
+
+  it("opens the microphone even when preparation simply runs out", async () => {
+    // The path that had no microphone at all. `advanceEarly()` opens the devices
+    // itself, so pressing the button worked; a candidate who used their full
+    // thirty minutes reached the monologue with nothing recording and nothing
+    // saying why.
+    const h = harness();
+    h.controller.start();
+    h.advanceClock(PHASE_DURATIONS.preparation);
+    await new Promise((resolve) => setImmediate(resolve));
+
+    assert.equal(h.controller.getSnapshot().phase, "monologue");
+    assert.equal(h.recorders.length, 1, "the microphone was asked for");
+    assert.equal(h.recorder.started, true);
+    assert.deepEqual(h.recorder.calls, ["monologue"]);
+  });
+
+  it("reports the measured duration and the clock as separate numbers", async () => {
+    // The distinction the phase exists for. Here the monologue ran seven minutes
+    // and recorded four of them, because the microphone stopped delivering
+    // halfway through — and both facts reach the payload intact.
+    const h = harness();
+    await intoMonologue(h);
+    h.advanceClock(240); // four minutes of audio
+    h.advanceClockSilently(180); // three minutes of nothing
+
+    assert.match(h.controller.getSnapshot().micError ?? "", /n'envoie plus de son/);
+
+    await h.controller.advanceEarly();
+    h.session().finishTurn();
+    await new Promise((resolve) => setImmediate(resolve));
+
+    assert.equal(h.controller.getSnapshot().phase, "debate");
+    assert.equal(
+      h.controller.getSnapshot().micError,
+      null,
+      "and the monologue's stall warning did not follow the candidate into the débat",
+    );
+
+    h.advanceClock(PHASE_DURATIONS.debate);
+    h.session().finishTurn();
+    await new Promise((resolve) => setImmediate(resolve));
+
+    const monologue = h.report("monologue");
+    assert.ok(monologue);
+    assert.equal(monologue.recordedSeconds, 240, "measured from the audio");
+    assert.equal(monologue.elapsedSeconds, 420, "and the clock says otherwise, on the record");
+  });
+
+  it("hands over the artefacts and then releases their memory", async () => {
+    const h = harness();
+    await intoMonologue(h);
+    h.advanceClock(PHASE_DURATIONS.monologue);
+    h.session().finishTurn();
+    await new Promise((resolve) => setImmediate(resolve));
+    h.advanceClock(PHASE_DURATIONS.debate);
+    h.session().finishTurn();
+    await new Promise((resolve) => setImmediate(resolve));
+
+    assert.equal(h.finished.length, 1);
+    assert.equal(h.finished[0].recordings.length, 2, "taken before the memory was released");
+    assert.equal(h.recorder.discarded, true, "and released, since the blobs own their bytes now");
+  });
+
+  it("reports only the phases the candidate actually reached", async () => {
+    // An abandoned sitting has a monologue and no débat, which is the truth about
+    // it — better than a débat row claiming zero seconds of a task that never
+    // happened.
+    const h = harness();
+    await intoMonologue(h);
+    h.advanceClock(60);
+    h.controller.destroy();
+
+    assert.equal(h.finished.length, 0, "an abandoned sitting is not a finished one");
+    assert.equal(h.recorder.stopped, true, "but the device is released either way");
+  });
+
+  it("tells the candidate when the microphone dies, and keeps what it recorded", async () => {
+    const h = harness();
+    await intoMonologue(h);
+    h.advanceClock(120);
+
+    h.loseMicrophone("the audio track ended");
+
+    const state = h.controller.getSnapshot();
+    assert.match(state.micError ?? "", /microphone s'est déconnecté/);
+    assert.equal(state.recording, false, "and the indicator says so");
+    assert.ok(state.events.some((event) => event.name === "microphone-lost"));
+
+    // The exam is NOT ended: the examiner is still listening over the socket, and
+    // two minutes of real audio have already been recorded.
+    assert.equal(state.phase, "monologue");
+    assert.equal(h.recorder.measuredSeconds("monologue"), 120);
+  });
+
+  it("reports a dead microphone once, not once per event", async () => {
+    const h = harness();
+    await intoMonologue(h);
+    h.loseMicrophone();
+    h.loseMicrophone();
+    h.loseMicrophone();
+
+    const losses = h.controller
+      .getSnapshot()
+      .events.filter((event) => event.name === "microphone-lost");
+    assert.equal(losses.length, 1);
+  });
+
+  it("notices a recording that has quietly stopped growing", async () => {
+    // The failure with no event to listen for: a backgrounded tab whose audio
+    // graph the browser suspended. Blocks stop, `ended` never fires, the clock
+    // runs on and the page looks exactly like a working one.
+    const h = harness();
+    await intoMonologue(h);
+    h.advanceClock(60);
+    assert.equal(h.controller.getSnapshot().micError, null);
+
+    h.advanceClockSilently(3);
+    assert.equal(h.controller.getSnapshot().micError, null, "not yet — three seconds is a pause");
+
+    h.advanceClockSilently(3);
+    assert.match(h.controller.getSnapshot().micError ?? "", /n'envoie plus de son/);
+    assert.ok(
+      h.controller.getSnapshot().events.some((event) => event.name === "capture-stalled"),
+    );
+
+    // And it clears itself when the tab comes back, rather than leaving a stale
+    // warning over a working microphone for the rest of the épreuve.
+    h.advanceClock(1);
+    assert.equal(h.controller.getSnapshot().micError, null);
+    assert.ok(h.controller.getSnapshot().events.some((event) => event.name === "capture-resumed"));
+  });
+
+  it("does not call a phase transition a stalled microphone", async () => {
+    // There is a real gap in the audio at every boundary: the monologue's
+    // recording closes, a session is torn down and another is built. The
+    // watchdog is re-armed per phase so that gap is not reported as a fault.
+    const h = harness();
+    await intoMonologue(h);
+    h.advanceClock(PHASE_DURATIONS.monologue);
+    h.session().finishTurn();
+    await new Promise((resolve) => setImmediate(resolve));
+
+    assert.equal(h.controller.getSnapshot().phase, "debate");
+    h.advanceClock(1);
+    assert.equal(h.controller.getSnapshot().micError, null);
+  });
+
+  it("keeps recording through a reconnect", async () => {
+    // The property the layering diagram promises: the socket is the shortest-
+    // lived thing on the page and cannot take a hole out of the recording.
+    const h = harness();
+    await intoMonologue(h);
+    h.advanceClock(60);
+    await h.controller.forceReconnect();
+    h.advanceClock(60);
+
+    assert.deepEqual(h.recorder.calls, ["monologue"], "the recording was never closed");
+    assert.equal(h.recorder.measuredSeconds("monologue"), 120);
+    assert.equal(h.controller.getSnapshot().recording, true);
   });
 });

@@ -4,12 +4,14 @@ import { useCallback, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { useExamController } from "@/lib/live/use-exam-controller";
+import type { ExamFinishedPayload } from "@/lib/live/exam-controller";
 import { PHASE_LABELS, MONOLOGUE_MIN_SECONDS } from "@/lib/delf/phases";
 import type { OralTopic } from "@/lib/delf/topics";
 import type { TranscriptEntry } from "@/lib/delf/transcript";
 import { PhaseClock } from "./_components/phase-clock";
 import { ConnectionBadge } from "./_components/connection-badge";
 import { EventLog } from "./_components/event-log";
+import { RecordingBadge } from "./_components/recording-badge";
 
 /**
  * The exam screen. One component per phase, so each phase's UI is genuinely its
@@ -29,15 +31,14 @@ export function ExamClient({ examId, topic }: { examId: string; topic: OralTopic
    * Ship the finished exam for grading. The evaluation is stashed in
    * sessionStorage as well as persisted, so the results page renders even with
    * no database configured.
+   *
+   * The recordings go up as one file per phase rather than one per sitting: the
+   * duration floors are per task, and two artefacts are what lets a candidate
+   * re-listen to the half that went wrong. Multipart because a 13-minute WAV is
+   * tens of megabytes and has no business being base64'd into a JSON body.
    */
   const onFinished = useCallback(
-    async (payload: {
-      transcript: TranscriptEntry[];
-      audio: Blob | null;
-      monologueSeconds: number;
-      debateSeconds: number;
-      reconnectCount: number;
-    }) => {
+    async (payload: ExamFinishedPayload) => {
       if (submittedRef.current) return;
       submittedRef.current = true;
       setSubmitting(true);
@@ -49,12 +50,20 @@ export function ExamClient({ examId, topic }: { examId: string; topic: OralTopic
         JSON.stringify({
           topicSlug: topic.slug,
           transcript: payload.transcript,
-          monologueSeconds: payload.monologueSeconds,
-          debateSeconds: payload.debateSeconds,
+          phases: payload.phases,
           reconnectCount: payload.reconnectCount,
         }),
       );
-      if (payload.audio) form.set("audio", payload.audio, "candidate.wav");
+      for (const recording of payload.recordings) {
+        form.set(`audio-${recording.phase}`, recording.blob, `${recording.phase}.wav`);
+      }
+
+      // What the results page shows, and what the penalty was computed from: the
+      // measured length of the recording, not the phase clock. They differ
+      // exactly when something went wrong with the microphone, and showing the
+      // clock there would hide it.
+      const recordedSeconds = (phase: "monologue" | "debate") =>
+        payload.phases.find((report) => report.phase === phase)?.recordedSeconds ?? 0;
 
       try {
         const response = await fetch(`/api/exams/${examId}/finish`, {
@@ -70,8 +79,8 @@ export function ExamClient({ examId, topic }: { examId: string; topic: OralTopic
             evaluation: body.evaluation,
             topic,
             transcript: payload.transcript,
-            monologueSeconds: payload.monologueSeconds,
-            debateSeconds: payload.debateSeconds,
+            monologueSeconds: recordedSeconds("monologue"),
+            debateSeconds: recordedSeconds("debate"),
             reconnectCount: payload.reconnectCount,
           }),
         );
@@ -129,6 +138,7 @@ export function ExamClient({ examId, topic }: { examId: string; topic: OralTopic
           <h1 className="mt-0.5 text-lg font-semibold">{topic.title}</h1>
         </div>
         <div className="flex items-center gap-3">
+          <RecordingBadge recording={state.recording} />
           {state.phase !== "preparation" && <ConnectionBadge state={state.connection} />}
           <PhaseClock remaining={state.remaining} phase={state.phase} />
         </div>
@@ -238,9 +248,13 @@ function Briefing({ topic, onStart }: { topic: OralTopic; onStart: () => void })
       </ol>
 
       <p className="bg-muted text-muted-foreground rounded-lg px-4 py-3 text-xs leading-relaxed">
-        Le microphone vous sera demandé au début du monologue, pas maintenant.
-        Utilisez un casque : sans lui, l&apos;examinateur s&apos;entend lui-même et
-        la transcription en souffre.
+        Le microphone vous sera demandé au début du monologue, pas maintenant. Rien
+        n&apos;est enregistré avant que vous ne l&apos;autorisiez : un témoin
+        &laquo;&nbsp;Enregistrement&nbsp;&raquo; reste visible en haut de
+        l&apos;écran pendant toute l&apos;épreuve. Vos deux prises de parole sont
+        enregistrées séparément, puis envoyées pour la correction une fois
+        l&apos;épreuve terminée. Utilisez un casque : sans lui,
+        l&apos;examinateur s&apos;entend lui-même et la transcription en souffre.
       </p>
 
       <button

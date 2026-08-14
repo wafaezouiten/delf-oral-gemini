@@ -4,24 +4,37 @@
  * Does two jobs at once from a single microphone stream:
  *
  *  1. **Streams** 16 kHz PCM16 frames to Gemini Live, as base64.
- *  2. **Archives** every frame in memory so the candidate's own audio can be
- *     handed to the evaluator afterwards. This is the point of §20 of the brief:
- *     phonologie graded from a transcript is guesswork (the reference
+ *  2. **Records** the candidate, one artefact per speaking phase, so a
+ *     correction can be defended and re-listened to. This is the point of §20 of
+ *     the brief: phonologie graded from a transcript is guesswork (the reference
  *     implementation openly instructs the model to infer fluency from the number
  *     of "euh"s), whereas graded from audio it is an actual measurement.
  *
- * The archive is raw PCM, so it must be wrapped in a WAV header before anything
- * else can read it — see `pcm16ToWav`.
+ * The two jobs share a microphone and a framer and nothing else. That
+ * independence is deliberate and is the property Phase 6 is really about: the
+ * Live socket goes away several times in a normal sitting — a GoAway at the
+ * connection limit, a phase boundary that tears the session down and builds a
+ * new one, ten seconds of bad hotel wifi — and none of that may punch a hole in
+ * the recording. `sendAudio` on a closed session is a no-op; the archive keeps
+ * filling either way. Conversely, a phase that has ended stops recording while
+ * the socket is still open for the examiner's closing sentence.
+ *
+ * The recording itself lives in {@link PhaseArchive}, which owns the one number
+ * this phase exists to get right: a duration measured from the samples rather
+ * than assumed from the clock.
  *
  * The browser lives behind {@link MicrophoneOpener}. What is left here — framing,
- * the archive, and the lifetime of a device that a candidate can revoke, deny or
- * navigate away from mid-prompt — is then testable, which is what the leak
- * assertions in `recorder.test.ts` rest on.
+ * the recording, and the lifetime of a device that a candidate can revoke, deny,
+ * unplug or navigate away from mid-prompt — is then testable, which is what the
+ * leak assertions in `recorder.test.ts` rest on.
  */
 
 import { INPUT_SAMPLE_RATE } from "@/lib/gemini/constants";
+import { PhaseArchive, type PhaseRecording, type RecordedPhase } from "./archive";
 import { PcmFramer, frameSamplesAt } from "./framing";
-import { int16ToBase64, pcm16ToWav } from "./pcm";
+import { int16ToBase64 } from "./pcm";
+
+export type { PhaseRecording, RecordedPhase } from "./archive";
 
 // ---------------------------------------------------------------- the seam
 
@@ -35,6 +48,17 @@ export interface CaptureStream {
   readonly sampleRate: number;
   /** Float32 blocks from the audio thread. Set to null to stop listening. */
   onBlock: ((block: Float32Array) => void) | null;
+  /**
+   * The device stopped producing audio on its own — a headset unplugged, a
+   * permission revoked from the browser's site controls, an OS that handed the
+   * microphone to another application.
+   *
+   * Worth a callback rather than silence because it is invisible otherwise: the
+   * blocks simply stop, the clock keeps running, and the candidate carries on
+   * speaking into a page that looks exactly like a working one for the rest of
+   * the phase.
+   */
+  onLost: ((reason: string) => void) | null;
   /** Release the device and the audio graph. */
   close(): Promise<void>;
 }
@@ -81,12 +105,21 @@ export const browserMicrophone: MicrophoneOpener = async ({ requestedRate }) => 
     const capture: CaptureStream = {
       sampleRate: audio.sampleRate,
       onBlock: null,
+      onLost: null,
       async close() {
         node.port.onmessage = null;
         this.onBlock = null;
+        this.onLost = null;
+        // Detached before the tracks are stopped: `stop()` fires `ended` on some
+        // engines and not others, and an ordinary teardown reported as a lost
+        // device would tell the candidate their microphone failed at the exact
+        // moment the épreuve ended well.
+        stream.getTracks().forEach((track) => {
+          track.onended = null;
+          track.stop();
+        });
         node.disconnect();
         source.disconnect();
-        stream.getTracks().forEach((track) => track.stop());
         if (audio.state !== "closed") {
           await audio.close().catch(() => {
             /* already closing */
@@ -94,6 +127,13 @@ export const browserMicrophone: MicrophoneOpener = async ({ requestedRate }) => 
         }
       },
     };
+
+    // A track ends when the device goes away underneath us. There is normally
+    // exactly one (mono capture), but the loss is reported from whichever ends
+    // first — any of them ending means the capture is over.
+    stream.getTracks().forEach((track) => {
+      track.onended = () => capture.onLost?.(`the ${track.kind} track ended`);
+    });
 
     node.port.onmessage = (event: MessageEvent<ArrayBuffer>) => {
       capture.onBlock?.(new Float32Array(event.data));
@@ -139,6 +179,12 @@ export interface RecorderCallbacks {
   onChunk: (base64: string) => void;
   /** Diagnostics for the session log. */
   onEvent?: (name: string, detail?: unknown) => void;
+  /**
+   * The device stopped mid-sitting. Fired once per capture; the recording so far
+   * is intact and stays intact, so the caller's job is to say so, not to salvage
+   * anything.
+   */
+  onLost?: (reason: string) => void;
 }
 
 export interface MicRecorderOptions extends RecorderCallbacks {
@@ -159,11 +205,18 @@ export class MicRecorder {
    */
   private generation = 0;
 
-  /** Every captured frame, kept for the post-exam audio evaluation. */
-  private archive: Int16Array[] = [];
-  private archivedSamples = 0;
+  /**
+   * The recording, cut per phase. Owned by the recorder rather than handed in,
+   * because its lifetime is the microphone's: it must survive every reconnect
+   * and every phase boundary, and die with the device.
+   */
+  private readonly archive = new PhaseArchive(INPUT_SAMPLE_RATE);
 
-  /** Paused capture archives nothing and streams nothing. */
+  /** Set once, when the device goes away under us. Terminal: a capture that
+   *  ended does not come back, and a second report of it is noise. */
+  private lost = false;
+
+  /** Paused capture records nothing and streams nothing. */
   private paused = false;
 
   private readonly callbacks: RecorderCallbacks;
@@ -213,19 +266,81 @@ export class MicRecorder {
     this.capture = capture;
     this.paused = false;
     capture.onBlock = (block) => this.consume(block);
+    capture.onLost = (reason) => this.handleLoss(reason);
     this.callbacks.onEvent?.("capture-started", { sampleRate: capture.sampleRate });
   }
 
   private consume(block: Float32Array): void {
     if (this.paused || !this.framer) return;
     for (const frame of this.framer.push(block)) {
-      this.archive.push(frame);
-      this.archivedSamples += frame.length;
+      // Recorded first, sent second, and neither depends on the other: a frame
+      // belongs in the artefact whether or not there is a socket to send it on.
+      this.archive.append(frame);
       this.callbacks.onChunk(int16ToBase64(frame));
     }
   }
 
-  /** Stop streaming and archiving without releasing the microphone. */
+  /**
+   * The device went away mid-sitting.
+   *
+   * Deliberately does NOT tear the capture down. Nothing more will arrive, so
+   * there is nothing to stop; closing from inside the device's own event handler
+   * would race whatever teardown the page is already running, and this file has
+   * enough scars from exactly that shape of bug. What the recording has is kept,
+   * and the measured duration then tells the truth about the phase without
+   * anyone having to reconstruct it.
+   */
+  private handleLoss(reason: string): void {
+    if (this.lost || !this.capture) return;
+    this.lost = true;
+    this.callbacks.onEvent?.("capture-lost", {
+      reason,
+      recordedSeconds: Number(this.archive.totalSeconds.toFixed(2)),
+    });
+    this.callbacks.onLost?.(reason);
+  }
+
+  /**
+   * Start recording this phase. Streaming is unaffected — it never stopped.
+   *
+   * Called at the phase boundary rather than when the microphone opens, so the
+   * moment or two of room tone between the permission prompt and the exposé does
+   * not end up inside the monologue's artefact.
+   */
+  beginPhase(phase: RecordedPhase): void {
+    this.archive.begin(phase);
+    this.callbacks.onEvent?.("recording-phase-started", phase);
+  }
+
+  /**
+   * Stop recording the current phase, keeping what it captured.
+   *
+   * Flushes the framer first: the partial frame it is holding is the last thing
+   * the candidate said before the phase ended, and it belongs to the phase that
+   * is closing rather than to the one about to open. Too late to send — the
+   * session for that phase is being torn down — but never too late to record.
+   */
+  endPhase(): void {
+    const phase = this.archive.openPhase;
+    // Flushed unconditionally, so the framer never carries one phase's last
+    // milliseconds into the next one's artefact. With no phase open the tail
+    // belongs to nobody and the archive counts it as discarded.
+    this.flushTail();
+    if (!phase) return;
+    this.archive.end();
+    this.callbacks.onEvent?.("recording-phase-ended", {
+      phase,
+      seconds: Number(this.archive.measuredSeconds(phase).toFixed(2)),
+    });
+  }
+
+  /** Move the framer's partial frame into the recording, if there is one. */
+  private flushTail(): void {
+    const tail = this.framer?.flush();
+    if (tail && tail.length > 0) this.archive.append(tail);
+  }
+
+  /** Stop streaming and recording without releasing the microphone. */
   pause(): void {
     this.paused = true;
   }
@@ -234,13 +349,30 @@ export class MicRecorder {
     if (this.capture) this.paused = false;
   }
 
-  /** Seconds of audio archived so far. */
+  /** Seconds of audio recorded so far, across every phase. Measured from the
+   *  samples; see {@link PhaseArchive}. */
   get recordedSeconds(): number {
-    return this.archivedSamples / INPUT_SAMPLE_RATE;
+    return this.archive.totalSeconds;
+  }
+
+  /** Seconds recorded for one phase — the number the duration penalty is
+   *  computed from. */
+  measuredSeconds(phase: RecordedPhase): number {
+    return this.archive.measuredSeconds(phase);
+  }
+
+  /** The phase currently being recorded, or null between phases. */
+  get recordingPhase(): RecordedPhase | null {
+    return this.archive.openPhase;
+  }
+
+  /** Whether the device went away mid-sitting. */
+  get isLost(): boolean {
+    return this.lost;
   }
 
   get isRecording(): boolean {
-    return this.capture !== null && !this.paused;
+    return this.capture !== null && !this.paused && !this.lost;
   }
 
   /** The rate the microphone is running at, or null before it opens. Differs
@@ -249,31 +381,29 @@ export class MicRecorder {
     return this.capture?.sampleRate ?? null;
   }
 
-  /** Everything captured so far, as one PCM16 buffer. */
-  private flattenArchive(): Int16Array {
-    const all = new Int16Array(this.archivedSamples);
-    let offset = 0;
-    for (const frame of this.archive) {
-      all.set(frame, offset);
-      offset += frame.length;
-    }
-    return all;
-  }
-
   /**
-   * The archived audio as a playable/uploadable WAV blob. Returns null when
-   * nothing was captured, so callers can distinguish "silent exam" from "bug".
+   * One phase's recording as a playable, uploadable WAV, or null when that
+   * phase captured nothing — so a caller can tell a silent phase from a bug.
    *
    * Always at {@link INPUT_SAMPLE_RATE}, whatever the device ran at: the framer
    * has already converted, so the header is not a claim about the hardware.
    */
-  toWavBlob(): Blob | null {
-    if (this.archivedSamples === 0) return null;
-    return pcm16ToWav(this.flattenArchive(), INPUT_SAMPLE_RATE);
+  recordingFor(phase: RecordedPhase): PhaseRecording | null {
+    return this.archive.recordingFor(phase);
+  }
+
+  /** Every phase that produced audio, in the order they were recorded. */
+  recordings(): PhaseRecording[] {
+    return this.archive.all();
   }
 
   /** Release the microphone and the audio graph. Safe to call twice, and safe
-   *  to call while `start()` is still waiting on the permission prompt. */
+   *  to call while `start()` is still waiting on the permission prompt.
+   *
+   *  The recording SURVIVES: `stop()` releases a device, it does not discard an
+   *  artefact. Callers read `recordings()` afterwards, and a stop that wiped
+   *  them would make the ordering between "release the microphone" and "take the
+   *  audio" a trap. Use `discard()` to actually free the memory. */
   async stop(): Promise<void> {
     this.paused = true;
     this.generation += 1;
@@ -290,19 +420,27 @@ export class MicRecorder {
 
     const capture = this.capture;
     this.capture = null;
-    if (capture) capture.onBlock = null;
+    if (capture) {
+      capture.onBlock = null;
+      capture.onLost = null;
+    }
 
     // The last partial frame is the candidate's final words. It is too late to
-    // send — the session is closing — but it belongs in the archive that gets
+    // send — the session is closing — but it belongs in the recording that gets
     // graded, and dropping it silently loses up to 40 ms of every sitting.
-    const tail = this.framer?.flush();
-    if (tail && tail.length > 0) {
-      this.archive.push(tail);
-      this.archivedSamples += tail.length;
-    }
+    // Flushed BEFORE the phase is closed, so those words land in the phase they
+    // were spoken in rather than in nothing.
+    this.endPhase();
     this.framer = null;
 
     if (capture) await closeQuietly(capture);
+  }
+
+  /** Release the recording's memory. Separate from {@link stop} on purpose: a
+   *  sitting's PCM is tens of megabytes, and the page that no longer needs it is
+   *  never the same code as the one releasing the device. */
+  discard(): void {
+    this.archive.clear();
   }
 }
 

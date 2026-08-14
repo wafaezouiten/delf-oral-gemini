@@ -177,6 +177,25 @@ test("the recording row can outlive the recording", () => {
   assert.ok(columns.get("deleted_at"));
 });
 
+test("a recording belongs to one speaking phase, and only one row can claim it", () => {
+  // The Phase 6 invariant, in the database rather than in the route: the
+  // candidate speaks twice against two different duration floors, so an
+  // untagged artefact cannot answer "which half ran short?", and two rows for
+  // the same half cannot answer it either.
+  const columns = columnsByName(oralRecordings);
+  const phase = columns.get("phase");
+  assert.ok(phase, "a recording says which task it is");
+  assert.equal(phase.notNull, true);
+  assert.equal(phase.getSQLType(), oralSpeakingPhase.enumName);
+
+  const unique = getTableConfig(oralRecordings).indexes.find((index) => index.config.unique);
+  assert.deepEqual(
+    unique?.config.columns.map((column) => ("name" in column ? column.name : undefined)),
+    ["exam_id", "phase"],
+    "at most one recording per (sitting, phase)",
+  );
+});
+
 test("the sitting keeps its transcript and its topic", () => {
   const columns = columnsByName(oralExams);
   assert.equal(columns.get("transcript")?.getSQLType(), "jsonb");
