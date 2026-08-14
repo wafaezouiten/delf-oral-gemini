@@ -41,6 +41,7 @@ import {
   type TranscriptPhase,
 } from "@/lib/delf/transcript";
 import type { ConnectionState, SessionManagerCallbacks } from "./session-manager";
+import { examStatus, type ExamStatus } from "./state-machine";
 
 /** What the controller needs from a Gemini session. */
 export interface LiveSessionLike {
@@ -80,6 +81,14 @@ export interface ExamState {
   elapsed: number;
   remaining: number;
   connection: ConnectionState;
+  /**
+   * The two machines flattened into one value (`lib/live/state-machine.ts`).
+   *
+   * Derived on every snapshot rather than stored, so it cannot drift from the
+   * phase and the connection it is derived from. `phase` and `connection` are
+   * still exposed: this is the summary, not a replacement.
+   */
+  status: ExamStatus;
   examinerSpeaking: boolean;
   transcript: readonly TranscriptEntry[];
   events: readonly ExamEvent[];
@@ -185,6 +194,7 @@ export class ExamController {
       elapsed: this.elapsed,
       remaining: remainingSeconds(this.phase, this.elapsed),
       connection: this.connection,
+      status: examStatus(this.phase, this.connection),
       examinerSpeaking: this.examinerSpeaking,
       transcript: this.transcript,
       events: this.events,
@@ -391,8 +401,16 @@ export class ExamController {
   }
 
   private async openSession(target: TranscriptPhase): Promise<void> {
+    // Each phase gets its own session, and therefore its own connection
+    // machine. Without this the previous phase's terminal `closed` would show
+    // as the new session's starting state until its first callback arrived.
+    this.connection = "idle";
+
     const callbacks: SessionManagerCallbacks = {
       onStateChange: (state) => {
+        // Every reconnect — goAway, unexpected drop, or forced — passes through
+        // `reconnecting` exactly once before `resuming`, so this is the one
+        // place that counts them.
         if (state === "reconnecting") this.reconnectCount += 1;
         this.connection = state;
         this.emit();
@@ -402,7 +420,13 @@ export class ExamController {
       onExaminerAudio: (base64) => this.player?.enqueue(base64),
       onInterrupted: () => this.player?.interrupt(),
       onTurnComplete: () => {
-        // The examiner has delivered its closing sentence: the phase may end.
+        // The ONLY thing Gemini is allowed to influence about the exam's flow,
+        // and only inside a window the app opened: once the clock has run out
+        // and the closing directive has gone out, the examiner's turn ending is
+        // what releases the phase. Outside a closing handshake this is ignored —
+        // the examiner finishing a sentence mid-débat must not end the débat.
+        // The timer decides when a phase ends; the model only decides when it
+        // has stopped talking about it.
         if (this.closing) {
           this.closing = false;
           this.clearClosingTimer();
