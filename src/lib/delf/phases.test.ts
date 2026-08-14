@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
+import { ORAL_PARTS_B2 } from "./constants";
 import {
   MONOLOGUE_MIN_SECONDS,
   PHASE_DURATIONS,
@@ -30,6 +31,22 @@ describe("exam state machine", () => {
     // could not satisfy this.
     const distinct = new Set(Object.values(PHASE_DURATIONS));
     assert.equal(distinct.size, 3);
+  });
+
+  it("takes its timings from the ported B2 part specs, not a second copy of them", () => {
+    // The same three numbers exist in `constants.ts`, where they are the DELF
+    // business rule the duration penalty also reads. If the phase clock ever
+    // stops deriving them, the timer and the rubric can disagree about how long
+    // a monologue is, and nothing will say so.
+    const [monologue, debate] = ORAL_PARTS_B2;
+    assert.equal(PHASE_DURATIONS.preparation, monologue.preparationSeconds);
+    assert.equal(PHASE_DURATIONS.monologue, monologue.durationSeconds);
+    assert.equal(PHASE_DURATIONS.debate, debate.durationSeconds);
+
+    // And the official numbers themselves, so a change to either file is loud.
+    assert.equal(PHASE_DURATIONS.preparation, 30 * 60);
+    assert.equal(PHASE_DURATIONS.monologue, 7 * 60);
+    assert.equal(PHASE_DURATIONS.debate, 13 * 60);
   });
 
   it("ends a phase exactly once, even when the clock jumps past the boundary", () => {

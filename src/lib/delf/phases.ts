@@ -18,6 +18,8 @@
  *    reconnect feel like a new exam).
  */
 
+import { getOralPartSpec, type OralPartSpec } from "./constants";
+
 export type OralPhase = "preparation" | "monologue" | "debate" | "finished";
 
 /** The phases in exam order. `finished` is terminal. */
@@ -28,19 +30,33 @@ export const ORAL_PHASES: readonly OralPhase[] = [
   "finished",
 ] as const;
 
+/** The B2 part spec for a task number, or a loud failure. The parts are a fixed
+ *  two-row table, so an absent one is a broken build, not a runtime condition. */
+function requirePart(tache: number): OralPartSpec {
+  const spec = getOralPartSpec(tache);
+  if (!spec) throw new Error(`No DELF B2 oral part ${tache} in ORAL_PARTS_B2`);
+  return spec;
+}
+
+const MONOLOGUE_PART = requirePart(1);
+const DEBATE_PART = requirePart(2);
+
 /**
- * Official DELF B2 production orale timings, in seconds.
+ * Official DELF B2 production orale timings, in seconds: 30 min preparation, a
+ * 5-7 min monologue suivi, then a ~13 min débat.
  *
- * Sourced from the real épreuve (and cross-checked against the reference
- * implementation's `ORAL_PARTS_BY_LEVEL`): 30 min preparation, a 5-7 min
- * monologue suivi, then a débat that brings the total speaking time to ~20 min.
- * The brief fixes the débat target at ~13 min, which is the upper end of the
- * real exam and the number the acceptance test measures against.
+ * **Derived, not restated.** These same three numbers already exist in
+ * `constants.ts` as `ORAL_PARTS_B2` — ported verbatim from the reference
+ * implementation, where they are the DELF business rule. Writing `7 * 60` here
+ * as well would create two sources of truth for the exam's length, and the one
+ * the timer reads would not be the one the duration penalty reads. Reading them
+ * off the part specs means the phase clock and the rubric cannot disagree about
+ * how long a monologue is.
  */
 export const PHASE_DURATIONS: Record<Exclude<OralPhase, "finished">, number> = {
-  preparation: 30 * 60,
-  monologue: 7 * 60,
-  debate: 13 * 60,
+  preparation: MONOLOGUE_PART.preparationSeconds,
+  monologue: MONOLOGUE_PART.durationSeconds,
+  debate: DEBATE_PART.durationSeconds,
 };
 
 /**
