@@ -81,7 +81,7 @@ export async function POST(request: Request) {
     // Not an error — the exam runs without a database on purpose — but in a
     // deployed instance it means persistence is degraded, and the subject is
     // whatever the browser said.
-    console.warn("[live-token] no sitting to read; minting for the requested subject", examId);
+    console.warn("[live-token] no sitting to read; minting for the requested subject:", examId);
   }
 
   const apiKey = process.env.GEMINI_API_KEY;

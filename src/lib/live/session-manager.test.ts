@@ -92,9 +92,39 @@ class FakeTransport implements LiveTransport {
   /** Number of upcoming mints that should fail, simulating a token route outage. */
   failMints = 0;
   private minted = 0;
+  private mintGate: Promise<void> | null = null;
+  private openGate: Promise<void> | null = null;
+
+  /**
+   * Stall the next mint (or open) until the returned function is called, so a
+   * test can land `close()` in the middle of an in-flight connect. That window
+   * is where a socket used to be opened and then referenced by nobody.
+   */
+  holdMint(): () => void {
+    return this.hold((gate) => {
+      this.mintGate = gate;
+    });
+  }
+
+  holdOpen(): () => void {
+    return this.hold((gate) => {
+      this.openGate = gate;
+    });
+  }
+
+  private hold(assign: (gate: Promise<void>) => void): () => void {
+    let release!: () => void;
+    assign(new Promise<void>((resolve) => (release = resolve)));
+    return () => {
+      this.mintGate = null;
+      this.openGate = null;
+      release();
+    };
+  }
 
   async mintToken(request: LiveTokenClientRequest): Promise<string> {
     this.tokenRequests.push({ ...request });
+    if (this.mintGate) await this.mintGate;
     if (this.failMints > 0) {
       this.failMints -= 1;
       throw new Error("token route unavailable");
@@ -109,6 +139,7 @@ class FakeTransport implements LiveTransport {
     config: unknown;
     callbacks: LiveSocketCallbacks;
   }): Promise<LiveSocket> {
+    if (this.openGate) await this.openGate;
     const socket = new FakeSocket(params.callbacks);
     this.sockets.push(socket);
     this.opens.push({ token: params.token, model: params.model, config: params.config });
@@ -485,6 +516,56 @@ describe("reconnection", () => {
     await flush();
 
     assert.equal(h.transport.socket.audioChunks.length, 50);
+  });
+
+  it("closes a socket that finishes opening after the phase ended", async () => {
+    // The leak this guards: `close()` works by closing `this.socket`, which is
+    // only assigned once `open()` resolves. A candidate navigating away
+    // mid-connect therefore found null, closed nothing, and left a live Gemini
+    // socket that nothing held a reference to.
+    const h = harness();
+    const release = h.transport.holdOpen();
+
+    const connecting = h.session.connect();
+    // Let the mint settle, so the close lands while `open()` is in flight —
+    // past the point where bailing early is still possible.
+    await flush();
+    h.session.close();
+    release();
+    await connecting;
+
+    assert.equal(h.transport.sockets.length, 1, "the socket did open");
+    assert.equal(h.transport.socket.closed, true, "and it was closed anyway");
+    assert.equal(h.session.connectionState, "closed");
+    assert.ok(h.eventNames().includes("closed-late-open"));
+  });
+
+  it("does not spend a socket at all when the phase ends while the token is minting", async () => {
+    const h = harness();
+    const release = h.transport.holdMint();
+
+    const connecting = h.session.connect();
+    h.session.close();
+    release();
+    await connecting;
+
+    assert.equal(h.transport.sockets.length, 0);
+    assert.equal(h.session.connectionState, "closed");
+  });
+
+  it("refuses to reopen after the phase is over, however it is asked", async () => {
+    // `closed` is terminal in the state machine, so it has to be terminal here.
+    // A stray reconnect would otherwise open a session for an exam that ended.
+    const h = harness();
+    await h.session.connect();
+    h.session.close();
+
+    await h.session.connect();
+    await h.session.reconnect();
+
+    assert.equal(h.transport.sockets.length, 1);
+    assert.equal(h.session.connectionState, "closed");
+    assert.ok(h.eventNames().includes("connect-refused"));
   });
 
   it("stops for good on close, with no reconnect behind it", async () => {

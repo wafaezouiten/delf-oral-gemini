@@ -186,14 +186,18 @@ const BACKOFF_CAP_MS = 5000;
 /**
  * Why the socket is being torn down, which is what `onclose` needs to know.
  *
- * Three cases, and conflating any two of them breaks something: `none` means the
- * server dropped us and we must reconnect; `final` means the phase is over and
- * we must not; `reconnect` means WE are cycling the socket, so `onclose` must
- * stay silent and let {@link ExamLiveSession.reconnect} drive the states. That
- * last one is why a forced reconnect never passes through `closed`, which the
- * state machine treats as terminal.
+ * `none` means the server dropped us and we must reconnect; `reconnect` means WE
+ * are cycling the socket, so `onclose` must stay silent and let
+ * {@link ExamLiveSession.reconnect} drive the states. That second case is why a
+ * forced reconnect never passes through `closed`, which the state machine treats
+ * as terminal.
+ *
+ * The third case — the phase is over — is deliberately NOT here. It is a sticky
+ * flag (`finished`) instead, because this one is reset on every connect and
+ * cleared halfway through every reconnect, and "the exam ended" must survive
+ * both.
  */
-type Teardown = "none" | "final" | "reconnect";
+type Teardown = "none" | "reconnect";
 
 export interface ExamLiveSessionOptions {
   /** The sitting this session belongs to. Sent to the token route, which binds
@@ -217,6 +221,8 @@ export class ExamLiveSession {
   private resumptionHandle: string | undefined;
 
   private teardown: Teardown = "none";
+  /** Set once by {@link close}, never cleared. See {@link Teardown}. */
+  private finished = false;
   private reconnectAttempts = 0;
   private cancelGoAway: CancelTimer | null = null;
 
@@ -295,6 +301,13 @@ export class ExamLiveSession {
    * examiner's memory of the exam so far.
    */
   async connect(): Promise<void> {
+    // `closed` is terminal in the state machine, so it has to be terminal here
+    // too. Without this a stray `reconnect()` after the phase ended would reopen
+    // a session for an exam that is over.
+    if (this.isFinished()) {
+      this.callbacks.onEvent("connect-refused", "the phase is over");
+      return;
+    }
     if (this.state === "connecting" || this.state === "resuming" || this.state === "connected") {
       return;
     }
@@ -305,8 +318,11 @@ export class ExamLiveSession {
 
     try {
       const token = await this.transport.mintToken(this.tokenRequest());
+      // `close()` can land while a connect is still awaiting the token. Bail
+      // before spending a socket on an exam that has ended.
+      if (this.isFinished()) return;
 
-      this.socket = await this.transport.open({
+      const socket = await this.transport.open({
         token,
         model: LIVE_MODEL,
         // Modalities only. The real config — instruction, VAD mode, resumption,
@@ -316,11 +332,18 @@ export class ExamLiveSession {
         config: CLIENT_CONNECT_CONFIG,
         callbacks: {
           onopen: () => {
+            // The socket can open after the phase ended — see the guard below,
+            // which is what actually closes it.
+            if (this.isFinished()) return;
             this.reconnectAttempts = 0;
             this.setState("connected");
             this.callbacks.onEvent(resuming ? "resumed" : "connected", {
               handle: this.resumptionHandle?.slice(0, 12),
             });
+            // Not the flush that matters — `this.socket` is still null here, so
+            // this one always no-ops. It is kept for a transport that resolves
+            // `open()` before firing this event; the load-bearing call is the
+            // one after the await below.
             this.flushPendingAudio();
           },
           onmessage: (message) => this.handleMessage(message),
@@ -330,6 +353,22 @@ export class ExamLiveSession {
           onclose: (event) => this.handleClose(event),
         },
       });
+
+      // The socket only becomes ours once it exists. `close()` works by closing
+      // `this.socket`, so anything that ran while `open()` was in flight found
+      // null and did nothing — the socket would then open, stay open, and be
+      // referenced by nobody, leaking until Gemini's own idle limit reaped it.
+      // A candidate navigating away mid-connect is enough to hit this.
+      if (this.isFinished()) {
+        try {
+          socket.close();
+        } catch {
+          /* never opened */
+        }
+        this.callbacks.onEvent("closed-late-open");
+        return;
+      }
+      this.socket = socket;
 
       // A brand-new débat session knows nothing about the monologue. Seed it
       // before the examiner speaks so its first objection can quote the
@@ -359,18 +398,17 @@ export class ExamLiveSession {
     this.socket = null;
     this.clearGoAwayTimer();
 
-    switch (this.teardown) {
-      case "final":
-        this.setState("closed");
-        return;
-      case "reconnect":
-        // Our own doing. `reconnect()` is mid-flight and owns the states from
-        // here; emitting `closed` would end the session machine for good.
-        return;
-      case "none":
-        this.callbacks.onEvent("closed-unexpectedly", event?.reason ?? "");
-        void this.scheduleReconnect();
+    if (this.isFinished()) {
+      this.setState("closed");
+      return;
     }
+    if (this.teardown === "reconnect") {
+      // Our own doing. `reconnect()` is mid-flight and owns the states from
+      // here; emitting `closed` would end the session machine for good.
+      return;
+    }
+    this.callbacks.onEvent("closed-unexpectedly", event?.reason ?? "");
+    void this.scheduleReconnect();
   }
 
   private handleMessage(message: LiveServerMessage): void {
@@ -441,14 +479,15 @@ export class ExamLiveSession {
   /**
    * Whether the phase has been ended for good.
    *
-   * A method rather than a bare `this.teardown === "final"`, because the check
-   * is made on both sides of an `await` and the compiler narrows the field at
-   * the first one — then reports the second as unreachable. It is not: `close()`
-   * can land while the backoff is sleeping, and dropping that check would have
-   * a torn-down session reconnect itself after the exam ended.
+   * A method rather than a bare field read, because the check is made on both
+   * sides of several `await`s and the compiler narrows the field at the first
+   * one — then reports the rest as unreachable. They are not: `close()` can land
+   * while a token is being minted, while a socket is opening, or while the
+   * backoff sleeps, and every one of those is a way to end up with a live socket
+   * nobody holds a reference to.
    */
   private isFinished(): boolean {
-    return this.teardown === "final";
+    return this.finished;
   }
 
   /** Backoff reconnect after an unexpected close or a failed connect. */
@@ -476,6 +515,13 @@ export class ExamLiveSession {
    * sit through ten minutes of débat to reach it.
    */
   async reconnect(): Promise<void> {
+    // Checked here as well as in `connect()`: without it the machine would still
+    // announce `reconnecting` for a session that is never going to reopen, and
+    // the badge would sit on "reconnexion, l'épreuve continue" forever.
+    if (this.isFinished()) {
+      this.callbacks.onEvent("reconnect-refused", "the phase is over");
+      return;
+    }
     this.clearGoAwayTimer();
     this.callbacks.onEvent("reconnect-forced", { hasHandle: this.hasResumptionHandle });
     this.teardown = "reconnect";
@@ -557,7 +603,7 @@ export class ExamLiveSession {
 
   /** End the phase for good. No reconnect follows. Safe to call twice. */
   close(): void {
-    this.teardown = "final";
+    this.finished = true;
     this.clearGoAwayTimer();
     this.pendingAudio = [];
     this.closeSocket();
