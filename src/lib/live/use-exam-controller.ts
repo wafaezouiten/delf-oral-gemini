@@ -36,15 +36,45 @@ export function useExamController(options: {
         topic,
         createSession: (phase, sessionTopic, callbacks, initialHistory) =>
           new ExamLiveSession({ examId, phase, topic: sessionTopic, callbacks, initialHistory }),
-        createRecorder: (onChunk) => new MicRecorder({ onChunk }),
-        createPlayer: (onSpeakingChange) => new ExaminerAudioPlayer(onSpeakingChange),
+        createRecorder: (callbacks) => new MicRecorder(callbacks),
+        createPlayer: (callbacks) => new ExaminerAudioPlayer(callbacks),
         onFinished,
       }),
     [examId, topic, onFinished],
   );
 
-  // Release the microphone and the socket when the candidate leaves the page.
-  useEffect(() => () => controller.destroy(), [controller]);
+  /**
+   * Release the microphone and the socket when the candidate leaves.
+   *
+   * Unmount alone is not enough, and the gap is not theoretical: closing the
+   * tab, navigating away, or backgrounding on iOS unmounts nothing. React runs
+   * no cleanup, so the recording indicator stays lit and the AudioContext stays
+   * open until the browser gets round to reaping the page.
+   *
+   * `pagehide` rather than `beforeunload` because it is the one that fires on
+   * mobile Safari, and it fires for bfcache too. A page frozen into the bfcache
+   * comes back with its devices released and its listeners gone rather than
+   * live — which is the right way round: an épreuve does not resume from a back
+   * button, and a suspended tab holding the microphone is worse than one that
+   * has to be restarted.
+   *
+   * When the microphone is already open — the case that matters, because that
+   * is when a device is actually held — `destroy()` reaches
+   * `stream.getTracks().forEach(stop)` before its first await, so the release
+   * happens inside this event's own call stack rather than on a tick the
+   * browser owes an unloading page nothing. It is not an unconditional
+   * guarantee: if capture is still waiting on the permission prompt, `stop()`
+   * awaits that first. Nothing is held yet in that case, and the controller's
+   * own teardown flag stops the device being adopted if it does arrive.
+   */
+  useEffect(() => {
+    const release = () => controller.destroy();
+    window.addEventListener("pagehide", release);
+    return () => {
+      window.removeEventListener("pagehide", release);
+      controller.destroy();
+    };
+  }, [controller]);
 
   const state: ExamState = useSyncExternalStore(
     controller.subscribe,

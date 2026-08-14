@@ -69,6 +69,11 @@ export interface PlayerLike {
   close(): Promise<void>;
 }
 
+/** Diagnostics from the audio layer, routed into the same session log the
+ *  Gemini connection writes to — a capture rate the browser refused and a
+ *  reconnect are the same kind of fact when an épreuve goes wrong. */
+export type AudioEventSink = (name: string, detail?: unknown) => void;
+
 export interface ExamEvent {
   at: number;
   phase: OralPhase;
@@ -117,8 +122,14 @@ export interface ExamControllerDeps {
     callbacks: SessionManagerCallbacks,
     history: Array<{ role: "user" | "model"; parts: Array<{ text: string }> }>,
   ) => LiveSessionLike;
-  createRecorder: (onChunk: (base64: string) => void) => RecorderLike;
-  createPlayer: (onSpeakingChange: (speaking: boolean) => void) => PlayerLike;
+  createRecorder: (callbacks: {
+    onChunk: (base64: string) => void;
+    onEvent: AudioEventSink;
+  }) => RecorderLike;
+  createPlayer: (callbacks: {
+    onSpeakingChange: (speaking: boolean) => void;
+    onEvent: AudioEventSink;
+  }) => PlayerLike;
   onFinished: (payload: ExamFinishedPayload) => void;
   /** Injected so tests can drive a fake clock. */
   now?: () => number;
@@ -167,6 +178,12 @@ export class ExamController {
   private session: LiveSessionLike | null = null;
   private recorder: RecorderLike | null = null;
   private player: PlayerLike | null = null;
+  /** In flight, so a second `prepareAudio()` joins it rather than opening a
+   *  second pair of devices. */
+  private preparingAudio: Promise<boolean> | null = null;
+  /** Set once by {@link destroy}. Terminal, like the session's `closed`: the
+   *  controller is gone and nothing it opens afterwards has an owner. */
+  private destroyed = false;
 
   private ticker: ReturnType<typeof setInterval> | null = null;
   /** When the closing handshake started, for its safety deadline. See `tick()`. */
@@ -263,23 +280,67 @@ export class ExamController {
    * candidate is about to speak, not thirty minutes earlier.
    */
   async prepareAudio(): Promise<boolean> {
+    if (this.destroyed) return false;
     if (this.recorder) return true;
+    // A second attempt after a failed one used to build a second player and
+    // abandon the first, still holding an open AudioContext. `advanceEarly()`
+    // is a button, and a candidate who has just been told their microphone is
+    // blocked presses it again.
+    if (this.preparingAudio) return this.preparingAudio;
+    this.preparingAudio = this.openAudio();
     try {
-      const player = this.deps.createPlayer((speaking) => {
-        this.examinerSpeaking = speaking;
-        this.emit();
+      return await this.preparingAudio;
+    } finally {
+      this.preparingAudio = null;
+    }
+  }
+
+  private async openAudio(): Promise<boolean> {
+    // Held locally until BOTH devices are open. Assigning as we went meant a
+    // microphone failure — the common one; it is the half that needs
+    // permission — left the speaker's context open with nothing to close it
+    // until the exam ended.
+    let player: PlayerLike | null = null;
+    try {
+      player = this.deps.createPlayer({
+        onSpeakingChange: (speaking) => {
+          this.examinerSpeaking = speaking;
+          this.emit();
+        },
+        onEvent: (name, detail) => this.log(name, detail),
       });
       await player.resume();
-      this.player = player;
 
-      const recorder = this.deps.createRecorder((base64) => this.session?.sendAudio(base64));
+      const recorder = this.deps.createRecorder({
+        onChunk: (base64) => this.session?.sendAudio(base64),
+        onEvent: (name, detail) => this.log(name, detail),
+      });
       await recorder.start();
-      this.recorder = recorder;
 
+      // `destroy()` can land while the permission prompt is up — which is the
+      // very window this method was moved late in the exam to create. The
+      // devices are installed on the controller only at the lines below, so a
+      // teardown that ran meanwhile found both fields null and closed nothing;
+      // without this check they are then adopted by a controller that is
+      // already gone, and nothing will ever stop them again. The microphone
+      // and the speaker each guard their own version of this internally; this
+      // is the same race one layer up, where only the controller can see it.
+      if (this.destroyed) {
+        await recorder.stop().catch(() => {});
+        await player.close().catch(() => {});
+        this.log("audio-discarded", "the sitting ended while the devices were opening");
+        return false;
+      }
+
+      this.player = player;
+      this.recorder = recorder;
       this.micError = null;
       this.log("audio-ready");
       return true;
     } catch (error) {
+      await player?.close().catch(() => {
+        /* nothing left to report; the exam failure below is the story */
+      });
       const denied =
         typeof DOMException !== "undefined" &&
         error instanceof DOMException &&
@@ -494,11 +555,19 @@ export class ExamController {
     this.stopTicker();
 
     this.player?.interrupt();
-    const audio = this.recorder?.toWavBlob() ?? null;
-    await this.recorder?.stop();
-    await this.player?.close();
+
+    // Stopped BEFORE the blob is taken, not after. `stop()` is what flushes the
+    // partial frame still in the framer, so taking the archive first dropped the
+    // candidate's last few tens of milliseconds from the recording the
+    // phonologie score is measured on. Cheap to get right, invisible when wrong.
+    const recorder = this.recorder;
     this.recorder = null;
+    await recorder?.stop();
+    const audio = recorder?.toWavBlob() ?? null;
+
+    const player = this.player;
     this.player = null;
+    await player?.close();
 
     this.log("exam-finished", {
       monologue: this.phaseSeconds.monologue,
@@ -564,6 +633,10 @@ export class ExamController {
 
   /** Release everything. Safe to call twice. */
   destroy(): void {
+    // Set before anything else: a `prepareAudio()` still waiting on the
+    // permission prompt reads this when it resolves, and closes what it opened
+    // rather than handing it to a controller that no longer exists.
+    this.destroyed = true;
     this.stopTicker();
     this.clearClosingTimer();
     this.closeSession();
