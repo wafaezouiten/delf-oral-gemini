@@ -323,7 +323,14 @@ export async function POST(
       transcript: payload.transcript,
       monologueSeconds,
       debateSeconds,
-      audio: recordings.map((recording) => recording.blob),
+      // Labelled, not just ordered: when only one phase recorded — a microphone
+      // denied before the monologue, a headset unplugged mid-débat — the
+      // corrector has to be told which task it is listening to, or it assumes
+      // the file covers the épreuve and grades the half it cannot hear.
+      audio: recordings.map((recording) => ({
+        phase: recording.phase,
+        blob: recording.blob,
+      })),
     });
 
     if (persistedExamId !== null) {

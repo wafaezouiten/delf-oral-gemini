@@ -31,7 +31,8 @@ import {
 } from "@/lib/delf/rubric";
 import { formatTranscript, type TranscriptEntry } from "@/lib/delf/transcript";
 import type { OralTopic } from "@/lib/delf/topics";
-import type { EvaluationFeedback, EvaluationMode } from "@/lib/db/schema";
+import type { EvaluationFeedback, EvaluationMode, OralSpeakingPhase } from "@/lib/db/schema";
+import { phonologyInstruction, type AttachedRecording } from "./phonology-instruction";
 
 /**
  * The corrector model. Deliberately NOT the Live model: grading is a careful
@@ -51,8 +52,9 @@ import type { EvaluationFeedback, EvaluationMode } from "@/lib/db/schema";
 export const EVAL_MODEL = process.env.GEMINI_EVAL_MODEL ?? "gemini-3.6-flash";
 
 /** Bumped whenever the prompt changes, so a stored score can be traced to the
- *  words that produced it. `.2` names the two per-phase recordings (Phase 6). */
-export const EVAL_PROMPT_VERSION = "2026-08-14.2";
+ *  words that produced it. `.3` names which task each recording is, including
+ *  when only one of the two exists (Phase 6). */
+export const EVAL_PROMPT_VERSION = "2026-08-14.3";
 
 /** Re-exported, not redeclared: the mode is a stored column, and `evaluations.mode`
  *  is where its legal values are defined. */
@@ -77,33 +79,14 @@ function criteriaBlock(): string {
   ).join("\n");
 }
 
-/**
- * The phonologie instruction, which is the ONE place the two modes genuinely
- * differ. In text mode the model is grading an absence and must be told so
- * honestly; in audio mode it is grading a recording and should say what it
- * hears.
- */
-function phonologyInstruction(mode: EvaluationMode, audioCount = 1): string {
-  if (mode === "audio") {
-    // Which recording is which has to be said. Phase 6 sends one artefact per
-    // task, in exam order, and a model told only "here is the audio" will
-    // happily attribute the débat's hesitations to the monologue.
-    const order =
-      audioCount > 1
-        ? ` Les enregistrements sont fournis dans l'ordre de l'épreuve : d'abord le MONOLOGUE SUIVI, ensuite le DEBAT.`
-        : "";
-    return `PHONOLOGIE : vous disposez de l'ENREGISTREMENT AUDIO réel du candidat.${order} Écoutez-le et jugez la prononciation, l'accentuation, le rythme, l'intonation, la fluidité et l'intelligibilité effectives. Appuyez votre note sur ce que vous entendez, en citant des exemples précis (sons mal réalisés, syllabes accentuées à tort, débit, pauses). Ne déduisez PAS la phonologie du texte : vous avez le son.`;
-  }
-  return `PHONOLOGIE : vous ne disposez QUE de la transcription, sans le son. Vous ne pouvez donc pas juger la prononciation elle-même. Jugez uniquement les indices de fluidité visibles dans le texte : hésitations (« euh », « hum »), faux départs, autocorrections, répétitions, énoncés abandonnés ou fragmentés. Beaucoup de ces marques indiquent un débit haché : notez bas. Un texte fluide et des phrases menées à terme : notez 3, voire 5 si la fluidité est remarquable sur toute la durée. Mettez « phonologieNonEvaluable » à true si la production est trop brève pour juger quoi que ce soit.`;
-}
-
 function buildPrompt(params: {
   mode: EvaluationMode;
   topic: OralTopic;
   transcript: readonly TranscriptEntry[];
   monologueSeconds: number;
   debateSeconds: number;
-  audioCount?: number;
+  /** Which tasks the attached audio actually covers. See `phonology-instruction.ts`. */
+  recordings?: readonly AttachedRecording[];
 }): string {
   const { mode, topic, transcript, monologueSeconds, debateSeconds } = params;
 
@@ -134,7 +117,7 @@ RÈGLES D'ÉVALUATION (PRIORITÉ ABSOLUE)
 - N'utilisez jamais de tiret cadratin ni de tiret demi-cadratin dans vos commentaires.
 - Restez bienveillant mais rigoureux.
 
-${phonologyInstruction(mode, params.audioCount)}
+${phonologyInstruction(mode, params.recordings)}
 
 TRANSCRIPTION DE L'ÉPREUVE
 ${formatTranscript(transcript) || "(aucune production)"}`;
@@ -210,11 +193,21 @@ export interface EvaluateParams {
   /**
    * The candidate's recording. Required for `audio` mode, ignored otherwise.
    *
-   * Accepts several, because Phase 6 produces one artefact per task rather than
-   * one per sitting. They are uploaded and attached in the order given, and the
-   * prompt tells the model what that order means — so pass the monologue first.
+   * Two shapes, because there are two kinds of caller. Phase 6's exam produces
+   * one artefact per task and passes them **labelled**, in exam order — the
+   * corrector is then told which task each file is, which matters most in the
+   * case where only one of them exists (see `phonology-instruction.ts`). A bare
+   * `Blob` is a whole-sitting recording, which is what the verification scripts
+   * and the audio-versus-text experiment hand over, and is described to the
+   * corrector as covering the épreuve rather than a task.
    */
-  audio?: Blob | readonly Blob[];
+  audio?: Blob | readonly EvaluationRecording[];
+}
+
+/** One recording, and which task of the épreuve it is of. */
+export interface EvaluationRecording {
+  phase: OralSpeakingPhase;
+  blob: Blob;
 }
 
 /**
@@ -230,13 +223,15 @@ export async function evaluateExam(params: EvaluateParams): Promise<EvaluationRe
   const ai = new GoogleGenAI({ apiKey });
   const startedAt = Date.now();
 
-  const recordings = params.audio
-    ? Array.isArray(params.audio)
-      ? [...(params.audio as readonly Blob[])]
-      : [params.audio as Blob]
-    : [];
+  // A bare blob is a whole-sitting recording and belongs to no single task, so
+  // it carries a null phase rather than being guessed at.
+  const recordings: Array<{ phase: OralSpeakingPhase | null; blob: Blob }> = !params.audio
+    ? []
+    : params.audio instanceof Blob
+      ? [{ phase: null, blob: params.audio }]
+      : params.audio.map((recording) => ({ phase: recording.phase, blob: recording.blob }));
 
-  const parts: Part[] = [{ text: buildPrompt({ ...params, audioCount: recordings.length }) }];
+  const parts: Part[] = [{ text: buildPrompt({ ...params, recordings }) }];
 
   if (params.mode === "audio") {
     if (recordings.length === 0) {
@@ -251,7 +246,7 @@ export async function evaluateExam(params: EvaluateParams): Promise<EvaluationRe
     // two files is not a latency problem worth a 429 for.
     for (const recording of recordings) {
       const uploaded = await ai.files.upload({
-        file: recording,
+        file: recording.blob,
         config: { mimeType: "audio/wav" },
       });
       if (!uploaded.uri || !uploaded.mimeType) {

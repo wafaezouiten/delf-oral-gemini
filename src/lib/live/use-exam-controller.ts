@@ -92,25 +92,29 @@ export function useExamController(options: {
    * a candidate who confirms still leaves, and must still leave with the
    * microphone released.
    *
-   * Registered only while something is actually being recorded. An unconditional
-   * handler blocks the bfcache for the whole sitting and nags on the way out of
-   * a finished exam, which is the fastest way to teach someone to click through
-   * the dialog without reading it.
+   * The listener is added and removed as recording starts and stops, rather
+   * than registered once and made a no-op from inside. That distinction is not
+   * cosmetic: several engines disqualify a page from the back/forward cache for
+   * *having* a `beforeunload` listener at all, whether or not it ever calls
+   * `preventDefault` — so a handler installed for the whole sitting would
+   * quietly cost the bfcache behaviour the `pagehide` effect above is written to
+   * rely on, through thirty minutes of preparation when there is nothing to
+   * protect. It also stops the dialog appearing on the way out of a finished
+   * exam, which is the fastest way to teach someone to click through it without
+   * reading it.
    */
-  useEffect(() => {
-    const warn = (event: BeforeUnloadEvent) => {
-      if (!controller.getSnapshot().recording) return;
-      event.preventDefault();
-    };
-    window.addEventListener("beforeunload", warn);
-    return () => window.removeEventListener("beforeunload", warn);
-  }, [controller]);
-
   const state: ExamState = useSyncExternalStore(
     controller.subscribe,
     controller.getSnapshot,
     controller.getSnapshot,
   );
+
+  useEffect(() => {
+    if (!state.recording) return;
+    const warn = (event: BeforeUnloadEvent) => event.preventDefault();
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [state.recording]);
 
   return { state, controller };
 }

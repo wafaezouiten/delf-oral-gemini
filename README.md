@@ -28,7 +28,7 @@ Required to run an exam:
 
 ```bash
 pnpm check       # typecheck + lint
-pnpm test:unit   # 261 tests, including the full-exam acceptance test
+pnpm test:unit   # 267 tests, including the full-exam acceptance test
 pnpm build
 ```
 
@@ -112,7 +112,7 @@ minutes.
 
 ## Status
 
-**Verified offline** — `pnpm check` clean, `pnpm build` succeeds, 261/261 unit
+**Verified offline** — `pnpm check` clean, `pnpm build` succeeds, 267/267 unit
 tests pass. That includes the acceptance scenario end to end (preparation →
 monologue → débat → forced reconnect → finish), asserting the transcript stays
 continuous, the débat clock does not reset, and the examiner's seeded memory
