@@ -22,7 +22,8 @@ import { and, eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { wavDurationSeconds } from "@/lib/audio/pcm";
+import { checkWavFormat, readWavFormat } from "@/lib/audio/pcm";
+import { INPUT_SAMPLE_RATE } from "@/lib/gemini/constants";
 import { EXAM_ACCESS_DENIALS } from "@/lib/auth/exam-access";
 import { authorizeExam } from "@/lib/auth/exam-guard";
 import {
@@ -102,10 +103,20 @@ const phaseReportSchema = z
  *
  * The cap exists because this is an authenticated endpoint that reads a body
  * into memory and forwards it to a metered upload API, and the browser recorder
- * is not the only thing that can reach it. Checked from `Blob.size` before
- * anything is read, so an oversized field costs a header rather than a buffer.
+ * is not the only thing that can reach it.
+ *
+ * It is enforced in two places and neither is airtight on its own. The
+ * `Content-Length` check runs before `formData()` and is the only one that can
+ * stop an oversized body being buffered at all — but the header is advisory and
+ * absent on a chunked request. The `Blob.size` check runs after, by which point
+ * the body is already in memory; what it still prevents is the expensive half,
+ * the `arrayBuffer()` and the upload to the Files API. Bounding the body itself
+ * properly means streaming it, which is a platform concern rather than this
+ * route's.
  */
 const MAX_RECORDING_BYTES = 64 * 1024 * 1024;
+/** Both recordings, plus the transcript JSON and multipart overhead. */
+const MAX_REQUEST_BYTES = 2 * MAX_RECORDING_BYTES + 8 * 1024 * 1024;
 
 const finishPayloadSchema = z.object({
   topicSlug: z.string().min(1),
@@ -128,8 +139,7 @@ interface UploadedRecording {
   phase: OralSpeakingPhase;
   blob: Blob;
   byteSize: number;
-  /** Null when the file is not a WAV we can measure — see `wavDurationSeconds`. */
-  durationSeconds: number | null;
+  durationSeconds: number;
 }
 
 /**
@@ -139,20 +149,34 @@ interface UploadedRecording {
  * refused, or died during the débat, has audio for some phases and not others,
  * and that is a state to report rather than to paper over with a zero-length
  * placeholder.
+ *
+ * A file that is *present but unmeasurable* is a different thing entirely and is
+ * refused. This endpoint grades on duration, `pcm16ToWav` is the only thing that
+ * writes these files, and a WAV that is not mono 16-bit at the capture rate did
+ * not come from it — so the choice is between rejecting it and quietly grading
+ * against a length someone else chose. The upper bound on that length is the
+ * upload cap, not a separate check: at 32 kB a second, {@link
+ * MAX_RECORDING_BYTES} cannot express more than about 35 minutes.
  */
-async function readRecordings(form: FormData): Promise<UploadedRecording[]> {
+async function readRecordings(
+  form: FormData,
+): Promise<{ recordings: UploadedRecording[] } | { rejected: OralSpeakingPhase }> {
   const recordings: UploadedRecording[] = [];
   for (const phase of SPEAKING_PHASES) {
     const file = form.get(`audio-${phase}`);
     if (!(file instanceof Blob) || file.size === 0) continue;
+
+    const format = readWavFormat(await file.arrayBuffer());
+    if (!format || !checkWavFormat(format, INPUT_SAMPLE_RATE)) return { rejected: phase };
+
     recordings.push({
       phase,
       blob: file,
       byteSize: file.size,
-      durationSeconds: wavDurationSeconds(await file.arrayBuffer()),
+      durationSeconds: format.durationSeconds,
     });
   }
-  return recordings;
+  return { recordings };
 }
 
 export async function POST(
@@ -182,6 +206,13 @@ export async function POST(
   }
   const { userId } = access;
   const persistedExamId = access.status === "owned" ? access.examId : null;
+
+  // Before the body is buffered, which is the only point at which refusing it
+  // is free. Advisory — see MAX_REQUEST_BYTES — but the cheap half of the guard.
+  const declaredLength = Number(request.headers.get("content-length"));
+  if (Number.isFinite(declaredLength) && declaredLength > MAX_REQUEST_BYTES) {
+    return NextResponse.json({ error: "Requête trop volumineuse" }, { status: 413 });
+  }
 
   let form: FormData;
   try {
@@ -239,7 +270,29 @@ export async function POST(
 
   // In exam order, because that is what the evaluator's prompt promises the
   // model about the files it is being handed.
-  const recordings = await readRecordings(form);
+  const read = await readRecordings(form);
+  if ("rejected" in read) {
+    return NextResponse.json(
+      {
+        error: `L'enregistrement du ${read.rejected} n'est pas exploitable. Réessayez depuis l'application.`,
+      },
+      { status: 400 },
+    );
+  }
+  const { recordings } = read;
+
+  // The two tables tell one story, so they are not allowed to disagree about
+  // which phases happened. A recording for a phase the client did not report is
+  // a row in `oral_recordings` with nothing beside it in `oral_exam_phases`, and
+  // "which half ran short?" stops being answerable from either.
+  const reportedPhases = new Set(payload.phases.map((report) => report.phase));
+  const unreported = recordings.find((recording) => !reportedPhases.has(recording.phase));
+  if (unreported) {
+    return NextResponse.json(
+      { error: `Un enregistrement a été envoyé pour une phase absente du récapitulatif.` },
+      { status: 400 },
+    );
+  }
 
   /**
    * The measured length of a phase's recording, in seconds.
@@ -340,10 +393,7 @@ export async function POST(
                 uri: null,
                 mimeType: "audio/wav",
                 byteSize: recording.byteSize,
-                durationSeconds:
-                  recording.durationSeconds === null
-                    ? null
-                    : Math.round(recording.durationSeconds),
+                durationSeconds: Math.round(recording.durationSeconds),
                 deletedAt: now,
               })),
             )

@@ -109,25 +109,48 @@ export function pcm16ToWav(samples: Int16Array, sampleRate: number): Blob {
   return new Blob([buffer], { type: "audio/wav" });
 }
 
+/** What a WAV says about itself, once it has been checked for saying it twice. */
+export interface WavFormat {
+  sampleRate: number;
+  channels: number;
+  bitsPerSample: number;
+  /** Bytes of audio actually present, which is not always what the header claims. */
+  dataBytes: number;
+  /** Measured: `dataBytes` divided by the rate the format fields imply. */
+  durationSeconds: number;
+}
+
 /**
- * How long a WAV actually is, read out of the file itself.
+ * Read a WAV's format and its true length out of the file itself.
  *
  * The counterpart to `pcm16ToWav`, and the reason it lives here: the duration
  * that feeds the DELF duration penalty must be *measured*, and the strongest
  * available measurement is the one taken from the bytes that were received
  * rather than from a number a browser sent alongside them. The recorder counts
- * its own samples too; this is the server checking that count against the
+ * its own samples too; this is the reader checking that count against the
  * artefact instead of trusting it.
  *
+ * Two things it deliberately does not take on faith:
+ *
+ *  - **The declared data size**, which is clamped to what the file actually
+ *    contains. A truncated upload is short audio, not a long recording with a
+ *    promise attached.
+ *  - **The declared `byteRate`**, which is not used to compute anything. It is a
+ *    redundant field — `sampleRate × channels × bitsPerSample / 8` says the same
+ *    thing — and a file whose two copies disagree is rejected rather than
+ *    measured. Dividing by the declared one would mean a hand-built header
+ *    claiming 100 bytes a second could turn a two-second file into a five-minute
+ *    recording, which is exactly the "take the client's word for it" this exists
+ *    to avoid. The format fields are still the file's own claim; what a caller
+ *    does about that is `checkWavFormat`'s business.
+ *
  * Walks the chunk list rather than assuming the canonical 44-byte header, so a
- * file that picked up a `LIST` or `fact` chunk on the way still measures. The
- * declared data size is clamped to what the file actually contains: a truncated
- * upload is short audio, not a long recording with a promise attached.
+ * file that picked up a `LIST` or `fact` chunk on the way still measures.
  *
  * Returns null when this is not a WAV we can measure — the caller then knows it
  * has no duration rather than a plausible zero.
  */
-export function wavDurationSeconds(bytes: ArrayBuffer): number | null {
+export function readWavFormat(bytes: ArrayBuffer): WavFormat | null {
   if (bytes.byteLength < 12) return null;
   const view = new DataView(bytes);
 
@@ -139,8 +162,9 @@ export function wavDurationSeconds(bytes: ArrayBuffer): number | null {
 
   if (ascii(0, 4) !== "RIFF" || ascii(8, 4) !== "WAVE") return null;
 
-  let byteRate = 0;
-  let dataSize: number | null = null;
+  let format: { sampleRate: number; channels: number; bitsPerSample: number; byteRate: number } | null =
+    null;
+  let dataBytes: number | null = null;
 
   let offset = 12;
   while (offset + 8 <= bytes.byteLength) {
@@ -149,9 +173,14 @@ export function wavDurationSeconds(bytes: ArrayBuffer): number | null {
     const body = offset + 8;
 
     if (id === "fmt " && size >= 16 && body + 16 <= bytes.byteLength) {
-      byteRate = view.getUint32(body + 8, true);
+      format = {
+        channels: view.getUint16(body + 2, true),
+        sampleRate: view.getUint32(body + 4, true),
+        byteRate: view.getUint32(body + 8, true),
+        bitsPerSample: view.getUint16(body + 14, true),
+      };
     } else if (id === "data") {
-      dataSize = Math.min(size, bytes.byteLength - body);
+      dataBytes = Math.min(size, bytes.byteLength - body);
       break;
     }
 
@@ -160,6 +189,42 @@ export function wavDurationSeconds(bytes: ArrayBuffer): number | null {
     offset = body + size + (size % 2);
   }
 
-  if (dataSize === null || byteRate <= 0) return null;
-  return dataSize / byteRate;
+  if (!format || dataBytes === null) return null;
+
+  const { sampleRate, channels, bitsPerSample, byteRate } = format;
+  if (sampleRate <= 0 || channels <= 0 || bitsPerSample <= 0) return null;
+
+  const bytesPerSecond = (sampleRate * channels * bitsPerSample) / 8;
+  // The header contradicting itself is a forged or corrupt file either way, and
+  // there is no honest way to pick which half to believe.
+  if (byteRate !== bytesPerSecond) return null;
+
+  return {
+    sampleRate,
+    channels,
+    bitsPerSample,
+    dataBytes,
+    durationSeconds: dataBytes / bytesPerSecond,
+  };
+}
+
+/**
+ * Whether a WAV is one this application could have produced.
+ *
+ * `readWavFormat` establishes that a file is internally consistent; this is the
+ * separate question of whether it is *ours* — mono 16-bit PCM at the capture
+ * rate, which is the only thing `pcm16ToWav` is ever handed. Anything else
+ * reaching a server that grades on duration is a file nobody in this codebase
+ * wrote, and measuring it would be answering a question that was not asked.
+ */
+export function checkWavFormat(format: WavFormat, sampleRate: number): boolean {
+  return (
+    format.sampleRate === sampleRate && format.channels === 1 && format.bitsPerSample === 16
+  );
+}
+
+/** The measured length of a WAV, or null if it cannot be measured. See
+ *  {@link readWavFormat}. */
+export function wavDurationSeconds(bytes: ArrayBuffer): number | null {
+  return readWavFormat(bytes)?.durationSeconds ?? null;
 }

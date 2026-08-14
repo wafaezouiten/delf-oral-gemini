@@ -3,10 +3,12 @@ import { describe, it } from "node:test";
 
 import {
   base64ToInt16,
+  checkWavFormat,
   floatBlockToPcm16,
   floatToPcm16,
   int16ToBase64,
   pcm16ToWav,
+  readWavFormat,
   wavDurationSeconds,
 } from "./pcm";
 
@@ -192,5 +194,36 @@ describe("reading a WAV's duration", () => {
     assert.equal(wavDurationSeconds(new ArrayBuffer(0)), null);
     assert.equal(wavDurationSeconds(new ArrayBuffer(64)), null, "not RIFF/WAVE");
     assert.equal(wavDurationSeconds(wav({ dataBytes: 32_000, byteRate: 0 })), null);
+  });
+
+  it("refuses a header that contradicts itself", () => {
+    // The attack this closes. `byteRate` is redundant with the three fields
+    // beside it, and dividing by the declared one lets a hand-built header turn
+    // a one-second file into an eight-minute recording — against an endpoint
+    // whose whole premise is that it does not take the client's word for the
+    // duration. A file whose two copies of the same fact disagree is refused;
+    // there is no honest way to pick which half to believe.
+    const forged = wav({ dataBytes: 32_000, byteRate: 64 });
+    assert.equal(wavDurationSeconds(forged), null, "not 500 seconds from a one-second file");
+
+    const honest = readWavFormat(wav({ dataBytes: 32_000 }));
+    assert.equal(honest?.durationSeconds, 1);
+  });
+
+  it("reports the format, so a caller can ask whether the file is even ours", () => {
+    const format = readWavFormat(wav({ dataBytes: 32_000 }));
+    assert.ok(format);
+    assert.equal(format.sampleRate, 16000);
+    assert.equal(format.channels, 1);
+    assert.equal(format.bitsPerSample, 16);
+    assert.equal(format.dataBytes, 32_000);
+
+    assert.equal(checkWavFormat(format, 16000), true);
+    assert.equal(checkWavFormat(format, 24000), false, "a rate the recorder never captures at");
+    assert.equal(
+      checkWavFormat({ ...format, channels: 2 }, 16000),
+      false,
+      "and nothing in this codebase writes stereo",
+    );
   });
 });
