@@ -163,9 +163,26 @@ export function ExamClient({ examId, topic }: { examId: string; topic: OralTopic
           {advanceLabel(state.phase, state.elapsed)}
         </button>
 
-        {/* The forced-reconnect control from §16. Kept visible in development
-            only: it drives the same path a real GoAway takes, so the 13-minute
-            resumption behaviour can be tested in seconds. */}
+        {/* The candidate's way out of a dead session, and the reason the state
+            machine treats `failed` as recoverable rather than terminal. Five
+            automatic attempts can be spent by ten seconds of bad network in a
+            twenty-minute exam; without this the only escape is reloading, which
+            starts the épreuve over. Shown in every environment — it used to be
+            folded into the development control below, which meant the documented
+            recovery did not exist in production. */}
+        {state.status === "error" && (
+          <button
+            type="button"
+            onClick={() => void controller.forceReconnect()}
+            className="bg-danger-subtle text-danger rounded-lg px-4 py-2 text-sm font-semibold"
+          >
+            Reprendre la connexion
+          </button>
+        )}
+
+        {/* The same call, as a development affordance: it drives the path a real
+            GoAway takes, so the 13-minute resumption behaviour can be exercised
+            in seconds instead of waiting for the connection limit. */}
         {process.env.NODE_ENV !== "production" && state.phase !== "preparation" && (
           <button
             type="button"

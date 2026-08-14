@@ -90,8 +90,13 @@ that would not.
   and never through `closed`: `reconnect()` marks its own teardown so the
   resulting `onclose` stays silent.
 
-`failed` is deliberately *not* terminal — the candidate can still press "forcer
-une reconnexion", and an exam that cannot be retried is worse than one that can.
+`failed` is deliberately *not* terminal, and the exam screen renders a
+**"Reprendre la connexion"** control whenever `examStatus` is `error` — in every
+environment, not only development. Five automatic attempts can be spent by ten
+seconds of bad network in a twenty-minute exam, and without that control the only
+escape is reloading the page, which starts the épreuve over. A deliberate retry
+also resets the attempt budget: a recovery button that works once is worse than
+none, because it makes a recoverable exam look unrecoverable.
 
 ### Why a socket is retired by generation, not by a flag
 

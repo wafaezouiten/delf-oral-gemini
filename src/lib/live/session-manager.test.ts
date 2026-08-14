@@ -489,6 +489,25 @@ describe("reconnection", () => {
     assert.ok(h.eventNames().includes("reconnect-exhausted"));
   });
 
+  it("gives a deliberate retry a fresh budget, so recovery from `failed` works", async () => {
+    // `failed` is recoverable by design, and the candidate has a button for it.
+    // Without resetting the counter that button gets exactly one attempt before
+    // falling straight back to `failed` — which reads as an unrecoverable exam
+    // when it is not.
+    const h = harness({ maxReconnectAttempts: 2 });
+    await h.session.connect();
+    h.transport.failMints = 99;
+    h.transport.socket.drop();
+    await flush();
+    assert.equal(h.session.connectionState, "failed");
+
+    h.transport.failMints = 0;
+    await h.session.reconnect();
+
+    assert.equal(h.session.connectionState, "connected", "the candidate got back in");
+    assert.equal(h.transport.sockets.length, 2);
+  });
+
   it("resets the attempt counter once a socket opens again", async () => {
     const h = harness({ maxReconnectAttempts: 3 });
     await h.session.connect();

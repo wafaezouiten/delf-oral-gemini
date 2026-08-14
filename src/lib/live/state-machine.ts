@@ -89,8 +89,9 @@ export const SESSION_TRANSITIONS: Record<SessionState, readonly SessionState[]> 
   reconnecting: ["connecting", "resuming", "failed", "closed"],
   // Terminal. See above.
   closed: [],
-  // Not terminal: the candidate can still press "forcer une reconnexion", and a
-  // failed exam that cannot be retried is worse than one that can.
+  // Not terminal: the exam screen renders "Reprendre la connexion" whenever the
+  // status is `error`, and a deliberate retry also resets the attempt budget. An
+  // exam that cannot be retried is worse than one that can.
   failed: ["reconnecting", "closed"],
 } as const;
 

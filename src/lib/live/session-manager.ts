@@ -399,6 +399,16 @@ export class ExamLiveSession {
     } catch (error) {
       this.callbacks.onEvent("connect-failed", String(error));
       this.socket = null;
+      // Awaited, not fired and forgotten, and that is deliberate: this resolves
+      // only once the whole retry chain has — a socket, or every attempt spent
+      // (~11 s with the current backoff). `openSession()` in the controller
+      // awaits `connect()`, so a phase transition blocks for that window on a
+      // bad first connect, and the directive and activity markers that follow
+      // no-op against a null socket.
+      //
+      // Making this fire-and-forget would look like an improvement and is not:
+      // a second `openSession()` could then start while this chain is still
+      // retrying, and two overlapping chains would race for the same phase.
       await this.scheduleReconnect();
     }
   }
@@ -538,6 +548,12 @@ export class ExamLiveSession {
     }
     this.clearGoAwayTimer();
     this.callbacks.onEvent("reconnect-forced", { hasHandle: this.hasResumptionHandle });
+    // A deliberate retry earns a fresh budget. Without this the counter is
+    // still at the limit after an exhaustion, so the candidate's "reprendre la
+    // connexion" would get exactly one attempt and then fall straight back to
+    // `failed` — a recovery control that works once is worse than none, because
+    // it looks like the exam is unrecoverable when it is not.
+    this.reconnectAttempts = 0;
     // Retiring bumps the generation, so the old socket's `onclose` — which
     // arrives on a later tick, well after this method has returned — is already
     // stale by the time it lands and cannot be mistaken for a fresh drop. This
