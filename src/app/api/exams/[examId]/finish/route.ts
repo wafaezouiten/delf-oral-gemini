@@ -69,15 +69,43 @@ const transcriptEntrySchema = z.object({
  * copy of it here would be a number that can disagree with the file it
  * describes.
  */
-const phaseReportSchema = z.object({
-  phase: z.enum(["monologue", "debate"]),
-  /** Wall clock. What the candidate watched count down. */
-  elapsedSeconds: z.number().nonnegative(),
-  /** Epoch ms. Null when the phase was entered but never left — an abandoned
-   *  sitting that reached the finish handler another way. */
-  startedAt: z.number().int().nullable(),
-  endedAt: z.number().int().nullable(),
-});
+const phaseReportSchema = z
+  .object({
+    phase: z.enum(["monologue", "debate"]),
+    /**
+     * Wall clock. What the candidate watched count down.
+     *
+     * Bounded because it is the one number here the server cannot check against
+     * anything: it decides nothing (the penalty is computed from the measured
+     * recording below), but it is written to an audit column, and an audit trail
+     * that will accept a four-figure hour count is decoration rather than
+     * evidence. Four hours is absurd for a 13-minute task and still far outside
+     * anything a stalled tab's clock could plausibly produce.
+     */
+    elapsedSeconds: z.number().nonnegative().max(4 * 60 * 60),
+    /** Epoch ms. Null when the phase was entered but never left — an abandoned
+     *  sitting that reached the finish handler another way. */
+    startedAt: z.number().int().nonnegative().nullable(),
+    endedAt: z.number().int().nonnegative().nullable(),
+  })
+  .refine(
+    (report) => report.startedAt === null || report.endedAt === null || report.endedAt >= report.startedAt,
+    "a phase cannot end before it started",
+  );
+
+/**
+ * The largest recording this endpoint will read.
+ *
+ * A full 20-minute sitting at 16 kHz mono PCM is about 38 MB, and the longest
+ * single task — the ~13-minute débat — about 25 MB. 64 MB is well clear of both
+ * and well under anything worth spending a 5-minute serverless budget on.
+ *
+ * The cap exists because this is an authenticated endpoint that reads a body
+ * into memory and forwards it to a metered upload API, and the browser recorder
+ * is not the only thing that can reach it. Checked from `Blob.size` before
+ * anything is read, so an oversized field costs a header rather than a buffer.
+ */
+const MAX_RECORDING_BYTES = 64 * 1024 * 1024;
 
 const finishPayloadSchema = z.object({
   topicSlug: z.string().min(1),
@@ -195,6 +223,17 @@ export async function POST(
           "La transcription ne contient presque aucune parole du candidat. L'épreuve ne peut pas être évaluée.",
       },
       { status: 422 },
+    );
+  }
+
+  const oversized = SPEAKING_PHASES.find((phase) => {
+    const file = form.get(`audio-${phase}`);
+    return file instanceof Blob && file.size > MAX_RECORDING_BYTES;
+  });
+  if (oversized) {
+    return NextResponse.json(
+      { error: `L'enregistrement du ${oversized} est trop volumineux.` },
+      { status: 413 },
     );
   }
 

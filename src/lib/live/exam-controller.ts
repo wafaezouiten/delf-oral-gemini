@@ -318,9 +318,14 @@ export class ExamController {
       canAdvance: canAdvanceEarly(this.phase, this.elapsed) && !this.closing,
       closing: this.closing,
       micError: this.micError,
+      // False during a stall too, not only after a lost device. The point of the
+      // indicator is that the candidate can check the claim, and a pulsing
+      // "Enregistrement" over a capture that has stopped delivering is the one
+      // state where the claim is false and the indicator says it is true.
       recording:
         this.recorder !== null &&
         !this.captureLost &&
+        !this.captureStalled &&
         (this.phase === "monologue" || this.phase === "debate"),
       started: this.started,
       monologueSeconds: this.phaseSeconds.monologue,

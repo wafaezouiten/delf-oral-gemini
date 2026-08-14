@@ -834,6 +834,11 @@ describe("recording the candidate", () => {
 
     h.advanceClockSilently(3);
     assert.match(h.controller.getSnapshot().micError ?? "", /n'envoie plus de son/);
+    assert.equal(
+      h.controller.getSnapshot().recording,
+      false,
+      "and the indicator goes dark, because at this moment it is telling the truth",
+    );
     assert.ok(
       h.controller.getSnapshot().events.some((event) => event.name === "capture-stalled"),
     );
@@ -842,6 +847,7 @@ describe("recording the candidate", () => {
     // warning over a working microphone for the rest of the épreuve.
     h.advanceClock(1);
     assert.equal(h.controller.getSnapshot().micError, null);
+    assert.equal(h.controller.getSnapshot().recording, true);
     assert.ok(h.controller.getSnapshot().events.some((event) => event.name === "capture-resumed"));
   });
 
