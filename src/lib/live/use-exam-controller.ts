@@ -43,8 +43,33 @@ export function useExamController(options: {
     [examId, topic, onFinished],
   );
 
-  // Release the microphone and the socket when the candidate leaves the page.
-  useEffect(() => () => controller.destroy(), [controller]);
+  /**
+   * Release the microphone and the socket when the candidate leaves.
+   *
+   * Unmount alone is not enough, and the gap is not theoretical: closing the
+   * tab, navigating away, or backgrounding on iOS unmounts nothing. React runs
+   * no cleanup, so the recording indicator stays lit and the AudioContext stays
+   * open until the browser gets round to reaping the page.
+   *
+   * `pagehide` rather than `beforeunload` because it is the one that fires on
+   * mobile Safari, and it fires for bfcache too. A page frozen into the bfcache
+   * comes back with its devices released and its listeners gone rather than
+   * live — which is the right way round: an épreuve does not resume from a back
+   * button, and a suspended tab holding the microphone is worse than one that
+   * has to be restarted.
+   *
+   * `destroy()` stops the tracks before its first await, so the device is
+   * released inside the event's own call stack rather than on a tick the
+   * browser may never give a page it is unloading.
+   */
+  useEffect(() => {
+    const release = () => controller.destroy();
+    window.addEventListener("pagehide", release);
+    return () => {
+      window.removeEventListener("pagehide", release);
+      controller.destroy();
+    };
+  }, [controller]);
 
   const state: ExamState = useSyncExternalStore(
     controller.subscribe,
