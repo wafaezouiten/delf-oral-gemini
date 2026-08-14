@@ -9,13 +9,18 @@
  * heeding rather than silencing — middleware auth relies on path matching, which
  * can diverge from how Next.js actually routes a request and leave a protected
  * resource reachable. For a route that mints Gemini credentials, "probably
- * matched" is not good enough.
+ * matched" is not good enough. A path matcher also cannot answer the question
+ * this product actually has to ask, which is not "is this caller signed in?" but
+ * "is this sitting theirs?" — that needs the row.
  *
- * So authorisation lives with each resource instead:
- *   - `app/app/layout.tsx`               redirects an unauthenticated visitor
- *   - `api/live-token/route.ts`          checks `auth()` before minting a token
- *   - `api/exams/route.ts`               checks `auth()` before creating an exam
- *   - `api/exams/[examId]/finish/route.ts` checks `auth()` before grading
+ * So authorisation lives with each resource instead, through `lib/auth`:
+ *   - `app/app/page.tsx`                   `requireUserId()`
+ *   - `app/app/oral/[examId]/page.tsx`     `requireExamAccess()`
+ *   - `app/app/results/[examId]/page.tsx`  `requireExamAccess()`
+ *   - `app/app/layout.tsx`                 `requireUserId()`, for the shell only
+ *   - `api/live-token/route.ts`            `auth()` before minting a token
+ *   - `api/exams/route.ts`                 `auth()` before creating an exam
+ *   - `api/exams/[examId]/finish/route.ts` `authorizeExam()` before grading
  *
  * This file only establishes the Clerk request context those checks read from.
  */

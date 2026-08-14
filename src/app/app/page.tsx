@@ -1,11 +1,16 @@
 import { currentUser } from "@clerk/nextjs/server";
 
+import { requireUserId } from "@/lib/auth/exam-guard";
 import { ORAL_TOPICS } from "@/lib/delf/topics";
 import { PHASE_DURATIONS } from "@/lib/delf/phases";
 import { StartExamButton } from "./_components/start-exam-button";
 
 /** Subject picker — the entry point to an exam. */
 export default async function DashboardPage() {
+  // On the page, not only in the layout: a layout does not re-render on a client
+  // transition and does not decide whether this segment renders.
+  await requireUserId();
+
   const user = await currentUser();
   const firstName = user?.firstName;
 
