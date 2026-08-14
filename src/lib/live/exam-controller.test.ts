@@ -415,8 +415,13 @@ describe("full DELF B2 exam, with a forced reconnect mid-debate", () => {
     await h.controller.advanceEarly();
     assert.equal(h.controller.getSnapshot().closing, true);
 
-    // The safety timeout is the guard against a silent examiner freezing the exam.
-    await new Promise((resolve) => setTimeout(resolve, 12_100));
+    // The safety timeout is the guard against a silent examiner freezing the
+    // exam. Driven off the injected clock like every other deadline here, so
+    // reaching it costs a tick rather than a real twelve seconds.
+    h.advanceClock(11);
+    assert.equal(h.controller.getSnapshot().phase, "monologue", "not yet");
+
+    h.advanceClock(2);
     await new Promise((resolve) => setImmediate(resolve));
     assert.equal(h.controller.getSnapshot().phase, "debate");
   });

@@ -235,6 +235,8 @@ export class ExamLiveSession {
    *  on a long outage. */
   private pendingAudio: string[] = [];
   private static readonly MAX_PENDING_CHUNKS = 50;
+  /** Reported once per outage rather than once per dropped chunk. */
+  private bufferOverflowed = false;
 
   private readonly examId: string;
   private readonly phase: LivePhase;
@@ -599,10 +601,26 @@ export class ExamLiveSession {
     }
   }
 
-  /** Hold a chunk for the next connect, up to the cap. */
+  /**
+   * Hold a chunk for the next connect, up to the cap.
+   *
+   * Past the cap the newest chunks are dropped and the oldest kept, which is
+   * the arguable half of this trade-off — the audio nearest the reconnect is
+   * what joins up with the resumed stream. It is left as it is because the cap
+   * is ~2 seconds and the alternative is speculation nothing here can measure;
+   * what it must not be is SILENT, so an overflow is reported once per outage
+   * and shows up in the session log next to the flush that follows it.
+   */
   private bufferAudio(base64: string): void {
     if (this.pendingAudio.length < ExamLiveSession.MAX_PENDING_CHUNKS) {
       this.pendingAudio.push(base64);
+      return;
+    }
+    if (!this.bufferOverflowed) {
+      this.bufferOverflowed = true;
+      this.callbacks.onEvent("audio-buffer-overflow", {
+        cap: ExamLiveSession.MAX_PENDING_CHUNKS,
+      });
     }
   }
 
@@ -610,6 +628,7 @@ export class ExamLiveSession {
     if (this.pendingAudio.length === 0) return;
     const queued = this.pendingAudio;
     this.pendingAudio = [];
+    this.bufferOverflowed = false;
     this.callbacks.onEvent("flushing-buffered-audio", { chunks: queued.length });
     for (const chunk of queued) this.sendAudio(chunk);
   }

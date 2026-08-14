@@ -581,6 +581,12 @@ describe("reconnection", () => {
     await flush();
 
     assert.equal(h.transport.socket.audioChunks.length, 50);
+    // Bounded, but not silently: a dropped-audio incident has to be visible in
+    // the session log, and once per outage rather than once per chunk.
+    assert.equal(
+      h.log.events.filter((event) => event.name === "audio-buffer-overflow").length,
+      1,
+    );
   });
 
   it("ignores the retired socket's close, which lands mid-reconnect", async () => {

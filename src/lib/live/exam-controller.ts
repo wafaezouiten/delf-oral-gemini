@@ -169,7 +169,8 @@ export class ExamController {
   private player: PlayerLike | null = null;
 
   private ticker: ReturnType<typeof setInterval> | null = null;
-  private closingTimer: ReturnType<typeof setTimeout> | null = null;
+  /** When the closing handshake started, for its safety deadline. See `tick()`. */
+  private closingStartedAt: number | null = null;
 
   private readonly now: () => number;
 
@@ -344,21 +345,23 @@ export class ExamController {
     if (this.phase === "monologue") this.endMonologueActivity();
     this.session?.sendDirective(closingInstruction(this.phase));
 
-    this.closingTimer = setTimeout(() => {
-      if (!this.closing) return;
-      this.closing = false;
-      this.log("closing-safety-timeout");
-      void this.advance();
-    }, CLOSING_SAFETY_MS);
+    // Stamped, not scheduled. The deadline is checked from `tick()` against the
+    // injected clock, like every other timing decision here — this used to be a
+    // real `setTimeout`, the one path in the file that ignored `deps.now()`, and
+    // it cost the unit suite a genuine twelve-second sleep to reach.
+    this.closingStartedAt = this.now();
 
     this.emit();
   }
 
+  /** Whether the examiner has had its promised sentence and then some. */
+  private closingHasTimedOut(): boolean {
+    if (!this.closing || this.closingStartedAt === null) return false;
+    return this.now() - this.closingStartedAt >= CLOSING_SAFETY_MS;
+  }
+
   private clearClosingTimer(): void {
-    if (this.closingTimer) {
-      clearTimeout(this.closingTimer);
-      this.closingTimer = null;
-    }
+    this.closingStartedAt = null;
   }
 
   /** Every phase transition runs through here, so ordering lives in one place. */
@@ -530,6 +533,18 @@ export class ExamController {
     if (seconds !== this.elapsed) {
       this.elapsed = seconds;
       this.emit();
+    }
+
+    // The examiner was asked for one closing sentence and never delivered it.
+    // Advancing anyway is what stops a silent model stranding the candidate on
+    // a frozen clock — the failure the reference implementation hit in
+    // production.
+    if (this.closingHasTimedOut()) {
+      this.closing = false;
+      this.clearClosingTimer();
+      this.log("closing-safety-timeout");
+      void this.advance();
+      return;
     }
 
     if (isPhaseTimeUp(this.phase, seconds) && !this.closing) {
