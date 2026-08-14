@@ -182,16 +182,21 @@ export function ExamClient({ examId, topic }: { examId: string; topic: OralTopic
 
         {/* The same call, as a development affordance: it drives the path a real
             GoAway takes, so the 13-minute resumption behaviour can be exercised
-            in seconds instead of waiting for the connection limit. */}
-        {process.env.NODE_ENV !== "production" && state.phase !== "preparation" && (
-          <button
-            type="button"
-            onClick={() => void controller.forceReconnect()}
-            className="border-border text-muted-foreground rounded-lg border px-3 py-1.5 text-xs font-semibold"
-          >
-            Forcer une reconnexion ({state.reconnectCount})
-          </button>
-        )}
+            in seconds instead of waiting for the connection limit. Stands down
+            once the real recovery control is on screen — two buttons doing the
+            same thing side by side is how a developer ends up testing the wrong
+            one. */}
+        {process.env.NODE_ENV !== "production" &&
+          state.phase !== "preparation" &&
+          state.status !== "error" && (
+            <button
+              type="button"
+              onClick={() => void controller.forceReconnect()}
+              className="border-border text-muted-foreground rounded-lg border px-3 py-1.5 text-xs font-semibold"
+            >
+              Forcer une reconnexion ({state.reconnectCount})
+            </button>
+          )}
       </footer>
 
       {process.env.NODE_ENV !== "production" && <EventLog events={state.events} />}
