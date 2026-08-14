@@ -487,6 +487,12 @@ describe("reconnection", () => {
     assert.deepEqual(h.timers.slept, [400, 800, 1600], "delays double, capped");
     assert.equal(h.session.connectionState, "failed");
     assert.ok(h.eventNames().includes("reconnect-exhausted"));
+
+    // Each failed attempt re-enters `reconnecting` from `resuming`. That is
+    // correct at this level — every one of them IS an attempt — and it is why
+    // the controller counts outages by looking for a transition out of
+    // `connected`, not by counting these.
+    assert.equal(h.log.states.filter((state) => state === "reconnecting").length, 3);
   });
 
   it("gives a deliberate retry a fresh budget, so recovery from `failed` works", async () => {

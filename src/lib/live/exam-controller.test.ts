@@ -83,6 +83,12 @@ class FakeSession implements LiveSessionLike {
     this.activityEnds += 1;
   }
 
+  /** Drive an arbitrary connection-state sequence, as the real manager can —
+   *  including a backoff that needed several attempts. */
+  emitStates(...states: Array<Parameters<SessionManagerCallbacks["onStateChange"]>[0]>): void {
+    for (const state of states) this.callbacks.onStateChange(state);
+  }
+
   /** Test helpers: pretend the examiner spoke / the candidate was transcribed. */
   candidateSays(text: string): void {
     this.callbacks.onCandidateTranscript(text);
@@ -369,6 +375,34 @@ describe("full DELF B2 exam, with a forced reconnect mid-debate", () => {
     assert.ok(seen.includes("resuming"), "the resume is distinguishable from a bare reconnect");
     assert.equal(h.controller.getSnapshot().status, "monologue", "and it lands back in the phase");
     assert.equal(h.controller.getSnapshot().reconnectCount, 1, "counted once, not twice");
+  });
+
+  it("counts one reconnection per outage, not one per attempt inside it", async () => {
+    // The number is persisted on the sitting as a reliability signal. A backoff
+    // sequence re-enters `reconnecting` once per failed attempt, so counting
+    // every entry reported three reconnections for one flaky ten-second
+    // episode — and a signal that cannot tell one bad minute from three
+    // separate ones is not a signal.
+    const h = harness();
+    h.controller.start();
+    await h.controller.advanceEarly();
+    await new Promise((resolve) => setImmediate(resolve));
+
+    // One outage that took three attempts to come back from.
+    h.session().emitStates(
+      "reconnecting",
+      "resuming",
+      "reconnecting",
+      "resuming",
+      "reconnecting",
+      "resuming",
+      "connected",
+    );
+    assert.equal(h.controller.getSnapshot().reconnectCount, 1);
+
+    // A second, genuinely separate outage.
+    h.session().emitStates("reconnecting", "resuming", "connected");
+    assert.equal(h.controller.getSnapshot().reconnectCount, 2);
   });
 
   it("advances anyway when the examiner never delivers its closing line", async () => {

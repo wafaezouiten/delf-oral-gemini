@@ -408,10 +408,21 @@ export class ExamController {
 
     const callbacks: SessionManagerCallbacks = {
       onStateChange: (state) => {
-        // Every reconnect — goAway, unexpected drop, or forced — passes through
-        // `reconnecting` exactly once before `resuming`, so this is the one
-        // place that counts them.
-        if (state === "reconnecting") this.reconnectCount += 1;
+        // Counts OUTAGES, not attempts, and the `from connected` is what makes
+        // the difference. A backoff sequence re-enters `reconnecting` once per
+        // failed attempt — `resuming` → throw → `reconnecting` → `resuming` —
+        // so counting every entry reported three reconnections for one flaky
+        // ten-second episode. That number is persisted on the sitting as a
+        // reliability signal, and a signal that cannot tell one bad minute from
+        // three separate ones is not one.
+        //
+        // Only a transition out of a HEALTHY connection starts a new episode.
+        // A first connect that fails goes `connecting` → `reconnecting` and is
+        // deliberately not counted either: nothing was ever connected, so
+        // nothing reconnected.
+        if (state === "reconnecting" && this.connection === "connected") {
+          this.reconnectCount += 1;
+        }
         this.connection = state;
         this.emit();
       },
