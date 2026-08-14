@@ -96,6 +96,14 @@ class FakeSocket implements LiveSocket {
   }
 }
 
+interface MintGate {
+  promise: Promise<void>;
+  /** Let the gated mint proceed. */
+  release: () => void;
+  /** Make the gated mint reject, as a flaky network would. */
+  fail: () => void;
+}
+
 class FakeTransport implements LiveTransport {
   tokenRequests: LiveTokenClientRequest[] = [];
   opens: Array<{ token: string; model: string; config: unknown }> = [];
@@ -103,31 +111,36 @@ class FakeTransport implements LiveTransport {
   /** Number of upcoming mints that should fail, simulating a token route outage. */
   failMints = 0;
   private minted = 0;
-  private mintGate: Promise<void> | null = null;
+  private mintGate: MintGate | null = null;
   private openGate: Promise<void> | null = null;
 
   /**
-   * Stall the next mint (or open) until the returned function is called, so a
-   * test can land `close()` in the middle of an in-flight connect. That window
-   * is where a socket used to be opened and then referenced by nobody.
+   * Stall the NEXT mint until released, so a test can land something else in
+   * the middle of an in-flight connect — a `close()`, or a whole second attempt
+   * that overtakes this one. Consumed by the call it gates, so a later attempt
+   * runs at full speed and can win the race.
+   *
+   * `fail()` rejects it instead, which is how a superseded attempt is made to
+   * throw after a newer one has already connected.
    */
-  holdMint(): () => void {
-    return this.hold((gate) => {
-      this.mintGate = gate;
+  holdMint(): MintGate {
+    let release!: () => void;
+    let fail!: () => void;
+    const promise = new Promise<void>((resolve, reject) => {
+      release = resolve;
+      fail = () => reject(new Error("token route unavailable"));
     });
+    // Not unhandled: `mintToken` awaits it, and this keeps node quiet if a test
+    // fails before that happens.
+    promise.catch(() => {});
+    this.mintGate = { promise, release, fail };
+    return this.mintGate;
   }
 
   holdOpen(): () => void {
-    return this.hold((gate) => {
-      this.openGate = gate;
-    });
-  }
-
-  private hold(assign: (gate: Promise<void>) => void): () => void {
     let release!: () => void;
-    assign(new Promise<void>((resolve) => (release = resolve)));
+    this.openGate = new Promise<void>((resolve) => (release = resolve));
     return () => {
-      this.mintGate = null;
       this.openGate = null;
       release();
     };
@@ -135,7 +148,11 @@ class FakeTransport implements LiveTransport {
 
   async mintToken(request: LiveTokenClientRequest): Promise<string> {
     this.tokenRequests.push({ ...request });
-    if (this.mintGate) await this.mintGate;
+    const gate = this.mintGate;
+    if (gate) {
+      this.mintGate = null;
+      await gate.promise;
+    }
     if (this.failMints > 0) {
       this.failMints -= 1;
       throw new Error("token route unavailable");
@@ -579,12 +596,12 @@ describe("reconnection", () => {
     h.transport.socket.emit(resumptionUpdate("handle-one"));
 
     const retired = h.transport.socket;
-    const release = h.transport.holdMint();
+    const gate = h.transport.holdMint();
     const reconnecting = h.session.reconnect();
     // The old socket's close lands here, with the connect still mid-mint.
     await flush();
     assert.ok(h.eventNames().includes("stale-close-ignored"));
-    release();
+    gate.release();
     await reconnecting;
 
     assert.equal(h.transport.sockets.length, 2, "one replacement, not two");
@@ -675,15 +692,47 @@ describe("reconnection", () => {
 
   it("does not spend a socket at all when the phase ends while the token is minting", async () => {
     const h = harness();
-    const release = h.transport.holdMint();
+    const gate = h.transport.holdMint();
 
     const connecting = h.session.connect();
     h.session.close();
-    release();
+    gate.release();
     await connecting;
 
     assert.equal(h.transport.sockets.length, 0);
     assert.equal(h.session.connectionState, "closed");
+  });
+
+  it("lets a superseded attempt fail without disturbing the one that replaced it", async () => {
+    // The last unguarded path. A connect parked on its token can be overtaken
+    // by a forced reconnect; when the abandoned attempt then rejects — an
+    // ordinary thing on the flaky network this class exists for — its catch
+    // used to null the reference to the LIVE socket the newer attempt had
+    // installed, force `reconnecting` over its `connected`, and open a second
+    // socket beside the first. Two message streams, doubled audio, one leaked.
+    const h = harness();
+    const gate = h.transport.holdMint();
+    const superseded = h.session.connect();
+    await flush();
+
+    // A forced reconnect overtakes it and connects for real.
+    await h.session.reconnect();
+    assert.equal(h.session.connectionState, "connected");
+    const live = h.transport.socket;
+
+    // Only now does the abandoned attempt's token request fail.
+    gate.fail();
+    await superseded;
+    await flush();
+
+    assert.ok(h.eventNames().includes("stale-connect-failed"));
+    assert.equal(h.transport.sockets.length, 1, "no second socket was opened");
+    assert.equal(h.session.connectionState, "connected", "the live attempt was left alone");
+    assert.deepEqual(h.timers.slept, [], "and no backoff was started behind it");
+
+    // The live socket is still held, so audio still goes out.
+    h.session.sendAudio("chunk-after");
+    assert.deepEqual(live.audioChunks, ["chunk-after"]);
   });
 
   it("refuses to reopen after the phase is over, however it is asked", async () => {

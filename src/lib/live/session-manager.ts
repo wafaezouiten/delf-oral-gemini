@@ -397,8 +397,24 @@ export class ExamLiveSession {
       // unless the state says connected.
       this.flushPendingAudio();
     } catch (error) {
+      // A superseded attempt failing is not this session's problem. Without
+      // this check the rejection of an abandoned `mintToken`/`open` — an
+      // entirely normal thing on the flaky network this class exists for —
+      // would null the reference to the LIVE socket a newer attempt had already
+      // installed, force `reconnecting` over its `connected`, and then open a
+      // second socket alongside the first: two `onmessage` streams, doubled
+      // audio, and one of them leaked. Every other callback here checks this;
+      // the catch was the one path that did not.
+      if (!isCurrent()) {
+        this.callbacks.onEvent("stale-connect-failed", String(error));
+        return;
+      }
       this.callbacks.onEvent("connect-failed", String(error));
-      this.socket = null;
+      // `retireSocket()` rather than `this.socket = null`: the throw can come
+      // from seeding the history, which happens AFTER the socket is installed,
+      // and nulling the field there would abandon an open socket instead of
+      // closing it.
+      this.retireSocket();
       // Awaited, not fired and forgotten, and that is deliberate: this resolves
       // only once the whole retry chain has — a socket, or every attempt spent
       // (~11 s with the current backoff). `openSession()` in the controller
