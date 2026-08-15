@@ -27,8 +27,14 @@ import { checkWavFormat, readWavFormat } from "@/lib/audio/pcm";
  * Measured, not guessed: the shipped encoding is 16 kbit/s constant, which came
  * out at 2 060 bytes a second over a 20-minute sitting (docs/AUDIO_UPLOAD.md).
  * 3 MiB is therefore about 25 minutes of one task — comfortably past the
- * ~13-minute débat and past any plausible overrun — and a recording larger than
- * that did not come from this application.
+ * ~13-minute débat and past any plausible overrun.
+ *
+ * It is a limit on Opus, and the WAV fallback is measured against the same
+ * number without being sized for it: 3 MiB is 98 seconds of PCM16. That is
+ * deliberate rather than an oversight — see `measureUploadedRecording` for what
+ * it means for the sittings a WAV can represent — because the number this route
+ * has to defend is the request's, and a per-recording cap generous enough for
+ * uncompressed audio would not be one.
  */
 export const MAX_RECORDING_BYTES = 3 * 1024 * 1024;
 
@@ -74,13 +80,26 @@ export interface MeasuredRecording {
  * must not be possible is a client choosing which arithmetic gets applied to its
  * file.
  *
- * Two formats are accepted, and they are not equals. **Ogg Opus** is what the
- * exam produces and the only one a real sitting can arrive as. **WAV** is what
- * the archive falls back to when a browser cannot encode Opus, and what the
- * repository's own tools write; it is still measured exactly, but a full sitting
- * as WAV is eight times the request ceiling and will have been refused above
- * before it gets here. Keeping it accepted means a short sitting, and local
- * development, still grade from audio.
+ * Two formats are accepted, and they are not equals.
+ *
+ * **Ogg Opus** is what the exam produces, and the only format a full sitting can
+ * arrive as.
+ *
+ * **WAV** is what the archive falls back to when a browser cannot encode Opus.
+ * It is measured just as exactly, but be clear about how little of it can get
+ * here: at 32 kB a second, {@link MAX_RECORDING_BYTES} is 98 seconds of it,
+ * against a monologue the candidate cannot leave before 300
+ * (`MONOLOGUE_MIN_SECONDS`). So the only WAV this route will ever accept is one
+ * whose *capture* failed — a microphone revoked, a headset unplugged, a tab the
+ * browser suspended — which is exactly the case where the recording is much
+ * shorter than the phase, and exactly the case Phase 6 built the measured
+ * duration for. A candidate who spoke normally into a browser without WebCodecs
+ * is not graded from audio at all: the client weighs the artefact and sends the
+ * transcript alone rather than a request that cannot be delivered.
+ *
+ * It stays accepted because refusing it would throw away the one audio a broken
+ * capture does produce, and because it costs one branch to keep — not because it
+ * is a working transport for a real sitting. It is not.
  *
  * Null for anything else — including a WAV or an Opus stream that is not the
  * mono, capture-rate audio this application writes. `pcm16ToWav` and

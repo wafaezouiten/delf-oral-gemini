@@ -136,5 +136,16 @@ So: the Files API takes `audio/ogg`, the model hears French through it at
   still waiting on real learner recordings.
 - **Browsers without WebCodecs.** `AudioEncoder` has been in Chrome since 94,
   Safari since 16.4 and Firefox since 130. A browser without it archives a WAV
-  instead, which the client will refuse to attach when it is over the ceiling —
-  so that sitting is graded from its transcript, and the results page says so.
+  instead, and a WAV of a real sitting is far past what one request may carry —
+  `MAX_RECORDING_BYTES` is 98 seconds of PCM16, against a monologue that cannot
+  end before 300. So on that browser the recording is not sent at all: the
+  client weighs it, sends the transcript alone, and the results page reports the
+  correction as `transcription seule`. The candidate is told this on the briefing
+  screen, before the thirty minutes of preparation, because that is the only
+  point at which switching browsers costs them nothing.
+
+  The route still accepts WAV, and what that is actually for is narrow: a capture
+  that failed early — a revoked permission, an unplugged headset, a suspended tab
+  — leaves a short artefact that is worth grading and measures exactly the same
+  way. It is not a working transport for a full sitting and is not meant to read
+  as one.

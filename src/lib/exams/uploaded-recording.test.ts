@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import { muxOggOpus } from "@/lib/audio/ogg-opus";
+import { MONOLOGUE_MIN_SECONDS } from "@/lib/delf/phases";
 import { pcm16ToWav } from "@/lib/audio/pcm";
 import { INPUT_SAMPLE_RATE } from "@/lib/gemini/constants";
 import {
@@ -99,6 +100,21 @@ describe("what one request may carry", () => {
 
     assert.ok(asWav(7) > MAX_RECORDING_BYTES);
     assert.equal(fitsInOneRequest([200_000, asWav(7), asWav(13)]), false);
+  });
+
+  it("cannot carry a WAV of a monologue that ran its own minimum", () => {
+    // Worth pinning rather than describing: the per-recording cap is sized for
+    // Opus, so as PCM16 it is 98 seconds — and the candidate cannot leave the
+    // monologue before 300. A WAV therefore only ever reaches this route from a
+    // capture that failed early, which is the case the measured duration exists
+    // for. A browser without WebCodecs is not "graded from a short sitting", it
+    // is graded from its transcript, and `fitsInOneRequest` is what decides that
+    // in the tab rather than at a 413.
+    const asWav = (seconds: number) => 44 + seconds * INPUT_SAMPLE_RATE * 2;
+
+    assert.ok(asWav(MONOLOGUE_MIN_SECONDS) > MAX_RECORDING_BYTES);
+    assert.equal(Math.floor(MAX_RECORDING_BYTES / (INPUT_SAMPLE_RATE * 2)), 98);
+    assert.equal(fitsInOneRequest([1_000, asWav(MONOLOGUE_MIN_SECONDS)]), false);
   });
 
   it("stays under the platform's own limit, which is the point of the number", () => {

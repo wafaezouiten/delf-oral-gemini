@@ -178,12 +178,17 @@ function toFloat32(block: Int16Array): Float32Array<ArrayBuffer> {
  * The encoder the recorder actually installs: Opus, with the recorder's WAV as
  * the answer when a browser cannot produce it.
  *
- * The fallback is not a working upload — a WAV sitting is eight times the
- * platform's limit and the finish route refuses it — and it is not meant to be.
- * It keeps the artefact playable and measurable for a short sitting and for
- * local development, and it makes the failure a named event rather than a
- * recording that quietly stops existing. What the client does with an artefact
- * too large to send is the client's decision, in `exam-client.tsx`.
+ * The fallback is not a working upload and is not meant to be. A WAV sitting is
+ * eight times the platform's limit, and the finish route's per-recording cap is
+ * 98 seconds of PCM16 against a monologue that cannot end before 300 — so on
+ * this path a candidate who spoke normally is graded from their transcript, and
+ * the only WAV that reaches the server is one from a capture that failed early.
+ *
+ * What it buys is that the artefact still exists and still measures, and that
+ * the failure is a named event instead of a recording that quietly stops
+ * existing. The candidate is told before the épreuve rather than after it, in
+ * `exam-client.tsx`, which is the only point at which they can do something
+ * about it: {@link isOpusEncodingSupported} is what that check asks.
  */
 export function opusRecordingEncoder(options?: {
   onFallback?: (reason: string) => void;

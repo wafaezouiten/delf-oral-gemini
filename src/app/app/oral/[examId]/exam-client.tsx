@@ -1,11 +1,12 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { useExamController } from "@/lib/live/use-exam-controller";
 import type { ExamFinishedPayload } from "@/lib/live/exam-controller";
 import { PHASE_LABELS, MONOLOGUE_MIN_SECONDS } from "@/lib/delf/phases";
+import { isOpusEncodingSupported } from "@/lib/audio/opus-encoder";
 import { fitsInOneRequest } from "@/lib/exams/uploaded-recording";
 import type { OralTopic } from "@/lib/delf/topics";
 import type { TranscriptEntry } from "@/lib/delf/transcript";
@@ -121,8 +122,33 @@ export function ExamClient({ examId, topic }: { examId: string; topic: OralTopic
 
   const { state, controller } = useExamController({ examId, topic, onFinished });
 
+  /**
+   * Whether this browser can compress the recording, asked before the épreuve
+   * rather than discovered after it.
+   *
+   * A browser without WebCodecs archives a WAV, and a WAV sitting is far past
+   * what one request may carry — so the recording is never sent and the
+   * correction is made from the transcript alone (#24). That is a real loss of
+   * the thing this product exists for, and the only moment the candidate can do
+   * anything about it is now, before thirty minutes of preparation. Null while
+   * the question is still being asked, so a slow answer does not flash a warning
+   * at a browser that turns out to be fine.
+   */
+  const [canEncode, setCanEncode] = useState<boolean | null>(null);
+  useEffect(() => {
+    let live = true;
+    void isOpusEncodingSupported().then((supported) => {
+      if (live) setCanEncode(supported);
+    });
+    return () => {
+      live = false;
+    };
+  }, []);
+
   if (!state.started) {
-    return <Briefing topic={topic} onStart={() => controller.start()} />;
+    return (
+      <Briefing topic={topic} onStart={() => controller.start()} canEncode={canEncode} />
+    );
   }
 
   if (state.phase === "finished") {
@@ -247,7 +273,16 @@ function advanceLabel(phase: string, elapsed: number): string {
   return "Terminer l'épreuve";
 }
 
-function Briefing({ topic, onStart }: { topic: OralTopic; onStart: () => void }) {
+function Briefing({
+  topic,
+  onStart,
+  canEncode,
+}: {
+  topic: OralTopic;
+  onStart: () => void;
+  /** Null while the browser is still being asked. See `ExamClient`. */
+  canEncode: boolean | null;
+}) {
   return (
     <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col justify-center gap-6 px-6 py-12">
       <div className="space-y-3">
@@ -279,6 +314,19 @@ function Briefing({ topic, onStart }: { topic: OralTopic; onStart: () => void })
         l&apos;épreuve terminée. Utilisez un casque : sans lui,
         l&apos;examinateur s&apos;entend lui-même et la transcription en souffre.
       </p>
+
+      {canEncode === false && (
+        // Said here, and only here: after the épreuve the candidate can do
+        // nothing about it, and the results page will only be able to report
+        // that the correction was made without the audio.
+        <p className="bg-danger-subtle text-danger rounded-lg px-4 py-3 text-xs leading-relaxed">
+          Votre navigateur ne sait pas compresser l&apos;enregistrement. Votre
+          prestation sera corrigée à partir de la transcription seule, sans écoute
+          de votre prononciation. Pour une correction qui tient compte de votre
+          phonologie, passez l&apos;épreuve sur une version récente de Chrome,
+          Edge, Safari ou Firefox.
+        </p>
+      )}
 
       <button
         type="button"
