@@ -17,32 +17,16 @@
 
 import { z } from "zod";
 
-import type { TranscriptEntry } from "@/lib/delf/transcript";
+// The transcript half of this payload, shared with the progress route since
+// Phase 8 — both write turns into the same column, so both are bounded by the
+// same numbers rather than by two copies of them.
+import { transcriptSchema } from "./transcript-payload";
 
-/**
- * How long one turn's text may be.
- *
- * Sized against what the transcript actually produces, not against a guess.
- * `appendFragment` coalesces consecutive fragments from the same speaker, and
- * the monologue is by construction ONE turn — Gemini emits nothing until
- * `activityEnd` and then the whole exposé at once. Seven minutes of fast French
- * is roughly 1 300 words, call it 9 000 characters, so a 4 000-character cap
- * would reject a perfectly ordinary sitting. 20 000 is comfortably clear of the
- * longest legitimate turn and still four orders of magnitude below what an
- * unbounded field allows.
- */
-export const MAX_TURN_CHARS = 20_000;
-
-/** Turns in a sitting. A talkative 13-minute débat is well under a hundred. */
-export const MAX_TURNS = 500;
-
-/**
- * And the whole transcript, bounded independently of how it is distributed
- * across turns — 500 turns of 20 000 characters each is 10 MB, which is not a
- * bound worth having. 200 000 characters is about 35 000 words against a
- * 20-minute exam's realistic ceiling of roughly 4 000.
- */
-export const MAX_TRANSCRIPT_CHARS = 200_000;
+export {
+  MAX_TRANSCRIPT_CHARS,
+  MAX_TURNS,
+  MAX_TURN_CHARS,
+} from "./transcript-payload";
 
 /**
  * The longest a phase's clock may claim to have run.
@@ -54,13 +38,6 @@ export const MAX_TRANSCRIPT_CHARS = 200_000;
  * tab's clock could plausibly produce.
  */
 export const MAX_PHASE_SECONDS = 4 * 60 * 60;
-
-const transcriptEntrySchema = z.object({
-  phase: z.enum(["monologue", "debate"]),
-  speaker: z.enum(["candidate", "examiner"]),
-  timestamp: z.number(),
-  text: z.string().max(MAX_TURN_CHARS),
-}) satisfies z.ZodType<TranscriptEntry>;
 
 /**
  * One phase, as the browser saw it. Deliberately carries no recorded duration:
@@ -102,13 +79,7 @@ const phaseReportSchema = z
 export const finishPayloadSchema = z.object({
   /** Bounded to the column it is looked up against (`oral_topics.slug`). */
   topicSlug: z.string().min(1).max(128),
-  transcript: z
-    .array(transcriptEntrySchema)
-    .max(MAX_TURNS)
-    .refine(
-      (entries) => entries.reduce((n, entry) => n + entry.text.length, 0) <= MAX_TRANSCRIPT_CHARS,
-      "the transcript is longer than any real épreuve produces",
-    ),
+  transcript: transcriptSchema,
   /** At most one entry per phase, and only for phases actually entered. */
   phases: z
     .array(phaseReportSchema)

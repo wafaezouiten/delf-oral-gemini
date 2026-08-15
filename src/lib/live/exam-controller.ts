@@ -43,6 +43,7 @@ import { closingInstruction, examinerOpeningLine } from "@/lib/delf/examiner-pro
 import type { OralTopic } from "@/lib/delf/topics";
 import {
   appendFragment,
+  entriesForPhase,
   monologueAsHistory,
   type TranscriptEntry,
   type TranscriptPhase,
@@ -168,6 +169,23 @@ export interface PhaseReport {
   endedAt: number | null;
 }
 
+/**
+ * A speaking phase that has just ended, reported while the exam is still running.
+ *
+ * The clock stamps are here and no duration is: how much the candidate actually
+ * spoke is measured from the audio, and the audio does not leave this tab until
+ * the épreuve is submitted. What this buys is the transcript — the turns of a
+ * completed phase, on the server, before the tab has a chance to lose them.
+ */
+export interface FinalisedPhaseReport {
+  phase: RecordedPhase;
+  /** This phase's turns only. The server appends them to what it already has. */
+  entries: TranscriptEntry[];
+  /** Epoch ms. Both non-null: the phase was entered, and it has now ended. */
+  startedAt: number;
+  endedAt: number;
+}
+
 export interface ExamFinishedPayload {
   transcript: TranscriptEntry[];
   /** One playable artefact per phase that captured anything. */
@@ -195,6 +213,15 @@ export interface ExamControllerDeps {
     onEvent: AudioEventSink;
   }) => PlayerLike;
   onFinished: (payload: ExamFinishedPayload) => void;
+  /**
+   * A speaking phase has ended and the exam continues.
+   *
+   * Optional, and called for its side effect only — the controller does not
+   * await it, does not retry it and does not care whether it succeeded. The
+   * épreuve must not pause, stall or fail because a progress request did, so
+   * everything about that is the binding's problem (`use-exam-controller.ts`).
+   */
+  onPhaseFinalised?: (report: FinalisedPhaseReport) => void;
   /** Injected so tests can drive a fake clock. */
   now?: () => number;
   /**
@@ -659,7 +686,40 @@ export class ExamController {
       await this.openSession(target);
     }
 
+    // Deliberately last, and deliberately not on the way into `finished`.
+    //
+    // Last, because the transcript is what is being reported and Gemini's
+    // transcription of the monologue arrives asynchronously: the awaits above
+    // are free time for the fragments still in flight, and any that land after
+    // this carry the NEXT phase's tag, so they cannot contaminate what is sent.
+    // Not on the way into `finished`, because `finish()` is about to post the
+    // whole sitting — transcript, recordings and all — and a progress request
+    // racing it would be a second write of the same turns for no insurance.
+    if (target !== "finished" && (current === "monologue" || current === "debate")) {
+      this.reportFinalisedPhase(current);
+    }
+
     if (target === "finished") await this.finish();
+  }
+
+  /** Hand a completed phase to whoever is persisting it. Never throws upward. */
+  private reportFinalisedPhase(phase: RecordedPhase): void {
+    const { startedAt, endedAt } = this.phaseStamps[phase];
+    // A phase that was never entered, or somehow never stamped its end, has
+    // nothing honest to report. The finish payload still carries its turns.
+    if (startedAt === null || endedAt === null) return;
+
+    try {
+      this.deps.onPhaseFinalised?.({
+        phase,
+        entries: entriesForPhase(this.transcript, phase),
+        startedAt,
+        endedAt,
+      });
+    } catch (error) {
+      // A throwing listener must not take a phase transition down with it.
+      this.log("error", `progress report failed: ${String(error)}`);
+    }
   }
 
   /** Open this phase's artefact and arm the stall watchdog for it. */

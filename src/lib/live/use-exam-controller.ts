@@ -15,10 +15,42 @@ import { useEffect, useMemo, useSyncExternalStore } from "react";
 import { MicRecorder } from "@/lib/audio/recorder";
 import { ExaminerAudioPlayer } from "@/lib/audio/player";
 import type { OralTopic } from "@/lib/delf/topics";
-import { ExamController, type ExamFinishedPayload, type ExamState } from "./exam-controller";
+import {
+  ExamController,
+  type ExamFinishedPayload,
+  type ExamState,
+  type FinalisedPhaseReport,
+} from "./exam-controller";
 import { ExamLiveSession } from "./session-manager";
 
 export type { ExamEvent, ExamState } from "./exam-controller";
+
+/**
+ * Tell the server a phase has ended, and forget about it.
+ *
+ * Every property of this call is chosen so that it cannot cost the candidate
+ * anything:
+ *
+ *  - **Not awaited.** The controller fires it from inside a phase transition,
+ *    and the transition must not wait on a network round trip to hand the floor
+ *    to the next task.
+ *  - **`keepalive`.** The most valuable moment to have sent this is the one just
+ *    before the tab goes away, which is exactly when an ordinary fetch is
+ *    cancelled. `keepalive` asks the browser to finish it anyway.
+ *  - **Swallowed.** A failure loses the insurance and nothing else: the finish
+ *    request re-sends the complete transcript regardless, so the only sitting
+ *    this protects is one that never reaches finish at all.
+ */
+function reportPhase(examId: string, report: FinalisedPhaseReport): void {
+  void fetch(`/api/exams/${examId}/progress`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(report),
+    keepalive: true,
+  }).catch((error: unknown) => {
+    console.warn(`[progress] the ${report.phase} was not recorded on the server`, error);
+  });
+}
 
 export function useExamController(options: {
   /** The sitting. Reaches the token route, which refuses to mint for a sitting
@@ -39,6 +71,7 @@ export function useExamController(options: {
         createRecorder: (callbacks) => new MicRecorder(callbacks),
         createPlayer: (callbacks) => new ExaminerAudioPlayer(callbacks),
         onFinished,
+        onPhaseFinalised: (report) => reportPhase(examId, report),
       }),
     [examId, topic, onFinished],
   );

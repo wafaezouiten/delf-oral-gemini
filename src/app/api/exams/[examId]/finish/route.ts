@@ -16,23 +16,26 @@
  * the number the DELF duration penalty is computed from. A client that
  * miscounts, or an upload that truncates, then produces a short recording rather
  * than a long claim.
+ *
+ * **What this route no longer does.** Since Phase 8 it does not write anything
+ * itself. It reads the request, decides what the correction should be graded
+ * from, and hands the result to `lib/exams/sitting-persistence.ts` — which owns
+ * the order the writes happen in, what a second submission of the same sitting
+ * costs, and how a sitting that was graded but not stored is described
+ * afterwards. That move is what closed #16 and #17: the writes became one
+ * batch, and the arithmetic behind them became something `node --test` can
+ * reach.
  */
 
-import { and, eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { INPUT_SAMPLE_RATE } from "@/lib/gemini/constants";
 import { EXAM_ACCESS_DENIALS } from "@/lib/auth/exam-access";
 import { authorizeExam } from "@/lib/auth/exam-guard";
-import {
-  evaluations,
-  getDb,
-  oralExamPhases,
-  oralExams,
-  oralRecordings,
-  type OralSpeakingPhase,
-} from "@/lib/db";
+import type { OralSpeakingPhase } from "@/lib/db";
+import { neonSittingStore } from "@/lib/db/sittings";
+import { correctSitting, type CorrectionRow } from "@/lib/exams/sitting-persistence";
 import { findTopic } from "@/lib/delf/topics";
 import { candidateWordCount } from "@/lib/delf/transcript";
 // Lives outside this file so it can be unit-tested: nothing in a route that
@@ -46,7 +49,11 @@ import {
   MAX_REQUEST_BYTES,
   measureUploadedRecording,
 } from "@/lib/exams/uploaded-recording";
-import { evaluateExam, type EvaluationMode } from "@/lib/gemini/evaluate";
+import {
+  evaluateExam,
+  type EvaluationMode,
+  type EvaluationResult,
+} from "@/lib/gemini/evaluate";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -259,8 +266,8 @@ export async function POST(
    */
   const mode: EvaluationMode = recordings.length === 0 ? "text" : "audio";
 
-  try {
-    const result = await evaluateExam({
+  const grade = () =>
+    evaluateExam({
       mode,
       topic,
       transcript: payload.transcript,
@@ -280,114 +287,66 @@ export async function POST(
       })),
     });
 
-    if (persistedExamId !== null) {
-      // The four writes below are not atomic, and cannot be as written: this
-      // driver is `neon-http`, whose `db.transaction()` throws. A failure after
-      // the UPDATE leaves a sitting marked finished with no correction attached,
-      // or — since Phase 6 — with phase rows and no recording rows beside them.
-      // `db.batch()` — which neon-http implements as a real transaction — is the
-      // fix, and belongs with the read path that would expose the inconsistency
-      // in the first place. See #16.
-      try {
-        const db = getDb();
-        const id = persistedExamId;
-
-        await db
-          .update(oralExams)
-          .set({
-            phase: "finished",
-            reconnectCount: payload.reconnectCount,
-            transcript: payload.transcript,
-            finishedAt: new Date(),
-          })
-          // The ownership predicate is repeated here on purpose: the check above
-          // is what makes the request legal, this is what keeps the statement
-          // itself safe if the two ever drift apart.
-          .where(and(eq(oralExams.id, id), eq(oralExams.userId, userId)));
-
-        // Per-phase speaking time is a row per phase, not a column pair on the
-        // sitting. `doNothing` because a repeated finish must not rewrite how
-        // long the candidate spoke; the real duplicate guard is Phase 11.
-        //
-        // Only the phases the candidate actually entered get a row. A sitting
-        // abandoned during the monologue has no débat, and a débat row claiming
-        // zero seconds would be a record of a task that never happened.
-        if (payload.phases.length > 0) {
-          await db
-            .insert(oralExamPhases)
-            .values(
-              payload.phases.map((report) => ({
-                examId: id,
-                phase: report.phase,
-                // Measured from the audio, not from `report.elapsedSeconds`.
-                // This column feeds the duration penalty; the clock is the two
-                // timestamps beside it.
-                spokenSeconds: Math.round(measuredSeconds(report.phase)),
-                startedAt: report.startedAt === null ? null : new Date(report.startedAt),
-                endedAt: report.endedAt === null ? null : new Date(report.endedAt),
-              })),
-            )
-            .onConflictDoNothing();
-        }
-
-        // One row per artefact. `uri` stays null and `deletedAt` is stamped:
-        // nothing durably stores the bytes — the schema's header is explicit
-        // that retention is forbidden — so what survives is the honest record
-        // that a recording of this length and this size existed and is gone.
-        // The upload to the Files API inside `evaluateExam` is the transient
-        // copy, and it is not ours to reference from here.
-        if (recordings.length > 0) {
-          const now = new Date();
-          await db
-            .insert(oralRecordings)
-            .values(
-              recordings.map((recording) => ({
-                examId: id,
-                phase: recording.phase,
-                uri: null,
-                mimeType: recording.mimeType,
-                byteSize: recording.byteSize,
-                durationSeconds: Math.round(recording.durationSeconds),
-                deletedAt: now,
-              })),
-            )
-            .onConflictDoNothing();
-        }
-
-        await db.insert(evaluations).values({
-          examId: id,
-          // Deliberately no `recordingId`. The correction listened to BOTH
-          // artefacts, and a single FK can name only one of them; naming either
-          // would be a smaller lie than null but still a lie. The recordings are
-          // attributable through `exam_id`, and the column stays as Phase 2 left
-          // it until something reconciles it with a per-phase recording.
-          mode: result.mode,
-          // The five bands are columns; `criteria` is keyed by the same five
-          // criterion names, so it spreads straight in.
-          ...result.criteria,
-          rawScore25: result.rawScore25,
-          // The penalty the rubric asked for, not the points the score happened
-          // to lose. They differ only below 3/25, where the score floors at 0
-          // first — and "docked 3, could only absorb 2" is the truer record.
-          // The route no longer computes either: since #9 both numbers, and the
-          // floor verdict beside them, come back from the one rubric (#15's
-          // review asked for exactly this).
-          durationPenalty: result.durationPenalty,
-          score25: result.score25,
-          meetsFloor: result.meetsFloor,
-          feedback: result.feedback,
-          model: result.model,
-          promptVersion: result.promptVersion,
-          latencySeconds: result.latencySeconds,
-        });
-      } catch (error) {
-        // The candidate has their grade; losing the row is a logging problem,
-        // not a reason to show them an error.
-        console.error("[finish] evaluation succeeded but persistence failed:", error);
-      }
+  try {
+    // No sitting to write to — no database, a degraded `local-…` id, or an
+    // ownership question that went unanswered. Grade and hand it straight back;
+    // the results page renders from the response either way.
+    if (persistedExamId === null) {
+      return NextResponse.json({ evaluation: await grade(), persisted: false });
     }
 
-    return NextResponse.json({ evaluation: result });
+    /**
+     * Grade and persist, at most once per sitting.
+     *
+     * Everything about the ordering — the duplicate check before the paid call,
+     * the claim after it, the three writes in one batch — lives in
+     * `lib/exams/sitting-persistence.ts`, which is where it can be tested. This
+     * route's remaining job is to decide what the candidate sees.
+     */
+    let graded: EvaluationResult | null = null;
+    const outcome = await correctSitting(
+      neonSittingStore(),
+      { examId: persistedExamId, userId },
+      {
+        transcript: payload.transcript,
+        reconnectCount: payload.reconnectCount,
+        phases: payload.phases,
+        recordings: recordings.map((recording) => ({
+          phase: recording.phase,
+          mimeType: recording.mimeType,
+          byteSize: recording.byteSize,
+          durationSeconds: recording.durationSeconds,
+        })),
+        evaluate: async () => {
+          graded = await grade();
+          return toCorrectionRow(graded);
+        },
+        now: () => new Date(),
+      },
+    );
+
+    if (outcome.status === "graded-not-stored") {
+      // The candidate has their grade; losing the row is a logging problem, not
+      // a reason to show them an error. The sitting reads as `uncorrected`
+      // until it is finished again, which re-runs this whole path.
+      console.error("[finish] evaluation succeeded but persistence failed:", outcome.error);
+    }
+
+    /**
+     * A second submission returns the correction that already exists rather
+     * than the one this request would have produced — there is one grade per
+     * sitting, and it is the stored one.
+     *
+     * It is slightly thinner than a fresh result: `shortParts` and the pre-snap
+     * bands are the corrector's working, which has no columns and is not worth
+     * inventing them for. The results page treats both as optional (see
+     * `results-client.tsx`) precisely because a stored correction is the other
+     * thing it can be rendering.
+     */
+    return NextResponse.json({
+      evaluation: graded ?? outcome.correction,
+      persisted: outcome.status !== "graded-not-stored",
+    });
   } catch (error) {
     console.error("[finish] evaluation failed:", error);
     return NextResponse.json(
@@ -395,4 +354,25 @@ export async function POST(
       { status: 502 },
     );
   }
+}
+
+/** The stored subset of a correction. The rest is diagnostic, not a column. */
+function toCorrectionRow(result: EvaluationResult): CorrectionRow {
+  return {
+    mode: result.mode,
+    criteria: result.criteria,
+    rawScore25: result.rawScore25,
+    // The penalty the rubric asked for, not the points the score happened to
+    // lose. They differ only below 3/25, where the score floors at 0 first — and
+    // "docked 3, could only absorb 2" is the truer record. The route computes
+    // neither: since #9 both numbers, and the floor verdict beside them, come
+    // back from the one rubric.
+    durationPenalty: result.durationPenalty,
+    score25: result.score25,
+    meetsFloor: result.meetsFloor,
+    feedback: result.feedback,
+    model: result.model,
+    promptVersion: result.promptVersion,
+    latencySeconds: result.latencySeconds,
+  };
 }
