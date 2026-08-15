@@ -201,10 +201,11 @@ export interface SittingStore {
    * Record a phase the candidate has finished, mid-sitting, and append its turns
    * to the stored transcript.
    *
-   * Returns `false` when the phase was already recorded or the sitting is
-   * already finished — in both cases nothing is written, and in particular the
-   * turns are NOT appended a second time. A retried request must not double the
-   * monologue.
+   * Returns `false` — writing nothing — unless the phase is the sitting's very
+   * next step. That covers three refusals with one rule: a phase already
+   * recorded (a retried request must not double the monologue), a phase that
+   * would skip over one that was never reported, and any report at all once the
+   * sitting has been finished.
    */
   appendFinalisedPhase(ref: SittingRef, phase: FinalisedPhase): Promise<boolean>;
 

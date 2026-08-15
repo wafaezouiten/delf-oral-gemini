@@ -13,7 +13,7 @@ import {
   oralTopics,
 } from "./schema";
 import { ORAL_CRITERIA } from "@/lib/delf/criteria";
-import { nextPhase } from "@/lib/delf/phases";
+import { ORAL_PHASES, nextPhase } from "@/lib/delf/phases";
 import type {
   CorrectionWrite,
   FinalisedPhase,
@@ -98,18 +98,41 @@ function liveSittingOwnedBy({ examId, userId }: SittingRef) {
 }
 
 /**
- * `oral_exams.phase` has not already moved past the phase being reported.
+ * The phase being reported is the sitting's very next step — not merely one it
+ * has not already passed.
  *
  * The enum is declared in exam order (`preparation`, `monologue`, `debate`,
- * `finished`), and Postgres orders enum values by declaration — so a single
- * comparison expresses both halves of what makes this write safe to repeat: a
- * report for a phase already passed matches nothing, and reports cannot be
- * replayed out of order to walk the sitting backwards. The type name comes off
- * the enum object rather than being spelled out, so renaming it in `schema.ts`
- * cannot leave a stale cast here.
+ * `finished`) and Postgres orders enum values by declaration, so the whole
+ * invariant is one `between` against two constants derived from the report:
+ *
+ *   phase_before(reported) ≤ oral_exams.phase ≤ reported
+ *
+ * Both bounds earn their place. The **upper** one is what makes a replay a
+ * no-op: a second report for a phase already recorded finds the sitting past it
+ * and matches nothing, which is what stops the monologue being appended twice.
+ * The **lower** one is what stops a report skipping a phase — without it a
+ * hand-crafted request could report the débat of a sitting still in
+ * `preparation`, and the column documented as the record of how far a candidate
+ * got would be recording somewhere they had never been. Nothing that grades or
+ * authorises reads `phase`, so that was a lie the sitting told only about
+ * itself; it is still a lie, and one constant removes it.
+ *
+ * The cost is deliberate and small: if a phase's report is lost in flight, the
+ * next one is refused too, and the sitting keeps only what it had. The finish
+ * request re-sends the complete transcript regardless, so what is given up is
+ * the insurance on a sitting that also never finishes — and recording a
+ * débat-only transcript under a sitting that claims to have reached the end
+ * would be worse evidence than recording none.
+ *
+ * The type name comes off the enum object rather than being spelled out, so
+ * renaming it in `schema.ts` cannot leave a stale cast here.
  */
-function phaseNotYetPassed(phase: FinalisedPhase["phase"]) {
-  return sql`${oralExams.phase} <= ${phase}::${sql.identifier(oralPhase.enumName)}`;
+function phaseIsTheNextStep(phase: FinalisedPhase["phase"]) {
+  // Derived from the one ordered list rather than a second hand-written map:
+  // both speaking phases have a predecessor by construction.
+  const previous = ORAL_PHASES[ORAL_PHASES.indexOf(phase) - 1];
+  const type = sql.identifier(oralPhase.enumName);
+  return sql`${oralExams.phase} between ${previous}::${type} and ${phase}::${type}`;
 }
 
 /** The five band columns, read back into the shape the rubric uses. */
@@ -153,8 +176,16 @@ export function neonSittingStore(): SittingStore {
        * database, so nothing reads the column in order to write it — a
        * read-modify-write here would lose a phase whenever two requests
        * overlapped, and overlapping is exactly what a retry is. The guard on
-       * `phase` (see {@link phaseNotYetPassed}) is what makes a replayed request
-       * append nothing rather than the monologue twice.
+       * `phase` (see {@link phaseIsTheNextStep}) is what makes a replayed
+       * request append nothing rather than the monologue twice.
+       *
+       * `nextPhase` can therefore write `finished` here, on a report of the
+       * débat — and that is the intended reading of the column rather than a
+       * leak of the finish route's word. `phase` says where the state machine
+       * stopped; whether anything was graded is `finished_at`'s and the
+       * correction's to say, and `sittingOutcome` asks only those two. A sitting
+       * whose machine ran to the end and was never submitted is exactly a
+       * `finished` phase with a null stamp.
        */
       const advanced = await db
         .update(oralExams)
@@ -162,7 +193,7 @@ export function neonSittingStore(): SittingStore {
           phase: nextPhase(phase.phase),
           transcript: sql`coalesce(${oralExams.transcript}, '[]'::jsonb) || ${JSON.stringify(phase.entries)}::jsonb`,
         })
-        .where(and(liveSittingOwnedBy(ref), phaseNotYetPassed(phase.phase)))
+        .where(and(liveSittingOwnedBy(ref), phaseIsTheNextStep(phase.phase)))
         .returning({ id: oralExams.id });
 
       if (advanced.length === 0) return false;

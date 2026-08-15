@@ -105,8 +105,12 @@ interface ExamRow {
 }
 
 /** `oral_phase` is declared in exam order and Postgres compares enums by
- *  declaration, which is what the real guard leans on. Same thing here. */
+ *  declaration, which is what the real guard leans on. Same thing here: the
+ *  reported phase must be the sitting's next step, so the stored phase has to
+ *  sit between the reported one's predecessor and the reported one. */
 const phaseRank = (phase: OralPhase) => ORAL_PHASES.indexOf(phase);
+const isNextStep = (stored: OralPhase, reported: "monologue" | "debate") =>
+  phaseRank(stored) >= phaseRank(reported) - 1 && phaseRank(stored) <= phaseRank(reported);
 const phaseAfter = (phase: "monologue" | "debate"): OralPhase =>
   phase === "monologue" ? "debate" : "finished";
 
@@ -141,7 +145,7 @@ class MemoryStore implements SittingStore {
   async appendFinalisedPhase(ref: SittingRef, phase: FinalisedPhase): Promise<boolean> {
     const exam = this.owned(ref);
     if (!exam || exam.finishedAt !== null) return false;
-    if (phaseRank(exam.phase) > phaseRank(phase.phase)) return false;
+    if (!isNextStep(exam.phase, phase.phase)) return false;
 
     exam.phase = phaseAfter(phase.phase);
     exam.transcript = [...exam.transcript, ...phase.entries];
@@ -390,6 +394,28 @@ describe("appending a phase as it finalises", () => {
       sitting?.phases.map((row) => row.phase),
       ["monologue", "debate"],
     );
+  });
+
+  it("refuses a phase that would skip the one before it", async () => {
+    // Not reachable through the controller, which reports phases in order — but
+    // reachable by hand-crafting a request for your own sitting, and `phase` is
+    // the column that claims to record how far the candidate got. A sitting
+    // still in preparation has not reached the débat.
+    assert.equal(await store.appendFinalisedPhase(REF, DEBATE), false);
+
+    const sitting = await store.readSitting(REF);
+    assert.deepEqual(sitting?.transcript, [], "and nothing was appended");
+    assert.equal(sitting?.phase, "preparation", "nor did the sitting move");
+  });
+
+  it("accepts the same phase once the one before it has been reported", async () => {
+    // The other half of the same rule: exactly one step, never two, never none.
+    await store.appendFinalisedPhase(REF, MONOLOGUE);
+    assert.equal(await store.appendFinalisedPhase(REF, DEBATE), true);
+    assert.equal((await store.readSitting(REF))?.phase, "finished");
+    // …and `finished` here is the machine's position, not a grade. The stamp and
+    // the correction are what decide that, and neither exists.
+    assert.equal((await store.readSitting(REF))?.outcome, "in-progress");
   });
 
   it("refuses a sitting belonging to someone else", async () => {

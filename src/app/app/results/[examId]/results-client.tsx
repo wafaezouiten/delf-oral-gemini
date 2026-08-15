@@ -32,7 +32,14 @@ export interface StoredResult {
     durationPenalty?: number;
     shortParts?: Array<"monologue" | "debate">;
     model: string;
-    latencySeconds: number;
+    /**
+     * Nullable because `evaluations.latency_seconds` is, and this object is
+     * built from that row as well as from a fresh finish response. Nothing
+     * renders it today; the type says `number | null` so that whatever renders
+     * it next has to decide what an unmeasured correction looks like, instead of
+     * inheriting a zero somebody coalesced to make the types line up.
+     */
+    latencySeconds: number | null;
     feedback: {
       justifications: Record<string, string>;
       appreciationGlobale: string;

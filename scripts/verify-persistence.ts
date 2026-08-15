@@ -118,6 +118,16 @@ async function main(): Promise<number> {
 
   try {
     console.log("append");
+    check(
+      "a phase that skips the one before it is refused",
+      (await store.appendFinalisedPhase(ref, {
+        phase: "debate",
+        entries: DEBATE,
+        startedAt: new Date(),
+        endedAt: new Date(),
+      })) === false,
+    );
+
     check("the monologue is recorded", await store.appendFinalisedPhase(ref, {
       phase: "monologue",
       entries: MONOLOGUE,

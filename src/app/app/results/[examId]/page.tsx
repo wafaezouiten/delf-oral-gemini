@@ -71,7 +71,7 @@ export default async function ResultsPage({ params }: PageProps<"/app/results/[e
       // no column. The client already treats it as optional, because a stored
       // correction was always going to be the other thing it renders.
       model: correction.model,
-      latencySeconds: correction.latencySeconds ?? 0,
+      latencySeconds: correction.latencySeconds,
       feedback: correction.feedback,
     },
     topic,
