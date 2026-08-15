@@ -32,13 +32,8 @@ const TONE_CLASSES: Record<BandTone, { fill: string; text: string; ring: string 
   },
 };
 
-/** The tone tokens for a band, for callers that need the colour without the scale. */
-export function bandClasses(band: GrilleBand) {
-  return TONE_CLASSES[BAND_TONE[band]];
-}
-
 export function BandScale({ band }: { band: GrilleBand }) {
-  const tone = bandClasses(band);
+  const tone = TONE_CLASSES[BAND_TONE[band]];
 
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">

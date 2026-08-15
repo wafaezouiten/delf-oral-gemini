@@ -24,6 +24,14 @@ import type { ReactNode } from "react";
  *  - **No technical text.** This component cannot enforce that, but it is where a
  *    reviewer looks — every caller passes prose written for a candidate, and the
  *    error object goes to `console.error` beside it, never into `children`.
+ *
+ * `title` is a paragraph and not a heading, deliberately. A notice is a
+ * transient statement about right now, and putting each one in the document
+ * outline would mean the heading list of the exam screen changes shape every
+ * time the microphone hiccups — the outline is meant to describe the page, not
+ * its current mood. Discoverability is not lost: the two tones worth finding
+ * announce themselves through their role, and both appear directly above the
+ * control that answers them rather than somewhere a candidate has to navigate to.
  */
 type NoticeTone = "info" | "warning" | "danger" | "success";
 

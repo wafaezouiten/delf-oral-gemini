@@ -15,13 +15,14 @@ const inter = Inter({ variable: "--font-inter", subsets: ["latin"] });
  * déclencheur, which on the day arrives on paper, and the grille, which is a
  * corrector's grid. Spectral is a French-designed text serif with the latin-ext
  * coverage the accented copy needs; the weights are declared because
- * `next/font` only downloads what is asked for.
+ * `next/font` only downloads what is asked for — and nothing more, which is why
+ * there is no italic here. Nothing in this product is set in italic, and a face
+ * that is asked for is a face that is fetched.
  */
 const spectral = Spectral({
   variable: "--font-spectral",
   subsets: ["latin", "latin-ext"],
   weight: ["400", "500", "600"],
-  style: ["normal", "italic"],
 });
 
 export const metadata: Metadata = {
