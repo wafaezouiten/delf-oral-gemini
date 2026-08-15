@@ -52,10 +52,24 @@ export const transcriptEntrySchema = z.object({
 /**
  * A run of turns, bounded by count and by total size.
  *
- * Applied per request, which for the progress route means per phase rather than
- * per sitting. That is deliberately the looser reading: a sitting cannot exceed
- * these bounds by arriving in two halves, because the finish route re-sends the
- * whole transcript and is checked against them whole.
+ * **Bounded per request, not per sitting**, and the difference is worth stating
+ * exactly rather than rounding off. The progress route accepts one phase at a
+ * time and checks each against these numbers on its own, so a sitting that is
+ * reported and then never finished can hold up to twice a single request's worth
+ * in `oral_exams.transcript` — two phases, each individually legal. About 400 kB
+ * at the ceiling.
+ *
+ * That is the transient state and it is accepted, for three reasons: it is
+ * reachable only by an authenticated user hand-crafting requests against their
+ * own sitting (the controller sends one phase, once), nothing reads the column
+ * until the sitting is finished, and finishing overwrites it wholesale with the
+ * claim's copy — which IS checked against these bounds whole. So what is stored
+ * on any sitting anyone ever reads is bounded by these numbers; what an
+ * unfinished one can be sitting on in the meantime is bounded by twice them.
+ *
+ * Tightening it would mean a per-sitting running total, which is a read before
+ * every write on a path whose whole design is a single self-contained append.
+ * The bound that matters is on what gets graded, and that one holds.
  */
 export const transcriptSchema = z
   .array(transcriptEntrySchema)
