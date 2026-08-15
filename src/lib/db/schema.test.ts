@@ -19,12 +19,7 @@ import { COMPETENCY_FLOOR, COMPETENCY_MAX } from "@/lib/delf/constants";
 import { ORAL_CRITERIA } from "@/lib/delf/criteria";
 import { GRILLE_BANDS } from "@/lib/delf/grille";
 import { ORAL_PHASES } from "@/lib/delf/phases";
-import {
-  GRILLE_BANDS as RUBRIC_BANDS,
-  ORAL_CRITERIA as RUBRIC_CRITERIA,
-  SCORE_FLOOR as RUBRIC_FLOOR,
-  SCORE_MAX as RUBRIC_MAX,
-} from "@/lib/delf/rubric";
+import { scoreSitting } from "@/lib/delf/orale-rubric";
 import {
   evaluationMode,
   evaluations,
@@ -47,31 +42,58 @@ function columnsByName(table: Parameters<typeof getTableConfig>[0]) {
 
 /**
  * The schema's `satisfies Record<OralCriterion, …>` is anchored to the ported
- * `criteria.ts` / `grille.ts`, because those are the modules the audit makes
- * canonical and the ones that survive the reconciliation in #9. The row that
- * actually reaches the INSERT, though, is built by `rubric.ts` — `evaluate.ts`
- * types `EvaluationResult.criteria` with its `CriteriaScores`, and the route
- * spreads that straight into `.values()`.
+ * `criteria.ts` / `grille.ts`. Until #9 the row that actually reached the INSERT
+ * was built by a second rubric, so two tests here asserted that the two copies
+ * agreed about the criteria, the bands and the floor. There is one rubric now,
+ * and the question those tests were really asking is better asked directly:
+ * can the rubric produce a row this table would reject?
  *
- * So the compile-time net only covers the write path for as long as the two
- * agree. This asserts that they do. When #9 deletes `rubric.ts`, this test stops
- * compiling — which is the right way to find out.
+ * Every constraint on `evaluations` is checked against the rubric's own output,
+ * including from inputs a model should never send. A failure here is a 500 on a
+ * candidate's finish request, after the paid call, inside a catch that only
+ * logs — which is the least visible place in the system for a rule to break.
  */
-test("the ported criteria and the ones that build the row are the same five", () => {
-  assert.deepEqual([...RUBRIC_CRITERIA], [...ORAL_CRITERIA]);
-  assert.deepEqual([...RUBRIC_BANDS], [...GRILLE_BANDS]);
-});
+test("no correction the rubric can produce violates the constraints on the row", () => {
+  const durations = [
+    { monologueSeconds: 400, debateSeconds: 700 }, // a full sitting
+    { monologueSeconds: 0, debateSeconds: 0 }, // nothing recorded
+    { monologueSeconds: 400, debateSeconds: 10 }, // one half short
+  ];
+  // Legal bands, the illegal 2 and 4 the prompt forbids, and the out-of-range
+  // numbers a model has no business emitting at all.
+  const scores = [0, 1, 2, 3, 4, 5, 4.5, -1, 99];
 
-/**
- * Same reasoning one level down. `meets_floor` is written by `orale-rubric.ts`'s
- * `meetsCompetencyFloor`, against a score `rubric.ts` produced — two
- * independently declared thresholds meeting in one row, with no constraint tying
- * `meets_floor` back to `score_25` the way `evaluations_score_25_check` ties the
- * three scores together.
- */
-test("the two rubric copies agree on the floor a stored score is judged against", () => {
-  assert.equal(RUBRIC_FLOOR, COMPETENCY_FLOOR);
-  assert.equal(RUBRIC_MAX, COMPETENCY_MAX);
+  for (const raw of scores) {
+    for (const duration of durations) {
+      const scored = scoreSitting(
+        Object.fromEntries(ORAL_CRITERIA.map((criterion) => [criterion, raw])) as Record<
+          (typeof ORAL_CRITERIA)[number],
+          number
+        >,
+        duration,
+      );
+
+      for (const criterion of ORAL_CRITERIA) {
+        assert.ok(
+          (GRILLE_BANDS as readonly number[]).includes(scored.criteria[criterion]),
+          `evaluations_bands_check: ${criterion} = ${scored.criteria[criterion]} from ${raw}`,
+        );
+      }
+      // evaluations_score_range_check
+      assert.ok(scored.rawScore25 >= 0 && scored.rawScore25 <= COMPETENCY_MAX);
+      assert.ok(scored.score25 >= 0 && scored.score25 <= COMPETENCY_MAX);
+      assert.ok(scored.durationPenalty >= 0);
+      // evaluations_score_25_check, written exactly as the SQL states it.
+      assert.equal(
+        scored.score25,
+        Math.max(scored.rawScore25 - scored.durationPenalty, 0),
+        `evaluations_score_25_check with ${JSON.stringify(scored)}`,
+      );
+      // `meets_floor` has no constraint tying it back to `score_25`, so it is
+      // pinned here instead — against the same constant the column documents.
+      assert.equal(scored.meetsFloor, scored.score25 >= COMPETENCY_FLOOR);
+    }
+  }
 });
 
 test("the phase enum mirrors the exam state machine", () => {

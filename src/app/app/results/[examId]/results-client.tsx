@@ -3,16 +3,14 @@
 import Link from "next/link";
 import { useCallback, useSyncExternalStore } from "react";
 
+import { COMPETENCY_FLOOR, COMPETENCY_MAX } from "@/lib/delf/constants";
 import {
-  BAND_LABELS,
-  CRITERION_COMPETENCE,
-  CRITERION_LABELS,
   ORAL_CRITERIA,
-  SCORE_FLOOR,
-  SCORE_MAX,
-  meetsFloor,
-  type GrilleBand,
-} from "@/lib/delf/rubric";
+  ORAL_CRITERIA_COMPETENCE,
+  ORAL_CRITERIA_LABELS,
+} from "@/lib/delf/criteria";
+import { BAND_LABELS, type GrilleBand } from "@/lib/delf/grille";
+import { meetsCompetencyFloor } from "@/lib/delf/orale-rubric";
 import { formatClock } from "@/lib/delf/phases";
 import { formatTranscript, type TranscriptEntry } from "@/lib/delf/transcript";
 import type { OralTopic } from "@/lib/delf/topics";
@@ -23,6 +21,16 @@ interface StoredResult {
     criteria: Record<string, GrilleBand>;
     rawScore25: number;
     score25: number;
+    /**
+     * What the rubric docked for a short épreuve, and which halves were short.
+     *
+     * Optional because this object is read back out of `sessionStorage`, so a
+     * results page opened after a deploy can be showing a sitting graded before
+     * it. The fallback below is the old reading — worth the two lines, since the
+     * alternative is a blank penalty notice on somebody's finished exam.
+     */
+    durationPenalty?: number;
+    shortParts?: Array<"monologue" | "debate">;
     model: string;
     latencySeconds: number;
     feedback: {
@@ -106,8 +114,22 @@ export function ResultsClient({ examId }: { examId: string }) {
   }
 
   const { evaluation, topic, transcript, monologueSeconds, debateSeconds } = result;
-  const passed = meetsFloor(evaluation.score25);
-  const penalised = evaluation.score25 < evaluation.rawScore25;
+  const passed = meetsCompetencyFloor(evaluation.score25);
+  const penalised =
+    evaluation.durationPenalty !== undefined
+      ? evaluation.durationPenalty > 0
+      : evaluation.score25 < evaluation.rawScore25;
+
+  /** Which half fell short, in the candidate's own words. */
+  const shortParts = evaluation.shortParts ?? [];
+  const shortLabel =
+    shortParts.length === 2
+      ? "vos deux prises de parole ont été"
+      : shortParts[0] === "monologue"
+        ? "votre monologue a été"
+        : shortParts[0] === "debate"
+          ? "votre débat a été"
+          : "votre temps de parole a été";
 
   return (
     <main className="mx-auto w-full max-w-5xl px-6 py-10">
@@ -124,7 +146,7 @@ export function ResultsClient({ examId }: { examId: string }) {
             </p>
             <p className="tabular mt-2 text-5xl font-semibold">
               {evaluation.score25}
-              <span className="text-muted-foreground text-2xl"> / {SCORE_MAX}</span>
+              <span className="text-muted-foreground text-2xl"> / {COMPETENCY_MAX}</span>
             </p>
             <p
               className={`mt-3 inline-block rounded-full px-3 py-1 text-xs font-semibold ${
@@ -132,13 +154,16 @@ export function ResultsClient({ examId }: { examId: string }) {
               }`}
             >
               {passed
-                ? `Au-dessus du seuil de ${SCORE_FLOOR}/${SCORE_MAX}`
-                : `En dessous du seuil de ${SCORE_FLOOR}/${SCORE_MAX}`}
+                ? `Au-dessus du seuil de ${COMPETENCY_FLOOR}/${COMPETENCY_MAX}`
+                : `En dessous du seuil de ${COMPETENCY_FLOOR}/${COMPETENCY_MAX}`}
             </p>
             {penalised && (
               <p className="text-muted-foreground mt-3 text-xs leading-relaxed">
-                Note avant pénalité de durée : {evaluation.rawScore25}/{SCORE_MAX}. Votre
-                temps de parole était nettement inférieur à celui de l&apos;épreuve réelle.
+                Note avant pénalité de durée : {evaluation.rawScore25}/{COMPETENCY_MAX}.{" "}
+                {/* Named, not merely announced: "vous avez été pénalisé" is an
+                    assertion, "votre débat a duré 40 secondes" is something the
+                    candidate can check against the clock beside it. */}
+                {shortLabel} nettement plus court que ce que demande l&apos;épreuve réelle.
               </p>
             )}
             <dl className="text-muted-foreground mt-4 space-y-1 text-xs">
@@ -169,11 +194,11 @@ export function ResultsClient({ examId }: { examId: string }) {
                 return (
                   <li key={key}>
                     <div className="flex items-baseline justify-between gap-3">
-                      <span className="text-sm font-medium">{CRITERION_LABELS[key]}</span>
+                      <span className="text-sm font-medium">{ORAL_CRITERIA_LABELS[key]}</span>
                       <span className="tabular text-sm font-semibold">{band} / 5</span>
                     </div>
                     <p className="text-muted-foreground text-xs">
-                      {CRITERION_COMPETENCE[key]} · {BAND_LABELS[band]}
+                      {ORAL_CRITERIA_COMPETENCE[key]} · {BAND_LABELS[band]}
                     </p>
                     <p className="mt-1.5 text-sm leading-relaxed">
                       {evaluation.feedback.justifications[key]}

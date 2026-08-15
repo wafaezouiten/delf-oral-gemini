@@ -21,14 +21,18 @@ import "server-only";
 import { GoogleGenAI, Type, createPartFromUri, type Part } from "@google/genai";
 
 import {
-  CRITERION_DESCRIPTIONS,
+  BAND_SCALE,
+  EVALUATION_RULES,
   ORAL_CRITERIA,
-  applyDurationPenalty,
-  criteriaToScore25,
-  snapCriteria,
-  type CriteriaScores,
+  ORAL_CRITERIA_DESCRIPTIONS,
   type OralCriterion,
-} from "@/lib/delf/rubric";
+} from "@/lib/delf/criteria";
+import { scoreSitting, type CriteriaBands } from "@/lib/delf/orale-rubric";
+import {
+  criterionJustifications,
+  criterionScores,
+  parseEvaluationResponse,
+} from "./evaluation-response";
 import { formatTranscript, type TranscriptEntry } from "@/lib/delf/transcript";
 import type { OralTopic } from "@/lib/delf/topics";
 import type { EvaluationFeedback, EvaluationMode, OralSpeakingPhase } from "@/lib/db/schema";
@@ -51,34 +55,72 @@ import { phonologyInstruction, type AttachedRecording } from "./phonology-instru
  */
 export const EVAL_MODEL = process.env.GEMINI_EVAL_MODEL ?? "gemini-3.6-flash";
 
-/** Bumped whenever the prompt changes, so a stored score can be traced to the
- *  words that produced it. `.3` names which task each recording is, including
- *  when only one of the two exists (Phase 6). */
-export const EVAL_PROMPT_VERSION = "2026-08-14.3";
+/**
+ * Bumped whenever the prompt changes, so a stored score can be traced to the
+ * words that produced it.
+ *
+ * `2026-08-15.0` is the first version whose band scale and evaluation rules are
+ * the ported grille text (`delf/criteria.ts`) rather than this file's
+ * paraphrase of it. Scores either side of this string are not strictly
+ * comparable, which is the entire reason the column exists.
+ */
+export const EVAL_PROMPT_VERSION = "2026-08-15.0";
 
 /** Re-exported, not redeclared: the mode is a stored column, and `evaluations.mode`
  *  is where its legal values are defined. */
 export type { EvaluationMode };
 
 /**
- * The band scale, spelled out. The wording matters: without the explicit
- * instruction to use the whole scale, models converge on 3 for everything and
- * the result stops discriminating between a good candidate and a weak one.
+ * Using the whole scale — this project's addition, not the grille's words.
+ *
+ * Kept separate from {@link BAND_SCALE} on purpose: that block is the ported
+ * definition of what each band *means*, and paraphrasing it would change what
+ * the model grades. This is a behavioural instruction about how to use it,
+ * learned by running the corrector: without it, models put 3 on everything and
+ * the result stops telling a good candidate from a weak one (see
+ * docs/EVALUATION_FINDINGS.md).
  */
-const BAND_SCALE = `ÉCHELLE DE NOTATION : chaque critère reçoit EXACTEMENT l'une de ces quatre notes : 0, 1, 3 ou 5. N'utilisez JAMAIS 2 ni 4.
-- 0 = Rien d'évaluable pour ce critère.
-- 1 = En dessous du niveau B2 : les lacunes gênent la communication.
-- 3 = Au niveau B2 : critère globalement satisfait, avec des maladresses ponctuelles.
-- 5 = B2 pleinement maîtrisé, voire B2+ : un vrai point fort, sans réserve majeure.
+const SCALE_USE = `UTILISEZ TOUTE L'ÉCHELLE. N'attribuez pas 3 par défaut. Un critère réellement réussi reçoit 5, un critère faible reçoit 1. Deux prestations de qualité différente DOIVENT recevoir des notes différentes. Des erreurs occasionnelles qui ne gênent pas la communication sont normales au niveau B2 et restent compatibles avec un 5 : n'exigez pas un niveau C1 pour l'accorder.`;
 
-UTILISEZ TOUTE L'ÉCHELLE. N'attribuez pas 3 par défaut. Un critère réellement réussi reçoit 5, un critère faible reçoit 1. Deux prestations de qualité différente DOIVENT recevoir des notes différentes. Des erreurs occasionnelles qui ne gênent pas la communication sont normales au niveau B2 et restent compatibles avec un 5 : n'exigez pas un niveau C1 pour l'accorder.`;
+/**
+ * Which task each criterion is judged on — also this project's, and for a
+ * structural reason rather than a stylistic one.
+ *
+ * The reference implementation corrects ONE task per correction, so it never
+ * has to say where a criterion's evidence lives. Here the monologue and the
+ * débat are one sitting and one mark, and the two pragmatic criteria are earned
+ * in different halves of it: a candidate who argues well alone and folds under
+ * contradiction is a real, common profile, and a corrector not told where to
+ * look grades both criteria off whichever half it read last.
+ */
+const TASK_ATTRIBUTION = `RÉPARTITION DES CRITÈRES SUR LES DEUX TÂCHES :
+- « realisationTache » se juge principalement sur le MONOLOGUE SUIVI : prise de position, structure, qualité des arguments et des exemples.
+- « interaction » se juge principalement sur le DEBAT : capacité à réagir aux objections, à défendre et à nuancer sa position, à apporter de NOUVEAUX exemples, à maintenir l'échange.
+- « lexique » et « morphosyntaxe » se jugent sur l'ENSEMBLE des deux tâches.
+- N'utilisez jamais de tiret cadratin ni de tiret demi-cadratin dans vos commentaires.`;
 
+/** The five criteria and what each measures, in the grille's own words. */
 function criteriaBlock(): string {
   return ORAL_CRITERIA.map(
-    (key, index) => `${index + 1}. ${key} : ${CRITERION_DESCRIPTIONS[key]}`,
+    (key, index) => `${index + 1}. ${key} : ${ORAL_CRITERIA_DESCRIPTIONS[key]}`,
   ).join("\n");
 }
 
+/**
+ * The corrector's prompt.
+ *
+ * Note what it does NOT contain: any arithmetic. The band scale is stated so
+ * the model knows which four numbers it may return, and nothing else about the
+ * mark is asked of it — the sum, the duration penalty and the competency floor
+ * are computed from what it returns, by `orale-rubric.ts`. A prompt that told
+ * the model to subtract three points for a short épreuve would be a second
+ * implementation of the rubric, written in French, unversioned and untestable
+ * (#9).
+ *
+ * The durations are given for context only, so the model can read a thin
+ * monologue as thin rather than as a bad one. They are the measured seconds,
+ * from the recordings.
+ */
 function buildPrompt(params: {
   mode: EvaluationMode;
   topic: OralTopic;
@@ -103,19 +145,14 @@ L'épreuve comporte DEUX tâches, présentes toutes les deux dans la transcripti
 
 ${BAND_SCALE}
 
+${SCALE_USE}
+
 LES CINQ CRITÈRES (chacun noté 0, 1, 3 ou 5 ; leur somme = total25) :
 ${criteriaBlock()}
 
-RÈGLES D'ÉVALUATION (PRIORITÉ ABSOLUE)
-- Seules les répliques « CANDIDAT: » sont notées. Les répliques « EXAMINATEUR: » sont du contexte : ne notez jamais le vocabulaire, les idées ou les structures de l'examinateur.
-- « realisationTache » se juge principalement sur le MONOLOGUE : prise de position, structure, qualité des arguments et des exemples.
-- « interaction » se juge principalement sur le DEBAT : capacité à réagir aux objections, à défendre et à nuancer sa position, à apporter de NOUVEAUX exemples, à maintenir l'échange. Abandonner sa position sans la défendre est une faiblesse à ce critère.
-- « lexique » et « morphosyntaxe » se jugent sur l'ENSEMBLE des deux tâches.
-- Évaluez la MANIÈRE de s'exprimer, JAMAIS l'opinion défendue.
-- Si aucune réplique « CANDIDAT: » ne contient de contenu évaluable, mettez 0 à TOUS les critères.
-- Chaque justification doit citer une tournure ou une réplique réelle du candidat, nommer la bande atteinte et dire pourquoi.
-- N'utilisez jamais de tiret cadratin ni de tiret demi-cadratin dans vos commentaires.
-- Restez bienveillant mais rigoureux.
+${EVALUATION_RULES}
+
+${TASK_ATTRIBUTION}
 
 ${phonologyInstruction(mode, params.recordings)}
 
@@ -158,26 +195,26 @@ const responseSchema = {
   ],
 };
 
-interface RawEvaluation {
-  total25: number;
-  phonologieNonEvaluable: boolean;
-  appreciationGlobale: string;
-  pointsForts: string[];
-  axesPrioritaires: string[];
-  conseil: string;
-  [criterion: string]: unknown;
-}
-
 export interface EvaluationResult {
   mode: EvaluationMode;
-  criteria: CriteriaScores;
+  criteria: CriteriaBands;
   /** What the model literally returned, pre-snap. Kept because a model that
    *  starts emitting illegal 2s and 4s looks perfectly healthy once snapped. */
   rawCriteria: Record<OralCriterion, number>;
   /** The model's own arithmetic, for comparison only. Never shown. */
   modelTotal25: number;
   rawScore25: number;
+  /**
+   * What the rubric asked to dock for a short épreuve, nominal — and which
+   * parts were short, so the figure can be explained rather than just applied.
+   * Both come from `orale-rubric.ts`; neither is derived here.
+   */
+  durationPenalty: number;
+  shortParts: Array<"monologue" | "debate">;
   score25: number;
+  /** Whether the mark clears the ≥ 5/25 competency floor. Computed by the
+   *  rubric, so the route no longer needs its own copy of the threshold. */
+  meetsFloor: boolean;
   feedback: EvaluationFeedback;
   model: string;
   promptVersion: string;
@@ -293,46 +330,41 @@ export async function evaluateExam(params: EvaluateParams): Promise<EvaluationRe
   const text = response.text;
   if (!text) throw new Error("The evaluator returned no output");
 
-  let raw: RawEvaluation;
-  try {
-    raw = JSON.parse(text) as RawEvaluation;
-  } catch {
-    throw new Error(`The evaluator returned invalid JSON: ${text.slice(0, 200)}`);
-  }
+  // Checked, not coerced. The previous reading defaulted a missing criterion to
+  // zero, so a truncated or refused generation cost the candidate five points
+  // silently; a breach of the contract now throws and the caller can retry.
+  const raw = parseEvaluationResponse(text);
+  const rawCriteria = criterionScores(raw);
 
-  const rawCriteria = Object.fromEntries(
-    ORAL_CRITERIA.map((key) => {
-      const entry = raw[key] as { score?: number } | undefined;
-      return [key, Number(entry?.score ?? 0)];
-    }),
-  ) as Record<OralCriterion, number>;
-
-  const criteria = snapCriteria(rawCriteria);
-  const rawScore25 = criteriaToScore25(criteria);
-  const totalSpeaking = params.monologueSeconds + params.debateSeconds;
-  const score25 = applyDurationPenalty(rawScore25, totalSpeaking);
-
-  const justifications = Object.fromEntries(
-    ORAL_CRITERIA.map((key) => {
-      const entry = raw[key] as { justification?: string } | undefined;
-      return [key, entry?.justification ?? ""];
-    }),
-  ) as Record<OralCriterion, string>;
+  // The whole rubric, in one call. Snapping, the sum, the per-part duration
+  // penalty and the competency floor are all `orale-rubric.ts`'s, in the order
+  // it defines — nothing about the mark is computed here.
+  const scored = scoreSitting(rawCriteria, {
+    monologueSeconds: params.monologueSeconds,
+    debateSeconds: params.debateSeconds,
+  });
 
   return {
     mode: params.mode,
-    criteria,
+    criteria: scored.criteria,
     rawCriteria,
-    modelTotal25: Number(raw.total25 ?? 0),
-    rawScore25,
-    score25,
+    modelTotal25: raw.total25,
+    rawScore25: scored.rawScore25,
+    durationPenalty: scored.durationPenalty,
+    shortParts: scored.shortParts,
+    score25: scored.score25,
+    meetsFloor: scored.meetsFloor,
+    // No `?? ""` or `Boolean(...)` here any more: every one of these is required
+    // by the response schema, so a default would be dead code that also implied
+    // the field might be missing — which is exactly the reading that let a
+    // missing criterion score zero.
     feedback: {
-      justifications,
-      appreciationGlobale: raw.appreciationGlobale ?? "",
-      pointsForts: raw.pointsForts ?? [],
-      axesPrioritaires: raw.axesPrioritaires ?? [],
-      conseil: raw.conseil ?? "",
-      phonologieNonEvaluable: Boolean(raw.phonologieNonEvaluable),
+      justifications: criterionJustifications(raw),
+      appreciationGlobale: raw.appreciationGlobale,
+      pointsForts: raw.pointsForts,
+      axesPrioritaires: raw.axesPrioritaires,
+      conseil: raw.conseil,
+      phonologieNonEvaluable: raw.phonologieNonEvaluable,
     },
     model: EVAL_MODEL,
     promptVersion: EVAL_PROMPT_VERSION,

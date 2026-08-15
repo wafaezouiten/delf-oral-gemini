@@ -20,9 +20,36 @@
  *
  * Everything else — the clamping, the sum, the flat −3 penalty, the ≥ 5/25
  * floor — is byte-for-byte the incumbent's, so scores stay comparable.
+ *
+ * ---
+ *
+ * PHASE 7. This is now the ONLY implementation of the grading rules. A second
+ * one lived in `rubric.ts` and disagreed with this file in ways that changed
+ * grades — it snapped where this clamps, docked 5 or 3 where this docks a flat
+ * 3, and measured a shortfall against an 8-minute sitting total where the port
+ * measures each part against its own floor. It is deleted; #9 required exactly
+ * one to survive and that it be this one.
+ *
+ * Two things were added rather than ported, and both are compositions of ported
+ * pieces rather than new rules:
+ *
+ *  - {@link scoreSitting}, the single entry point the evaluator calls. The
+ *    order — snap, sum, dock, then test the floor — is a rule in itself, and a
+ *    call site free to get it wrong is how a 2 reaches a column that only
+ *    accepts 0, 1, 3 and 5.
+ *  - {@link applySittingDurationPenalty}, which applies a **per-part** rule to a
+ *    sitting that has two parts and one /25. The incumbent corrects one task per
+ *    correction, so it never had to answer this; see that function for what was
+ *    decided and why.
+ *
+ * And one signature changed: {@link applyDurationPenalty} returns the penalty it
+ * applied as well as the adjusted score, so the caller can record what the
+ * rubric asked for rather than reversing an answer out of two numbers.
  */
 
-import { COMPETENCY_MAX, COMPETENCY_FLOOR } from "./constants";
+import { COMPETENCY_MAX, COMPETENCY_FLOOR, minDurationSeconds } from "./constants";
+import { ORAL_CRITERIA, type OralCriterion } from "./criteria";
+import { snapToBand, type GrilleBand } from "./grille";
 
 /** The five official grille criteria (each a 0/1/3/5 band). */
 export interface OralCriteriaScores {
@@ -70,19 +97,111 @@ export function criteriaToScore25(raw: OralCriteriaScores): number {
   return Math.min(COMPETENCY_MAX, Math.max(0, sum));
 }
 
+/** What the duration rule did: the adjusted score, and the points it asked for. */
+export interface DurationPenalty {
+  /** The /25 after the penalty, floored at 0. */
+  score25: number;
+  /**
+   * The penalty the rubric **nominally** applied — not necessarily the points
+   * the score lost, because the score floors at 0. A 2/25 docked 3 records a
+   * penalty of 3 and a score of 0.
+   *
+   * Returned rather than left to be reversed out of the two scores: a caller
+   * computing `raw − adjusted` gets the *effective* figure, which quietly
+   * understates the rubric on any score below the penalty, and `evaluations`
+   * stores this column. (Raised in review of #15, settled here — see #9.)
+   */
+  penalty: number;
+}
+
 /**
  * Apply a short-duration penalty: if the candidate spoke for less than the
  * expected minimum, subtract `penalty` points (default 3) from the /25 score,
- * floored at 0. Returns the adjusted score.
+ * floored at 0.
  */
 export function applyDurationPenalty(
   score25: number,
   actualSeconds: number,
   minSeconds: number,
   penalty = 3,
-): number {
-  if (actualSeconds >= minSeconds) return score25;
-  return Math.max(0, score25 - penalty);
+): DurationPenalty {
+  if (actualSeconds >= minSeconds) return { score25, penalty: 0 };
+  return { score25: Math.max(0, score25 - penalty), penalty };
+}
+
+/** The two parts of a B2 sitting, as `tache` numbers (`constants.ts`). */
+const MONOLOGUE_TACHE = 1;
+const DEBATE_TACHE = 2;
+
+/**
+ * The minimum each part must produce before the duration penalty fires: 40 % of
+ * the part's expected speaking time, floored at 30 s. 168 s of monologue and
+ * 312 s of débat.
+ *
+ * Not to be confused with `phases.ts`'s `MONOLOGUE_MIN_SECONDS` (300 s), which
+ * is how long the candidate must stay in the monologue before the UI lets them
+ * advance. That one is a clock the candidate watches; these are floors the
+ * *recording* is measured against afterwards, and the two answer different
+ * questions — a phase can run its full 300 s and record 40 s of audio.
+ */
+export const MONOLOGUE_FLOOR_SECONDS = minDurationSeconds(MONOLOGUE_TACHE);
+export const DEBATE_FLOOR_SECONDS = minDurationSeconds(DEBATE_TACHE);
+
+/** Measured speaking time per part, from the recordings rather than the clock. */
+export interface SittingDurations {
+  monologueSeconds: number;
+  debateSeconds: number;
+}
+
+/** Which parts of the sitting fell under their own floor, in exam order. */
+export function partsUnderFloor(durations: SittingDurations): Array<"monologue" | "debate"> {
+  const short: Array<"monologue" | "debate"> = [];
+  if (durations.monologueSeconds < MONOLOGUE_FLOOR_SECONDS) short.push("monologue");
+  if (durations.debateSeconds < DEBATE_FLOOR_SECONDS) short.push("debate");
+  return short;
+}
+
+/** The duration rule over a whole sitting, and which parts triggered it. */
+export interface SittingDurationPenalty extends DurationPenalty {
+  shortParts: Array<"monologue" | "debate">;
+}
+
+/**
+ * The per-part duration rule, applied to a sitting that has one /25.
+ *
+ * The port measures **each part against its own floor**, because the incumbent
+ * corrects one task per correction and each correction carries its own score.
+ * Here both tasks are one sitting and one mark, so the rule has to be composed,
+ * and the composition is a decision the port cannot make for us:
+ *
+ *   - **The penalty fires once, if either part is short.** A flat −3, which is
+ *     the only magnitude the incumbent's rule can produce. Docking 3 per short
+ *     part would invent a −6 that no correction over there has ever produced.
+ *   - **The floors stay per part.** Measuring the sitting total against their
+ *     sum (480 s) is what the deleted copy did, and it passes a candidate who
+ *     talks for eight minutes in the monologue and says nothing in the débat —
+ *     which is precisely the shortfall the rule exists to catch.
+ *
+ * `shortParts` comes back so the reason is legible afterwards: "docked 3" and
+ * "docked 3 because the débat produced 40 seconds" are different records, and
+ * only one of them can be argued with.
+ */
+export function applySittingDurationPenalty(
+  score25: number,
+  durations: SittingDurations,
+): SittingDurationPenalty {
+  const shortParts = partsUnderFloor(durations);
+  if (shortParts.length === 0) return { score25, penalty: 0, shortParts };
+
+  // Delegated with the first short part's own measurement against its own floor
+  // — real numbers, not a pair invented to force the branch — so the subtraction
+  // and the floor at 0 stay in the ported function and are not written twice.
+  const first =
+    shortParts[0] === "monologue"
+      ? { seconds: durations.monologueSeconds, floor: MONOLOGUE_FLOOR_SECONDS }
+      : { seconds: durations.debateSeconds, floor: DEBATE_FLOOR_SECONDS };
+
+  return { ...applyDurationPenalty(score25, first.seconds, first.floor), shortParts };
 }
 
 /**
@@ -91,4 +210,74 @@ export function applyDurationPenalty(
  */
 export function meetsCompetencyFloor(score25: number): boolean {
   return score25 >= COMPETENCY_FLOOR;
+}
+
+// ------------------------------------------------------------- the whole rule
+
+/** The five criteria as the grille allows them to be: 0, 1, 3 or 5. */
+export type CriteriaBands = Record<OralCriterion, GrilleBand>;
+
+/**
+ * Snap all five of a model's raw numbers onto legal bands.
+ *
+ * The snapping itself is `grille.ts`'s, which is the ported source of truth for
+ * it and says so; this is only the five-at-once shape. Note what it is NOT:
+ * {@link normalizeCriteria} clamps to 0–5 and will happily return a 2, which the
+ * grille has no band for and `evaluations_bands_check` rejects outright. Both
+ * behaviours are the incumbent's — over there the clamp sits behind a model
+ * instructed to emit bands only — and this is the one the pipeline uses.
+ */
+export function snapCriteria(raw: Record<OralCriterion, number>): CriteriaBands {
+  return Object.fromEntries(
+    ORAL_CRITERIA.map((criterion) => [criterion, snapToBand(raw[criterion])]),
+  ) as CriteriaBands;
+}
+
+/** Everything the rubric has to say about one sitting. */
+export interface SittingScore {
+  /** The five bands, snapped. */
+  criteria: CriteriaBands;
+  /** Their sum, before the duration penalty. */
+  rawScore25: number;
+  /** What the rubric asked to dock, nominal. See {@link DurationPenalty}. */
+  durationPenalty: number;
+  /** Which parts were short, so the penalty can be explained. */
+  shortParts: Array<"monologue" | "debate">;
+  /** What the candidate is shown. */
+  score25: number;
+  /** Whether that clears the ≥ 5/25 competency floor. */
+  meetsFloor: boolean;
+}
+
+/**
+ * Score one sitting: the whole rule, in the order it has to happen.
+ *
+ * The evaluator calls this and nothing else. Every step below is a rule that
+ * changes a grade, and each was, at some point in this repository, also written
+ * somewhere else — the snapping in `rubric.ts`, the floor in the finish route,
+ * the penalty in two different shapes. Composing them here is what makes
+ * "exactly one implementation survives" true of the *sequence* and not just of
+ * the functions: a caller cannot sum before snapping, dock before summing, or
+ * ask about the floor before the penalty has been taken off.
+ *
+ * Nothing here is asked of the model. It returns five numbers and prose; the
+ * arithmetic that turns those into a mark is the rubric's, and a prompt that
+ * restated it would be a second implementation written in French.
+ */
+export function scoreSitting(
+  raw: Record<OralCriterion, number>,
+  durations: SittingDurations,
+): SittingScore {
+  const criteria = snapCriteria(raw);
+  const rawScore25 = criteriaToScore25(criteria);
+  const { score25, penalty, shortParts } = applySittingDurationPenalty(rawScore25, durations);
+
+  return {
+    criteria,
+    rawScore25,
+    durationPenalty: penalty,
+    shortParts,
+    score25,
+    meetsFloor: meetsCompetencyFloor(score25),
+  };
 }

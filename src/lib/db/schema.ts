@@ -31,11 +31,12 @@
  *    (`TranscriptEntry.phase`). A row-per-turn table would buy queries nobody
  *    runs, cost a join on every read, and store the phase twice.
  *
- * What this schema deliberately does NOT decide: which of the two rubric
- * implementations on `develop` wins. It stores the five bands, the pre-penalty
- * total, the penalty in points and the floor verdict — every one of which both
- * `lib/delf/rubric.ts` and `lib/delf/orale-rubric.ts` can produce. Settling that
- * disagreement is an evaluation-layer decision, not a storage one.
+ * This schema deliberately did not decide which of the two rubric
+ * implementations on `develop` won: it stores the five bands, the pre-penalty
+ * total, the penalty in points and the floor verdict, every one of which both
+ * could produce. #9 settled it in the evaluation layer, where it belonged —
+ * `lib/delf/orale-rubric.ts` survives, `rubric.ts` is deleted, and the row is
+ * now written from one `scoreSitting` call.
  */
 
 import { relations, sql } from "drizzle-orm";
@@ -332,12 +333,14 @@ export const evaluations = pgTable(
     /**
      * Points docked because the candidate spoke for less than the épreuve asks.
      *
-     * This is the penalty *effectively* applied, not the one the rubric nominally
-     * asked for: the rubric floors the result at 0, so a 2/25 hit with a 5-point
-     * penalty records a 2 here, which is what keeps `score_25 = raw − penalty`
-     * true. The nominal figure is not recoverable from the row — `applyDurationPenalty`
-     * does not surface it, and changing that belongs to the phase that reconciles
-     * the two rubric copies (#9).
+     * The penalty the rubric **nominally** applied, since #9. A 2/25 docked 3
+     * records a penalty of 3 and a score of 0 — "the rubric wanted 3, the score
+     * could absorb 2" — and `evaluations_score_25_check` still holds, because it
+     * compares against `greatest(raw − penalty, 0)` rather than the difference.
+     *
+     * It was the *effective* figure until `applyDurationPenalty` was changed to
+     * return what it asked for, so rows written before #9 record the smaller
+     * number on any score below the penalty. Only reachable under 3/25.
      */
     durationPenalty: integer("duration_penalty").notNull().default(0),
     /** What the candidate is shown: `raw_score_25 − duration_penalty`, floored at 0. */

@@ -28,7 +28,7 @@ Required to run an exam:
 
 ```bash
 pnpm check       # typecheck + lint
-pnpm test:unit   # 320 tests, including the full-exam acceptance test
+pnpm test:unit   # 337 tests, including the full-exam acceptance test
 pnpm build
 ```
 
@@ -97,7 +97,7 @@ so a token opens one phase, of one subject, of one sitting, for its owner, once.
 ## Layout
 
 ```
-src/lib/delf/         Pure exam logic: phases, transcript, rubric, examiner prompt, topics
+src/lib/delf/         Pure exam logic: phases, transcript, the grille and the /25 rubric, examiner prompt, topics
 src/lib/gemini/       Live configuration per phase; the /25 evaluator
 src/lib/live/         Session lifecycle (resumption, GoAway), state machine, exam controller
 src/lib/audio/        16 kHz PCM capture, 24 kHz playback, WAV and Opus encoding, the per-phase recording
@@ -112,7 +112,7 @@ minutes.
 
 ## Status
 
-**Verified offline** — `pnpm check` clean, `pnpm build` succeeds, 320/320 unit
+**Verified offline** — `pnpm check` clean, `pnpm build` succeeds, 337/337 unit
 tests pass. That includes the acceptance scenario end to end (preparation →
 monologue → débat → forced reconnect → finish), asserting the transcript stays
 continuous, the débat clock does not reset, and the examiner's seeded memory
@@ -161,12 +161,23 @@ browser path and uploaded exactly as the evaluator uploads it: the Files API
 accepts `audio/ogg`, and the corrector model transcribed the sentence back word
 for word from 28 kB of Opus. 439 kB of PCM travelled as 28 kB.
 
-**Verified evaluation** — `pnpm verify:eval`, 8/8: a strong, a weak and an
+**Verified evaluation** — `pnpm verify:eval`, 11/11: a strong, a weak and an
 *uneven* transcript graded through the real model. Scores land on legal bands,
 the /25 is recomputed rather than trusted, a 20-point gap separates strong from
 weak, and — the check that matters — the uneven fixture scores morphosyntaxe 3
 while argumentation stays 5, proving criteria are judged independently rather
-than by global impression. The audio path uploads and grades end to end.
+than by global impression. The audio path uploads and grades end to end, and the
+duration rule is observed doing its work: the same strong transcript over a
+40-second débat comes back docked 3, with the short half named.
+
+**One rubric, and it is the ported one.** Two implementations of the grading
+rules used to disagree in ways that changed grades — snapping versus clamping a
+model's 2, a tiered 5/3 penalty versus a flat 3, an 8-minute sitting total versus
+each part against its own floor. `rubric.ts` is deleted; the grille, the bands,
+the floors and the arithmetic all come from `src/lib/delf/`, and the evaluator
+calls one function. The corrector's prompt states the band scale and no
+arithmetic, because a prompt that restated the rubric would be a second copy of
+it written in French. See [`docs/EVALUATION_FINDINGS.md`](docs/EVALUATION_FINDINGS.md).
 
 Everything learned by actually connecting — including four Live API behaviours
 that present as a healthy session behaving wrongly, and two dead model ids — is
