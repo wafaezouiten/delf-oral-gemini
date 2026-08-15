@@ -123,6 +123,30 @@ présence sur site. » — and put its length at 14 s against a measured 13.74 s
 So: the Files API takes `audio/ogg`, the model hears French through it at
 16 kbit/s, and the same 439 kB of PCM travels as 28 kB.
 
+## What degrading costs, and who is told
+
+When an artefact cannot be delivered, the client attaches what it can and sends
+the rest as transcript alone. `selectDeliverable` applies both of the route's
+limits — each file against `MAX_RECORDING_BYTES`, then the survivors against the
+request — because the route refuses an oversized *file* with a 413 for the
+*whole request*, and a 413 does not degrade: the exam is one-way, a retry
+re-sends the same bytes, and the sitting is gone. Dropping is per artefact, so a
+phase that encoded fine is still graded from audio when the other one did not.
+
+That degrade is not free, and the cost is bigger than the phonologie mark. A
+phase whose recording was not sent measures **zero seconds**, and the duration
+penalty is computed from measured audio — `applyDurationPenalty(score, 0)` takes
+the severe branch, **−5 on the /25**. This is the same rule a phase whose
+microphone never worked meets, and it is the only honest one available: the
+server cannot measure audio it was not given, and taking the browser's word for
+the length is exactly what the measured duration exists to avoid.
+
+What follows from that is that the candidate has to be told *before* the
+épreuve, not after, which is the only point at which switching browsers costs
+them nothing. The briefing screen asks `isOpusEncodingSupported` and says plainly
+that the recording will not be sent, that the correction will be made without
+listening, and that the duration penalty will apply as if no recording existed.
+
 ## What this does not show
 
 - **A real sitting on a deployed URL.** Everything here is measured, but the

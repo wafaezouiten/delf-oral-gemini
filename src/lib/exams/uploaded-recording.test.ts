@@ -10,6 +10,7 @@ import {
   MAX_REQUEST_BYTES,
   fitsInOneRequest,
   measureUploadedRecording,
+  selectDeliverable,
 } from "./uploaded-recording";
 
 /**
@@ -106,15 +107,20 @@ describe("what one request may carry", () => {
     // Worth pinning rather than describing: the per-recording cap is sized for
     // Opus, so as PCM16 it is 98 seconds — and the candidate cannot leave the
     // monologue before 300. A WAV therefore only ever reaches this route from a
-    // capture that failed early, which is the case the measured duration exists
-    // for. A browser without WebCodecs is not "graded from a short sitting", it
-    // is graded from its transcript, and `fitsInOneRequest` is what decides that
-    // in the tab rather than at a 413.
+    // capture that failed inside the first 98 seconds, which is the case the
+    // measured duration exists for. A browser without WebCodecs is not "graded
+    // from a short sitting", it is graded from its transcript, and
+    // `selectDeliverable` is what decides that in the tab rather than at a 413.
     const asWav = (seconds: number) => 44 + seconds * INPUT_SAMPLE_RATE * 2;
 
     assert.ok(asWav(MONOLOGUE_MIN_SECONDS) > MAX_RECORDING_BYTES);
     assert.equal(Math.floor(MAX_RECORDING_BYTES / (INPUT_SAMPLE_RATE * 2)), 98);
     assert.equal(fitsInOneRequest([1_000, asWav(MONOLOGUE_MIN_SECONDS)]), false);
+  });
+
+  it("counts the multipart wrapping, not just the parts", () => {
+    assert.equal(fitsInOneRequest([MAX_REQUEST_BYTES]), false);
+    assert.ok(fitsInOneRequest([MAX_REQUEST_BYTES - 8 * 1024]));
   });
 
   it("stays under the platform's own limit, which is the point of the number", () => {
@@ -123,8 +129,69 @@ describe("what one request may carry", () => {
     assert.ok(MAX_REQUEST_BYTES < 4_500_000);
   });
 
-  it("counts the multipart wrapping, not just the parts", () => {
-    assert.equal(fitsInOneRequest([MAX_REQUEST_BYTES]), false);
-    assert.ok(fitsInOneRequest([MAX_REQUEST_BYTES - 8 * 1024]));
+});
+
+describe("choosing what to attach", () => {
+  /** A recording, as the client weighs it: a size and which phase it is of. */
+  const recording = (phase: "monologue" | "debate", bytes: number) => ({ phase, bytes });
+  const sizeOf = (r: { bytes: number }) => r.bytes;
+  const transcript = 30_000;
+
+  /** The shipped encoding, at the measured 2 060 bytes a second. */
+  const asOpus = (seconds: number) => seconds * 2_060;
+  const asWav = (seconds: number) => 44 + seconds * INPUT_SAMPLE_RATE * 2;
+
+  it("attaches both recordings of an ordinary sitting", () => {
+    const sitting = [recording("monologue", asOpus(7 * 60)), recording("debate", asOpus(13 * 60))];
+
+    assert.deepEqual(selectDeliverable(sitting, sizeOf, transcript), sitting);
+  });
+
+  it("drops only the phase that fell back to WAV, and keeps the one that did not", () => {
+    // The case the aggregate check alone missed. Opus is encoded per phase, so a
+    // transient failure in one leaves a WAV beside a perfectly good Opus file:
+    // 110 s of WAV is 3.5 MB, over the per-file cap, while the pair plus the
+    // transcript is 4.0 MB and under the request's. Attaching it would have been
+    // a 413 for the whole sitting — and the exam is one-way, so that is the
+    // correction lost rather than degraded.
+    const monologue = recording("monologue", asWav(110));
+    const debate = recording("debate", asOpus(60));
+
+    assert.ok(monologue.bytes > MAX_RECORDING_BYTES);
+    assert.ok(fitsInOneRequest([transcript, monologue.bytes, debate.bytes]), "the pair fits");
+    assert.deepEqual(selectDeliverable([monologue, debate], sizeOf, transcript), [debate]);
+  });
+
+  it("gives up the larger recording when the pair is what does not fit", () => {
+    // Both legal on their own, too much together. Keeping one is strictly better
+    // than keeping neither: the corrector is told which task it is listening to,
+    // so half a sitting is still graded from audio.
+    const monologue = recording("monologue", 2_600_000);
+    const debate = recording("debate", 2_000_000);
+
+    assert.ok(monologue.bytes < MAX_RECORDING_BYTES && debate.bytes < MAX_RECORDING_BYTES);
+    assert.equal(fitsInOneRequest([transcript, monologue.bytes, debate.bytes]), false);
+    assert.deepEqual(selectDeliverable([monologue, debate], sizeOf, transcript), [debate]);
+  });
+
+  it("attaches nothing when nothing can be delivered", () => {
+    // A browser with no codec at all: two full-length WAVs, 38 MB. The sitting is
+    // graded from its transcript, which the results page reports and the briefing
+    // screen warned about before the épreuve began.
+    const sitting = [recording("monologue", asWav(7 * 60)), recording("debate", asWav(13 * 60))];
+
+    assert.deepEqual(selectDeliverable(sitting, sizeOf, transcript), []);
+  });
+
+  it("keeps them in the order they were recorded", () => {
+    // Not in size order, which is how they are considered for dropping: the
+    // evaluator's prompt promises the model the monologue comes first.
+    const monologue = recording("monologue", asOpus(60));
+    const debate = recording("debate", asOpus(13 * 60));
+
+    assert.deepEqual(selectDeliverable([monologue, debate], sizeOf, transcript), [
+      monologue,
+      debate,
+    ]);
   });
 });

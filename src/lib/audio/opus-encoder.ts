@@ -74,7 +74,11 @@ const config = (sampleRate: number, bitrateMode?: BitrateMode): AudioEncoderConf
  * two orders of magnitude better than PCM.
  */
 async function supportedConfig(sampleRate: number): Promise<AudioEncoderConfig | null> {
-  if (typeof AudioEncoder === "undefined") return null;
+  // Both halves, because both are used: an encoder with nothing to feed it is
+  // not support. They ship together in practice, but the briefing screen and the
+  // encode itself must be answering the same question — a briefing that says yes
+  // where the encode says no is the warning arriving after the épreuve.
+  if (typeof AudioEncoder === "undefined" || typeof AudioData === "undefined") return null;
   for (const candidate of [config(sampleRate, "constant"), config(sampleRate)]) {
     try {
       if ((await AudioEncoder.isConfigSupported(candidate)).supported) return candidate;
@@ -101,7 +105,7 @@ export async function encodePcm16ToOggOpus(
   pcm: Int16Array,
   sampleRate: number = INPUT_SAMPLE_RATE,
 ): Promise<Blob> {
-  const chosen = typeof AudioData === "undefined" ? null : await supportedConfig(sampleRate);
+  const chosen = await supportedConfig(sampleRate);
   if (!chosen) throw new Error("This browser cannot encode Opus");
 
   const packets: Uint8Array[] = [];

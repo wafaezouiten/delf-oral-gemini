@@ -7,7 +7,7 @@ import { useExamController } from "@/lib/live/use-exam-controller";
 import type { ExamFinishedPayload } from "@/lib/live/exam-controller";
 import { PHASE_LABELS, MONOLOGUE_MIN_SECONDS } from "@/lib/delf/phases";
 import { isOpusEncodingSupported } from "@/lib/audio/opus-encoder";
-import { fitsInOneRequest } from "@/lib/exams/uploaded-recording";
+import { selectDeliverable } from "@/lib/exams/uploaded-recording";
 import type { OralTopic } from "@/lib/delf/topics";
 import type { TranscriptEntry } from "@/lib/delf/transcript";
 import { PhaseClock } from "./_components/phase-clock";
@@ -56,27 +56,38 @@ export function ExamClient({ examId, topic }: { examId: string; topic: OralTopic
       form.set("payload", json);
 
       /**
-       * Weighed before it is sent, because the platform will not read a request
-       * over its limit and the candidate cannot act on that (#24).
+       * Weighed before it is sent, because the route refuses an oversized
+       * upload with a 413 for the whole request and there is nothing here that
+       * can recover from one: the exam is one-way, and a retry would re-send
+       * the same bytes to be refused the same way (#24).
        *
-       * A sitting encoded as Opus is about 2.4 MB and always fits. What does not
-       * is a sitting from a browser that could not encode it and fell back to
-       * WAV — 38 MB — and for that the choice is between a 413 that loses the
-       * whole correction and a correction made from the transcript alone. The
-       * second is worse than an audio grade and much better than nothing, and it
-       * is visible: the results page says which one the candidate got.
+       * A sitting encoded as Opus is about 2.4 MB and always fits, so in the
+       * ordinary case this drops nothing. What it is for is the browser that
+       * could not encode — where the artefact is a WAV, and a WAV is over the
+       * per-file cap after 98 seconds.
+       *
+       * Dropping a recording costs the candidate more than phonologie: the
+       * phase then measures zero seconds, and the duration penalty is computed
+       * from measured audio. That is the same rule a dead microphone meets and
+       * the only honest one available here — the server cannot grade audio it
+       * was not given — but it is why this drops per artefact instead of
+       * all-or-nothing, and why the briefing says so before the épreuve starts.
        */
-      const sizes = payload.recordings.map((recording) => recording.blob.size);
-      const attachable = fitsInOneRequest([new TextEncoder().encode(json).length, ...sizes]);
-      if (attachable) {
-        for (const recording of payload.recordings) {
-          const extension = recording.mimeType === "audio/ogg" ? "ogg" : "wav";
-          form.set(`audio-${recording.phase}`, recording.blob, `${recording.phase}.${extension}`);
-        }
-      } else {
+      const deliverable = selectDeliverable(
+        payload.recordings,
+        (recording) => recording.blob.size,
+        new TextEncoder().encode(json).length,
+      );
+      for (const recording of deliverable) {
+        const extension = recording.mimeType === "audio/ogg" ? "ogg" : "wav";
+        form.set(`audio-${recording.phase}`, recording.blob, `${recording.phase}.${extension}`);
+      }
+      for (const recording of payload.recordings) {
+        if (deliverable.includes(recording)) continue;
         console.warn(
-          `[finish] the recordings are ${sizes.reduce((a, b) => a + b, 0)} bytes, ` +
-            "over what one request may carry; grading from the transcript alone",
+          `[finish] the ${recording.phase} recording is ${recording.blob.size} bytes, ` +
+            `more than one request can carry as ${recording.mimeType}; ` +
+            "that phase will be graded from its transcript and will measure zero seconds",
         );
       }
 
@@ -320,11 +331,12 @@ function Briefing({
         // nothing about it, and the results page will only be able to report
         // that the correction was made without the audio.
         <p className="bg-danger-subtle text-danger rounded-lg px-4 py-3 text-xs leading-relaxed">
-          Votre navigateur ne sait pas compresser l&apos;enregistrement. Votre
-          prestation sera corrigée à partir de la transcription seule, sans écoute
-          de votre prononciation. Pour une correction qui tient compte de votre
-          phonologie, passez l&apos;épreuve sur une version récente de Chrome,
-          Edge, Safari ou Firefox.
+          Votre navigateur ne sait pas compresser l&apos;enregistrement, qui ne
+          pourra donc pas être envoyé. Votre prestation sera corrigée à partir de
+          la transcription seule, sans écoute de votre prononciation, et la
+          pénalité de durée s&apos;appliquera comme si aucun enregistrement
+          n&apos;existait. Passez plutôt l&apos;épreuve sur une version récente de
+          Chrome, Edge, Safari ou Firefox.
         </p>
       )}
 

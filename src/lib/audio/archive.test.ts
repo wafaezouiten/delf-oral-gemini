@@ -172,6 +172,32 @@ describe("the artefact itself", () => {
     assert.equal(recording.sampleCount, 5 * INPUT_SAMPLE_RATE);
   });
 
+  it("encodes each phase on its own, so one can fall back without the other", async () => {
+    // Reachable, and worth pinning: the encoder is asked once per phase, so a
+    // transient WebCodecs failure during the débat leaves a WAV beside a
+    // perfectly good Opus monologue. The client has to weigh the two artefacts
+    // separately because of this — see `selectDeliverable` — and it can only do
+    // that if they are allowed to differ here.
+    const archive = new PhaseArchive(INPUT_SAMPLE_RATE, async (pcm, sampleRate) => {
+      if (pcm.length > 3 * sampleRate) throw new Error("the encoder gave up");
+      return { blob: new Blob([new Uint8Array(64)]), mimeType: "audio/ogg" };
+    });
+
+    archive.begin("monologue");
+    fill(archive, 2);
+    archive.end();
+    archive.begin("debate");
+    fill(archive, 9);
+    archive.end();
+
+    // The failure is the encoder's to report and the caller's to handle; the
+    // archive does not swallow it into a silent zero-length artefact.
+    await assert.rejects(() => archive.all(), /the encoder gave up/);
+    assert.equal((await archive.recordingFor("monologue"))?.mimeType, "audio/ogg");
+    // And the measurement is untouched by any of it.
+    assert.equal(archive.measuredSeconds("debate"), 9);
+  });
+
   it("releases its memory when told to, and not before", async () => {
     // A sitting is roughly 38 MB of PCM. Cutting the blobs does not free it —
     // the blobs own their own bytes — so something has to, once the tab no

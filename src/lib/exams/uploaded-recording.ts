@@ -64,6 +64,57 @@ export function fitsInOneRequest(parts: readonly number[]): boolean {
   return parts.reduce((total, part) => total + part, overhead) <= MAX_REQUEST_BYTES;
 }
 
+/**
+ * The recordings that can actually be delivered, out of the ones a sitting
+ * produced.
+ *
+ * Both limits, in the order the route applies them: each artefact against
+ * {@link MAX_RECORDING_BYTES}, then what survives against the request as a
+ * whole, dropping the largest until it fits.
+ *
+ * Both, because the route refuses an oversized *file* with a 413 for the entire
+ * request — and a 413 here does not degrade, it loses the sitting. The exam is
+ * one-way (`preparation → monologue → débat → finished`), a retry re-sends the
+ * same bytes for the same refusal, and there is nothing left to go back to. The
+ * two limits are not the same question: two artefacts can each be legal and be
+ * too much together, and one can be over the per-file cap while the pair is
+ * comfortably under the request's. That second case is reachable — Opus is
+ * encoded per phase, so one phase can fall back to WAV on a transient failure
+ * while the other stays small.
+ *
+ * Dropping one recording is not free: the phase it belonged to then measures
+ * zero seconds, and the DELF duration penalty is computed from measured audio.
+ * That is the same rule a phase whose microphone never worked meets, and it is
+ * the honest one — the server cannot grade audio it does not have. It is a
+ * reason to drop as little as possible, which is why this drops per artefact
+ * rather than all-or-nothing.
+ */
+export function selectDeliverable<T>(
+  recordings: readonly T[],
+  sizeOf: (recording: T) => number,
+  payloadBytes: number,
+): T[] {
+  const kept = recordings.filter((recording) => sizeOf(recording) <= MAX_RECORDING_BYTES);
+
+  // Largest first, so what is given up is the one artefact standing between the
+  // request and the ceiling rather than the smallest two.
+  const dropOrder = [...kept].sort((a, b) => sizeOf(b) - sizeOf(a));
+  const dropped = new Set<T>();
+  while (
+    dropOrder.length > dropped.size &&
+    !fitsInOneRequest([
+      payloadBytes,
+      ...kept.filter((recording) => !dropped.has(recording)).map(sizeOf),
+    ])
+  ) {
+    dropped.add(dropOrder[dropped.size]);
+  }
+
+  // In the order they were recorded, which is what the evaluator's prompt
+  // promises the model about the files it is handed.
+  return kept.filter((recording) => !dropped.has(recording));
+}
+
 /** One artefact, as the server reads it rather than as the client labels it. */
 export interface MeasuredRecording {
   /** Taken from the bytes, not from the multipart headers. */
@@ -87,15 +138,16 @@ export interface MeasuredRecording {
  *
  * **WAV** is what the archive falls back to when a browser cannot encode Opus.
  * It is measured just as exactly, but be clear about how little of it can get
- * here: at 32 kB a second, {@link MAX_RECORDING_BYTES} is 98 seconds of it,
+ * here: at 32 kB a second, {@link MAX_RECORDING_BYTES} is **98 seconds** of it,
  * against a monologue the candidate cannot leave before 300
  * (`MONOLOGUE_MIN_SECONDS`). So the only WAV this route will ever accept is one
- * whose *capture* failed — a microphone revoked, a headset unplugged, a tab the
- * browser suspended — which is exactly the case where the recording is much
- * shorter than the phase, and exactly the case Phase 6 built the measured
- * duration for. A candidate who spoke normally into a browser without WebCodecs
- * is not graded from audio at all: the client weighs the artefact and sends the
- * transcript alone rather than a request that cannot be delivered.
+ * whose capture failed inside the first minute and a half — not "a capture that
+ * failed early" in general. `archive.ts`'s own example, a headset unplugged four
+ * minutes in, is 7.7 MB as WAV and does not fit; it fits as Opus, which is what
+ * it will be on any browser that has WebCodecs at all. A candidate who spoke
+ * normally into a browser that does not is graded from audio not at all: the
+ * client weighs each artefact and sends what it can rather than a request that
+ * cannot be delivered.
  *
  * It stays accepted because refusing it would throw away the one audio a broken
  * capture does produce, and because it costs one branch to keep — not because it
