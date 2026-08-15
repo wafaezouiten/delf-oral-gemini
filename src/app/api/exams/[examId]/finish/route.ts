@@ -33,9 +33,6 @@ import {
   oralRecordings,
   type OralSpeakingPhase,
 } from "@/lib/db";
-// The floor is the one rule the two rubric copies on `develop` agree on, so
-// reading it from the ported module settles nothing that Phase 2 shouldn't.
-import { meetsCompetencyFloor } from "@/lib/delf/orale-rubric";
 import { findTopic } from "@/lib/delf/topics";
 import { candidateWordCount } from "@/lib/delf/transcript";
 // Lives outside this file so it can be unit-tested: nothing in a route that
@@ -369,9 +366,15 @@ export async function POST(
           // criterion names, so it spreads straight in.
           ...result.criteria,
           rawScore25: result.rawScore25,
-          durationPenalty: result.rawScore25 - result.score25,
+          // The penalty the rubric asked for, not the points the score happened
+          // to lose. They differ only below 3/25, where the score floors at 0
+          // first — and "docked 3, could only absorb 2" is the truer record.
+          // The route no longer computes either: since #9 both numbers, and the
+          // floor verdict beside them, come back from the one rubric (#15's
+          // review asked for exactly this).
+          durationPenalty: result.durationPenalty,
           score25: result.score25,
-          meetsFloor: meetsCompetencyFloor(result.score25),
+          meetsFloor: result.meetsFloor,
           feedback: result.feedback,
           model: result.model,
           promptVersion: result.promptVersion,

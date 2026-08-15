@@ -1,6 +1,6 @@
 # The /25 corrector, as measured
 
-Reproduce with `pnpm verify:eval` (8 checks, all passing).
+Reproduce with `pnpm verify:eval` (11 checks, all passing).
 
 ## What is verified
 
@@ -25,8 +25,65 @@ Confirmed by this:
   would score it uniformly; instead morphosyntaxe alone dropped to 3 while
   argumentation stayed at 5. Without that case, "strong scores high, weak scores
   low" would be equally consistent with the model just measuring overall vibe.
-- **The audio path works.** A 254 KB WAV uploads through the Files API and grades
-  end to end, at roughly 15 s versus 11 s for text.
+- **The audio path works.** A 267 KB WAV uploads through the Files API and grades
+  end to end, at roughly 28 s versus 13 s for text.
+- **The duration rule is the rubric's, and it is applied.** The same strong
+  transcript graded over a 40-second débat comes back docked: penalty 3, short
+  part named `debate` against its 312 s floor, `25 − 3 = 22/25`. The model is
+  never told the rule — it returns five bands and prose — so this is the
+  evaluation layer's arithmetic being observed end to end, not an instruction
+  being followed.
+
+## Where the rules live, since Phase 7
+
+Two implementations of the grading rules used to disagree on `develop`, and the
+disagreement changed grades: one snapped a model's 2 down to 1 where the other
+clamped it to 2, one docked 5 or 3 where the other docked a flat 3, and one
+measured the shortfall against an 8-minute sitting total where the port measures
+each part against its own floor. `rubric.ts` is deleted. What survives is the
+port:
+
+| Rule | Lives in |
+| --- | --- |
+| The five criteria, their prose, the band scale, the evaluation rules | `delf/criteria.ts` |
+| The bands 0/1/3/5, their labels, snapping a raw number onto one | `delf/grille.ts` |
+| The /25 ceiling, the ≥ 5/25 floor, the per-part duration floors | `delf/constants.ts` |
+| The sum, the penalty, the floor test, and the order they happen in | `delf/orale-rubric.ts` |
+
+The evaluator calls `scoreSitting` and nothing else. That matters more than it
+looks: the order — snap, sum, dock, then test the floor — is itself a rule. Test
+the floor before the penalty and a candidate the rubric has just failed comes
+back passed.
+
+**The one decision the port could not make.** The reference implementation
+corrects one task per correction, so a per-part floor needs no composition over
+there. Here both tasks are one sitting and one mark, and the rule fires **once,
+if either part is short**, for a flat −3. Docking per short part would invent a
+−6 that no correction in the incumbent can produce; measuring the total against
+the sum of the floors (480 s) would pass a candidate who talks for eight minutes
+in the monologue and says nothing in the débat, which is exactly the shortfall
+the rule exists to catch.
+
+**The penalty on the record is the nominal one.** `applyDurationPenalty` now
+returns what it asked for alongside the adjusted score, so a 2/25 docked 3 stores
+a penalty of 3 and a score of 0 — "the rubric wanted 3, the score could absorb 2".
+Rows written before this record the smaller figure, and only below 3/25.
+
+## What the model is no longer asked
+
+The corrector's prompt states the band scale and stops. It does not restate the
+sum, the duration penalty or the competency floor, because a prompt that did
+would be a second implementation of the rubric written in French, unversioned and
+untestable. And the reply is now checked rather than read: the evaluator used to
+take scores with `Number(entry?.score ?? 0)`, so a response missing `phonologie`
+— a truncated generation, a refusal, a schema quietly ignored — scored that
+criterion 0 and graded the candidate anyway. A breach of the contract throws
+(`gemini/evaluation-response.ts`), and the caller can retry.
+
+A 2 or a 4 is deliberately *not* a breach. The grille has no such band and the
+prompt forbids it, but `snapToBand` is the ported net underneath exactly that
+mistake, and failing a whole sitting over a band the rubric knows how to read
+would throw away a correction for nothing.
 
 ## What is NOT verified, and a calibration concern
 
