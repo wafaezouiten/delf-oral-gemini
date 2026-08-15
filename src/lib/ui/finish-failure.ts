@@ -24,6 +24,31 @@ const FALLBACK =
 const TERMINAL =
   "Votre prestation ne peut pas être corrigée. Réessayer donnerait le même résultat.";
 
+/**
+ * An expired session, which is the one failure where the route's own words are
+ * actively harmful and are replaced rather than shown.
+ *
+ * `/api/exams/[examId]/finish` answers a lost Clerk session with 401 and
+ * « Non authentifié » (`EXAM_ACCESS_DENIALS` in `lib/auth/exam-access.ts`).
+ * Two reasons that cannot be passed through:
+ *
+ *  - It is not a sentence a candidate can act on, and the action — sign in
+ *    again — is not guessable from it.
+ *  - The obvious way to sign in again is to click the link in this tab, and the
+ *    recording exists only in this tab. Following that instinct destroys the
+ *    épreuve more thoroughly than the failure did.
+ *
+ * A sitting runs about fifty minutes, so a session that lapses partway through
+ * is an ordinary event and not an exotic one. It is entirely recoverable, which
+ * is why 401 and 403 are retryable below — telling this candidate that retrying
+ * would change nothing would be false, and would be false at the moment they
+ * had the most to lose.
+ */
+const SESSION_EXPIRED =
+  "Votre session a expiré pendant l'épreuve. Reconnectez-vous dans un NOUVEL onglet — " +
+  "sans fermer ni quitter celui-ci, qui contient le seul exemplaire de votre " +
+  "enregistrement — puis revenez ici et réessayez.";
+
 export interface FinishFailure {
   /** Candidate-facing French. Never an exception message or a status code. */
   message: string;
@@ -35,14 +60,25 @@ export interface FinishFailure {
  * Statuses that mean "not now" rather than "not ever".
  *
  * Everything at 5xx is the server having a bad moment; 408 and 429 are the two
- * 4xx that explicitly invite a second attempt. Every other 4xx is a statement
- * about this request — too large, unreadable, nothing to grade — and the same
- * bytes will earn the same refusal, which is the whole reason `#24` weighs the
- * upload before sending rather than retrying after.
+ * 4xx that explicitly invite a second attempt. **401 and 403 join them**, and
+ * that is the one entry here that is not obvious: an authentication failure is
+ * about the caller's session rather than the request, and a session is exactly
+ * the kind of thing that comes back. See `SESSION_EXPIRED` for why getting this
+ * wrong would be expensive.
+ *
+ * Every other 4xx is a statement about this request — too large, unreadable,
+ * nothing to grade — and the same bytes will earn the same refusal, which is
+ * the whole reason `#24` weighs the upload before sending rather than retrying
+ * after.
  */
 function statusIsRetryable(status: number): boolean {
   if (status >= 500) return true;
-  return status === 408 || status === 429;
+  return status === 401 || status === 403 || status === 408 || status === 429;
+}
+
+/** Whether this failure is the session having lapsed rather than the request. */
+function isAuthFailure(status: number | null): boolean {
+  return status === 401 || status === 403;
 }
 
 /**
@@ -57,6 +93,10 @@ export function describeFinishFailure(
   // A network failure is the most retryable thing there is: nothing was refused,
   // the request simply never arrived.
   const retryable = status === null ? true : statusIsRetryable(status);
+
+  // Before the server's own words are considered, because this is the case
+  // where they are worse than nothing.
+  if (isAuthFailure(status)) return { message: SESSION_EXPIRED, retryable: true };
 
   const fromServer =
     typeof serverMessage === "string" && serverMessage.trim().length > 0

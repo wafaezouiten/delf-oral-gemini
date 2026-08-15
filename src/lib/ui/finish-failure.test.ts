@@ -33,9 +33,30 @@ describe("finish failures", () => {
     // recording over the per-file cap, and a transcript with nothing in it. The
     // same bytes get the same answer, so a retry button here is a promise the
     // product cannot keep.
-    for (const status of [400, 401, 404, 413, 422]) {
+    for (const status of [400, 404, 413, 422]) {
       assert.equal(describeFinishFailure(status, "…").retryable, false, `status ${status}`);
     }
+  });
+
+  it("treats an expired session as recoverable, because it is", () => {
+    // `/api/exams/[examId]/finish` answers a lapsed Clerk session with 401
+    // (`EXAM_ACCESS_DENIALS`). A sitting runs about fifty minutes, so this is an
+    // ordinary event — and the one place a wrong answer is expensive: the
+    // recording exists only in that tab, and telling the candidate that
+    // retrying would change nothing sends them away from the only copy.
+    for (const status of [401, 403]) {
+      assert.equal(describeFinishFailure(status, "Non authentifié").retryable, true);
+    }
+  });
+
+  it("replaces « Non authentifié » rather than showing it", () => {
+    const { message } = describeFinishFailure(401, "Non authentifié");
+    assert.doesNotMatch(message, /Non authentifié/);
+    // The remedy, and the trap it has to steer around: signing in via this tab
+    // is the obvious move and it destroys the recording.
+    assert.match(message, /session a expiré/i);
+    assert.match(message, /NOUVEL onglet/);
+    assert.match(message, /sans fermer/i);
   });
 
   it("says plainly that a terminal failure will not change", () => {

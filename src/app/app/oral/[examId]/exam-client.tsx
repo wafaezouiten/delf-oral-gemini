@@ -394,7 +394,17 @@ function FinishedScreen({
           DELF B2 · Production orale
         </p>
         <h1 className="font-serif mt-1 text-2xl font-semibold">Épreuve terminée</h1>
-        <p className="text-muted-foreground mt-2 text-sm leading-relaxed" role="status">
+        {/* A live region only while there is no failure. Once `submitError` is
+            set, this paragraph's text changes at the same moment the assertive
+            <Notice> below mounts, and a screen reader would receive two
+            overlapping statements about one event — the same fault the
+            connection badge was silenced for. The notice wins here for the same
+            reason it wins there: it is the one carrying the explanation and the
+            button. The sentence stays on screen; it just stops announcing. */}
+        <p
+          className="text-muted-foreground mt-2 text-sm leading-relaxed"
+          role={submitError ? undefined : "status"}
+        >
           {submitting
             ? "Votre prestation est en cours d'évaluation. Cela peut prendre une minute ; ne fermez pas cet onglet."
             : submitError

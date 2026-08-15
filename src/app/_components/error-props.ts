@@ -24,14 +24,25 @@ import type { ErrorInfo } from "next/dist/client/components/error-boundary";
  * three, so `next typegen`, `tsc --noEmit` and `next build` are all silent about
  * this file's signature, and React ignores a prop nobody destructures.
  *
- * So the check is made here instead. `Assignable` fails to compile if this type
- * ever stops matching the one Next actually passes — a renamed prop, a changed
- * signature — and the deep import fails loudly if the module moves. Both
- * failures land on this comment, which is the point: a Next upgrade that breaks
- * this line is a Next upgrade that needs a human to look at the error screens,
- * and that is much better than the button quietly doing the wrong thing.
+ * So the check is made here instead, and it can fail in two different ways.
+ * Knowing which is which saves the next person a confused ten minutes:
  *
- * The import is `import type`, so it contributes nothing at runtime.
+ *  - **`TS2339: Property 'retry' does not exist on type 'ErrorInfo'`**, on the
+ *    assertion below — Next still ships this module but the prop was renamed or
+ *    dropped. Read the boundary's source and re-point both error pages.
+ *  - **`TS2307: Cannot find module 'next/dist/client/components/error-boundary'`**,
+ *    on the import above — Next moved or renamed the file. `next/dist/**` is
+ *    internal and carries no semver promise whatsoever, so this is the likelier
+ *    of the two. Find where `ErrorInfo` lives now; if it has become public API,
+ *    import it from there and delete this note.
+ *
+ * Either way the build stops on a line that explains itself, which is the whole
+ * trade: a Next upgrade that breaks this is a Next upgrade where somebody should
+ * look at the error screens, and that is much better than the button quietly
+ * doing the wrong thing.
+ *
+ * The import is `import type`, so it contributes nothing at runtime — verified
+ * against the built client chunks, not assumed.
  */
 export interface ErrorPageProps {
   error: Error & { digest?: string };

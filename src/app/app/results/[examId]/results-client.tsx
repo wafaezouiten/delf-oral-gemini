@@ -100,19 +100,28 @@ function parseStored(raw: string | null): StoredResult | null | undefined {
  * five criteria; what it buys is the statement — this depends on two module
  * constants and nothing about a particular correction, and a future reader
  * looking for where the grouping reacts to a prop will not go hunting.
+ *
+ * Keyed by competence rather than by comparing against the previous group. The
+ * difference only shows up if `ORAL_CRITERIA` ever stops listing same-competence
+ * criteria contiguously — today it does, and a run-length grouping would have
+ * been correct by coincidence, printing the same competence header twice the
+ * day somebody reorders the list. Nothing would have failed; the grille would
+ * just have quietly grown a sixth row of headings. A `Map` is correct whatever
+ * the order, and groups still appear in the order their competence is first
+ * met, which keeps the criteria in the grille's own sequence.
  */
 const CRITERIA_GROUPS: ReadonlyArray<{
   competence: string;
   criteria: OralCriterion[];
 }> = (() => {
-  const groups: Array<{ competence: string; criteria: OralCriterion[] }> = [];
+  const groups = new Map<string, OralCriterion[]>();
   for (const criterion of ORAL_CRITERIA) {
     const competence = ORAL_CRITERIA_COMPETENCE[criterion];
-    const last = groups.at(-1);
-    if (last?.competence === competence) last.criteria.push(criterion);
-    else groups.push({ competence, criteria: [criterion] });
+    const existing = groups.get(competence);
+    if (existing) existing.push(criterion);
+    else groups.set(competence, [criterion]);
   }
-  return groups;
+  return [...groups].map(([competence, criteria]) => ({ competence, criteria }));
 })();
 
 /**
