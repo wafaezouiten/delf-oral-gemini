@@ -8,6 +8,7 @@ import type { SessionManagerCallbacks } from "./session-manager";
 import {
   ExamController,
   type ExamFinishedPayload,
+  type FinalisedPhaseReport,
   type LiveSessionLike,
   type PlayerLike,
   type RecorderLike,
@@ -222,6 +223,8 @@ interface Harness {
   recorders: FakeRecorder[];
   players: FakePlayer[];
   finished: ExamFinishedPayload[];
+  /** Phases reported mid-exam, in the order they finalised (Phase 8). */
+  progress: FinalisedPhaseReport[];
   /** Time passes AND the microphone delivers, which is what a healthy exam
    *  looks like. */
   advanceClock: (seconds: number) => void;
@@ -235,7 +238,14 @@ interface Harness {
   report: (phase: RecordedPhase) => ExamFinishedPayload["phases"][number] | undefined;
 }
 
-function harness(devices: { recorder?: DeviceOptions; player?: DeviceOptions } = {}): Harness {
+function harness(
+  devices: {
+    recorder?: DeviceOptions;
+    player?: DeviceOptions;
+    /** Overrides the sink below, for the one test about a listener that fails. */
+    onPhaseFinalised?: (report: FinalisedPhaseReport) => void;
+  } = {},
+): Harness {
   let now = 0;
   const sessions: FakeSession[] = [];
   // Built per call rather than shared, so "how many devices did this open?" is
@@ -243,6 +253,7 @@ function harness(devices: { recorder?: DeviceOptions; player?: DeviceOptions } =
   const recorders: FakeRecorder[] = [];
   const players: FakePlayer[] = [];
   const finished: ExamFinishedPayload[] = [];
+  const progress: FinalisedPhaseReport[] = [];
   let notifyLost: ((reason: string) => void) | null = null;
 
   const controller = new ExamController({
@@ -264,6 +275,7 @@ function harness(devices: { recorder?: DeviceOptions; player?: DeviceOptions } =
       return player;
     },
     onFinished: (payload) => finished.push(payload),
+    onPhaseFinalised: devices.onPhaseFinalised ?? ((report) => progress.push(report)),
     now: () => now,
     autoTick: false,
   });
@@ -277,6 +289,7 @@ function harness(devices: { recorder?: DeviceOptions; player?: DeviceOptions } =
     recorders,
     players,
     finished,
+    progress,
     advanceClock: (seconds: number) => {
       now += seconds * 1000;
       for (const recorder of recorders) recorder.capture(seconds);
@@ -880,5 +893,92 @@ describe("recording the candidate", () => {
     assert.deepEqual(h.recorder.calls, ["monologue"], "the recording was never closed");
     assert.equal(h.recorder.measuredSeconds("monologue"), 120);
     assert.equal(h.controller.getSnapshot().recording, true);
+  });
+});
+
+describe("reporting a phase as it finalises", () => {
+  /** Preparation → monologue, the way a candidate who has finished their notes
+   *  gets there. */
+  async function intoMonologue(h: Harness): Promise<void> {
+    h.controller.start();
+    await h.controller.advanceEarly();
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+
+  /** And on into the débat, through the closing handshake. */
+  async function intoDebate(h: Harness): Promise<void> {
+    await intoMonologue(h);
+    h.session().candidateSays("Le télétravail a transformé le rapport au bureau.");
+    h.advanceClock(MONOLOGUE_MIN_SECONDS + 10);
+    await h.controller.advanceEarly();
+    await completeClosing(h);
+  }
+
+  it("says nothing until a speaking phase has actually ended", async () => {
+    const h = harness();
+    await intoMonologue(h);
+    h.advanceClock(120);
+    assert.deepEqual(h.progress, [], "preparation produced nothing, and the monologue is running");
+  });
+
+  it("reports the monologue once, with its turns and its clock", async () => {
+    const h = harness();
+    await intoDebate(h);
+
+    assert.equal(h.progress.length, 1);
+    const [report] = h.progress;
+    assert.equal(report.phase, "monologue");
+    assert.deepEqual(
+      report.entries.map((entry) => entry.text),
+      ["Le télétravail a transformé le rapport au bureau."],
+    );
+    assert.ok(report.endedAt > report.startedAt, "a finalised phase has both stamps");
+  });
+
+  it("carries only that phase's turns, never the exam's", async () => {
+    // The turns are appended server-side, so a report that swept up the débat
+    // would file them under the monologue — and the corrector grades the two
+    // tasks separately.
+    const h = harness();
+    await intoDebate(h);
+    h.session().candidateSays("Oui, et cela libère du temps personnel.");
+    h.advanceClock(60);
+
+    assert.equal(h.progress.length, 1, "the débat is still running and has not reported");
+    assert.ok(
+      h.progress[0].entries.every((entry) => entry.phase === "monologue"),
+      "the monologue's report is the monologue's turns",
+    );
+  });
+
+  it("does not report the débat, because finishing carries it", async () => {
+    // A progress request racing the finish request would be a second write of
+    // the same turns, buying nothing: `onFinished` sends the whole sitting.
+    const h = harness();
+    await intoDebate(h);
+    h.advanceClock(PHASE_DURATIONS.debate);
+    await completeClosing(h);
+
+    assert.equal(h.controller.getSnapshot().phase, "finished");
+    assert.equal(h.finished.length, 1);
+    assert.deepEqual(
+      h.progress.map((report) => report.phase),
+      ["monologue"],
+    );
+  });
+
+  it("survives a listener that throws, because the épreuve must not stop", async () => {
+    // The report is fire-and-forget by contract, and the controller has to hold
+    // up its end: a phase transition that can be taken down by a failing
+    // listener would mean a progress request could end an épreuve.
+    const h = harness({
+      onPhaseFinalised: () => {
+        throw new Error("the network is on fire");
+      },
+    });
+    await intoDebate(h);
+
+    assert.equal(h.controller.getSnapshot().phase, "debate", "the transition completed anyway");
+    assert.equal(h.sessions.length, 2, "and the débat session was opened");
   });
 });

@@ -15,7 +15,7 @@ import { formatClock } from "@/lib/delf/phases";
 import { formatTranscript, type TranscriptEntry } from "@/lib/delf/transcript";
 import type { OralTopic } from "@/lib/delf/topics";
 
-interface StoredResult {
+export interface StoredResult {
   evaluation: {
     mode: "text" | "audio";
     criteria: Record<string, GrilleBand>;
@@ -32,7 +32,14 @@ interface StoredResult {
     durationPenalty?: number;
     shortParts?: Array<"monologue" | "debate">;
     model: string;
-    latencySeconds: number;
+    /**
+     * Nullable because `evaluations.latency_seconds` is, and this object is
+     * built from that row as well as from a fresh finish response. Nothing
+     * renders it today; the type says `number | null` so that whatever renders
+     * it next has to decide what an unmeasured correction looks like, instead of
+     * inheriting a zero somebody coalesced to make the types line up.
+     */
+    latencySeconds: number | null;
     feedback: {
       justifications: Record<string, string>;
       appreciationGlobale: string;
@@ -74,7 +81,20 @@ function parseStored(raw: string | null): StoredResult | null | undefined {
   return value;
 }
 
-export function ResultsClient({ examId }: { examId: string }) {
+/**
+ * @param initial The correction as it is stored, when the sitting was persisted
+ *   and read back on the server (Phase 8). Everything below is unchanged when it
+ *   is absent: a sitting with no row — no database, a degraded `local-…` id, a
+ *   write that failed — still renders from what the finish response left in
+ *   `sessionStorage`, which is the only copy that exists for it.
+ */
+export function ResultsClient({
+  examId,
+  initial,
+}: {
+  examId: string;
+  initial?: StoredResult;
+}) {
   const getSnapshot = useCallback(
     () => parseStored(sessionStorage.getItem(`delf-eval-${examId}`)),
     [examId],
@@ -85,7 +105,11 @@ export function ResultsClient({ examId }: { examId: string }) {
   // change notifications.
   const subscribe = useCallback(() => () => {}, []);
 
-  const result = useSyncExternalStore(subscribe, getSnapshot, () => undefined);
+  // Hooks first, unconditionally, and the stored copy wins afterwards — the
+  // stash is a fallback, not an alternative branch, and a conditional hook would
+  // be the way this stops being true.
+  const stashed = useSyncExternalStore(subscribe, getSnapshot, () => undefined);
+  const result = initial ?? stashed;
   const missing = result === null;
 
   if (missing) {
