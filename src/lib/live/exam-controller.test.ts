@@ -161,12 +161,14 @@ class FakeRecorder implements RecorderLike {
     return this.seconds[phase];
   }
 
-  recordings(): PhaseRecording[] {
+  /** Asynchronous like the real one, which compresses on the way out. */
+  async recordings(): Promise<PhaseRecording[]> {
     return (["monologue", "debate"] as const)
       .filter((phase) => this.seconds[phase] > 0)
       .map((phase) => ({
         phase,
-        blob: new Blob([new Uint8Array([1, 2, 3])], { type: "audio/wav" }),
+        blob: new Blob([new Uint8Array([1, 2, 3])], { type: "audio/ogg" }),
+        mimeType: "audio/ogg",
         durationSeconds: this.seconds[phase],
         sampleCount: this.seconds[phase] * 16000,
         byteSize: 3,

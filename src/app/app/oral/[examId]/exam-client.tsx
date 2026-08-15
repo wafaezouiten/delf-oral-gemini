@@ -1,11 +1,13 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { useExamController } from "@/lib/live/use-exam-controller";
 import type { ExamFinishedPayload } from "@/lib/live/exam-controller";
 import { PHASE_LABELS, MONOLOGUE_MIN_SECONDS } from "@/lib/delf/phases";
+import { isOpusEncodingSupported } from "@/lib/audio/opus-encoder";
+import { selectDeliverable } from "@/lib/exams/uploaded-recording";
 import type { OralTopic } from "@/lib/delf/topics";
 import type { TranscriptEntry } from "@/lib/delf/transcript";
 import { PhaseClock } from "./_components/phase-clock";
@@ -20,6 +22,15 @@ import { RecordingBadge } from "./_components/recording-badge";
  * The controller owns all the behaviour; this file only renders what phase the
  * exam is in.
  */
+/**
+ * How long the briefing waits for the browser to say whether it can encode.
+ *
+ * `AudioEncoder.isConfigSupported` answers in milliseconds; this is only here so
+ * that one that never answers costs the candidate three seconds rather than the
+ * épreuve.
+ */
+const BROWSER_CHECK_TIMEOUT_MS = 3_000;
+
 export function ExamClient({ examId, topic }: { examId: string; topic: OralTopic }) {
   const router = useRouter();
   const [notes, setNotes] = useState("");
@@ -34,8 +45,8 @@ export function ExamClient({ examId, topic }: { examId: string; topic: OralTopic
    *
    * The recordings go up as one file per phase rather than one per sitting: the
    * duration floors are per task, and two artefacts are what lets a candidate
-   * re-listen to the half that went wrong. Multipart because a 13-minute WAV is
-   * tens of megabytes and has no business being base64'd into a JSON body.
+   * re-listen to the half that went wrong. Multipart because a 13-minute
+   * recording has no business being base64'd into a JSON body.
    */
   const onFinished = useCallback(
     async (payload: ExamFinishedPayload) => {
@@ -45,17 +56,52 @@ export function ExamClient({ examId, topic }: { examId: string; topic: OralTopic
       setSubmitError(null);
 
       const form = new FormData();
-      form.set(
-        "payload",
-        JSON.stringify({
-          topicSlug: topic.slug,
-          transcript: payload.transcript,
-          phases: payload.phases,
-          reconnectCount: payload.reconnectCount,
-        }),
+      const json = JSON.stringify({
+        topicSlug: topic.slug,
+        transcript: payload.transcript,
+        phases: payload.phases,
+        reconnectCount: payload.reconnectCount,
+      });
+      form.set("payload", json);
+
+      /**
+       * Weighed before it is sent, because the route refuses an oversized
+       * upload with a 413 for the whole request and there is nothing here that
+       * can recover from one: the exam is one-way, and a retry would re-send
+       * the same bytes to be refused the same way (#24).
+       *
+       * A sitting encoded as Opus is about 2.4 MB and always fits, so in the
+       * ordinary case this drops nothing. What it is for is the browser that
+       * could not encode — where the artefact is a WAV, and a WAV is over the
+       * per-file cap after 98 seconds.
+       *
+       * Dropping a recording costs the candidate more than phonologie: the
+       * phase then measures zero seconds, and the duration penalty is computed
+       * from measured audio. That is the same rule a dead microphone meets and
+       * the only honest one available here — the server cannot grade audio it
+       * was not given — but it is why this drops per artefact instead of
+       * all-or-nothing, and why the briefing says so before the épreuve starts.
+       */
+      const deliverable = selectDeliverable(
+        payload.recordings,
+        (recording) => recording.blob.size,
+        new TextEncoder().encode(json).length,
       );
+      for (const recording of deliverable) {
+        const extension = recording.mimeType === "audio/ogg" ? "ogg" : "wav";
+        form.set(`audio-${recording.phase}`, recording.blob, `${recording.phase}.${extension}`);
+      }
       for (const recording of payload.recordings) {
-        form.set(`audio-${recording.phase}`, recording.blob, `${recording.phase}.wav`);
+        if (deliverable.includes(recording)) continue;
+        // Deliberately not "too large": a recording is also dropped when it is
+        // legal on its own and the pair is not, and a triage message that names
+        // the wrong limit sends the reader to the wrong constant.
+        console.warn(
+          `[finish] the ${recording.phase} recording (${recording.blob.size} bytes, ` +
+            `${recording.mimeType}) was not attached: it does not fit in one request ` +
+            "beside the rest of the sitting. That phase will be graded from its " +
+            "transcript and will measure zero seconds.",
+        );
       }
 
       // What the results page shows, and what the penalty was computed from: the
@@ -100,8 +146,54 @@ export function ExamClient({ examId, topic }: { examId: string; topic: OralTopic
 
   const { state, controller } = useExamController({ examId, topic, onFinished });
 
+  /**
+   * Whether this browser can compress the recording, asked before the épreuve
+   * rather than discovered after it.
+   *
+   * A browser without WebCodecs archives a WAV, and a WAV sitting is far past
+   * what one request may carry — so the recording is never sent, the correction
+   * is made from the transcript alone, and the duration penalty applies as if
+   * nothing had been recorded (#24). That is the whole product lost, and the
+   * only moment the candidate can do anything about it is now, before thirty
+   * minutes of preparation.
+   *
+   * Which is why the épreuve does not start until the question has been
+   * answered. `isConfigSupported` is fast, but "fast" is not "synchronous": a
+   * candidate who clicks straight through on a slow device would take the
+   * briefing — and with it the only warning there will ever be — off screen
+   * before it could render, and `Briefing` does not come back.
+   *
+   * The timeout is the other half of that. A browser that never answers must
+   * not hold the exam shut, so the wait is bounded; past it the sitting starts
+   * unwarned, which is exactly where this began and no worse.
+   */
+  const [canEncode, setCanEncode] = useState<boolean | null>(null);
+  const [checkingBrowser, setCheckingBrowser] = useState(true);
+  useEffect(() => {
+    let live = true;
+    const settle = (supported: boolean | null) => {
+      if (!live) return;
+      if (supported !== null) setCanEncode(supported);
+      setCheckingBrowser(false);
+    };
+
+    void isOpusEncodingSupported().then(settle);
+    const timer = setTimeout(() => settle(null), BROWSER_CHECK_TIMEOUT_MS);
+    return () => {
+      live = false;
+      clearTimeout(timer);
+    };
+  }, []);
+
   if (!state.started) {
-    return <Briefing topic={topic} onStart={() => controller.start()} />;
+    return (
+      <Briefing
+        topic={topic}
+        onStart={() => controller.start()}
+        canEncode={canEncode}
+        checking={checkingBrowser}
+      />
+    );
   }
 
   if (state.phase === "finished") {
@@ -113,7 +205,9 @@ export function ExamClient({ examId, topic }: { examId: string; topic: OralTopic
             ? "Votre prestation est en cours d'évaluation. Cela peut prendre une minute."
             : submitError
               ? submitError
-              : "Redirection vers vos résultats…"}
+              : // Not idle: the recordings are being compressed before they are
+                // sent, which takes a few seconds for a full sitting.
+                "Préparation de votre enregistrement…"}
         </p>
         {submitError && (
           <button
@@ -224,7 +318,19 @@ function advanceLabel(phase: string, elapsed: number): string {
   return "Terminer l'épreuve";
 }
 
-function Briefing({ topic, onStart }: { topic: OralTopic; onStart: () => void }) {
+function Briefing({
+  topic,
+  onStart,
+  canEncode,
+  checking,
+}: {
+  topic: OralTopic;
+  onStart: () => void;
+  /** Null while the browser is still being asked, and if it never answered. */
+  canEncode: boolean | null;
+  /** Whether that question is still open. See `ExamClient`. */
+  checking: boolean;
+}) {
   return (
     <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col justify-center gap-6 px-6 py-12">
       <div className="space-y-3">
@@ -257,12 +363,29 @@ function Briefing({ topic, onStart }: { topic: OralTopic; onStart: () => void })
         l&apos;examinateur s&apos;entend lui-même et la transcription en souffre.
       </p>
 
+      {canEncode === false && (
+        // Said here, and only here: after the épreuve the candidate can do
+        // nothing about it, and the results page will only be able to report
+        // that the correction was made without the audio.
+        <p className="bg-danger-subtle text-danger rounded-lg px-4 py-3 text-xs leading-relaxed">
+          Votre navigateur ne sait pas compresser l&apos;enregistrement, qui ne
+          pourra donc pas être envoyé. Votre prestation sera corrigée à partir de
+          la transcription seule, sans écoute de votre prononciation, et la
+          pénalité de durée s&apos;appliquera comme si aucun enregistrement
+          n&apos;existait. Passez plutôt l&apos;épreuve sur une version récente de
+          Chrome, Edge, Safari ou Firefox.
+        </p>
+      )}
+
+      {/* Held shut until the browser has answered, so the warning above cannot
+          be outrun by a candidate clicking straight through. */}
       <button
         type="button"
         onClick={onStart}
-        className="bg-primary text-primary-foreground self-start rounded-lg px-5 py-2.5 text-sm font-semibold"
+        disabled={checking}
+        className="bg-primary text-primary-foreground self-start rounded-lg px-5 py-2.5 text-sm font-semibold disabled:opacity-50"
       >
-        Commencer la préparation
+        {checking ? "Vérification de votre navigateur…" : "Commencer la préparation"}
       </button>
     </main>
   );

@@ -4,6 +4,7 @@ import { describe, it } from "node:test";
 import { INPUT_SAMPLE_RATE } from "@/lib/gemini/constants";
 import { FRAME_SAMPLES, frameSamplesAt } from "./framing";
 import { base64ToInt16, wavDurationSeconds } from "./pcm";
+import { wavRecordingEncoder, type RecordingEncoder } from "./archive";
 import { MicRecorder, type CaptureStream, type MicrophoneOpener } from "./recorder";
 
 // ------------------------------------------------------------------ the fake
@@ -50,6 +51,7 @@ function harness(
     /** Off for the twenty-minute run, where keeping every frame would cost
      *  more memory than the property is worth. */
     collect?: boolean;
+    encodeRecording?: RecordingEncoder;
   } = {},
 ) {
   const captures: FakeCapture[] = [];
@@ -75,6 +77,11 @@ function harness(
     onEvent: (name, detail) => events.push({ name, detail }),
     onLost: (reason) => losses.push(reason),
     openMicrophone,
+    // Stated rather than inherited. The exam encodes to Opus through WebCodecs,
+    // which does not exist under `node --test`; these tests are about what the
+    // recorder captures, so they archive uncompressed and assert against the WAV
+    // header. `ogg-opus.test.ts` is where the codec's arithmetic lives.
+    encodeRecording: options.encodeRecording ?? wavRecordingEncoder,
   });
 
   return {
@@ -176,7 +183,7 @@ describe("framing what reaches Gemini", () => {
     h.capture().emit(44_100);
     await h.recorder.stop();
 
-    const recording = h.recorder.recordingFor("monologue");
+    const recording = await h.recorder.recordingFor("monologue");
     assert.ok(recording);
     const view = new DataView(await recording.blob.arrayBuffer());
     assert.equal(view.getUint32(24, true), INPUT_SAMPLE_RATE, "the header is not a lie");
@@ -188,8 +195,8 @@ describe("framing what reaches Gemini", () => {
     h.recorder.beginPhase("monologue");
     await h.recorder.stop();
 
-    assert.equal(h.recorder.recordingFor("monologue"), null);
-    assert.deepEqual(h.recorder.recordings(), []);
+    assert.equal(await h.recorder.recordingFor("monologue"), null);
+    assert.deepEqual(await h.recorder.recordings(), []);
   });
 });
 
@@ -352,7 +359,7 @@ describe("one recording per phase", () => {
 
     assert.equal(h.recorder.measuredSeconds("debate"), debateSamples / INPUT_SAMPLE_RATE);
 
-    const recordings = h.recorder.recordings();
+    const recordings = await h.recorder.recordings();
     assert.deepEqual(
       recordings.map((recording) => recording.phase),
       ["monologue", "debate"],
@@ -372,7 +379,7 @@ describe("one recording per phase", () => {
     for (let i = 0; i < 100; i += 1) h.capture().emit(FRAME_SAMPLES); // four seconds
     await h.recorder.stop();
 
-    const recording = h.recorder.recordingFor("monologue");
+    const recording = await h.recorder.recordingFor("monologue");
     assert.ok(recording);
     assert.equal(recording.durationSeconds, 4);
     assert.equal(await wavSeconds(recording.blob), 4);
@@ -431,7 +438,7 @@ describe("nothing is recorded before there is something to record", () => {
     // calls at the monologue boundary and not before.
     const h = harness();
     assert.equal(h.captures.length, 0);
-    assert.deepEqual(h.recorder.recordings(), []);
+    assert.deepEqual(await h.recorder.recordings(), []);
   });
 
   it("streams but records nothing until a phase is open", async () => {
@@ -444,7 +451,7 @@ describe("nothing is recorded before there is something to record", () => {
 
     assert.ok(h.chunks.length > 0, "the transport is running");
     assert.equal(h.recorder.recordedSeconds, 0, "and nothing is being recorded");
-    assert.deepEqual(h.recorder.recordings(), []);
+    assert.deepEqual(await h.recorder.recordings(), []);
     assert.equal(h.recorder.recordingPhase, null);
 
     h.recorder.beginPhase("monologue");
@@ -484,7 +491,7 @@ describe("when the microphone goes away mid-phase", () => {
 
     // The second the device died is not a reason to lose the minute before it.
     await h.recorder.stop();
-    const recording = h.recorder.recordingFor("debate");
+    const recording = await h.recorder.recordingFor("debate");
     assert.ok(recording, "the audio captured before the loss survives");
     assert.equal(recording.durationSeconds, 1);
     assert.equal(await wavSeconds(recording.blob), 1);

@@ -74,8 +74,10 @@ export interface RecorderLike {
   /** Seconds recorded across the sitting. Read by the stall watchdog, which
    *  only cares that the number is still moving. */
   readonly recordedSeconds: number;
-  /** The finished artefacts, one per phase that captured anything. */
-  recordings(): PhaseRecording[];
+  /** The finished artefacts, one per phase that captured anything. Compressing
+   *  them is what makes a sitting small enough to upload, and it is not
+   *  instant — see `audio/opus-encoder.ts`. */
+  recordings(): Promise<PhaseRecording[]>;
   /** Release the recording's memory once the blobs are cut. */
   discard(): void;
 }
@@ -768,7 +770,9 @@ export class ExamController {
     const recorder = this.recorder;
     this.recorder = null;
     await recorder?.stop();
-    const recordings = recorder?.recordings() ?? [];
+    // Awaited: the artefacts are compressed on the way out of the archive, so
+    // this is where a 38 MB sitting becomes a 2.4 MB upload (#24).
+    const recordings = (await recorder?.recordings()) ?? [];
     const phases = this.phaseReports(recorder);
     // The blobs are cut and own their bytes; the PCM behind them is a second
     // copy of a sitting, and this tab is about to load a results page.

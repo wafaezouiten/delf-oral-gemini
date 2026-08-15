@@ -7,7 +7,7 @@
  *
  *  - **One artefact per phase, not one per sitting.** The monologue suivi and
  *    the débat are separate tasks with separate duration floors (168 s and
- *    312 s, `minDurationSeconds(tache)`), and a single 20-minute WAV cannot say
+ *    312 s, `minDurationSeconds(tache)`), and one 20-minute file cannot say
  *    which half the candidate ran short on. Two artefacts can, and they are also
  *    the two things a candidate re-listens to.
  *
@@ -29,7 +29,9 @@
  *
  * Everything here is deliberately free of the browser and of the transport: it
  * takes PCM16 frames and gives back blobs, which is what makes the duration
- * arithmetic testable without a microphone.
+ * arithmetic testable without a microphone. Which *format* those blobs are in is
+ * the transport's business and is injected — see {@link RecordingEncoder}, and
+ * #24 for why a sitting can no longer leave the tab as PCM.
  */
 
 import { INPUT_SAMPLE_RATE } from "@/lib/gemini/constants";
@@ -47,8 +49,11 @@ export type RecordedPhase = "monologue" | "debate";
 /** One finished artefact: what gets uploaded, played back and graded. */
 export interface PhaseRecording {
   phase: RecordedPhase;
-  /** A playable WAV — a bare PCM archive is not, see `pcm16ToWav`. */
+  /** Playable and uploadable — a bare PCM archive is neither. */
   blob: Blob;
+  /** What {@link blob} actually is, and what the server will be told to expect:
+   *  `audio/ogg` from the Opus encoder, `audio/wav` from the default one. */
+  mimeType: string;
   /**
    * Seconds of audio actually captured, measured from the sample count. Never
    * the phase's elapsed time; see the header.
@@ -57,6 +62,28 @@ export interface PhaseRecording {
   sampleCount: number;
   byteSize: number;
 }
+
+/**
+ * How the archive turns a phase's samples into the artefact that leaves the tab.
+ *
+ * Injected rather than chosen here, because the choice is about the transport
+ * and this file is about the arithmetic. The exam installs the Opus encoder
+ * (`opus-encoder.ts`), which is what makes a 38 MB sitting a 2.4 MB upload; the
+ * default below keeps the archive testable without a codec, and keeps
+ * `pcm16ToWav` — the only thing that ever writes these samples uncompressed —
+ * one call away.
+ */
+export type RecordingEncoder = (
+  pcm: Int16Array,
+  sampleRate: number,
+) => Promise<{ blob: Blob; mimeType: string }>;
+
+/** The artefact this application produced before Opus, and the one every test
+ *  that is not about compression still uses. */
+export const wavRecordingEncoder: RecordingEncoder = async (pcm, sampleRate) => ({
+  blob: pcm16ToWav(pcm, sampleRate),
+  mimeType: "audio/wav",
+});
 
 interface Segment {
   frames: Int16Array[];
@@ -71,7 +98,10 @@ export class PhaseArchive {
   /** Samples that arrived while no phase was open. Reported, not filed. */
   private discardedSamples = 0;
 
-  constructor(readonly sampleRate: number = INPUT_SAMPLE_RATE) {
+  constructor(
+    readonly sampleRate: number = INPUT_SAMPLE_RATE,
+    private readonly encode: RecordingEncoder = wavRecordingEncoder,
+  ) {
     if (!(sampleRate > 0)) {
       throw new RangeError(`A recording cannot be measured at ${sampleRate} Hz`);
     }
@@ -144,11 +174,17 @@ export class PhaseArchive {
   /**
    * One phase's artefact, or null when that phase captured nothing.
    *
-   * Null rather than an empty WAV so a caller can tell "the microphone never
+   * Null rather than an empty file so a caller can tell "the microphone never
    * worked" from "here is a zero-length recording", which is the difference
    * between a bug to report and a grade to withhold.
+   *
+   * Asynchronous because compressing a phase is: the encoder runs off the main
+   * thread and a 13-minute débat is not free. Note what is NOT waited on —
+   * `durationSeconds` and `sampleCount` are the archive's own count of what it
+   * filed, so the number the duration penalty rests on does not depend on the
+   * codec having behaved.
    */
-  recordingFor(phase: RecordedPhase): PhaseRecording | null {
+  async recordingFor(phase: RecordedPhase): Promise<PhaseRecording | null> {
     const segment = this.segments.get(phase);
     if (!segment || segment.samples === 0) return null;
 
@@ -160,22 +196,29 @@ export class PhaseArchive {
     }
 
     // Always at the archive's rate, whatever the device ran at: the framer has
-    // already converted, so the header is a fact rather than a claim.
-    const blob = pcm16ToWav(pcm, this.sampleRate);
+    // already converted, so what the file declares is a fact rather than a claim.
+    const { blob, mimeType } = await this.encode(pcm, this.sampleRate);
     return {
       phase,
       blob,
+      mimeType,
       durationSeconds: segment.samples / this.sampleRate,
       sampleCount: segment.samples,
       byteSize: blob.size,
     };
   }
 
-  /** Every artefact with audio in it, in the order the phases were entered. */
-  all(): PhaseRecording[] {
+  /**
+   * Every artefact with audio in it, in the order the phases were entered.
+   *
+   * One phase at a time rather than both at once: the encoder is a device with a
+   * queue, and handing it a whole sitting in parallel buys nothing on the one
+   * thread it drains on.
+   */
+  async all(): Promise<PhaseRecording[]> {
     const recordings: PhaseRecording[] = [];
     for (const phase of this.segments.keys()) {
-      const recording = this.recordingFor(phase);
+      const recording = await this.recordingFor(phase);
       if (recording) recordings.push(recording);
     }
     return recordings;
