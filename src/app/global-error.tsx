@@ -1,5 +1,7 @@
 "use client";
 
+import type { ErrorPageProps } from "./_components/error-props";
+
 /**
  * The root layout itself failed.
  *
@@ -21,16 +23,11 @@
  *    React's `<title>` — the alternative the Next 16 docs give
  *    (`03-file-conventions/error.md`).
  *
- * `retry` and not `reset`, for the reason spelled out in `error.tsx`: both props
- * are passed, neither is typechecked here, and only `retry` re-fetches.
+ * `retry` and not `reset`: both props are passed and only `retry` re-fetches.
+ * The type is shared with `error.tsx` and checked against Next's own, which is
+ * where that is explained — `_components/error-props.ts`.
  */
-export default function GlobalError({
-  error,
-  retry,
-}: {
-  error: Error & { digest?: string };
-  retry: () => void;
-}) {
+export default function GlobalError({ error, retry }: ErrorPageProps) {
   return (
     <html lang="fr">
       <body

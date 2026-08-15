@@ -4,6 +4,7 @@ import { useEffect } from "react";
 
 import { Notice } from "./_components/notice";
 import { primaryButton, secondaryButton } from "./_components/button-styles";
+import type { ErrorPageProps } from "./_components/error-props";
 
 /**
  * The last message between a crash and a blank page.
@@ -21,27 +22,13 @@ import { primaryButton, secondaryButton } from "./_components/button-styles";
  * screen to a line in the logs. It is not presented as something the candidate
  * should understand.
  *
- * **`retry` is the recovery prop, and it is not interchangeable with `reset`.**
- * Next 16 passes both — see `client/components/error-boundary.js`, where the
- * boundary renders `errorComponent` with `{ error, reset, retry }` — so a
- * component typed against either one compiles, and `next build` and
- * `next typegen` both stay silent: the generated `.next/types/validator.ts`
- * covers pages, layouts and route handlers only, and this file is none of them.
- * The difference is at runtime. `reset` only clears the boundary's error state,
- * so the same broken render is attempted against the same stale data and throws
- * straight back. `retry` wraps `router.refresh()` around that reset, which is
- * what actually re-fetches — and it is the one the Next 16 docs document
- * (`node_modules/next/dist/docs/01-app/03-api-reference/03-file-conventions/error.md`).
- * A button wired to `reset` is not dead, which is worse: it flickers and returns
- * to this screen.
+ * The props come from `ErrorPageProps`, which is checked against Next's own
+ * `ErrorInfo` rather than retyped here. That indirection is the whole defence
+ * against wiring this button to `reset` — the prop Next also passes, which only
+ * clears the boundary and re-runs the same broken render. Nothing else in the
+ * toolchain would catch it; see the note in that file.
  */
-export default function ExamError({
-  error,
-  retry,
-}: {
-  error: Error & { digest?: string };
-  retry: () => void;
-}) {
+export default function ExamError({ error, retry }: ErrorPageProps) {
   useEffect(() => {
     console.error(error);
   }, [error]);

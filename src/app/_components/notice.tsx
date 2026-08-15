@@ -33,7 +33,14 @@ import type { ReactNode } from "react";
  * announce themselves through their role, and both appear directly above the
  * control that answers them rather than somewhere a candidate has to navigate to.
  */
-type NoticeTone = "info" | "warning" | "danger" | "success";
+/**
+ * Three tones, because this product has three things to say. There is no
+ * `success`: nothing in an épreuve is announced by a banner saying it went
+ * well — a working microphone is the recording badge, and a passing score is the
+ * grille. A fourth tone with no caller is a colour waiting for someone to invent
+ * a reason for it.
+ */
+type NoticeTone = "info" | "warning" | "danger";
 
 const TONES: Record<NoticeTone, { mark: string; heading: string; classes: string }> = {
   info: {
@@ -50,11 +57,6 @@ const TONES: Record<NoticeTone, { mark: string; heading: string; classes: string
     mark: "✕",
     heading: "Problème",
     classes: "border-danger/40 bg-danger-subtle text-danger",
-  },
-  success: {
-    mark: "✓",
-    heading: "C'est bon",
-    classes: "border-success/30 bg-success-subtle text-success",
   },
 };
 
