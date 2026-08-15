@@ -18,11 +18,20 @@ export default async function AppLayout({ children }: LayoutProps<"/app">) {
 
   return (
     <div className="flex min-h-full flex-1 flex-col">
-      <header className="border-border flex items-center justify-between border-b px-6 py-3">
-        <Link href="/app" className="text-sm font-semibold">
-          DELF B2 · Production orale
-        </Link>
-        <UserButton />
+      {/* The masthead of a convocation: the diploma named in full, ruled off in
+          the tricolore. `no-print` because a printed correction is a grade
+          sheet, not a screenshot of an application. */}
+      <header className="no-print">
+        <div className="bg-card border-border flex items-center justify-between border-b px-6 py-3">
+          <Link href="/app" className="flex items-baseline gap-2">
+            <span className="font-serif text-base font-semibold">DELF B2</span>
+            <span className="text-muted-foreground text-xs font-semibold tracking-[0.16em] uppercase">
+              Production orale
+            </span>
+          </Link>
+          <UserButton />
+        </div>
+        <div className="tricolore" aria-hidden />
       </header>
       <div className="flex flex-1 flex-col">{children}</div>
     </div>

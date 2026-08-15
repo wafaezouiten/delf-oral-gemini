@@ -1,5 +1,7 @@
 import Link from "next/link";
 
+import { Notice } from "@/app/_components/notice";
+import { secondaryButton } from "@/app/_components/button-styles";
 import { requireExamAccess, requireUserId } from "@/lib/auth/exam-guard";
 import { neonSittingStore } from "@/lib/db/sittings";
 import { findTopic } from "@/lib/delf/topics";
@@ -101,21 +103,27 @@ function UnfinishedSitting({ sitting }: { sitting: StoredSitting }) {
   const interrupted = sitting.outcome === "in-progress";
 
   return (
-    <main className="mx-auto w-full max-w-2xl px-6 py-16 text-center">
-      <h1 className="text-xl font-semibold">
-        {interrupted ? "Épreuve interrompue" : "Épreuve non corrigée"}
-      </h1>
-      <p className="text-muted-foreground mt-2 text-sm leading-relaxed">
+    <main className="mx-auto flex w-full max-w-xl flex-1 flex-col justify-center gap-5 px-6 py-16">
+      <div className="space-y-2 text-center">
+        <p className="text-primary text-[0.6875rem] font-semibold tracking-[0.16em] uppercase">
+          DELF B2 · Production orale
+        </p>
+        <h1 className="font-serif text-2xl font-semibold">
+          {interrupted ? "Épreuve interrompue" : "Épreuve non corrigée"}
+        </h1>
+      </div>
+
+      <Notice tone="warning" title={interrupted ? "Aucune note" : "Correction perdue"}>
         {interrupted
-          ? "Cette épreuve n'a pas été menée à son terme, elle n'a donc pas été corrigée."
-          : "Cette épreuve a bien été passée, mais sa correction n'a pas pu être enregistrée."}
-      </p>
-      <Link
-        href="/app"
-        className="border-border mt-6 inline-block rounded-lg border px-4 py-2 text-sm font-semibold"
-      >
-        Passer une nouvelle épreuve
-      </Link>
+          ? "Cette épreuve n'a pas été menée à son terme — l'onglet a été fermé, ou la connexion a été perdue avant la fin. Rien n'a été corrigé, et il n'y a pas de note à afficher."
+          : "Cette épreuve a bien été passée et corrigée, mais sa correction n'a pas pu être enregistrée. Si l'onglet où vous l'avez passée est encore ouvert, la note s'y trouve peut-être encore."}
+      </Notice>
+
+      <div className="flex justify-center">
+        <Link href="/app" className={secondaryButton}>
+          Passer une nouvelle épreuve
+        </Link>
+      </div>
     </main>
   );
 }

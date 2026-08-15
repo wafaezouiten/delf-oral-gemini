@@ -3,17 +3,22 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
+import { Notice } from "@/app/_components/notice";
+import { dangerButton, primaryButton, secondaryButton } from "@/app/_components/button-styles";
 import { useExamController } from "@/lib/live/use-exam-controller";
 import type { ExamFinishedPayload } from "@/lib/live/exam-controller";
 import { PHASE_LABELS, MONOLOGUE_MIN_SECONDS } from "@/lib/delf/phases";
 import { isOpusEncodingSupported } from "@/lib/audio/opus-encoder";
 import { selectDeliverable } from "@/lib/exams/uploaded-recording";
+import { describeFinishFailure, type FinishFailure } from "@/lib/ui/finish-failure";
 import type { OralTopic } from "@/lib/delf/topics";
 import type { TranscriptEntry } from "@/lib/delf/transcript";
 import { PhaseClock } from "./_components/phase-clock";
+import { PhaseSteps } from "./_components/phase-steps";
 import { ConnectionBadge } from "./_components/connection-badge";
 import { EventLog } from "./_components/event-log";
 import { RecordingBadge } from "./_components/recording-badge";
+import { SubjectDocument } from "./_components/subject-document";
 
 /**
  * The exam screen. One component per phase, so each phase's UI is genuinely its
@@ -31,12 +36,41 @@ import { RecordingBadge } from "./_components/recording-badge";
  */
 const BROWSER_CHECK_TIMEOUT_MS = 3_000;
 
+const PHASE_LABEL_FR: Record<"monologue" | "debate", string> = {
+  monologue: "monologue",
+  debate: "débat",
+};
+
 export function ExamClient({ examId, topic }: { examId: string; topic: OralTopic }) {
   const router = useRouter();
   const [notes, setNotes] = useState("");
   const [submitting, setSubmitting] = useState(false);
-  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [submitError, setSubmitError] = useState<FinishFailure | null>(null);
   const submittedRef = useRef(false);
+
+  /**
+   * The phases whose recording could not be attached to the finish request.
+   *
+   * Rendered rather than only logged, which is the whole point: #11 asks that a
+   * candidate can go from start to correction without reading a console, and
+   * "your débat was graded from the transcript and measured zero seconds" is
+   * exactly the kind of thing that used to live in a `console.warn` nobody
+   * opens. Said on this screen, at the moment it happens, because the results
+   * page is read back from the database and this is not a fact the database
+   * holds.
+   */
+  const [droppedPhases, setDroppedPhases] = useState<Array<"monologue" | "debate">>([]);
+
+  /**
+   * The finished sitting, kept so the upload can be retried.
+   *
+   * `submittedRef` is already reset when a finish fails — the controller's
+   * payload is the only thing that was missing, and without it the retry the
+   * comment there promises had no way to be offered. The audio lives in this
+   * tab and nowhere else, so this ref is the last copy of the épreuve; it is not
+   * cleared on success only because the screen navigates away.
+   */
+  const finishedPayload = useRef<ExamFinishedPayload | null>(null);
 
   /**
    * Ship the finished exam for grading. The evaluation is stashed in
@@ -52,6 +86,7 @@ export function ExamClient({ examId, topic }: { examId: string; topic: OralTopic
     async (payload: ExamFinishedPayload) => {
       if (submittedRef.current) return;
       submittedRef.current = true;
+      finishedPayload.current = payload;
       setSubmitting(true);
       setSubmitError(null);
 
@@ -91,8 +126,10 @@ export function ExamClient({ examId, topic }: { examId: string; topic: OralTopic
         const extension = recording.mimeType === "audio/ogg" ? "ogg" : "wav";
         form.set(`audio-${recording.phase}`, recording.blob, `${recording.phase}.${extension}`);
       }
+      const dropped: Array<"monologue" | "debate"> = [];
       for (const recording of payload.recordings) {
         if (deliverable.includes(recording)) continue;
+        dropped.push(recording.phase);
         // Deliberately not "too large": a recording is also dropped when it is
         // legal on its own and the pair is not, and a triage message that names
         // the wrong limit sends the reader to the wrong constant.
@@ -103,6 +140,7 @@ export function ExamClient({ examId, topic }: { examId: string; topic: OralTopic
             "transcript and will measure zero seconds.",
         );
       }
+      setDroppedPhases(dropped);
 
       // What the results page shows, and what the penalty was computed from: the
       // measured length of the recording, not the phase clock. They differ
@@ -116,8 +154,16 @@ export function ExamClient({ examId, topic }: { examId: string; topic: OralTopic
           method: "POST",
           body: form,
         });
-        const body = await response.json();
-        if (!response.ok) throw new Error(body?.error ?? "Évaluation impossible");
+        // A platform error is an HTML page, not this route's JSON, so parsing is
+        // allowed to fail without losing the status — which is the half of the
+        // failure that decides whether a retry is worth offering.
+        const body = await response.json().catch(() => null);
+        if (!response.ok) {
+          setSubmitError(describeFinishFailure(response.status, body?.error));
+          setSubmitting(false);
+          submittedRef.current = false;
+          return;
+        }
 
         sessionStorage.setItem(
           `delf-eval-${examId}`,
@@ -132,10 +178,11 @@ export function ExamClient({ examId, topic }: { examId: string; topic: OralTopic
         );
         router.push(`/app/results/${examId}`);
       } catch (error) {
+        // The request never got an answer — offline, DNS, a dropped upload. The
+        // exception's own words ("Failed to fetch") are for the console; the
+        // candidate gets a sentence and a retry, because nothing was refused.
         console.error(error);
-        setSubmitError(
-          error instanceof Error ? error.message : "L'évaluation a échoué.",
-        );
+        setSubmitError(describeFinishFailure(null, null));
         setSubmitting(false);
         // Allow a retry: the transcript is still in memory.
         submittedRef.current = false;
@@ -198,50 +245,68 @@ export function ExamClient({ examId, topic }: { examId: string; topic: OralTopic
 
   if (state.phase === "finished") {
     return (
-      <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col items-center justify-center gap-4 px-6 py-16 text-center">
-        <h1 className="text-2xl font-semibold">Épreuve terminée</h1>
-        <p className="text-muted-foreground text-sm">
-          {submitting
-            ? "Votre prestation est en cours d'évaluation. Cela peut prendre une minute."
-            : submitError
-              ? submitError
-              : // Not idle: the recordings are being compressed before they are
-                // sent, which takes a few seconds for a full sitting.
-                "Préparation de votre enregistrement…"}
-        </p>
-        {submitError && (
-          <button
-            type="button"
-            onClick={() => router.push("/app")}
-            className="border-border rounded-lg border px-4 py-2 text-sm font-semibold"
-          >
-            Retour au tableau de bord
-          </button>
-        )}
-      </main>
+      <FinishedScreen
+        submitting={submitting}
+        submitError={submitError}
+        droppedPhases={droppedPhases}
+        onRetry={() => {
+          const payload = finishedPayload.current;
+          if (payload) void onFinished(payload);
+        }}
+        onLeave={() => router.push("/app")}
+      />
     );
   }
 
   return (
-    <main className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-5 px-6 py-6">
-      <header className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <p className="text-muted-foreground text-xs font-semibold tracking-[0.13em] uppercase">
-            {PHASE_LABELS[state.phase]}
-          </p>
-          <h1 className="mt-0.5 text-lg font-semibold">{topic.title}</h1>
+    <main className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-4 px-6 py-5">
+      <header className="space-y-3">
+        <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-3">
+          <div className="min-w-0">
+            <p className="text-primary text-[0.6875rem] font-semibold tracking-[0.16em] uppercase">
+              {PHASE_LABELS[state.phase]}
+            </p>
+            <h1 className="font-serif mt-0.5 truncate text-xl leading-tight font-semibold">
+              {topic.title}
+            </h1>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <RecordingBadge recording={state.recording} />
+            {state.phase !== "preparation" && <ConnectionBadge state={state.connection} />}
+            <PhaseClock remaining={state.remaining} phase={state.phase} />
+          </div>
         </div>
-        <div className="flex items-center gap-3">
-          <RecordingBadge recording={state.recording} />
-          {state.phase !== "preparation" && <ConnectionBadge state={state.connection} />}
-          <PhaseClock remaining={state.remaining} phase={state.phase} />
-        </div>
+        <PhaseSteps current={state.phase} />
       </header>
 
+      {/* Every failure the épreuve can produce, in the order a candidate cares
+          about it: the connection that has stopped coming back, then the
+          microphone. Both are messages first and a control second — a red button
+          on its own is not an explanation. */}
+      {state.status === "error" && (
+        <Notice
+          tone="danger"
+          title="La connexion avec l'examinateur est perdue"
+          action={
+            <button
+              type="button"
+              onClick={() => void controller.forceReconnect()}
+              className={dangerButton}
+            >
+              Reprendre la connexion
+            </button>
+          }
+        >
+          Les tentatives automatiques de reconnexion n&apos;ont pas abouti. Le temps
+          de cette partie continue de s&apos;écouler et ce qui a déjà été dit est
+          conservé. Vérifiez votre connexion internet, puis reprenez.
+        </Notice>
+      )}
+
       {state.micError && (
-        <p className="bg-danger-subtle text-danger rounded-lg px-4 py-3 text-sm">
+        <Notice tone="warning" title="Microphone">
           {state.micError}
-        </p>
+        </Notice>
       )}
 
       {state.phase === "preparation" && (
@@ -262,41 +327,23 @@ export function ExamClient({ examId, topic }: { examId: string; topic: OralTopic
           type="button"
           onClick={() => void controller.advanceEarly()}
           disabled={!state.canAdvance}
-          className="bg-primary text-primary-foreground rounded-lg px-4 py-2 text-sm font-semibold disabled:opacity-50"
+          className={primaryButton}
         >
           {advanceLabel(state.phase, state.elapsed)}
         </button>
 
-        {/* The candidate's way out of a dead session, and the reason the state
-            machine treats `failed` as recoverable rather than terminal. Five
-            automatic attempts can be spent by ten seconds of bad network in a
-            twenty-minute exam; without this the only escape is reloading, which
-            starts the épreuve over. Shown in every environment — it used to be
-            folded into the development control below, which meant the documented
-            recovery did not exist in production. */}
-        {state.status === "error" && (
-          <button
-            type="button"
-            onClick={() => void controller.forceReconnect()}
-            className="bg-danger-subtle text-danger rounded-lg px-4 py-2 text-sm font-semibold"
-          >
-            Reprendre la connexion
-          </button>
-        )}
-
-        {/* The same call, as a development affordance: it drives the path a real
-            GoAway takes, so the 13-minute resumption behaviour can be exercised
-            in seconds instead of waiting for the connection limit. Stands down
-            once the real recovery control is on screen — two buttons doing the
-            same thing side by side is how a developer ends up testing the wrong
-            one. */}
+        {/* Drives the path a real GoAway takes, so the 13-minute resumption
+            behaviour can be exercised in seconds instead of waiting for the
+            connection limit. Stands down once the real recovery control is on
+            screen in the notice above — two buttons doing the same thing side by
+            side is how a developer ends up testing the wrong one. */}
         {process.env.NODE_ENV !== "production" &&
           state.phase !== "preparation" &&
           state.status !== "error" && (
             <button
               type="button"
               onClick={() => void controller.forceReconnect()}
-              className="border-border text-muted-foreground rounded-lg border px-3 py-1.5 text-xs font-semibold"
+              className="border-border text-muted-foreground rounded-md border px-3 py-1.5 text-xs font-semibold"
             >
               Forcer une reconnexion ({state.reconnectCount})
             </button>
@@ -318,6 +365,102 @@ function advanceLabel(phase: string, elapsed: number): string {
   return "Terminer l'épreuve";
 }
 
+/**
+ * The end of the épreuve, which is three states and not one.
+ *
+ * Compressing, then either a correction on its way or a failure to send. The
+ * third is the one worth writing carefully: the audio exists only in this tab,
+ * so the message says so and the retry is offered before the way out — a
+ * candidate who reads "retour au tableau de bord" first and clicks it has thrown
+ * away twenty minutes of recording.
+ */
+function FinishedScreen({
+  submitting,
+  submitError,
+  droppedPhases,
+  onRetry,
+  onLeave,
+}: {
+  submitting: boolean;
+  submitError: FinishFailure | null;
+  droppedPhases: Array<"monologue" | "debate">;
+  onRetry: () => void;
+  onLeave: () => void;
+}) {
+  return (
+    <main className="mx-auto flex w-full max-w-xl flex-1 flex-col justify-center gap-5 px-6 py-16">
+      <div className="text-center">
+        <p className="text-primary text-[0.6875rem] font-semibold tracking-[0.16em] uppercase">
+          DELF B2 · Production orale
+        </p>
+        <h1 className="font-serif mt-1 text-2xl font-semibold">Épreuve terminée</h1>
+        {/* A live region only while there is no failure. Once `submitError` is
+            set, this paragraph's text changes at the same moment the assertive
+            <Notice> below mounts, and a screen reader would receive two
+            overlapping statements about one event — the same fault the
+            connection badge was silenced for. The notice wins here for the same
+            reason it wins there: it is the one carrying the explanation and the
+            button. The sentence stays on screen; it just stops announcing. */}
+        <p
+          className="text-muted-foreground mt-2 text-sm leading-relaxed"
+          role={submitError ? undefined : "status"}
+        >
+          {submitting
+            ? "Votre prestation est en cours d'évaluation. Cela peut prendre une minute ; ne fermez pas cet onglet."
+            : submitError
+              ? submitError.retryable
+                ? "Votre prestation attend d'être envoyée."
+                : "Votre prestation a bien été enregistrée, mais elle n'a pas pu être corrigée."
+              : // Not idle: the recordings are being compressed before they are
+                // sent, which takes a few seconds for a full sitting.
+                "Préparation de votre enregistrement…"}
+        </p>
+      </div>
+
+      {droppedPhases.length > 0 && (
+        <Notice tone="warning" title="Un enregistrement n'a pas pu être envoyé">
+          {droppedPhases.length === 2
+            ? "Vos deux prises de parole étaient trop volumineuses pour être envoyées."
+            : `Votre ${PHASE_LABEL_FR[droppedPhases[0]]} était trop volumineux pour être envoyé.`}{" "}
+          Cette partie sera corrigée à partir de sa transcription seule, sans
+          écoute de votre prononciation, et comptera comme une durée de zéro
+          seconde dans la pénalité de durée.
+        </Notice>
+      )}
+
+      {submitError && (
+        <Notice
+          tone="danger"
+          title={
+            submitError.retryable
+              ? "L'envoi a échoué"
+              : "Cette épreuve ne peut pas être corrigée"
+          }
+          action={
+            <div className="flex flex-wrap gap-2">
+              {/* The retry is offered only when it could work. A button under a
+                  413 or a 422 would send the same bytes to the same refusal, and
+                  the candidate would sit through it twice. */}
+              {submitError.retryable && (
+                <button type="button" onClick={onRetry} className={dangerButton}>
+                  Réessayer l&apos;envoi
+                </button>
+              )}
+              <button type="button" onClick={onLeave} className={secondaryButton}>
+                {submitError.retryable
+                  ? "Abandonner et revenir au tableau de bord"
+                  : "Revenir au tableau de bord"}
+              </button>
+            </div>
+          }
+        >
+          {submitError.message}
+        </Notice>
+      )}
+    </main>
+  );
+}
+
 function Briefing({
   topic,
   onStart,
@@ -333,48 +476,67 @@ function Briefing({
 }) {
   return (
     <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col justify-center gap-6 px-6 py-12">
-      <div className="space-y-3">
-        <p className="text-muted-foreground text-xs font-semibold tracking-[0.13em] uppercase">
+      <div className="space-y-2">
+        <p className="text-primary text-[0.6875rem] font-semibold tracking-[0.16em] uppercase">
           Avant de commencer
         </p>
-        <h1 className="text-2xl font-semibold tracking-tight">{topic.title}</h1>
+        <h1 className="font-serif text-2xl leading-tight font-semibold text-balance">
+          {topic.title}
+        </h1>
       </div>
 
-      <ol className="text-muted-foreground space-y-2 text-sm leading-relaxed">
-        <li>1. 30 minutes de préparation. Vous pouvez prendre des notes.</li>
-        <li>
-          2. Monologue suivi de 5 à 7 minutes. L&apos;examinateur écoute sans vous
-          interrompre.
-        </li>
-        <li>
-          3. Débat d&apos;environ 13 minutes. L&apos;examinateur conteste votre
-          position ; défendez-la.
-        </li>
-        <li>4. Évaluation sur 25 points selon la grille officielle.</li>
+      <ol className="border-border divide-border divide-y rounded-lg border">
+        {[
+          ["1", "30 minutes de préparation", "Vous pouvez prendre des notes."],
+          [
+            "2",
+            "Monologue suivi de 5 à 7 minutes",
+            "L'examinateur écoute sans vous interrompre.",
+          ],
+          [
+            "3",
+            "Débat d'environ 13 minutes",
+            "L'examinateur conteste votre position ; défendez-la.",
+          ],
+          [
+            "4",
+            "Évaluation sur 25 points",
+            "Cinq critères, selon la grille officielle de la production orale.",
+          ],
+        ].map(([step, title, detail]) => (
+          <li key={step} className="flex gap-3 px-4 py-3">
+            <span className="bg-primary-subtle text-primary tabular flex size-6 shrink-0 items-center justify-center rounded-full text-xs font-bold">
+              {step}
+            </span>
+            <div>
+              <p className="text-sm font-semibold">{title}</p>
+              <p className="text-muted-foreground text-sm leading-relaxed">{detail}</p>
+            </div>
+          </li>
+        ))}
       </ol>
 
-      <p className="bg-muted text-muted-foreground rounded-lg px-4 py-3 text-xs leading-relaxed">
+      <Notice tone="info" title="Microphone et enregistrement">
         Le microphone vous sera demandé au début du monologue, pas maintenant. Rien
         n&apos;est enregistré avant que vous ne l&apos;autorisiez : un témoin
         &laquo;&nbsp;Enregistrement&nbsp;&raquo; reste visible en haut de
         l&apos;écran pendant toute l&apos;épreuve. Vos deux prises de parole sont
         enregistrées séparément, puis envoyées pour la correction une fois
-        l&apos;épreuve terminée. Utilisez un casque : sans lui,
-        l&apos;examinateur s&apos;entend lui-même et la transcription en souffre.
-      </p>
+        l&apos;épreuve terminée. Utilisez un casque : sans lui, l&apos;examinateur
+        s&apos;entend lui-même et la transcription en souffre.
+      </Notice>
 
       {canEncode === false && (
         // Said here, and only here: after the épreuve the candidate can do
         // nothing about it, and the results page will only be able to report
         // that the correction was made without the audio.
-        <p className="bg-danger-subtle text-danger rounded-lg px-4 py-3 text-xs leading-relaxed">
-          Votre navigateur ne sait pas compresser l&apos;enregistrement, qui ne
-          pourra donc pas être envoyé. Votre prestation sera corrigée à partir de
-          la transcription seule, sans écoute de votre prononciation, et la
-          pénalité de durée s&apos;appliquera comme si aucun enregistrement
+        <Notice tone="danger" title="Votre navigateur ne peut pas envoyer l'enregistrement">
+          Il ne sait pas compresser l&apos;audio. Votre prestation sera corrigée à
+          partir de la transcription seule, sans écoute de votre prononciation, et
+          la pénalité de durée s&apos;appliquera comme si aucun enregistrement
           n&apos;existait. Passez plutôt l&apos;épreuve sur une version récente de
           Chrome, Edge, Safari ou Firefox.
-        </p>
+        </Notice>
       )}
 
       {/* Held shut until the browser has answered, so the warning above cannot
@@ -383,7 +545,7 @@ function Briefing({
         type="button"
         onClick={onStart}
         disabled={checking}
-        className="bg-primary text-primary-foreground self-start rounded-lg px-5 py-2.5 text-sm font-semibold disabled:opacity-50"
+        className={`${primaryButton} self-start px-5 py-2.5`}
       >
         {checking ? "Vérification de votre navigateur…" : "Commencer la préparation"}
       </button>
@@ -402,25 +564,21 @@ function PreparationPanel({
 }) {
   return (
     <div className="grid flex-1 gap-4 md:grid-cols-[1.4fr_1fr]">
-      <section className="border-border bg-card rounded-xl border p-5">
-        <h2 className="text-sm font-semibold">Document déclencheur</h2>
-        <p className="mt-3 text-sm leading-relaxed">{topic.document}</p>
-        <h3 className="mt-6 text-sm font-semibold">Consigne</h3>
-        <p className="text-muted-foreground mt-2 text-sm leading-relaxed">
-          {topic.consigne}
-        </p>
-      </section>
+      <SubjectDocument topic={topic} />
 
-      <section className="border-border bg-card flex flex-col rounded-xl border p-5">
-        <h2 className="text-sm font-semibold">Vos notes</h2>
+      <section className="border-border bg-card flex flex-col rounded-lg border p-5">
+        <h2 className="text-sm font-semibold">
+          <label htmlFor="notes">Vos notes</label>
+        </h2>
         <p className="text-muted-foreground mt-1 text-xs">
           Elles resteront visibles pendant votre monologue.
         </p>
         <textarea
+          id="notes"
           value={notes}
           onChange={(event) => onNotes(event.target.value)}
           placeholder="Introduction, thèse, arguments, exemples, conclusion…"
-          className="border-border mt-3 min-h-64 flex-1 resize-none rounded-lg border bg-transparent p-3 text-sm leading-relaxed outline-none"
+          className="border-border mt-3 min-h-64 flex-1 resize-none rounded-md border bg-transparent p-3 text-sm leading-relaxed outline-none"
         />
       </section>
     </div>
@@ -442,12 +600,22 @@ function SpeakingPanel({
 
   return (
     <div className="grid flex-1 gap-4 md:grid-cols-[1.4fr_1fr]">
-      <section className="border-border bg-card flex flex-col rounded-xl border p-5">
-        <div className="flex items-center gap-2">
-          <span
-            className={`size-2 rounded-full ${examinerSpeaking ? "bg-primary" : "bg-success"}`}
-            aria-hidden
-          />
+      <section className="border-border bg-card flex flex-col rounded-lg border">
+        {/* Who has the floor. A live region because it changes while the
+            candidate is listening rather than looking, and the whole task
+            depends on knowing whether it is their turn. */}
+        <div
+          role="status"
+          aria-live="polite"
+          className={`flex items-center gap-2 rounded-t-lg border-b px-5 py-3 ${
+            examinerSpeaking
+              ? "border-border bg-primary-subtle text-primary"
+              : "border-border bg-success-subtle text-success"
+          }`}
+        >
+          <span className="text-sm" aria-hidden>
+            {examinerSpeaking ? "🗣" : "🎙"}
+          </span>
           <h2 className="text-sm font-semibold">
             {examinerSpeaking
               ? "L'examinateur parle, écoutez."
@@ -457,7 +625,7 @@ function SpeakingPanel({
           </h2>
         </div>
 
-        <div className="mt-4 flex-1 space-y-3 overflow-y-auto text-sm leading-relaxed">
+        <div className="flex-1 space-y-4 overflow-y-auto p-5 text-sm leading-relaxed">
           {entries.length === 0 && (
             // Verified against the live service: during a monologue nothing is
             // transcribed until the floor is released, so the whole exposé
@@ -472,7 +640,7 @@ function SpeakingPanel({
           {entries.map((entry, index) => (
             <p key={`${entry.timestamp}-${index}`}>
               <span
-                className={`text-xs font-semibold tracking-[0.13em] uppercase ${
+                className={`text-[0.6875rem] font-semibold tracking-[0.16em] uppercase ${
                   entry.speaker === "examiner" ? "text-primary" : "text-muted-foreground"
                 }`}
               >
@@ -485,7 +653,7 @@ function SpeakingPanel({
         </div>
       </section>
 
-      <section className="border-border bg-card rounded-xl border p-5">
+      <section className="border-border bg-card rounded-lg border p-5">
         <h2 className="text-sm font-semibold">Vos notes</h2>
         <p className="text-muted-foreground mt-3 text-sm leading-relaxed whitespace-pre-wrap">
           {notes.trim() || "Aucune note prise pendant la préparation."}

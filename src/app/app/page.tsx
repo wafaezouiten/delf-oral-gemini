@@ -21,28 +21,39 @@ export default async function DashboardPage() {
   return (
     <main className="mx-auto w-full max-w-4xl px-6 py-10">
       <div className="space-y-2">
-        <h1 className="text-2xl font-semibold tracking-tight">
+        <p className="text-primary text-[0.6875rem] font-semibold tracking-[0.16em] uppercase">
+          Choix du sujet
+        </p>
+        <h1 className="font-serif text-2xl leading-tight font-semibold tracking-tight">
           {firstName ? `Bonjour ${firstName}, choisissez votre sujet` : "Choisissez votre sujet"}
         </h1>
-        <p className="text-muted-foreground text-sm leading-relaxed">
+        <p className="text-muted-foreground max-w-2xl text-sm leading-relaxed">
           {prepMinutes} minutes de préparation, un monologue suivi de 5 à{" "}
           {monologueMinutes} minutes, puis un débat d&apos;environ {debateMinutes} minutes
           avec l&apos;examinateur. Prévoyez un endroit calme et un casque.
         </p>
       </div>
 
-      <ul className="mt-8 space-y-3">
-        {ORAL_TOPICS.map((topic) => (
+      {/* The subjects as a stack of sheets: the same paper the sujet is printed
+          on inside the épreuve, so the thing the candidate picks and the thing
+          they read are visibly the same object. */}
+      <ul className="mt-8 space-y-4">
+        {ORAL_TOPICS.map((topic, index) => (
           <li
             key={topic.slug}
-            className="border-border bg-card rounded-xl border p-5"
+            className="border-paper-border bg-paper rounded-lg border p-5 sm:p-6"
           >
-            <h2 className="text-base font-semibold">{topic.title}</h2>
+            <p className="text-muted-foreground text-[0.6875rem] font-semibold tracking-[0.16em] uppercase">
+              Sujet {index + 1}
+            </p>
+            <h2 className="font-serif mt-1 text-lg leading-snug font-semibold">
+              {topic.title}
+            </h2>
             <p className="text-muted-foreground mt-2 line-clamp-3 text-sm leading-relaxed">
               {topic.document}
             </p>
             <div className="mt-4">
-              <StartExamButton topicSlug={topic.slug} />
+              <StartExamButton topicSlug={topic.slug} topicTitle={topic.title} />
             </div>
           </li>
         ))}

@@ -3,13 +3,23 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
+import { primaryButton } from "@/app/_components/button-styles";
+
 /**
  * Creates the exam row, then navigates into it.
  *
  * The row is created BEFORE navigation so the exam page always has a real id to
  * report against, rather than minting one client-side and reconciling later.
  */
-export function StartExamButton({ topicSlug }: { topicSlug: string }) {
+export function StartExamButton({
+  topicSlug,
+  /** Only for the accessible name. Six buttons all reading "Passer l'épreuve" is
+   *  a list a screen-reader user cannot choose from. */
+  topicTitle,
+}: {
+  topicSlug: string;
+  topicTitle: string;
+}) {
   const router = useRouter();
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -28,22 +38,29 @@ export function StartExamButton({ topicSlug }: { topicSlug: string }) {
       router.push(`/app/oral/${examId}?sujet=${topicSlug}`);
     } catch (cause) {
       console.error(cause);
-      setError("Impossible de démarrer l'épreuve. Réessayez.");
+      setError(
+        "L'épreuve n'a pas pu être ouverte. Vérifiez votre connexion, puis réessayez.",
+      );
       setPending(false);
     }
   }
 
   return (
-    <div className="flex items-center gap-3">
+    <div className="space-y-2">
       <button
         type="button"
         onClick={start}
         disabled={pending}
-        className="bg-primary text-primary-foreground rounded-lg px-4 py-2 text-sm font-semibold disabled:opacity-60"
+        aria-label={`Passer l'épreuve sur le sujet : ${topicTitle}`}
+        className={primaryButton}
       >
         {pending ? "Ouverture…" : "Passer l'épreuve"}
       </button>
-      {error && <span className="text-danger text-xs">{error}</span>}
+      {error && (
+        <p role="alert" className="text-danger text-xs leading-relaxed">
+          {error}
+        </p>
+      )}
     </div>
   );
 }
