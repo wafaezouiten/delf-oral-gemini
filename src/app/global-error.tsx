@@ -20,6 +20,9 @@
  *  - `metadata` is not available in a Client Component, so the title is set with
  *    React's `<title>` — the alternative the Next 16 docs give
  *    (`03-file-conventions/error.md`).
+ *
+ * `retry` and not `reset`, for the reason spelled out in `error.tsx`: both props
+ * are passed, neither is typechecked here, and only `retry` re-fetches.
  */
 export default function GlobalError({
   error,

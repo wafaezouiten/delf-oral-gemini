@@ -208,6 +208,39 @@ body {
     display: none !important;
   }
 
+  /**
+   * Print is always the light scheme, whatever the screen was: a dark card
+   * printed literally is a page of toner, and most printers drop background
+   * fills anyway — so the same sheet comes out differently depending on a
+   * setting nobody thinks about.
+   *
+   * The subtle fills are flattened to white rather than kept, because a
+   * greyscale printer renders every one of them as the same grey block and the
+   * band scale stops being a scale. Nothing is lost: every tinted surface in
+   * this product was already required to carry a mark and a word as well as its
+   * colour, so on paper the awarded band is still the bold double-ruled cell and
+   * « Au niveau B2 » is still written beside it. The foreground colours are kept
+   * — they print as ink on a colour printer and as legible grey on a mono one.
+   */
+  :root {
+    --background: #ffffff;
+    --foreground: #000000;
+    --card: #ffffff;
+    --paper: #ffffff;
+    --muted: #ffffff;
+    --muted-foreground: #444444;
+    --border: #999999;
+    --paper-border: #999999;
+    --primary-subtle: #ffffff;
+    --success-subtle: #ffffff;
+    --warning-subtle: #ffffff;
+    --danger-subtle: #ffffff;
+    --band-red-subtle: #ffffff;
+    --band-amber-subtle: #ffffff;
+    --band-green-subtle: #ffffff;
+    --band-emerald-subtle: #ffffff;
+  }
+
   body {
     background: #ffffff;
     color: #000000;

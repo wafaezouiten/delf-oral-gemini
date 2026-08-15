@@ -95,8 +95,16 @@ function parseStored(raw: string | null): StoredResult | null | undefined {
  * rubric returns five bands and a total, and inventing the two intermediate
  * sums in a component would be exactly the "computing data the earlier phase
  * does not produce" that #11 rules out.
+ *
+ * Computed once at module load rather than per render. The cost is nothing at
+ * five criteria; what it buys is the statement — this depends on two module
+ * constants and nothing about a particular correction, and a future reader
+ * looking for where the grouping reacts to a prop will not go hunting.
  */
-function groupedCriteria(): Array<{ competence: string; criteria: OralCriterion[] }> {
+const CRITERIA_GROUPS: ReadonlyArray<{
+  competence: string;
+  criteria: OralCriterion[];
+}> = (() => {
   const groups: Array<{ competence: string; criteria: OralCriterion[] }> = [];
   for (const criterion of ORAL_CRITERIA) {
     const competence = ORAL_CRITERIA_COMPETENCE[criterion];
@@ -105,7 +113,7 @@ function groupedCriteria(): Array<{ competence: string; criteria: OralCriterion[
     else groups.push({ competence, criteria: [criterion] });
   }
   return groups;
-}
+})();
 
 /**
  * @param initial The correction as it is stored, when the sitting was persisted
@@ -268,7 +276,7 @@ export function ResultsClient({
             <h2 className="border-border font-serif border-b px-6 py-4 text-base font-semibold">
               Grille de correction
             </h2>
-            {groupedCriteria().map((group) => (
+            {CRITERIA_GROUPS.map((group) => (
               <div key={group.competence} className="border-border border-b last:border-b-0">
                 <h3 className="text-muted-foreground bg-muted/60 px-6 py-2 text-[0.6875rem] font-semibold tracking-[0.16em] uppercase">
                   {group.competence}
