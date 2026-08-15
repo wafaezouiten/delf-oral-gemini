@@ -30,8 +30,14 @@
  */
 
 import { INPUT_SAMPLE_RATE } from "@/lib/gemini/constants";
-import { PhaseArchive, type PhaseRecording, type RecordedPhase } from "./archive";
+import {
+  PhaseArchive,
+  type PhaseRecording,
+  type RecordedPhase,
+  type RecordingEncoder,
+} from "./archive";
 import { PcmFramer, frameSamplesAt } from "./framing";
+import { opusRecordingEncoder } from "./opus-encoder";
 import { int16ToBase64 } from "./pcm";
 
 export type { PhaseRecording, RecordedPhase } from "./archive";
@@ -189,6 +195,9 @@ export interface RecorderCallbacks {
 
 export interface MicRecorderOptions extends RecorderCallbacks {
   openMicrophone?: MicrophoneOpener;
+  /** How a phase's samples become the artefact that is uploaded. Defaults to
+   *  Opus; injected so a test can archive without a codec. */
+  encodeRecording?: RecordingEncoder;
 }
 
 export class MicRecorder {
@@ -210,7 +219,7 @@ export class MicRecorder {
    * because its lifetime is the microphone's: it must survive every reconnect
    * and every phase boundary, and die with the device.
    */
-  private readonly archive = new PhaseArchive(INPUT_SAMPLE_RATE);
+  private readonly archive: PhaseArchive;
 
   /** Set once, when the device goes away under us. Terminal: a capture that
    *  ended does not come back, and a second report of it is noise. */
@@ -225,6 +234,16 @@ export class MicRecorder {
   constructor(options: MicRecorderOptions) {
     this.callbacks = options;
     this.openMicrophone = options.openMicrophone ?? browserMicrophone;
+    this.archive = new PhaseArchive(
+      INPUT_SAMPLE_RATE,
+      options.encodeRecording ??
+        // A browser that cannot encode Opus produces a WAV that the finish route
+        // will refuse as too large. Said out loud here rather than discovered as
+        // a 413: this is the one path on which a sitting loses its audio.
+        opusRecordingEncoder({
+          onFallback: (reason) => this.callbacks.onEvent?.("recording-encode-fallback", reason),
+        }),
+    );
   }
 
   /** Open the microphone and start streaming. Safe to call twice. */
@@ -382,18 +401,21 @@ export class MicRecorder {
   }
 
   /**
-   * One phase's recording as a playable, uploadable WAV, or null when that
+   * One phase's recording as a playable, uploadable file, or null when that
    * phase captured nothing — so a caller can tell a silent phase from a bug.
    *
    * Always at {@link INPUT_SAMPLE_RATE}, whatever the device ran at: the framer
-   * has already converted, so the header is not a claim about the hardware.
+   * has already converted, so what the file declares is not a claim about the
+   * hardware.
    */
-  recordingFor(phase: RecordedPhase): PhaseRecording | null {
+  recordingFor(phase: RecordedPhase): Promise<PhaseRecording | null> {
     return this.archive.recordingFor(phase);
   }
 
-  /** Every phase that produced audio, in the order they were recorded. */
-  recordings(): PhaseRecording[] {
+  /** Every phase that produced audio, in the order they were recorded.
+   *  Compressing them is the slow part of finishing an exam; see
+   *  {@link PhaseArchive.all}. */
+  recordings(): Promise<PhaseRecording[]> {
     return this.archive.all();
   }
 

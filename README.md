@@ -28,7 +28,7 @@ Required to run an exam:
 
 ```bash
 pnpm check       # typecheck + lint
-pnpm test:unit   # 280 tests, including the full-exam acceptance test
+pnpm test:unit   # 313 tests, including the full-exam acceptance test
 pnpm build
 ```
 
@@ -79,8 +79,8 @@ of them carries a handle, and therefore only one of them keeps the examiner's
 memory of the exam. See `docs/SESSION_STATE_MACHINE.md`.
 
 **The recording's duration is measured, never assumed.** Each speaking phase
-produces its own WAV, and its length comes from counting the samples in it —
-then, on the server, from re-reading the uploaded file's own header. The phase
+produces its own file, and its length comes from counting the samples in it —
+then, on the server, from re-reading the uploaded artefact itself. The phase
 clock is stored beside it but is not the same number: a suspended audio graph
 behind a backgrounded tab, a headset unplugged four minutes in, a permission
 revoked mid-sentence all leave a phase that *ran* seven minutes and *recorded*
@@ -100,7 +100,7 @@ so a token opens one phase, of one subject, of one sitting, for its owner, once.
 src/lib/delf/         Pure exam logic: phases, transcript, rubric, examiner prompt, topics
 src/lib/gemini/       Live configuration per phase; the /25 evaluator
 src/lib/live/         Session lifecycle (resumption, GoAway), state machine, exam controller
-src/lib/audio/        16 kHz PCM capture, 24 kHz playback, WAV encoding, the per-phase recording
+src/lib/audio/        16 kHz PCM capture, 24 kHz playback, WAV and Opus encoding, the per-phase recording
 src/app/              Routes: landing, Clerk, /app dashboard, exam, results
 experiments/          The audio-vs-text evaluation experiment
 ```
@@ -112,7 +112,7 @@ minutes.
 
 ## Status
 
-**Verified offline** — `pnpm check` clean, `pnpm build` succeeds, 280/280 unit
+**Verified offline** — `pnpm check` clean, `pnpm build` succeeds, 313/313 unit
 tests pass. That includes the acceptance scenario end to end (preparation →
 monologue → débat → forced reconnect → finish), asserting the transcript stays
 continuous, the débat clock does not reset, and the examiner's seeded memory
@@ -129,10 +129,20 @@ it.
 
 The recording is covered against the same fakes: the monologue and the débat cut
 apart with the boundary's partial frame landing in the phase it was spoken in,
-the duration read back out of the WAV's own header, and the failures that make a
+the duration read back out of the artefact itself, and the failures that make a
 recording shorter than its phase — a track that ends mid-débat, a capture that
 quietly stops delivering, a phase entered before the microphone was asked for —
-each asserted to keep what was recorded and to say so.
+each asserted to keep what was recorded and to say so. The Ogg Opus container the
+artefact travels in is covered on its own terms: every frame size the codec
+defines, a stream measured back to the audio that went in, a truncated one
+measured to what arrived, and a stream stamped with a length its packets do not
+add up to, refused.
+
+**Verified in a real browser** — the recording is encoded by WebCodecs and a
+20-minute sitting comes out at **2.47 MB**, against 38.4 MB as WAV and a 4.5 MB
+platform limit. Chrome's own decoder reads the hand-written container back to
+1 200.02 s, the same figure the server's reader measures out of the packets. The
+numbers and the method are in [`docs/AUDIO_UPLOAD.md`](docs/AUDIO_UPLOAD.md).
 
 **Verified against the real Gemini service** — `pnpm verify:live`, 6/6:
 
@@ -145,6 +155,11 @@ each asserted to keep what was recorded and to say so.
 - **Resumption carries memory.** After dropping the socket and reconnecting with
   the handle, the examiner recalled a specific argument made before the
   reconnect, in character.
+
+**Verified upload** — French speech synthesised, encoded through the shipped
+browser path and uploaded exactly as the evaluator uploads it: the Files API
+accepts `audio/ogg`, and the corrector model transcribed the sentence back word
+for word from 28 kB of Opus. 439 kB of PCM travelled as 28 kB.
 
 **Verified evaluation** — `pnpm verify:eval`, 8/8: a strong, a weak and an
 *uneven* transcript graded through the real model. Scores land on legal bands,
@@ -166,6 +181,11 @@ written up in [`docs/GEMINI_LIVE_FINDINGS.md`](docs/GEMINI_LIVE_FINDINGS.md) and
   against a fake device, but whether a real headset unplugged mid-débat fires
   `ended` on every engine — and whether a real backgrounded tab suspends its
   capture — needs a human with a microphone.
+- A full sitting finishing on a deployed URL. Until #24 this could not have
+  succeeded — the upload was eight times the platform's body limit, so audio
+  grading has never completed against a real function. It now fits, measured
+  rather than assumed, but the request itself has only been made against
+  `next dev`.
 - A real `GoAway` at the true ~10 minute limit. The reconnect path is proven by
   forced reconnection; the trigger has not been observed in the wild.
 - The audio-vs-text evaluation result. `docs/AUDIO_EVALUATION.md` states the

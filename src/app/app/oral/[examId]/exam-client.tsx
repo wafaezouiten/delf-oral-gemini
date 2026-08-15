@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { useExamController } from "@/lib/live/use-exam-controller";
 import type { ExamFinishedPayload } from "@/lib/live/exam-controller";
 import { PHASE_LABELS, MONOLOGUE_MIN_SECONDS } from "@/lib/delf/phases";
+import { fitsInOneRequest } from "@/lib/exams/uploaded-recording";
 import type { OralTopic } from "@/lib/delf/topics";
 import type { TranscriptEntry } from "@/lib/delf/transcript";
 import { PhaseClock } from "./_components/phase-clock";
@@ -34,8 +35,8 @@ export function ExamClient({ examId, topic }: { examId: string; topic: OralTopic
    *
    * The recordings go up as one file per phase rather than one per sitting: the
    * duration floors are per task, and two artefacts are what lets a candidate
-   * re-listen to the half that went wrong. Multipart because a 13-minute WAV is
-   * tens of megabytes and has no business being base64'd into a JSON body.
+   * re-listen to the half that went wrong. Multipart because a 13-minute
+   * recording has no business being base64'd into a JSON body.
    */
   const onFinished = useCallback(
     async (payload: ExamFinishedPayload) => {
@@ -45,17 +46,37 @@ export function ExamClient({ examId, topic }: { examId: string; topic: OralTopic
       setSubmitError(null);
 
       const form = new FormData();
-      form.set(
-        "payload",
-        JSON.stringify({
-          topicSlug: topic.slug,
-          transcript: payload.transcript,
-          phases: payload.phases,
-          reconnectCount: payload.reconnectCount,
-        }),
-      );
-      for (const recording of payload.recordings) {
-        form.set(`audio-${recording.phase}`, recording.blob, `${recording.phase}.wav`);
+      const json = JSON.stringify({
+        topicSlug: topic.slug,
+        transcript: payload.transcript,
+        phases: payload.phases,
+        reconnectCount: payload.reconnectCount,
+      });
+      form.set("payload", json);
+
+      /**
+       * Weighed before it is sent, because the platform will not read a request
+       * over its limit and the candidate cannot act on that (#24).
+       *
+       * A sitting encoded as Opus is about 2.4 MB and always fits. What does not
+       * is a sitting from a browser that could not encode it and fell back to
+       * WAV — 38 MB — and for that the choice is between a 413 that loses the
+       * whole correction and a correction made from the transcript alone. The
+       * second is worse than an audio grade and much better than nothing, and it
+       * is visible: the results page says which one the candidate got.
+       */
+      const sizes = payload.recordings.map((recording) => recording.blob.size);
+      const attachable = fitsInOneRequest([new TextEncoder().encode(json).length, ...sizes]);
+      if (attachable) {
+        for (const recording of payload.recordings) {
+          const extension = recording.mimeType === "audio/ogg" ? "ogg" : "wav";
+          form.set(`audio-${recording.phase}`, recording.blob, `${recording.phase}.${extension}`);
+        }
+      } else {
+        console.warn(
+          `[finish] the recordings are ${sizes.reduce((a, b) => a + b, 0)} bytes, ` +
+            "over what one request may carry; grading from the transcript alone",
+        );
       }
 
       // What the results page shows, and what the penalty was computed from: the
@@ -113,7 +134,9 @@ export function ExamClient({ examId, topic }: { examId: string; topic: OralTopic
             ? "Votre prestation est en cours d'évaluation. Cela peut prendre une minute."
             : submitError
               ? submitError
-              : "Redirection vers vos résultats…"}
+              : // Not idle: the recordings are being compressed before they are
+                // sent, which takes a few seconds for a full sitting.
+                "Préparation de votre enregistrement…"}
         </p>
         {submitError && (
           <button

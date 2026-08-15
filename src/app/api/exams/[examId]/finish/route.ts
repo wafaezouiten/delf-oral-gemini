@@ -1,9 +1,9 @@
 /**
  * POST /api/exams/:examId/finish — grade a completed exam.
  *
- * Takes multipart form data (the transcript as JSON, one WAV per speaking phase
- * as files) because a 20-minute recording is tens of megabytes and has no
- * business being base64'd into a JSON body.
+ * Takes multipart form data (the transcript as JSON, one recording per speaking
+ * phase as files) because a 20-minute recording is megabytes and has no business
+ * being base64'd into a JSON body.
  *
  * Grading runs here, on the server, well after the Live session has closed. The
  * evaluation is returned in the response as well as persisted, so the results
@@ -12,17 +12,16 @@
  * **Where each duration comes from.** The clock — how long a phase ran, when it
  * started, when it ended — only the browser knows, so it is taken on trust and
  * stored as an audit trail. How much audio exists is a property of the bytes
- * that arrived, so it is measured HERE, out of the uploaded WAV, and that is the
- * number the DELF duration penalty is computed from. A client that miscounts, or
- * an upload that truncates, then produces a short recording rather than a long
- * claim.
+ * that arrived, so it is measured HERE, out of the uploaded file, and that is
+ * the number the DELF duration penalty is computed from. A client that
+ * miscounts, or an upload that truncates, then produces a short recording rather
+ * than a long claim.
  */
 
 import { and, eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { checkWavFormat, readWavFormat } from "@/lib/audio/pcm";
 import { INPUT_SAMPLE_RATE } from "@/lib/gemini/constants";
 import { EXAM_ACCESS_DENIALS } from "@/lib/auth/exam-access";
 import { authorizeExam } from "@/lib/auth/exam-guard";
@@ -44,6 +43,12 @@ import { candidateWordCount } from "@/lib/delf/transcript";
 // `node --test`, and the request validation is the last thing that should go
 // uncovered for that reason. See `finish-payload.test.ts`.
 import { finishPayloadSchema } from "@/lib/exams/finish-payload";
+// The binary half of the same request, extracted for the same reason.
+import {
+  MAX_RECORDING_BYTES,
+  MAX_REQUEST_BYTES,
+  measureUploadedRecording,
+} from "@/lib/exams/uploaded-recording";
 import { evaluateExam, type EvaluationMode } from "@/lib/gemini/evaluate";
 
 export const runtime = "nodejs";
@@ -51,29 +56,17 @@ export const dynamic = "force-dynamic";
 /** A full audio evaluation is slow; the default serverless budget is not enough. */
 export const maxDuration = 300;
 
-/**
- * The largest recording this endpoint will read.
- *
- * A full 20-minute sitting at 16 kHz mono PCM is about 38 MB, and the longest
- * single task — the ~13-minute débat — about 25 MB. 64 MB is well clear of both
- * and well under anything worth spending a 5-minute serverless budget on.
- *
- * The cap exists because this is an authenticated endpoint that reads a body
- * into memory and forwards it to a metered upload API, and the browser recorder
- * is not the only thing that can reach it.
- *
- * It is enforced in two places and neither is airtight on its own. The
- * `Content-Length` check runs before `formData()` and is the only one that can
- * stop an oversized body being buffered at all — but the header is advisory and
- * absent on a chunked request. The `Blob.size` check runs after, by which point
- * the body is already in memory; what it still prevents is the expensive half,
- * the `arrayBuffer()` and the upload to the Files API. Bounding the body itself
- * properly means streaming it, which is a platform concern rather than this
- * route's.
- */
-const MAX_RECORDING_BYTES = 64 * 1024 * 1024;
-/** Both recordings, plus the transcript JSON and multipart overhead. */
-const MAX_REQUEST_BYTES = 2 * MAX_RECORDING_BYTES + 8 * 1024 * 1024;
+// The size limits live in `lib/exams/uploaded-recording.ts`, with the platform
+// arithmetic that sets them. They are enforced in two places here and neither is
+// airtight on its own. The `Content-Length` check runs before `formData()` and is
+// the only one that can stop an oversized body being buffered at all — but the
+// header is advisory and absent on a chunked request. The `Blob.size` check runs
+// after, by which point the body is already in memory; what it still prevents is
+// the expensive half, the `arrayBuffer()` and the upload to the Files API.
+// Bounding the body itself properly means streaming it, which is a platform
+// concern rather than this route's — and since #24 the platform's own limit sits
+// just above ours, so an oversized request is refused either way. What ours buys
+// is a refusal the candidate can read.
 
 const SPEAKING_PHASES = ["monologue", "debate"] as const satisfies readonly OralSpeakingPhase[];
 
@@ -81,6 +74,8 @@ const SPEAKING_PHASES = ["monologue", "debate"] as const satisfies readonly Oral
 interface UploadedRecording {
   phase: OralSpeakingPhase;
   blob: Blob;
+  /** What the bytes turned out to be, which is not what the form claimed. */
+  mimeType: string;
   byteSize: number;
   durationSeconds: number;
 }
@@ -94,12 +89,8 @@ interface UploadedRecording {
  * placeholder.
  *
  * A file that is *present but unmeasurable* is a different thing entirely and is
- * refused. This endpoint grades on duration, `pcm16ToWav` is the only thing that
- * writes these files, and a WAV that is not mono 16-bit at the capture rate did
- * not come from it — so the choice is between rejecting it and quietly grading
- * against a length someone else chose. The upper bound on that length is the
- * upload cap, not a separate check: at 32 kB a second, {@link
- * MAX_RECORDING_BYTES} cannot express more than about 35 minutes.
+ * refused — see `measureUploadedRecording`, which decides the format from the
+ * bytes rather than from what the form said they were.
  *
  * One pass over the two phases, and the size check happens inside it — before
  * the `arrayBuffer()` that is the expensive half. Two loops reading the same two
@@ -116,16 +107,15 @@ async function readRecordings(
     if (!(file instanceof Blob) || file.size === 0) continue;
     if (file.size > MAX_RECORDING_BYTES) return { rejected: phase, reason: "too-large" };
 
-    const format = readWavFormat(await file.arrayBuffer());
-    if (!format || !checkWavFormat(format, INPUT_SAMPLE_RATE)) {
-      return { rejected: phase, reason: "unreadable" };
-    }
+    const measured = measureUploadedRecording(await file.arrayBuffer(), INPUT_SAMPLE_RATE);
+    if (!measured) return { rejected: phase, reason: "unreadable" };
 
     recordings.push({
       phase,
       blob: file,
+      mimeType: measured.mimeType,
       byteSize: file.size,
-      durationSeconds: format.durationSeconds,
+      durationSeconds: measured.durationSeconds,
     });
   }
   return { recordings };
@@ -286,6 +276,10 @@ export async function POST(
       audio: recordings.map((recording) => ({
         phase: recording.phase,
         blob: recording.blob,
+        // The type the bytes turned out to be. The Files API is told what it is
+        // being handed, and being handed `audio/wav` for an Opus stream is a
+        // upload that succeeds and a correction that hears nothing.
+        mimeType: recording.mimeType,
       })),
     });
 
@@ -354,7 +348,7 @@ export async function POST(
                 examId: id,
                 phase: recording.phase,
                 uri: null,
-                mimeType: "audio/wav",
+                mimeType: recording.mimeType,
                 byteSize: recording.byteSize,
                 durationSeconds: Math.round(recording.durationSeconds),
                 deletedAt: now,

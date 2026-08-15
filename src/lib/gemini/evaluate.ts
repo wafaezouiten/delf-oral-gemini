@@ -208,6 +208,19 @@ export interface EvaluateParams {
 export interface EvaluationRecording {
   phase: OralSpeakingPhase;
   blob: Blob;
+  /**
+   * What the file is, as read out of its bytes by the caller. Optional because
+   * the scripts hand over a WAV they just wrote; the finish route sniffs it,
+   * because since #24 a sitting arrives as Ogg Opus and a file uploaded under
+   * the wrong type is a correction of silence.
+   */
+  mimeType?: string;
+}
+
+/** A blob knows what it is; a blob built without a type does not, and the
+ *  scripts' recordings are always the WAV `pcm16ToWav` wrote. */
+function mimeTypeOf(blob: Blob): string {
+  return blob.type || "audio/wav";
 }
 
 /**
@@ -225,11 +238,19 @@ export async function evaluateExam(params: EvaluateParams): Promise<EvaluationRe
 
   // A bare blob is a whole-sitting recording and belongs to no single task, so
   // it carries a null phase rather than being guessed at.
-  const recordings: Array<{ phase: OralSpeakingPhase | null; blob: Blob }> = !params.audio
+  const recordings: Array<{
+    phase: OralSpeakingPhase | null;
+    blob: Blob;
+    mimeType: string;
+  }> = !params.audio
     ? []
     : params.audio instanceof Blob
-      ? [{ phase: null, blob: params.audio }]
-      : params.audio.map((recording) => ({ phase: recording.phase, blob: recording.blob }));
+      ? [{ phase: null, blob: params.audio, mimeType: mimeTypeOf(params.audio) }]
+      : params.audio.map((recording) => ({
+          phase: recording.phase,
+          blob: recording.blob,
+          mimeType: recording.mimeType ?? mimeTypeOf(recording.blob),
+        }));
 
   const parts: Part[] = [{ text: buildPrompt({ ...params, recordings }) }];
 
@@ -237,17 +258,18 @@ export async function evaluateExam(params: EvaluateParams): Promise<EvaluationRe
     if (recordings.length === 0) {
       throw new Error("Audio mode requires the candidate's recording");
     }
-    // Uploaded via the Files API rather than inlined: a full B2 exam is roughly
-    // 20 minutes of 16 kHz PCM, tens of megabytes, well past the inline request
-    // limit. The upload also lets the same recording be re-scored later without
-    // re-sending it.
+    // Uploaded via the Files API rather than inlined: a full B2 exam is 20
+    // minutes of audio, past the inline request limit even compressed. The
+    // upload also lets the same recording be re-scored later without re-sending
+    // it. `audio/ogg` is accepted and transcribed — verified against the real
+    // service, see docs/AUDIO_UPLOAD.md.
     //
     // Sequential rather than concurrent: the free tier rate-limits uploads, and
     // two files is not a latency problem worth a 429 for.
     for (const recording of recordings) {
       const uploaded = await ai.files.upload({
         file: recording.blob,
-        config: { mimeType: "audio/wav" },
+        config: { mimeType: recording.mimeType },
       });
       if (!uploaded.uri || !uploaded.mimeType) {
         throw new Error("File upload returned no usable URI");
