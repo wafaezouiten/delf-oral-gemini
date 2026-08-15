@@ -3,13 +3,18 @@
 import Link from "next/link";
 import { useCallback, useSyncExternalStore } from "react";
 
+import { Notice } from "@/app/_components/notice";
+import { BandScale } from "@/app/_components/band-scale";
+import { secondaryButton } from "@/app/_components/button-styles";
 import { COMPETENCY_FLOOR, COMPETENCY_MAX } from "@/lib/delf/constants";
 import {
   ORAL_CRITERIA,
   ORAL_CRITERIA_COMPETENCE,
+  ORAL_CRITERIA_DESCRIPTIONS,
   ORAL_CRITERIA_LABELS,
+  type OralCriterion,
 } from "@/lib/delf/criteria";
-import { BAND_LABELS, type GrilleBand } from "@/lib/delf/grille";
+import { type GrilleBand } from "@/lib/delf/grille";
 import { meetsCompetencyFloor } from "@/lib/delf/orale-rubric";
 import { formatClock } from "@/lib/delf/phases";
 import { formatTranscript, type TranscriptEntry } from "@/lib/delf/transcript";
@@ -82,6 +87,27 @@ function parseStored(raw: string | null): StoredResult | null | undefined {
 }
 
 /**
+ * The five criteria in their two grille groups, in the grille's order.
+ *
+ * Derived from `ORAL_CRITERIA_COMPETENCE` rather than written out, so a
+ * criterion that moves competence on the official grid moves here too. No
+ * subtotals: the official grid prints one per competence, but this project's
+ * rubric returns five bands and a total, and inventing the two intermediate
+ * sums in a component would be exactly the "computing data the earlier phase
+ * does not produce" that #11 rules out.
+ */
+function groupedCriteria(): Array<{ competence: string; criteria: OralCriterion[] }> {
+  const groups: Array<{ competence: string; criteria: OralCriterion[] }> = [];
+  for (const criterion of ORAL_CRITERIA) {
+    const competence = ORAL_CRITERIA_COMPETENCE[criterion];
+    const last = groups.at(-1);
+    if (last?.competence === competence) last.criteria.push(criterion);
+    else groups.push({ competence, criteria: [criterion] });
+  }
+  return groups;
+}
+
+/**
  * @param initial The correction as it is stored, when the sitting was persisted
  *   and read back on the server (Phase 8). Everything below is unchanged when it
  *   is absent: a sitting with no row — no database, a degraded `local-…` id, a
@@ -114,17 +140,20 @@ export function ResultsClient({
 
   if (missing) {
     return (
-      <main className="mx-auto w-full max-w-2xl px-6 py-16 text-center">
-        <h1 className="text-xl font-semibold">Résultat introuvable</h1>
-        <p className="text-muted-foreground mt-2 text-sm">
-          Ce résultat n&apos;est plus disponible dans cette session.
+      <main className="mx-auto w-full max-w-xl px-6 py-16">
+        <h1 className="font-serif text-center text-xl font-semibold">
+          Résultat introuvable
+        </h1>
+        <p className="text-muted-foreground mt-2 text-center text-sm leading-relaxed">
+          Cette correction n&apos;a pas été retrouvée. Elle n&apos;a pas été
+          enregistrée, ou elle a été ouverte depuis un autre navigateur que celui
+          où l&apos;épreuve a été passée.
         </p>
-        <Link
-          href="/app"
-          className="border-border mt-6 inline-block rounded-lg border px-4 py-2 text-sm font-semibold"
-        >
-          Passer une nouvelle épreuve
-        </Link>
+        <div className="mt-6 text-center">
+          <Link href="/app" className={secondaryButton}>
+            Passer une nouvelle épreuve
+          </Link>
+        </div>
       </main>
     );
   }
@@ -132,7 +161,9 @@ export function ResultsClient({
   if (!result) {
     return (
       <main className="mx-auto w-full max-w-2xl px-6 py-16">
-        <p className="text-muted-foreground text-sm">Chargement du résultat…</p>
+        <p className="text-muted-foreground text-sm" role="status">
+          Chargement du résultat…
+        </p>
       </main>
     );
   }
@@ -157,26 +188,35 @@ export function ResultsClient({
 
   return (
     <main className="mx-auto w-full max-w-5xl px-6 py-10">
-      <p className="text-muted-foreground text-xs font-semibold tracking-[0.13em] uppercase">
-        DELF B2 · Production orale
-      </p>
-      <h1 className="mt-1 text-2xl font-semibold tracking-tight">{topic.title}</h1>
+      <header className="border-border border-b pb-5">
+        <p className="text-primary text-[0.6875rem] font-semibold tracking-[0.16em] uppercase">
+          DELF B2 · Production orale · Correction
+        </p>
+        <h1 className="font-serif mt-1 text-2xl leading-tight font-semibold text-balance">
+          {topic.title}
+        </h1>
+      </header>
 
       <div className="mt-6 grid gap-6 lg:grid-cols-[1fr_1.1fr]">
         <section className="space-y-5">
-          <div className="border-border bg-card rounded-xl border p-6">
-            <p className="text-muted-foreground text-xs font-semibold tracking-[0.13em] uppercase">
+          <div className="border-border bg-card rounded-lg border p-6">
+            <p className="text-muted-foreground text-[0.6875rem] font-semibold tracking-[0.16em] uppercase">
               Note globale
             </p>
-            <p className="tabular mt-2 text-5xl font-semibold">
+            <p className="font-serif tabular mt-2 text-6xl leading-none font-semibold">
               {evaluation.score25}
               <span className="text-muted-foreground text-2xl"> / {COMPETENCY_MAX}</span>
             </p>
+            {/* The verdict in a word as well as a colour — a candidate who cannot
+                tell the green pill from the red one still reads « Au-dessus ». */}
             <p
-              className={`mt-3 inline-block rounded-full px-3 py-1 text-xs font-semibold ${
-                passed ? "bg-success-subtle text-success" : "bg-danger-subtle text-danger"
+              className={`mt-3 inline-flex items-center gap-1.5 rounded-md border px-3 py-1 text-xs font-semibold ${
+                passed
+                  ? "border-success/30 bg-success-subtle text-success"
+                  : "border-danger/40 bg-danger-subtle text-danger"
               }`}
             >
+              <span aria-hidden>{passed ? "✓" : "✕"}</span>
               {passed
                 ? `Au-dessus du seuil de ${COMPETENCY_FLOOR}/${COMPETENCY_MAX}`
                 : `En dessous du seuil de ${COMPETENCY_FLOOR}/${COMPETENCY_MAX}`}
@@ -190,16 +230,16 @@ export function ResultsClient({
                 {shortLabel} nettement plus court que ce que demande l&apos;épreuve réelle.
               </p>
             )}
-            <dl className="text-muted-foreground mt-4 space-y-1 text-xs">
-              <div className="flex justify-between">
+            <dl className="text-muted-foreground border-border mt-4 space-y-1 border-t pt-4 text-xs">
+              <div className="flex justify-between gap-4">
                 <dt>Monologue</dt>
                 <dd className="tabular">{formatClock(monologueSeconds)}</dd>
               </div>
-              <div className="flex justify-between">
+              <div className="flex justify-between gap-4">
                 <dt>Débat</dt>
                 <dd className="tabular">{formatClock(debateSeconds)}</dd>
               </div>
-              <div className="flex justify-between">
+              <div className="flex justify-between gap-4">
                 <dt>Évaluation</dt>
                 <dd>
                   {evaluation.mode === "audio"
@@ -210,29 +250,57 @@ export function ResultsClient({
             </dl>
           </div>
 
-          <div className="border-border bg-card rounded-xl border p-6">
-            <h2 className="text-sm font-semibold">Critères</h2>
-            <ul className="mt-4 space-y-4">
-              {ORAL_CRITERIA.map((key) => {
-                const band = evaluation.criteria[key] ?? 0;
-                return (
-                  <li key={key}>
-                    <div className="flex items-baseline justify-between gap-3">
-                      <span className="text-sm font-medium">{ORAL_CRITERIA_LABELS[key]}</span>
-                      <span className="tabular text-sm font-semibold">{band} / 5</span>
-                    </div>
-                    <p className="text-muted-foreground text-xs">
-                      {ORAL_CRITERIA_COMPETENCE[key]} · {BAND_LABELS[band]}
-                    </p>
-                    <p className="mt-1.5 text-sm leading-relaxed">
-                      {evaluation.feedback.justifications[key]}
-                    </p>
-                  </li>
-                );
-              })}
-            </ul>
+          {/* The two degraded corrections, told plainly rather than left as a
+              word in the table above. Both are states the earlier phases can
+              genuinely produce — a browser that could not encode, a recording
+              too large to send, a microphone that died — and a /25 that was
+              reached without hearing the candidate should say so. */}
+          {evaluation.mode === "text" && (
+            <Notice tone="warning" title="Corrigé sans l'audio">
+              Aucun enregistrement n&apos;a pu être joint à cette épreuve. La
+              correction a été faite à partir de la transcription seule : votre
+              prononciation n&apos;a pas été écoutée, et les durées ci-dessus sont
+              celles de l&apos;audio effectivement reçu.
+            </Notice>
+          )}
+
+          <div className="border-border bg-card rounded-lg border">
+            <h2 className="border-border font-serif border-b px-6 py-4 text-base font-semibold">
+              Grille de correction
+            </h2>
+            {groupedCriteria().map((group) => (
+              <div key={group.competence} className="border-border border-b last:border-b-0">
+                <h3 className="text-muted-foreground bg-muted/60 px-6 py-2 text-[0.6875rem] font-semibold tracking-[0.16em] uppercase">
+                  {group.competence}
+                </h3>
+                <ul className="divide-border divide-y">
+                  {group.criteria.map((key) => {
+                    const band = evaluation.criteria[key] ?? 0;
+                    return (
+                      <li key={key} className="space-y-2 px-6 py-4">
+                        <div className="flex items-baseline justify-between gap-3">
+                          <h4 className="text-sm font-semibold">
+                            {ORAL_CRITERIA_LABELS[key]}
+                          </h4>
+                          <span className="tabular text-sm font-semibold whitespace-nowrap">
+                            {band} / 5
+                          </span>
+                        </div>
+                        <p className="text-muted-foreground text-xs leading-relaxed">
+                          {ORAL_CRITERIA_DESCRIPTIONS[key]}
+                        </p>
+                        <BandScale band={band} />
+                        <p className="text-sm leading-relaxed">
+                          {evaluation.feedback.justifications[key]}
+                        </p>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            ))}
             {evaluation.feedback.phonologieNonEvaluable && (
-              <p className="text-muted-foreground mt-4 text-xs leading-relaxed">
+              <p className="text-muted-foreground border-border border-t px-6 py-4 text-xs leading-relaxed">
                 La phonologie n&apos;a pas pu être évaluée de façon fiable sur cette
                 production.
               </p>
@@ -248,56 +316,74 @@ export function ResultsClient({
           </Panel>
 
           <Panel title="Points forts">
-            <BulletList items={evaluation.feedback.pointsForts} />
+            <BulletList items={evaluation.feedback.pointsForts} marker="+" tone="text-success" />
           </Panel>
 
           <Panel title="Axes prioritaires">
-            <BulletList items={evaluation.feedback.axesPrioritaires} />
+            <BulletList
+              items={evaluation.feedback.axesPrioritaires}
+              marker="→"
+              tone="text-warning"
+            />
           </Panel>
 
           <Panel title="Conseil">
             <p className="text-sm leading-relaxed">{evaluation.feedback.conseil}</p>
           </Panel>
 
-          <details className="border-border rounded-xl border p-4">
-            <summary className="cursor-pointer text-sm font-semibold">
+          <details className="border-border bg-card rounded-lg border">
+            <summary className="cursor-pointer px-6 py-4 text-sm font-semibold">
               Transcription complète
             </summary>
-            <pre className="text-muted-foreground mt-3 text-xs leading-relaxed whitespace-pre-wrap">
+            <pre className="text-muted-foreground border-border max-h-96 overflow-y-auto border-t px-6 py-4 font-sans text-xs leading-relaxed whitespace-pre-wrap">
               {formatTranscript(transcript)}
             </pre>
           </details>
         </section>
       </div>
 
-      <Link
-        href="/app"
-        className="border-border mt-8 inline-block rounded-lg border px-4 py-2 text-sm font-semibold"
-      >
-        Passer une nouvelle épreuve
-      </Link>
+      <div className="no-print mt-8">
+        <Link href="/app" className={secondaryButton}>
+          Passer une nouvelle épreuve
+        </Link>
+      </div>
     </main>
   );
 }
 
 function Panel({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="border-border bg-card rounded-xl border p-6">
-      <h2 className="text-sm font-semibold">{title}</h2>
-      <div className="mt-3">{children}</div>
+    <div className="border-border bg-card rounded-lg border">
+      <h2 className="border-border font-serif border-b px-6 py-4 text-base font-semibold">
+        {title}
+      </h2>
+      <div className="px-6 py-4">{children}</div>
     </div>
   );
 }
 
-function BulletList({ items }: { items: string[] }) {
+function BulletList({
+  items,
+  marker,
+  tone,
+}: {
+  items: string[];
+  /** A character rather than a bullet, so the two lists are told apart without
+   *  colour: strengths are marked `+`, next steps `→`. */
+  marker: string;
+  tone: string;
+}) {
   if (items.length === 0) {
     return <p className="text-muted-foreground text-sm">Rien à signaler.</p>;
   }
   return (
     <ul className="space-y-2">
       {items.map((item, index) => (
-        <li key={index} className="text-sm leading-relaxed">
-          {item}
+        <li key={index} className="flex gap-2.5 text-sm leading-relaxed">
+          <span className={`shrink-0 font-bold ${tone}`} aria-hidden>
+            {marker}
+          </span>
+          <span>{item}</span>
         </li>
       ))}
     </ul>
