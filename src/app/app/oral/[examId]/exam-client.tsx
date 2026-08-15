@@ -22,6 +22,15 @@ import { RecordingBadge } from "./_components/recording-badge";
  * The controller owns all the behaviour; this file only renders what phase the
  * exam is in.
  */
+/**
+ * How long the briefing waits for the browser to say whether it can encode.
+ *
+ * `AudioEncoder.isConfigSupported` answers in milliseconds; this is only here so
+ * that one that never answers costs the candidate three seconds rather than the
+ * épreuve.
+ */
+const BROWSER_CHECK_TIMEOUT_MS = 3_000;
+
 export function ExamClient({ examId, topic }: { examId: string; topic: OralTopic }) {
   const router = useRouter();
   const [notes, setNotes] = useState("");
@@ -84,10 +93,14 @@ export function ExamClient({ examId, topic }: { examId: string; topic: OralTopic
       }
       for (const recording of payload.recordings) {
         if (deliverable.includes(recording)) continue;
+        // Deliberately not "too large": a recording is also dropped when it is
+        // legal on its own and the pair is not, and a triage message that names
+        // the wrong limit sends the reader to the wrong constant.
         console.warn(
-          `[finish] the ${recording.phase} recording is ${recording.blob.size} bytes, ` +
-            `more than one request can carry as ${recording.mimeType}; ` +
-            "that phase will be graded from its transcript and will measure zero seconds",
+          `[finish] the ${recording.phase} recording (${recording.blob.size} bytes, ` +
+            `${recording.mimeType}) was not attached: it does not fit in one request ` +
+            "beside the rest of the sitting. That phase will be graded from its " +
+            "transcript and will measure zero seconds.",
         );
       }
 
@@ -138,27 +151,48 @@ export function ExamClient({ examId, topic }: { examId: string; topic: OralTopic
    * rather than discovered after it.
    *
    * A browser without WebCodecs archives a WAV, and a WAV sitting is far past
-   * what one request may carry — so the recording is never sent and the
-   * correction is made from the transcript alone (#24). That is a real loss of
-   * the thing this product exists for, and the only moment the candidate can do
-   * anything about it is now, before thirty minutes of preparation. Null while
-   * the question is still being asked, so a slow answer does not flash a warning
-   * at a browser that turns out to be fine.
+   * what one request may carry — so the recording is never sent, the correction
+   * is made from the transcript alone, and the duration penalty applies as if
+   * nothing had been recorded (#24). That is the whole product lost, and the
+   * only moment the candidate can do anything about it is now, before thirty
+   * minutes of preparation.
+   *
+   * Which is why the épreuve does not start until the question has been
+   * answered. `isConfigSupported` is fast, but "fast" is not "synchronous": a
+   * candidate who clicks straight through on a slow device would take the
+   * briefing — and with it the only warning there will ever be — off screen
+   * before it could render, and `Briefing` does not come back.
+   *
+   * The timeout is the other half of that. A browser that never answers must
+   * not hold the exam shut, so the wait is bounded; past it the sitting starts
+   * unwarned, which is exactly where this began and no worse.
    */
   const [canEncode, setCanEncode] = useState<boolean | null>(null);
+  const [checkingBrowser, setCheckingBrowser] = useState(true);
   useEffect(() => {
     let live = true;
-    void isOpusEncodingSupported().then((supported) => {
-      if (live) setCanEncode(supported);
-    });
+    const settle = (supported: boolean | null) => {
+      if (!live) return;
+      if (supported !== null) setCanEncode(supported);
+      setCheckingBrowser(false);
+    };
+
+    void isOpusEncodingSupported().then(settle);
+    const timer = setTimeout(() => settle(null), BROWSER_CHECK_TIMEOUT_MS);
     return () => {
       live = false;
+      clearTimeout(timer);
     };
   }, []);
 
   if (!state.started) {
     return (
-      <Briefing topic={topic} onStart={() => controller.start()} canEncode={canEncode} />
+      <Briefing
+        topic={topic}
+        onStart={() => controller.start()}
+        canEncode={canEncode}
+        checking={checkingBrowser}
+      />
     );
   }
 
@@ -288,11 +322,14 @@ function Briefing({
   topic,
   onStart,
   canEncode,
+  checking,
 }: {
   topic: OralTopic;
   onStart: () => void;
-  /** Null while the browser is still being asked. See `ExamClient`. */
+  /** Null while the browser is still being asked, and if it never answered. */
   canEncode: boolean | null;
+  /** Whether that question is still open. See `ExamClient`. */
+  checking: boolean;
 }) {
   return (
     <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col justify-center gap-6 px-6 py-12">
@@ -340,12 +377,15 @@ function Briefing({
         </p>
       )}
 
+      {/* Held shut until the browser has answered, so the warning above cannot
+          be outrun by a candidate clicking straight through. */}
       <button
         type="button"
         onClick={onStart}
-        className="bg-primary text-primary-foreground self-start rounded-lg px-5 py-2.5 text-sm font-semibold"
+        disabled={checking}
+        className="bg-primary text-primary-foreground self-start rounded-lg px-5 py-2.5 text-sm font-semibold disabled:opacity-50"
       >
-        Commencer la préparation
+        {checking ? "Vérification de votre navigateur…" : "Commencer la préparation"}
       </button>
     </main>
   );

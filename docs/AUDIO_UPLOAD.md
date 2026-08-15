@@ -54,10 +54,14 @@ measurement, which counts the audio the packets carry, report a candidate who
 paused as one who stopped speaking. The duration penalty is computed from that
 number, so silence has to cost bytes.
 
-**Constant bitrate.** Variable would usually be smaller, because half the débat
-is the candidate listening. But #24 is what happens when a size is assumed rather
-than computed, and at 16 kbit/s constant the size of a sitting is arithmetic:
-2 kB a second, 2.4 MB for twenty minutes, whatever the candidate says.
+**Constant bitrate, where the browser allows it.** Variable would usually be
+smaller, because half the débat is the candidate listening. But #24 is what
+happens when a size is assumed rather than computed, and at 16 kbit/s constant
+the size of a sitting is arithmetic: 2 kB a second, 2.4 MB for twenty minutes,
+whatever the candidate says. A browser that declines the mode falls back to
+variable rather than to nothing — measured 13 % *smaller* on this signal, but
+without the guarantee, which is why the ceiling has a megabyte and a half of room
+above the constant-rate figure rather than being trimmed to it.
 
 ## What is still measured rather than believed
 
