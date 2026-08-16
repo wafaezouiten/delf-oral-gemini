@@ -62,15 +62,20 @@ test("no correction the rubric can produce violates the constraints on the row",
   // Legal bands, the illegal 2 and 4 the prompt forbids, and the out-of-range
   // numbers a model has no business emitting at all.
   const scores = [0, 1, 2, 3, 4, 5, 4.5, -1, 99];
+  // Both correction modes: the unheard one caps « phonologie », which is another
+  // path by which a band reaches the column and therefore another path by which
+  // an illegal one could (#29).
+  const heard = [true, false];
 
   for (const raw of scores) {
     for (const duration of durations) {
+      for (const phonologyHeard of heard) {
       const scored = scoreSitting(
         Object.fromEntries(ORAL_CRITERIA.map((criterion) => [criterion, raw])) as Record<
           (typeof ORAL_CRITERIA)[number],
           number
         >,
-        duration,
+        { ...duration, phonologyHeard },
       );
 
       for (const criterion of ORAL_CRITERIA) {
@@ -92,6 +97,7 @@ test("no correction the rubric can produce violates the constraints on the row",
       // `meets_floor` has no constraint tying it back to `score_25`, so it is
       // pinned here instead — against the same constant the column documents.
       assert.equal(scored.meetsFloor, scored.score25 >= COMPETENCY_FLOOR);
+      }
     }
   }
 });

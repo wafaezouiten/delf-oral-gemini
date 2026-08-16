@@ -142,7 +142,15 @@ it is the one that makes the divergences below worth reading.
 Each one is either an expected consequence of a documented departure, a finding
 about the incumbent, or a defect — and the defect is filed.
 
-### 3.1 Phonologie, ours +2 across the board — **defect, filed as [#29](https://github.com/wafaezouiten/delf-oral-gemini/issues/29)**
+### 3.1 Phonologie, ours +2 across the board — **defect, filed as [#29](https://github.com/wafaezouiten/delf-oral-gemini/issues/29) and since fixed**
+
+> **Update.** #29 is closed. The measurement below is what the run recorded and is
+> left standing, because it is the evidence that produced the fix; what changed
+> afterwards is at the end of this section. The numbers everywhere else in this
+> report are from the same run and are therefore also pre-fix — every one of this
+> system's /25 totals in §2 is now 2 points lower on the four sittings that scored
+> phonologie 5.
+
 
 The largest and most systematic divergence: +2.0, +2.5, +2.5, +2.5 on four of six
 sittings. Both correctors were reading text.
@@ -163,11 +171,28 @@ whose justification is real audio should not ship an instruction that exists to
 compensate for having none. That decision stands.
 
 What the audit did not decide is what the **fallback** does when the audio is
-missing, and the replacement (`phonology-instruction.ts`, `TEXT_INSTRUCTION`) is
+missing, and the replacement (`phonology-instruction.ts`, `TEXT_INSTRUCTION`) was
 *more* confident than the thing it replaced — in the one mode with strictly less
 evidence. `finish/route.ts` selects text mode whenever both recordings fail to
-upload, so this is reachable in production and inflates a stored, candidate-visible
-mark by up to 2 bands. Filed.
+upload, so this was reachable in production and inflated a stored,
+candidate-visible mark by up to 2 bands.
+
+**The fix, and what re-running showed.** `orale-rubric.ts` now holds « phonologie »
+to a ceiling of 3 whenever the correction had no audio
+(`UNHEARD_PHONOLOGY_CEILING`, `capUnheardPhonology`), and `TEXT_INSTRUCTION`
+withdraws the top band with its reason attached. Both, not either: a prompt is a
+request and this one had already been declined, so the rule that changes a mark
+lives where it can be tested.
+
+Re-grading the corpus produced exactly the predicted −2 on every sitting that had
+scored 5 — `b2-solide` 25 → 23, `morphosyntaxe-faible` 23 → 21,
+`interaction-faible` 17 → 15, `lexique-pauvre` 15 → 13 — and one result worth
+recording because it was not predicted: the corrector now returns **3 as its raw
+band** and sets `phonologieNonEvaluable: true` on all four, which is the
+incumbent's own 24/24 behaviour. The prompt did the work; the rubric ceiling never
+had to fire. That is the right way round, and it is also why the ceiling stays —
+`phonologyCapped` records whether it was needed, and a future model that stops
+complying will be held anyway rather than silently inflating marks again.
 
 ### 3.2 « Interaction » scored on a monologue — **structural departure, working as intended**
 
@@ -421,10 +446,9 @@ The evidence supports it on three grounds, in descending order of confidence:
 These are conditions, not caveats. The recommendation is weaker than it looks
 until they are met:
 
-- **[#29](https://github.com/wafaezouiten/delf-oral-gemini/issues/29) is fixed
-  before any candidate is graded.** Text mode currently awards up to 5/25 of a
-  candidate-visible mark on no acoustic evidence, and it is reached by nothing
-  more exotic than a failed upload.
+- ~~**[#29](https://github.com/wafaezouiten/delf-oral-gemini/issues/29) is fixed
+  before any candidate is graded.**~~ **Done** — see §3.1. Text mode is now held
+  to a phonologie ceiling of 3 in the rubric as well as in the prompt.
 - **Run the audio-versus-text experiment on real learner speech**
   (`docs/AUDIO_EVALUATION.md`, still unrun). The audio phonology claim is the
   reproduction's principal justification and this report does not test it. If it

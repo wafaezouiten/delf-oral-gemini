@@ -40,7 +40,21 @@ export interface AttachedRecording {
   phase: OralSpeakingPhase | null;
 }
 
-const TEXT_INSTRUCTION = `PHONOLOGIE : vous ne disposez QUE de la transcription, sans le son. Vous ne pouvez donc pas juger la prononciation elle-même. Jugez uniquement les indices de fluidité visibles dans le texte : hésitations (« euh », « hum »), faux départs, autocorrections, répétitions, énoncés abandonnés ou fragmentés. Beaucoup de ces marques indiquent un débit haché : notez bas. Un texte fluide et des phrases menées à terme : notez 3, voire 5 si la fluidité est remarquable sur toute la durée. Mettez « phonologieNonEvaluable » à true si la production est trop brève pour juger quoi que ce soit.`;
+/**
+ * Text mode: judge the fluency the transcript can show, and nothing above it.
+ *
+ * The previous wording ended « notez 3, voire 5 si la fluidité est remarquable
+ * sur toute la durée », and #29 measured what that produced — 5/5 awarded on
+ * seven of eleven corrections, justified as « aucune hésitation, aucun faux
+ * départ », i.e. for the ABSENCE of evidence. A written or ASR-cleaned transcript
+ * has no « euh » in it whether the candidate is fluent or unintelligible.
+ *
+ * So the top band is withdrawn here and the reason is given rather than merely
+ * asserted, because a model told "you may not" without "because" tends to argue.
+ * The ceiling is *also* enforced in `orale-rubric.ts` — this paragraph is the
+ * courtesy, that function is the rule.
+ */
+const TEXT_INSTRUCTION = `PHONOLOGIE : vous ne disposez QUE de la transcription, sans le son. Vous ne pouvez donc PAS juger la prononciation, l'accentuation ni l'intonation : rien dans un texte n'en porte la trace. Jugez uniquement les indices de fluidité visibles dans le texte : hésitations (« euh », « hum »), faux départs, autocorrections, répétitions, énoncés abandonnés ou fragmentés. Beaucoup de ces marques indiquent un débit haché : notez bas. PLAFOND : sans le son, la note maximale est 3. N'attribuez JAMAIS 5 à ce critère à partir d'une transcription : l'absence d'hésitations dans un texte ne prouve pas une prononciation remarquable, elle ne prouve rien du tout. Mettez « phonologieNonEvaluable » à true : vous n'avez pas entendu le candidat.`;
 
 /**
  * What the corrector is told about the audio it has been given.

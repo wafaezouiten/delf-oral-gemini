@@ -212,6 +212,12 @@ export interface EvaluationResult {
    */
   durationPenalty: number;
   shortParts: Array<"monologue" | "debate">;
+  /**
+   * Whether « phonologie » was held to the ceiling because this correction had no
+   * audio (#29). Surfaced so a 3 can be explained as "not heard" rather than read
+   * as "heard, and merely adequate".
+   */
+  phonologyCapped: boolean;
   score25: number;
   /** Whether the mark clears the ≥ 5/25 competency floor. Computed by the
    *  rubric, so the route no longer needs its own copy of the threshold. */
@@ -364,6 +370,10 @@ export async function evaluateExam(params: EvaluateParams): Promise<EvaluationRe
   const scored = scoreSitting(rawCriteria, {
     monologueSeconds: params.monologueSeconds,
     debateSeconds: params.debateSeconds,
+    // The one place the mode reaches the rubric. `audio` is the only mode that
+    // puts the recording in front of the corrector, so it is the only one that
+    // may award the top phonologie band (#29).
+    phonologyHeard: params.mode === "audio",
   });
 
   return {
@@ -374,6 +384,7 @@ export async function evaluateExam(params: EvaluateParams): Promise<EvaluationRe
     rawScore25: scored.rawScore25,
     durationPenalty: scored.durationPenalty,
     shortParts: scored.shortParts,
+    phonologyCapped: scored.phonologyCapped,
     score25: scored.score25,
     meetsFloor: scored.meetsFloor,
     // No `?? ""` or `Boolean(...)` here any more: every one of these is required

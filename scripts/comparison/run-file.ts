@@ -34,6 +34,8 @@ export type OurRecord =
       score25: number;
       durationPenalty: number;
       shortParts: string[];
+      /** Whether the rubric held « phonologie » down because there was no audio (#29). */
+      phonologyCapped: boolean;
       meetsFloor: boolean;
       phonologieNonEvaluable: boolean;
       justifications: Record<string, string>;

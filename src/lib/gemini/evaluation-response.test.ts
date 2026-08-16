@@ -61,7 +61,11 @@ describe("a correction that can be trusted", () => {
 
     assert.equal(criterionScores(parsed).lexique, 4);
     assert.equal(
-      scoreSitting(criterionScores(parsed), { monologueSeconds: 400, debateSeconds: 700 })
+      scoreSitting(criterionScores(parsed), {
+        monologueSeconds: 400,
+        debateSeconds: 700,
+        phonologyHeard: true,
+      })
         .criteria.lexique,
       3,
     );
