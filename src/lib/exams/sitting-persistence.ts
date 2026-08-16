@@ -221,6 +221,19 @@ export interface SittingStore {
   /** The phases, the recordings and the correction, atomically. Rejects, never partial. */
   writeCorrection(ref: SittingRef, write: CorrectionWrite): Promise<StoredCorrection>;
 
+  /**
+   * Record that the candidate walked out, having been warned it would count.
+   *
+   * Returns `false` — writing nothing — when the sitting already carries a
+   * correction, which is the same shape of guard `claimForCorrection` uses and
+   * for the same reason: a sitting is graded or abandoned, never both. The race
+   * it closes is real rather than theoretical — the finish request is in flight
+   * while the candidate is looking at the exit dialog, so "I gave up on the
+   * upload" and "the upload succeeded" can arrive in either order, and a
+   * correction that exists must outrank a walk-out.
+   */
+  abandonSitting(ref: SittingRef, abandonedAt: Date): Promise<boolean>;
+
   /** This sitting's correction, if it has one. The cheap half of {@link readSitting}. */
   findCorrection(ref: SittingRef): Promise<StoredCorrection | null>;
 

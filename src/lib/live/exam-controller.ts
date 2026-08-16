@@ -567,6 +567,49 @@ export class ExamController {
   }
 
   /**
+   * DEVELOPMENT ONLY — type what the candidate would have said.
+   *
+   * Testing this product otherwise means speaking French into a microphone for
+   * twenty minutes, twice, every time anything downstream of the transcript
+   * changes: the rubric, the persistence, the results page, the duration
+   * penalty. That is slow enough that those paths get tested rarely, which is
+   * the opposite of what they need.
+   *
+   * So this appends a candidate turn to the transcript exactly as a
+   * transcription fragment would, and the examiner is told the same text
+   * through `sendDirective` so the conversation stays coherent — a débat where
+   * the examiner never heard the exposé is not a useful thing to test against.
+   *
+   * Three things it deliberately does NOT do, because each would make what it
+   * produces a lie about a real sitting:
+   *
+   *  - **It records no audio.** The measured duration stays whatever the
+   *    microphone actually captured, so a typed sitting is graded from its
+   *    transcript and takes the duration penalty. That is the correct answer:
+   *    nothing was spoken.
+   *  - **It does not advance the phase.** The clock and the state machine are
+   *    untouched.
+   *  - **It does not run in production.** The guard is on `NODE_ENV` and is the
+   *    first line, so a build cannot ship a way to write an exam transcript
+   *    without speaking.
+   */
+  injectCandidateSpeech(text: string): void {
+    if (process.env.NODE_ENV === "production") return;
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    if (this.phase !== "monologue" && this.phase !== "debate") return;
+
+    this.addFragment("candidate", trimmed);
+    // The examiner has to hear it too, or the débat argues with silence.
+    try {
+      this.session?.sendDirective(trimmed);
+    } catch (error) {
+      this.log("dev-inject-directive-failed", String(error));
+    }
+    this.log("dev-inject-speech", `${trimmed.length} chars`);
+  }
+
+  /**
    * Force a reconnect on the live session.
    *
    * Exposed because a real GoAway takes about ten minutes to arrive, and a

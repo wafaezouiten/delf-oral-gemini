@@ -19,8 +19,32 @@
  * word for it.
  */
 
+/**
+ * Light only, on purpose.
+ *
+ * The palette had a full dark counterpart behind `prefers-color-scheme`, and it
+ * is gone rather than merely unused. The épreuve this product reproduces arrives
+ * on paper: a document déclencheur on warm stock, a corrector's grid ruled in
+ * navy. Every surface here is named for that — `--paper`, `--paper-border`, the
+ * tricolore rule, the justified serif measure of an exam booklet — and a dark
+ * inversion of a printed page is a photograph of a page rather than the page.
+ * The one screen where it showed most was the sujet: warm cream at #fdfcf8
+ * became a near-black card, and the whole reason the candidate is meant to read
+ * it as a handout went with it.
+ *
+ * `color-scheme: light` rather than the removal of the media query alone. It
+ * tells the browser to render its own furniture — form controls, scrollbars,
+ * the `<dialog>` backdrop — in light too. Without it a candidate on a dark
+ * system gets a light page with a dark scrollbar and dark spinner controls,
+ * which is the mismatch that reads as a bug.
+ *
+ * The print block below still overrides these. It always did: it is not the
+ * dark scheme's replacement but a third target, and it flattens the tinted
+ * surfaces to white because a greyscale printer renders every one of them as
+ * the same grey block.
+ */
 :root {
-  color-scheme: light dark;
+  color-scheme: light;
 
   --background: #f7f7f5;
   --foreground: #16181d;
@@ -63,44 +87,6 @@
   --band-green-subtle: #e7f2ea;
   --band-emerald: #10614f;
   --band-emerald-subtle: #e2f1ed;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0d0f13;
-    --foreground: #ecedf1;
-    --muted: #191c22;
-    --muted-foreground: #99a0ac;
-    --border: #272c35;
-    --card: #13161b;
-
-    --paper: #15181e;
-    --paper-border: #2f3641;
-
-    --primary: #8fb0ee;
-    --primary-foreground: #0d0f13;
-    --primary-subtle: #16203a;
-
-    --tricolore-blue: #2b5fc4;
-    --tricolore-white: #d8dae0;
-    --tricolore-red: #e0475c;
-
-    --success: #5cc98b;
-    --success-subtle: #11251a;
-    --warning: #f0b64a;
-    --warning-subtle: #2a2010;
-    --danger: #f18490;
-    --danger-subtle: #2b1418;
-
-    --band-red: #f18490;
-    --band-red-subtle: #2b1418;
-    --band-amber: #f0b64a;
-    --band-amber-subtle: #2a2010;
-    --band-green: #5cc98b;
-    --band-green-subtle: #11251a;
-    --band-emerald: #58ccb4;
-    --band-emerald-subtle: #0e2621;
-  }
 }
 
 @theme inline {
@@ -172,6 +158,38 @@ body {
 }
 
 /**
+ * The paperwork treatment — what stops these screens reading as a generic SaaS
+ * dashboard, and what makes them look like this product rather than the one they
+ * were reproduced from.
+ *
+ * The reference is a rounded-card interface: `rounded-2xl` panels, soft shadows,
+ * pill everything. That is a perfectly good look and it is not this one. An
+ * épreuve arrives as a printed form — ruled, squared, sectioned and numbered —
+ * so the panels here are squared off to a 2px radius and the sections are ruled
+ * with the double line a corrector's grid uses to close a block. The difference
+ * costs nothing structurally: the same components, the same layout, the same
+ * spacing rhythm, drawn as stationery instead of as cards.
+ *
+ * `.sheet` rather than a Tailwind radius utility, so the whole product's
+ * squareness is one number in one place — and so it cannot drift the way eight
+ * hand-written `rounded-*` classes did before it existed.
+ */
+.sheet {
+  border-radius: 2px;
+}
+
+/**
+ * The rule that closes a section: a heavy line over a hairline, the way a
+ * corrector's grid separates one compétence from the next. Drawn with a border
+ * plus a box-shadow rather than two elements, because it is decoration and has
+ * no business in the accessibility tree.
+ */
+.rule-double {
+  border-bottom: 1px solid var(--border);
+  box-shadow: 0 3px 0 -2px var(--border);
+}
+
+/**
  * The document déclencheur, set as a printed page: serif, justified, with the
  * generous measure of an exam booklet rather than the tight one of an app.
  */
@@ -181,6 +199,56 @@ body {
   line-height: 1.75;
   text-align: justify;
   hyphens: auto;
+}
+
+/**
+ * The passation's two moving parts, as CSS rather than as a library.
+ *
+ * The reference implementation runs both on motion/react. Reproducing them with
+ * `@keyframes` is not a shortcut around a dependency this project would
+ * otherwise want: it is what puts them under the `prefers-reduced-motion` rule
+ * below, which is a blanket `animation-duration: 0.001ms` and reaches every
+ * animation in the product *except* a JavaScript one, which keeps running
+ * because it never asked the cascade. A candidate who has told their system they
+ * do not want motion should not have a ring pulsing at them for twenty minutes.
+ *
+ * `po-ring` is the "who holds the floor" pulse — a border expanding out of a
+ * speaker's avatar and fading, which is the same figure the recording dot uses
+ * and for the same reason: a static ring reads as decoration.
+ *
+ * `po-bar` is one bar of the five-bar "a mic is live" glyph. It is decorative
+ * motion and NOT a level meter — it says the microphone is being listened to,
+ * not how loud anything is. The five bars are staggered by inline delay so the
+ * wave travels rather than throbbing as a block.
+ */
+@keyframes po-ring {
+  from {
+    transform: scale(1);
+    opacity: 0.5;
+  }
+  to {
+    transform: scale(1.55);
+    opacity: 0;
+  }
+}
+
+@keyframes po-bar {
+  0%,
+  100% {
+    transform: scaleY(0.25);
+  }
+  50% {
+    transform: scaleY(1);
+  }
+}
+
+.po-ring {
+  animation: po-ring 1.5s ease-out infinite;
+}
+
+.po-bar {
+  transform-origin: center;
+  animation: po-bar 1s ease-in-out infinite;
 }
 
 /**

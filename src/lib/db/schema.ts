@@ -150,6 +150,26 @@ export const oralExams = pgTable(
 
     startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
     finishedAt: timestamp("finished_at", { withTimezone: true }),
+
+    /**
+     * When the candidate walked out, having been told it would count.
+     *
+     * A separate column rather than a reading of the two that already exist, and
+     * the distinction it draws is the reason. `finished_at` means "submitted for
+     * correction"; `phase` means "where the state machine stopped". Between them
+     * they can already describe a sitting that ran to the end and was never
+     * graded — but they cannot tell that apart from a tab closed by a flat
+     * battery, and only one of those is a decision the candidate made.
+     *
+     * That difference is the whole point here: an abandoned sitting is scored
+     * zero and counts against the candidate's record, so the thing being
+     * recorded is their *choice* to leave after an explicit warning. Inferring
+     * it from an absence would score a dropped connection as a walk-out.
+     *
+     * Never set alongside a correction: `abandonSitting` refuses once an
+     * evaluation exists, so a sitting is graded or abandoned and never both.
+     */
+    abandonedAt: timestamp("abandoned_at", { withTimezone: true }),
   },
   (table) => [
     // Every read in the product is "this user's sittings" or "this sitting, if
