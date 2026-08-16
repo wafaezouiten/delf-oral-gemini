@@ -14,18 +14,24 @@
  *
  *  - **Local development** — on. `NODE_ENV` is not "production" and the server
  *    is the developer's own machine.
- *  - **Staging and previews** — on ONLY where `NEXT_PUBLIC_DEV_TOOLS` is set to
- *    "1". Vercel scopes environment variables per environment, so setting it on
- *    Preview and leaving Production blank is what keeps the two apart. Nothing
- *    is inferred from the branch name or the URL.
- *  - **Production** — off. The flag is absent by default, and `VERCEL_ENV`
- *    vetoes it outright wherever that variable is readable, so setting the flag
- *    on Production by mistake still does not switch this on.
+ *  - **Staging and previews** — on. Vercel reports these as `VERCEL_ENV=preview`,
+ *    and an environment that exists to try the product before it is real is
+ *    exactly where trying it without speaking for twenty minutes belongs.
+ *  - **Production** — off, and there is no way to turn it on: the check below is
+ *    an equality against "production" with nothing that can override it.
  *
- * Deliberately NOT keyed on "is this a preview deployment?" alone. That reads as
- * the same rule but is not: it turns the tooling on for every future preview
- * without anyone deciding to, including previews of branches nobody is testing
- * an exam on.
+ * This began as an explicit `NEXT_PUBLIC_DEV_TOOLS=1` opt-in per environment,
+ * which is the tighter rule and was the wrong one *here*. Two reasons it lost:
+ * a `NEXT_PUBLIC_*` value is inlined when the app is built, so setting it in a
+ * dashboard does nothing until the next build and reads as "the flag is broken";
+ * and every preview of this repo is a preview of this product, so "which
+ * previews should have it?" never had an interesting answer. The flag survives
+ * only for hosts that report no `VERCEL_ENV` at all.
+ *
+ * What this widens, stated plainly: anyone who can open the staging URL can type
+ * an exposé instead of speaking it, and claim a duration for it. Staging marks
+ * are test data, so that is the point rather than a cost — but it is why the
+ * production branch below is an equality and not a default.
  */
 
 /** The environment as this module reads it. Passed in so the rule is testable. */
@@ -35,24 +41,32 @@ export interface DevToolsEnv {
   /**
    * Vercel's own environment name — "production", "preview" or "development".
    *
-   * Server-side this is `VERCEL_ENV`. On the client it is only readable if the
-   * deployment explicitly exposes `NEXT_PUBLIC_VERCEL_ENV`, so it is treated as
-   * a veto when present rather than as the rule: absent must not mean "allow
-   * everything", and it does not, because the flag below is what grants.
+   * Server-side this is `VERCEL_ENV`. In the browser it is whatever
+   * `next.config.ts` inlined under `NEXT_PUBLIC_VERCEL_ENV` — which is that same
+   * value, copied at build time, so the two halves of this check cannot
+   * disagree. Empty or absent means "not deployed on Vercel".
    */
   vercelEnv?: string;
-  /** `NEXT_PUBLIC_DEV_TOOLS`. Anything but "1" is off. */
+  /**
+   * `NEXT_PUBLIC_DEV_TOOLS`. Anything but "1" is off.
+   *
+   * Only consulted where there is no Vercel environment to read, which on this
+   * project means a production build on some other host. It cannot reach past
+   * the production check.
+   */
   flag?: string;
 }
 
 export function devToolsEnabled(env: DevToolsEnv): boolean {
-  // The veto comes first: a production deployment does not get this even if
-  // somebody has set the flag there.
+  // First and unconditional. Nothing below can reach past this, which is the
+  // only property of this function that really matters.
   if (env.vercelEnv === "production") return false;
-  // A developer's own machine, where the server and the candidate are the same
-  // person and no mark means anything.
+  // A deployment that Vercel calls anything else — preview, staging, its own
+  // "development" — is not somewhere marks are real.
+  if (env.vercelEnv) return true;
+  // No Vercel at all: a developer's machine, or `node --test`.
   if (env.nodeEnv !== "production") return true;
-  // Every other build — staging, previews — has to ask for it by name.
+  // A production build on some other host, which has to ask by name.
   return env.flag === "1";
 }
 
@@ -65,6 +79,9 @@ export function devToolsEnabled(env: DevToolsEnv): boolean {
  */
 export const DEV_TOOLS_ENABLED = devToolsEnabled({
   nodeEnv: process.env.NODE_ENV,
-  vercelEnv: process.env.NEXT_PUBLIC_VERCEL_ENV ?? process.env.VERCEL_ENV,
+  // `||`, not `??`: off Vercel the inlined value is the empty string, and an
+  // empty string has to fall through to the server variable and then to
+  // NODE_ENV rather than being read as an environment named "".
+  vercelEnv: process.env.NEXT_PUBLIC_VERCEL_ENV || process.env.VERCEL_ENV,
   flag: process.env.NEXT_PUBLIC_DEV_TOOLS,
 });
