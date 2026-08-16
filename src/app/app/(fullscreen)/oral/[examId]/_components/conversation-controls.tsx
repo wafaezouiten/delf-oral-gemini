@@ -1,6 +1,6 @@
 "use client";
 
-import { LoadingIcon, MicIcon, PencilIcon, StopIcon } from "@/app/_components/po/icons";
+import { AlertIcon, LoadingIcon, MicIcon, PencilIcon, StopIcon } from "@/app/_components/po/icons";
 import { cn } from "@/lib/ui/class-names";
 import { micCopy, secondsToMonologueFloor, type SpeakingPhase } from "@/lib/ui/po-player-view";
 
@@ -40,6 +40,8 @@ export function ConversationControls({
   notesOpen,
   onToggleNotes,
   onAdvance,
+  emptyTranscript = false,
+  onRetryTranscription,
 }: {
   phase: SpeakingPhase;
   /** The state machine's own rule: may this phase be ended now? */
@@ -51,14 +53,27 @@ export function ConversationControls({
   notesOpen: boolean;
   onToggleNotes: () => void;
   onAdvance: () => void;
+  /** The monologue was ended with no speech on it, and the phase is held open. */
+  emptyTranscript?: boolean;
+  onRetryTranscription?: () => void;
 }) {
   const state = connecting ? "connecting" : canAdvance ? "recording" : "locked";
   const { hint, label } = micCopy(phase, state, secondsToMonologueFloor(elapsed));
   const locked = state === "locked";
 
   return (
-    <div className="border-border bg-card/95 shrink-0 border-t backdrop-blur">
-      <div className="mx-auto flex w-full max-w-[47.5rem] items-center gap-3 px-4 py-3 sm:px-6">
+    <div className="border-border bg-card/95 relative shrink-0 border-t backdrop-blur">
+      {/* The controls stay in a centred 760px column; the alert is pushed out of
+          it, into the bar's own right-hand corner — see the `xl:absolute` on it
+          below. Positioning it against THIS element rather than the column is
+          what "extreme right" means: the column ends at 996px on a 1280 screen,
+          the bar ends at 1280.
+
+          It is only pulled out from `xl` up, because that is where the margin
+          beside the column is wide enough to hold it. Narrower than that it
+          stays in the row beside « Terminer l'épreuve », which is the most
+          right-hand place that exists when there is no margin to move into. */}
+      <div className="mx-auto flex w-full max-w-[47.5rem] flex-wrap items-center gap-3 px-4 py-3 sm:px-6">
         {hasNotes && (
           <button
             type="button"
@@ -113,19 +128,50 @@ export function ConversationControls({
           <span className="text-muted-foreground text-center text-[0.6875rem]">{hint}</span>
         </div>
 
-        <button
-          type="button"
-          onClick={onAdvance}
-          disabled={phase !== "debate" || !canAdvance}
-          title={
-            phase === "debate"
-              ? undefined
-              : "Le débat doit avoir lieu avant la fin de l'épreuve."
-          }
-          className="bg-primary text-primary-foreground h-9 shrink-0 rounded-md px-4 text-xs font-semibold transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
-        >
-          Terminer l&apos;épreuve
-        </button>
+        <div className="ml-auto flex flex-wrap items-center justify-end gap-3">
+          <button
+            type="button"
+            onClick={onAdvance}
+            disabled={phase !== "debate" || !canAdvance}
+            title={
+              phase === "debate"
+                ? undefined
+                : "Le débat doit avoir lieu avant la fin de l'épreuve."
+            }
+            className="bg-primary text-primary-foreground h-9 shrink-0 rounded-md px-4 text-xs font-semibold transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            Terminer l&apos;épreuve
+          </button>
+
+          {/* `xl:absolute` lifts it out of the flex row and into the bar's
+              corner. That also stops it costing the mic any width: in flow the
+              mic is centred in what is left over, so on a wide screen the alert
+              appearing used to slide it 131px sideways. Above `xl` it no longer
+              moves at all. */}
+          {emptyTranscript && (
+            <div
+              role="alert"
+              className="border-warning/40 bg-warning-subtle text-warning flex items-center gap-2.5 rounded-md border px-3 py-1.5 xl:absolute xl:top-1/2 xl:right-6 xl:-translate-y-1/2"
+            >
+              <AlertIcon className="size-4 shrink-0" />
+              <div className="min-w-0">
+                <p className="text-xs font-semibold whitespace-nowrap">
+                  Transcription vide
+                </p>
+                <p className="text-[0.6875rem] leading-snug whitespace-nowrap">
+                  Chronomètre arrêté.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={onRetryTranscription}
+                className="border-warning/50 bg-card hover:bg-muted shrink-0 rounded-md border px-2.5 py-1.5 text-xs font-semibold whitespace-nowrap transition-colors"
+              >
+                Réessayer
+              </button>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

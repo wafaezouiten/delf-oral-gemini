@@ -58,6 +58,8 @@ export function PassationScreen({
   onToggleNotes,
   onAdvance,
   onExit,
+  emptyTranscript = false,
+  onRetryTranscription,
   badges,
   notices,
   devPanel,
@@ -77,6 +79,9 @@ export function PassationScreen({
   onToggleNotes: () => void;
   onAdvance: () => void;
   onExit: () => void;
+  /** The monologue was ended with no speech recorded — the advance was refused. */
+  emptyTranscript?: boolean;
+  onRetryTranscription?: () => void;
   /** The recording and connection badges. See the strip below for why not the chrome. */
   badges: ReactNode;
   /** Controller failures — a lost connection, a dead microphone. */
@@ -156,6 +161,8 @@ export function PassationScreen({
           notesOpen={notesOpen}
           onToggleNotes={onToggleNotes}
           onAdvance={onAdvance}
+          emptyTranscript={emptyTranscript}
+          onRetryTranscription={onRetryTranscription}
         />
 
         {hasNotes && (

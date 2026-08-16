@@ -251,6 +251,17 @@ export function ExamClient({ examId, topic }: { examId: string; topic: OralTopic
   const leave = () => router.push("/app");
 
   /**
+   * End the current phase.
+   *
+   * The refusal is no longer here. A monologue with no speech on it is held
+   * open by the controller — on this button *and* on its own time-up — because
+   * the second of those is a path the screen cannot see. Leaving the rule in
+   * one place is what keeps the two from disagreeing; this just calls it, and
+   * reads `state.monologueHeld` to know what to draw.
+   */
+  const advance = () => void controller.advanceEarly();
+
+  /**
    * Abandon: mark the sitting, confirm it was marked, then leave.
    *
    * The exit dialog promises the candidate this épreuve will count as a zero, so
@@ -427,8 +438,10 @@ export function ExamClient({ examId, topic }: { examId: string; topic: OralTopic
         notes={notes}
         notesOpen={notesOpen}
         onToggleNotes={() => setNotesOpen((open) => !open)}
-        onAdvance={() => void controller.advanceEarly()}
+        onAdvance={advance}
         onExit={() => setShowExitDialog(true)}
+        emptyTranscript={state.monologueHeld}
+        onRetryTranscription={() => controller.restartMonologue()}
         badges={
           <>
             <RecordingBadge recording={state.recording} />
