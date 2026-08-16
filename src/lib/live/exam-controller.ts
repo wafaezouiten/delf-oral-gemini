@@ -71,6 +71,12 @@ export interface RecorderLike {
   beginPhase(phase: RecordedPhase): void;
   /** Close it, keeping what it captured. */
   endPhase(): void;
+  /** Stop capturing and streaming without releasing the device, and start
+   *  again. The device stays open across both, so there is no second permission
+   *  prompt — which is the whole reason the development text mode can turn the
+   *  microphone off and back on mid-phase. See {@link ExamController.setDevTextMode}. */
+  pause(): void;
+  resume(): void;
   /** Seconds of audio recorded for one phase, measured from the samples. */
   measuredSeconds(phase: RecordedPhase): number;
   /** Of those, the seconds that carried speech. The two differ exactly when a
@@ -154,6 +160,16 @@ export interface ExamState {
    * has stopped and the phase will not end until it is attempted.
    */
   monologueHeld: boolean;
+  /**
+   * DEVELOPMENT ONLY — the candidate is typing instead of speaking, and the
+   * microphone is off for as long as that is true (#36).
+   *
+   * Always `false` in a production build: `setDevTextMode` refuses there, so
+   * nothing can set it. Rendered so the dev panel's toggle reads its own state
+   * off the controller rather than keeping a second copy that could disagree
+   * with the microphone.
+   */
+  devTextMode: boolean;
 }
 
 /**
@@ -300,6 +316,15 @@ export class ExamController {
    */
   private monologueHeld = false;
 
+  /**
+   * DEVELOPMENT ONLY — the microphone is off because the developer is typing
+   * the candidate's turns instead of speaking them (#36).
+   *
+   * Never true in a production build; `setDevTextMode` is the only writer and
+   * it returns before assigning there.
+   */
+  private devTextMode = false;
+
   private transcript: TranscriptEntry[] = [];
   private events: ExamEvent[] = [];
   private connection: ConnectionState = "idle";
@@ -387,16 +412,21 @@ export class ExamController {
       // indicator is that the candidate can check the claim, and a pulsing
       // "Enregistrement" over a capture that has stopped delivering is the one
       // state where the claim is false and the indicator says it is true.
+      // False in the development text mode too, for the same reason: the
+      // recorder is paused, so the badge would be describing a capture that is
+      // not happening.
       recording:
         this.recorder !== null &&
         !this.captureLost &&
         !this.captureStalled &&
+        !this.devTextMode &&
         (this.phase === "monologue" || this.phase === "debate"),
       started: this.started,
       monologueSeconds: this.phaseSeconds.monologue,
       debateSeconds: this.phaseSeconds.debate,
       monologueSilent: this.isMonologueSilent(),
       monologueHeld: this.monologueHeld,
+      devTextMode: this.devTextMode,
     };
   }
 
@@ -409,9 +439,17 @@ export class ExamController {
    *
    * `false` with no recorder at all, which is the same asymmetry
    * `monologueWasSilent` is built on — no microphone is not a silent candidate.
+   *
+   * The development text mode takes that same exit, and it is the same rule
+   * rather than an exception to it: while it is on there is no microphone in
+   * this sitting, so there is no silent candidate to catch. Without it the
+   * dictation box would be unusable — room tone captured before the mode was
+   * switched on is measured audio carrying no speech, which is exactly what #39
+   * holds the phase for, and the developer would be trapped at a monologue they
+   * had just typed in full.
    */
   private isMonologueSilent(): boolean {
-    if (!this.recorder) return false;
+    if (!this.recorder || this.devTextMode) return false;
     return monologueWasSilent(
       this.recorder.measuredSeconds("monologue"),
       this.recorder.voicedSeconds("monologue"),
@@ -529,6 +567,11 @@ export class ExamController {
 
       this.player = player;
       this.recorder = recorder;
+      // The development text mode can be switched on during preparation, before
+      // there is any microphone to turn off. The device has to arrive already
+      // paused, or the toggle silently means nothing for the phase it was
+      // pressed for.
+      if (this.devTextMode) recorder.pause();
       this.micError = null;
       this.log("audio-ready");
       return true;
@@ -578,6 +621,11 @@ export class ExamController {
     const recorder = this.recorder;
     if (!recorder || this.captureLost) return;
     if (this.phase !== "monologue" && this.phase !== "debate") return;
+    // A microphone we turned off ourselves is not a microphone that failed.
+    // Without this the development text mode would raise the stalled-capture
+    // notice four seconds in, every time, and teach developers to ignore the
+    // one notice that means something.
+    if (this.devTextMode) return;
 
     const seconds = recorder.recordedSeconds;
     const now = this.now();
@@ -678,6 +726,54 @@ export class ExamController {
   }
 
   /**
+   * DEVELOPMENT ONLY — turn the microphone off and type the candidate's turns
+   * instead (#36).
+   *
+   * The dictation box used to sit open beside a live microphone, so a typed
+   * sitting recorded whatever the room happened to contain. That is a worse lie
+   * than no recording at all: the artefact is real audio of nobody speaking, it
+   * is uploaded, it is graded, and the « Enregistrement » badge says it is
+   * happening. This makes the mode mean what it says — while it is on, nothing
+   * is captured and nothing is streamed.
+   *
+   * `pause()` rather than `stop()`, because the device stays open: the mode is
+   * a toggle, and releasing the microphone would put a browser permission
+   * prompt in the middle of a phase every time it went back on.
+   *
+   * What it does NOT do:
+   *
+   *  - **It does not discard what was already captured.** Audio recorded before
+   *    the mode went on belongs to the phase and stays in the artefact. The
+   *    duration penalty is then computed from a genuinely shorter recording,
+   *    which is the truth about a phase that was half spoken and half typed.
+   *  - **It does not run in production.** Same guard, and the same reason, as
+   *    {@link injectCandidateSpeech}: two independent NODE_ENV checks, because
+   *    the other one is a UI condition somebody could refactor away.
+   */
+  setDevTextMode(on: boolean): void {
+    if (process.env.NODE_ENV === "production") return;
+    if (this.devTextMode === on) return;
+
+    this.devTextMode = on;
+    if (on) {
+      this.recorder?.pause();
+    } else {
+      this.recorder?.resume();
+      // The watchdog stood down while the mode was on, so its bookkeeping is
+      // four minutes stale and would fire a stall the instant it resumes.
+      // Rewound to now, exactly as a phase change rewinds it.
+      this.lastCaptureAt = this.now();
+      this.lastRecordedSeconds = this.recorder?.recordedSeconds ?? 0;
+      if (this.captureStalled) {
+        this.captureStalled = false;
+        this.micError = null;
+      }
+    }
+    this.log("dev-text-mode", on ? "on — the microphone is off" : "off");
+    this.emit();
+  }
+
+  /**
    * DEVELOPMENT ONLY — type what the candidate would have said.
    *
    * Testing this product otherwise means speaking French into a microphone for
@@ -695,9 +791,10 @@ export class ExamController {
    * produces a lie about a real sitting:
    *
    *  - **It records no audio.** The measured duration stays whatever the
-   *    microphone actually captured, so a typed sitting is graded from its
-   *    transcript and takes the duration penalty. That is the correct answer:
-   *    nothing was spoken.
+   *    microphone actually captured — nothing at all, under
+   *    {@link setDevTextMode}, which is how this is meant to be used — so a
+   *    typed sitting is graded from its transcript and takes the duration
+   *    penalty. That is the correct answer: nothing was spoken.
    *  - **It does not advance the phase.** The clock and the state machine are
    *    untouched.
    *  - **It does not run in production.** The guard is on `NODE_ENV` and is the

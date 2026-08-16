@@ -452,7 +452,11 @@ export function ExamClient({ examId, topic }: { examId: string; topic: OralTopic
         devPanel={
           process.env.NODE_ENV !== "production" ? (
             <div className="space-y-2">
-              <DevSpeechBox onSubmit={(text) => controller.injectCandidateSpeech(text)} />
+              <DevSpeechBox
+                active={state.devTextMode}
+                onActiveChange={(on) => controller.setDevTextMode(on)}
+                onSubmit={(text) => controller.injectCandidateSpeech(text)}
+              />
               <EventLog events={state.events} />
               {/* Drives the path a real GoAway takes, so the 13-minute
                   resumption behaviour can be exercised in seconds instead of

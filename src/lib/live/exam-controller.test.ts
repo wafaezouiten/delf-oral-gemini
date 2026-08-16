@@ -132,6 +132,10 @@ class FakeRecorder implements RecorderLike {
   calls: string[] = [];
   recordedSeconds = 0;
 
+  /** Reachable, because "was the microphone actually off?" is the claim the
+   *  development text mode makes and the thing worth asserting. */
+  paused = false;
+
   private openPhase: RecordedPhase | null = null;
   private readonly seconds: Record<RecordedPhase, number> = { monologue: 0, debate: 0 };
 
@@ -156,6 +160,14 @@ class FakeRecorder implements RecorderLike {
   endPhase(): void {
     if (this.openPhase) this.calls.push(`end:${this.openPhase}`);
     this.openPhase = null;
+  }
+
+  pause(): void {
+    this.paused = true;
+  }
+
+  resume(): void {
+    this.paused = false;
   }
 
   measuredSeconds(phase: RecordedPhase): number {
@@ -188,9 +200,12 @@ class FakeRecorder implements RecorderLike {
     this.discarded = true;
   }
 
-  /** The audio thread delivering `seconds` of audio for the open phase. */
+  /** The audio thread delivering `seconds` of audio for the open phase. Drops
+   *  it while paused, exactly as the real recorder's `consume` does — otherwise
+   *  the harness would keep feeding a microphone the controller has turned off,
+   *  and the tests about that would pass for the wrong reason. */
   capture(seconds: number): void {
-    if (!this.openPhase) return;
+    if (this.paused || !this.openPhase) return;
     this.seconds[this.openPhase] += seconds;
     this.recordedSeconds += seconds;
   }
@@ -1024,6 +1039,139 @@ describe("recording the candidate", () => {
 
       h.controller.restartMonologue();
       assert.equal(h.controller.getSnapshot().elapsed, 120, "the clock stood still");
+    });
+  });
+
+  describe("the development text mode (#36)", () => {
+    it("turns the microphone off, and says so rather than claiming a recording", async () => {
+      const h = harness();
+      await intoMonologue(h);
+      h.advanceClock(30);
+      assert.equal(h.recorder.measuredSeconds("monologue"), 30);
+
+      h.controller.setDevTextMode(true);
+
+      assert.equal(h.recorder.paused, true, "the microphone stopped");
+      assert.equal(
+        h.controller.getSnapshot().recording,
+        false,
+        "and the badge stopped saying it was recording",
+      );
+      assert.equal(h.controller.getSnapshot().devTextMode, true);
+
+      // Nothing more reaches the artefact, so the phase is graded on the
+      // seconds that were genuinely spoken.
+      h.advanceClock(120);
+      assert.equal(h.recorder.measuredSeconds("monologue"), 30, "no room tone was added");
+    });
+
+    it("keeps what was captured before it went on", async () => {
+      // Pausing is not discarding. Thirty seconds spoken aloud belong to the
+      // phase whatever happens next.
+      const h = harness();
+      await intoMonologue(h);
+      h.advanceClock(30);
+      h.controller.setDevTextMode(true);
+      h.advanceClock(200);
+      h.controller.setDevTextMode(false);
+
+      assert.equal(h.recorder.paused, false, "the microphone came back");
+      assert.equal(h.recorder.measuredSeconds("monologue"), 30);
+      assert.equal(h.controller.getSnapshot().recording, true);
+    });
+
+    it("does not raise the stalled-capture notice while the mode is on", async () => {
+      // The microphone is off because we turned it off. Reporting that as a
+      // failing device teaches developers to ignore the notice that matters.
+      const h = harness();
+      await intoMonologue(h);
+      h.advanceClock(30);
+      h.controller.setDevTextMode(true);
+      h.advanceClock(120);
+
+      assert.equal(h.controller.getSnapshot().micError, null);
+    });
+
+    it("does not fire a stall the moment the microphone comes back", async () => {
+      // The watchdog's bookkeeping is two minutes stale by then, and without
+      // rewinding it the first tick after resuming looks like a dead device.
+      const h = harness();
+      await intoMonologue(h);
+      h.advanceClock(30);
+      h.controller.setDevTextMode(true);
+      h.advanceClock(120);
+      h.controller.setDevTextMode(false);
+      h.advanceClock(1);
+
+      assert.equal(h.controller.getSnapshot().micError, null);
+    });
+
+    it("does not hold the monologue for silence, and lets a typed one through", async () => {
+      // The reason the mode has to cut the microphone at all. Room tone
+      // captured before it went on is measured audio carrying no speech —
+      // exactly what #39 holds the phase for — so without this exit the
+      // developer is trapped at a monologue they have just typed in full.
+      const h = harness();
+      await intoMonologue(h);
+      h.recorder.voiced.monologue = 0;
+      h.advanceClock(30);
+      assert.equal(h.controller.getSnapshot().monologueSilent, true, "as #39 sees it");
+
+      h.controller.setDevTextMode(true);
+      h.controller.injectCandidateSpeech("Le télétravail a transformé le rapport au bureau.");
+      h.advanceClock(MONOLOGUE_MIN_SECONDS);
+
+      assert.equal(h.controller.getSnapshot().monologueSilent, false);
+      await h.controller.advanceEarly();
+
+      const state = h.controller.getSnapshot();
+      assert.equal(state.monologueHeld, false, "the phase was not held");
+      assert.equal(state.closing, true, "the examiner was asked to wrap up");
+    });
+
+    it("holds a silent monologue again once the microphone is back", async () => {
+      // The exit belongs to the mode, not to the sitting. Turning it off puts
+      // #39 back exactly as it was.
+      const h = harness();
+      await intoMonologue(h);
+      h.recorder.voiced.monologue = 0;
+      h.controller.setDevTextMode(true);
+      h.advanceClock(120);
+      h.controller.setDevTextMode(false);
+      h.advanceClock(30);
+
+      assert.equal(h.controller.getSnapshot().monologueSilent, true);
+      await h.controller.advanceEarly();
+      assert.equal(h.controller.getSnapshot().monologueHeld, true);
+    });
+
+    it("is inert before the microphone exists, and applies once it does", async () => {
+      // Nothing to pause during preparation. The flag still has to survive to
+      // the monologue, or the toggle silently means nothing.
+      const h = harness();
+      h.controller.start();
+      h.controller.setDevTextMode(true);
+      assert.equal(h.controller.getSnapshot().devTextMode, true);
+
+      await intoMonologue(h);
+      h.advanceClock(120);
+
+      assert.equal(h.controller.getSnapshot().recording, false);
+      assert.equal(h.recorder.measuredSeconds("monologue"), 0, "nothing was captured");
+    });
+
+    it("ignores a toggle that changes nothing", async () => {
+      const h = harness();
+      await intoMonologue(h);
+      h.controller.setDevTextMode(true);
+      h.advanceClock(30);
+      h.controller.setDevTextMode(true);
+
+      assert.equal(h.recorder.paused, true);
+      const modeEvents = h.controller
+        .getSnapshot()
+        .events.filter((event) => event.name === "dev-text-mode");
+      assert.equal(modeEvents.length, 1, "one entry, not one per press");
     });
   });
 });
