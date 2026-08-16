@@ -63,10 +63,14 @@ export function ConversationControls({
 
   return (
     <div className="border-border bg-card/95 shrink-0 border-t backdrop-blur">
-      {/* `flex-wrap`, because the alert below shares this row. On a wide screen
-          it sits to the right of « Terminer l'épreuve »; on a narrow one it
-          drops to its own line rather than squeezing the mic, which is the one
-          control that must never move. */}
+      {/* The alert shares this row, to the right of « Terminer l'épreuve ».
+
+          The mic was briefly pinned to the row's centre so it could not be
+          pushed sideways by the alert appearing. Measuring killed that: out of
+          flow, the mic no longer reserved any width, so the right-hand group
+          slid under it and « Terminer l'épreuve » ended up drawn across the
+          microphone. In flow it is, and the alert is kept compact — one short
+          line and a two-word button — so the shift it causes is small. */}
       <div className="mx-auto flex w-full max-w-[47.5rem] flex-wrap items-center gap-3 px-4 py-3 sm:px-6">
         {hasNotes && (
           <button
@@ -122,51 +126,48 @@ export function ConversationControls({
           <span className="text-muted-foreground text-center text-[0.6875rem]">{hint}</span>
         </div>
 
-        <button
-          type="button"
-          onClick={onAdvance}
-          disabled={phase !== "debate" || !canAdvance}
-          title={
-            phase === "debate"
-              ? undefined
-              : "Le débat doit avoir lieu avant la fin de l'épreuve."
-          }
-          className="bg-primary text-primary-foreground h-9 shrink-0 rounded-md px-4 text-xs font-semibold transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
-        >
-          Terminer l&apos;épreuve
-        </button>
-
-        {/* In the same container as « Terminer l'épreuve », on its own line
-            beneath it.
-
-            It took a share of the row first, and measuring showed why that is
-            wrong: the mic is centred in the space left over, so the alert
-            appearing slid it 150px sideways. The mic is the one control a
-            candidate reaches for mid-épreuve without looking, and it must not
-            move because something else appeared. `order-last w-full` gives the
-            alert its own line, so the row above it is byte-for-byte the layout
-            it was before. */}
-        {emptyTranscript && (
-          <div
-            role="alert"
-            className="border-warning/40 bg-warning-subtle text-warning order-last flex w-full flex-wrap items-center gap-x-3 gap-y-2 rounded-md border px-3 py-2 sm:justify-end"
+        <div className="ml-auto flex flex-wrap items-center justify-end gap-3">
+          <button
+            type="button"
+            onClick={onAdvance}
+            disabled={phase !== "debate" || !canAdvance}
+            title={
+              phase === "debate"
+                ? undefined
+                : "Le débat doit avoir lieu avant la fin de l'épreuve."
+            }
+            className="bg-primary text-primary-foreground h-9 shrink-0 rounded-md px-4 text-xs font-semibold transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
           >
-            <AlertIcon className="size-4 shrink-0" />
-            <div className="min-w-0 flex-1 sm:flex-none">
-              <p className="text-xs font-semibold">Transcription vide</p>
-              <p className="text-[0.6875rem] leading-snug">
-                Le chronomètre est arrêté. Reprenez votre monologue.
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={onRetryTranscription}
-              className="border-warning/50 bg-card hover:bg-muted shrink-0 rounded-md border px-3 py-1.5 text-xs font-semibold transition-colors"
+            Terminer l&apos;épreuve
+          </button>
+
+          {/* To the right of « Terminer l'épreuve », in the same row. It wraps
+              under the button only when the viewport genuinely cannot hold both,
+              and even then the mic does not move — it is pinned above. */}
+          {emptyTranscript && (
+            <div
+              role="alert"
+              className="border-warning/40 bg-warning-subtle text-warning flex items-center gap-2.5 rounded-md border px-3 py-1.5"
             >
-              Réessayer la transcription
-            </button>
-          </div>
-        )}
+              <AlertIcon className="size-4 shrink-0" />
+              <div className="min-w-0">
+                <p className="text-xs font-semibold whitespace-nowrap">
+                  Transcription vide
+                </p>
+                <p className="text-[0.6875rem] leading-snug whitespace-nowrap">
+                  Chronomètre arrêté.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={onRetryTranscription}
+                className="border-warning/50 bg-card hover:bg-muted shrink-0 rounded-md border px-2.5 py-1.5 text-xs font-semibold whitespace-nowrap transition-colors"
+              >
+                Réessayer
+              </button>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
