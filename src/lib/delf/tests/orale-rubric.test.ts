@@ -2,11 +2,13 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { ORAL_CRITERIA } from "../criteria";
+import { GRILLE_BANDS } from "../grille";
 import {
   DEBATE_FLOOR_SECONDS,
   MONOLOGUE_FLOOR_SECONDS,
   applyDurationPenalty,
   applySittingDurationPenalty,
+  capUnheardPhonology,
   clampCriterion,
   criteriaToScore25,
   meetsCompetencyFloor,
@@ -14,6 +16,7 @@ import {
   partsUnderFloor,
   scoreSitting,
   snapCriteria,
+  UNHEARD_PHONOLOGY_CEILING,
   type OralCriteriaScores,
 } from "../orale-rubric";
 
@@ -186,7 +189,11 @@ test("snapCriteria puts every criterion on a legal band", () => {
 test("scoreSitting snaps before it sums", () => {
   // The order is the rule. Summing first would give 25 for five 5s and 10 for
   // five 2s; snapping first gives 5, because a 2 is a 1 on this grille.
-  const scored = scoreSitting(bands(2), { monologueSeconds: 400, debateSeconds: 700 });
+  const scored = scoreSitting(bands(2), {
+    monologueSeconds: 400,
+    debateSeconds: 700,
+    phonologyHeard: true,
+  });
 
   assert.deepEqual(scored.criteria, bands(1));
   assert.equal(scored.rawScore25, 5);
@@ -197,7 +204,11 @@ test("scoreSitting docks before it tests the floor", () => {
   // 5/25 clears the floor and 2/25 does not, so a sitting that is short lands on
   // the other side of it. Testing the floor against the pre-penalty score would
   // pass a candidate the rubric has just failed.
-  const scored = scoreSitting(bands(1), { monologueSeconds: 400, debateSeconds: 10 });
+  const scored = scoreSitting(bands(1), {
+    monologueSeconds: 400,
+    debateSeconds: 10,
+    phonologyHeard: true,
+  });
 
   assert.equal(scored.rawScore25, 5);
   assert.equal(scored.durationPenalty, 3);
@@ -209,10 +220,116 @@ test("scoreSitting docks before it tests the floor", () => {
 test("scoreSitting keeps the nominal penalty when the score cannot absorb it", () => {
   const scored = scoreSitting(
     { ...bands(0), realisationTache: 1 },
-    { monologueSeconds: 0, debateSeconds: 0 },
+    { monologueSeconds: 0, debateSeconds: 0, phonologyHeard: true },
   );
 
   assert.equal(scored.rawScore25, 1);
   assert.equal(scored.durationPenalty, 3, "what the rubric asked for");
   assert.equal(scored.score25, 0, "what the score could absorb");
+});
+
+// ------------------------------------------- phonologie without the sound (#29)
+
+test("a correction that heard nothing cannot award the top phonologie band", () => {
+  // The measured failure #29 records: a transcript with no « euh » in it read as
+  // remarkable fluency, and five points were awarded for the absence of evidence.
+  const scored = scoreSitting(bands(5), {
+    monologueSeconds: 400,
+    debateSeconds: 700,
+    phonologyHeard: false,
+  });
+
+  assert.equal(scored.criteria.phonologie, UNHEARD_PHONOLOGY_CEILING);
+  assert.equal(scored.phonologyCapped, true);
+  // Two points, off a criterion worth five, on every text-mode sitting a strong
+  // candidate produces.
+  assert.equal(scored.rawScore25, 23);
+});
+
+test("the ceiling touches phonologie and nothing else", () => {
+  const scored = scoreSitting(bands(5), {
+    monologueSeconds: 400,
+    debateSeconds: 700,
+    phonologyHeard: false,
+  });
+
+  for (const criterion of ORAL_CRITERIA) {
+    if (criterion === "phonologie") continue;
+    assert.equal(scored.criteria[criterion], 5, `${criterion} must be untouched`);
+  }
+});
+
+test("a correction that heard the candidate may award the top band", () => {
+  const scored = scoreSitting(bands(5), {
+    monologueSeconds: 400,
+    debateSeconds: 700,
+    phonologyHeard: true,
+  });
+
+  assert.equal(scored.criteria.phonologie, 5);
+  assert.equal(scored.phonologyCapped, false);
+  assert.equal(scored.rawScore25, 25);
+});
+
+test("a band already under the ceiling is left alone, and not reported as capped", () => {
+  // The distinction the flag exists for: 1/5 from a hesitant transcript is the
+  // corrector's judgement, not the rubric's intervention, and a candidate told
+  // "we could not hear you" about it would be told something false.
+  for (const band of [0, 1, 3] as const) {
+    const scored = scoreSitting(
+      { ...bands(5), phonologie: band },
+      { monologueSeconds: 400, debateSeconds: 700, phonologyHeard: false },
+    );
+
+    assert.equal(scored.criteria.phonologie, band);
+    assert.equal(scored.phonologyCapped, false, `band ${band} was not moved`);
+  }
+});
+
+test("capUnheardPhonology only ever returns a legal grille band", () => {
+  for (const band of GRILLE_BANDS) {
+    // `snapCriteria` rather than `bands(3)`: this function takes bands that are
+    // already legal, and the type says so.
+    const capped = capUnheardPhonology({ ...snapCriteria(bands(3)), phonologie: band }, false);
+    assert.ok(
+      (GRILLE_BANDS as readonly number[]).includes(capped.phonologie),
+      `${band} capped to ${capped.phonologie}, which no column accepts`,
+    );
+  }
+});
+
+test("the ceiling is applied after snapping, so an illegal 4 becomes 3 either way", () => {
+  // A model emitting 4 is snapped to 3, which is already at the ceiling. The
+  // result must be the same whether or not the correction heard anything —
+  // otherwise the two orders would disagree and the mark would depend on one.
+  const heard = scoreSitting({ ...bands(3), phonologie: 4 }, {
+    monologueSeconds: 400,
+    debateSeconds: 700,
+    phonologyHeard: true,
+  });
+  const unheard = scoreSitting({ ...bands(3), phonologie: 4 }, {
+    monologueSeconds: 400,
+    debateSeconds: 700,
+    phonologyHeard: false,
+  });
+
+  assert.equal(heard.criteria.phonologie, 3);
+  assert.equal(unheard.criteria.phonologie, 3);
+  assert.equal(unheard.phonologyCapped, false, "snapping moved it, not the ceiling");
+});
+
+test("the duration penalty still applies on top of a capped phonologie", () => {
+  // Two independent rules, and a sitting can earn both. Neither is allowed to
+  // swallow the other.
+  const scored = scoreSitting(bands(5), {
+    monologueSeconds: 400,
+    debateSeconds: 10,
+    phonologyHeard: false,
+  });
+
+  assert.equal(scored.rawScore25, 23, "capped before the sum");
+  assert.equal(scored.durationPenalty, 3);
+  assert.equal(scored.score25, 20);
+  assert.deepEqual(scored.shortParts, ["debate"]);
+  assert.equal(scored.phonologyCapped, true);
 });

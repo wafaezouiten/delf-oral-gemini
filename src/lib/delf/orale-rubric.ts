@@ -204,6 +204,48 @@ export function applySittingDurationPenalty(
   return { ...applyDurationPenalty(score25, first.seconds, first.floor), shortParts };
 }
 
+// ------------------------------------------------- phonologie without the sound
+
+/**
+ * The highest band « phonologie » may reach when the corrector never heard the
+ * candidate — i.e. when a sitting is graded from its transcript alone.
+ *
+ * 3 is « au niveau ciblé B2 », and it is the honest ceiling for a criterion whose
+ * definition is a claim about sound. A transcript can show that a candidate
+ * hesitated; it cannot show that they were *remarkable*, and 5 (« niveau ciblé
+ * supérieur B2+ ») is a claim nobody reading text is in a position to make.
+ *
+ * THIS PROJECT'S RULE, not the incumbent's and not the grille's. The grille has
+ * no notion of a correction that cannot hear, because a real jury always can. The
+ * incumbent has the notion and handles it in its prompt, asking the model to be
+ * prudent; the reproduction audit deliberately dropped that wording (see
+ * `criteria.ts`) because this project's justification is real audio. What the
+ * audit did not settle is what the *fallback* does, and #12 measured the answer:
+ * graded on text, this corrector set `phonologieNonEvaluable` on 2 of 11
+ * corrections and awarded 5/5 on seven, including to a candidate whose French is
+ * conspicuously agrammatical. The incumbent, on the same six transcripts, flagged
+ * 24 of 24 and never went above 3.
+ *
+ * So the ceiling lives here rather than in the prompt. A prompt can be ignored by
+ * the model — that is precisely what #29 recorded it doing — and a rule that
+ * changes a candidate's mark belongs somewhere it can be tested.
+ */
+export const UNHEARD_PHONOLOGY_CEILING = 3;
+
+/**
+ * Hold « phonologie » to {@link UNHEARD_PHONOLOGY_CEILING} when the correction
+ * had no audio. A no-op when it did, and a no-op for bands already at or below
+ * the ceiling — every result is still a legal grille band, because 0, 1 and 3
+ * pass through and only 5 moves.
+ */
+export function capUnheardPhonology(
+  criteria: CriteriaBands,
+  phonologyHeard: boolean,
+): CriteriaBands {
+  if (phonologyHeard || criteria.phonologie <= UNHEARD_PHONOLOGY_CEILING) return criteria;
+  return { ...criteria, phonologie: UNHEARD_PHONOLOGY_CEILING };
+}
+
 /**
  * Whether a /25 score meets the DELF per-competency floor (≥ 5). A sub-floor
  * production orale score is éliminatoire regardless of other competencies.
@@ -233,9 +275,26 @@ export function snapCriteria(raw: Record<OralCriterion, number>): CriteriaBands 
   ) as CriteriaBands;
 }
 
+/**
+ * The conditions a sitting was produced and corrected under: how long each part
+ * ran, and whether the corrector could hear it.
+ *
+ * `phonologyHeard` is deliberately a fact about the épreuve rather than the
+ * `evaluations.mode` enum it will usually be derived from. This module is pure
+ * DELF logic and must not learn the shape of a storage column to apply a rule.
+ */
+export interface SittingConditions extends SittingDurations {
+  /**
+   * Whether the correction actually had the candidate's recording. Required, with
+   * no default: defaulting it true reinstates #29 for any caller who forgets, and
+   * defaulting it false silently caps corrections that did hear the candidate.
+   */
+  phonologyHeard: boolean;
+}
+
 /** Everything the rubric has to say about one sitting. */
 export interface SittingScore {
-  /** The five bands, snapped. */
+  /** The five bands, snapped — and capped, where the corrector could not hear. */
   criteria: CriteriaBands;
   /** Their sum, before the duration penalty. */
   rawScore25: number;
@@ -243,6 +302,13 @@ export interface SittingScore {
   durationPenalty: number;
   /** Which parts were short, so the penalty can be explained. */
   shortParts: Array<"monologue" | "debate">;
+  /**
+   * Whether « phonologie » was held down because the correction had no audio —
+   * true only when the band actually moved. Reported for the same reason as
+   * {@link shortParts}: "3 in phonologie" and "3 in phonologie because nobody
+   * heard you" are different records, and only one of them can be argued with.
+   */
+  phonologyCapped: boolean;
   /** What the candidate is shown. */
   score25: number;
   /** Whether that clears the ≥ 5/25 competency floor. */
@@ -266,17 +332,23 @@ export interface SittingScore {
  */
 export function scoreSitting(
   raw: Record<OralCriterion, number>,
-  durations: SittingDurations,
+  conditions: SittingConditions,
 ): SittingScore {
-  const criteria = snapCriteria(raw);
+  // Snap, then cap. Both orders give the same band here, but only this one is
+  // honest about what each step does: snapping turns a model's number into a
+  // legal band, and the ceiling is then applied to a band rather than to
+  // whatever the model happened to emit.
+  const snapped = snapCriteria(raw);
+  const criteria = capUnheardPhonology(snapped, conditions.phonologyHeard);
   const rawScore25 = criteriaToScore25(criteria);
-  const { score25, penalty, shortParts } = applySittingDurationPenalty(rawScore25, durations);
+  const { score25, penalty, shortParts } = applySittingDurationPenalty(rawScore25, conditions);
 
   return {
     criteria,
     rawScore25,
     durationPenalty: penalty,
     shortParts,
+    phonologyCapped: criteria.phonologie !== snapped.phonologie,
     score25,
     meetsFloor: meetsCompetencyFloor(score25),
   };
