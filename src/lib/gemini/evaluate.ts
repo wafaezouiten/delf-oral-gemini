@@ -33,6 +33,7 @@ import {
   criterionScores,
   parseEvaluationResponse,
 } from "./evaluation-response";
+import { readEvaluationUsage, type EvaluationUsage } from "./evaluation-usage";
 import { formatTranscript, type TranscriptEntry } from "@/lib/delf/transcript";
 import type { OralTopic } from "@/lib/delf/topics";
 import type { EvaluationFeedback, EvaluationMode, OralSpeakingPhase } from "@/lib/db/schema";
@@ -219,6 +220,16 @@ export interface EvaluationResult {
   model: string;
   promptVersion: string;
   latencySeconds: number;
+  /**
+   * What the correction actually cost, in tokens, as the API reported it.
+   *
+   * Reported rather than stored: nothing persists this, and no candidate-facing
+   * behaviour reads it. It exists because #12 asks for cost per sitting measured
+   * rather than estimated, and a harness that counted the prompt itself would be
+   * measuring its own arithmetic instead of the call. See `evaluation-usage.ts`,
+   * where the reading lives so it can be tested.
+   */
+  usage: EvaluationUsage;
 }
 
 export interface EvaluateParams {
@@ -369,5 +380,6 @@ export async function evaluateExam(params: EvaluateParams): Promise<EvaluationRe
     model: EVAL_MODEL,
     promptVersion: EVAL_PROMPT_VERSION,
     latencySeconds: (Date.now() - startedAt) / 1000,
+    usage: readEvaluationUsage(response.usageMetadata),
   };
 }

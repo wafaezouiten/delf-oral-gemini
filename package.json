@@ -18,6 +18,9 @@
     "verify:live": "tsx scripts/verify-live.ts",
     "verify:eval": "cross-env NODE_OPTIONS=--conditions=react-server tsx scripts/verify-eval.ts",
     "verify:db": "cross-env NODE_OPTIONS=--conditions=react-server tsx scripts/verify-persistence.ts",
+    "compare": "cross-env NODE_OPTIONS=--conditions=react-server tsx scripts/compare.ts",
+    "compare:summarise": "tsx scripts/comparison/summarise.ts",
+    "measure:live": "cross-env NODE_OPTIONS=--conditions=react-server tsx scripts/measure-live.ts",
     "models": "node scripts/list-models.mjs"
   },
   "dependencies": {
