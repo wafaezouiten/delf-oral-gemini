@@ -147,8 +147,6 @@ export function PassationScreen({
               {status.body}
             </p>
           </div>
-
-          {devPanel}
         </div>
 
         <ConversationControls
@@ -163,6 +161,9 @@ export function PassationScreen({
           onAdvance={onAdvance}
           emptyTranscript={emptyTranscript}
           onRetryTranscription={onRetryTranscription}
+          // Handed down rather than rendered here: it belongs beside the
+          // empty-transcript notice, which lives inside the bar (#36).
+          devPanel={devPanel}
         />
 
         {hasNotes && (
