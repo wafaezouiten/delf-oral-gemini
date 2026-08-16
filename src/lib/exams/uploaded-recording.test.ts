@@ -103,19 +103,31 @@ describe("what one request may carry", () => {
     assert.equal(fitsInOneRequest([200_000, asWav(7), asWav(13)]), false);
   });
 
-  it("cannot carry a WAV of a monologue that ran its own minimum", () => {
-    // Worth pinning rather than describing: the per-recording cap is sized for
-    // Opus, so as PCM16 it is 98 seconds — and the candidate cannot leave the
-    // monologue before 300. A WAV therefore only ever reaches this route from a
-    // capture that failed inside the first 98 seconds, which is the case the
-    // measured duration exists for. A browser without WebCodecs is not "graded
-    // from a short sitting", it is graded from its transcript, and
-    // `selectDeliverable` is what decides that in the tab rather than at a 413.
+  it("carries about 98 seconds of WAV, whatever the monologue's own floor is", () => {
+    // This test used to assert that a WAV of a minimum-length monologue could
+    // never fit, and that was true while the floor was 300 seconds: the cap is
+    // sized for Opus, so as PCM16 it is 98 seconds, and 300 > 98 by a wide
+    // margin. Dropping the floor to 60 makes it false — one minute of PCM16 is
+    // 1.9 MB and fits inside the 3 MB cap.
+    //
+    // The claim is therefore restated rather than deleted, because what it was
+    // really pinning is the cap's size in seconds, and that has not moved. What
+    // changed is a genuine consequence worth writing down: a browser without
+    // WebCodecs that records a SHORT monologue can now upload it, where before
+    // every WAV was dropped in the tab. That is an improvement — the audio gets
+    // graded — and `selectDeliverable` still decides, in the tab, which
+    // artefacts fit rather than discovering it at a 413.
     const asWav = (seconds: number) => 44 + seconds * INPUT_SAMPLE_RATE * 2;
 
-    assert.ok(asWav(MONOLOGUE_MIN_SECONDS) > MAX_RECORDING_BYTES);
     assert.equal(Math.floor(MAX_RECORDING_BYTES / (INPUT_SAMPLE_RATE * 2)), 98);
-    assert.equal(fitsInOneRequest([1_000, asWav(MONOLOGUE_MIN_SECONDS)]), false);
+    assert.ok(asWav(98) < MAX_RECORDING_BYTES);
+    assert.ok(asWav(99) > MAX_RECORDING_BYTES);
+
+    // A monologue at the new floor now fits on its own…
+    assert.ok(asWav(MONOLOGUE_MIN_SECONDS) < MAX_RECORDING_BYTES);
+    // …but a full-length débat beside it still does not, which is the pairing
+    // `selectDeliverable` exists to resolve.
+    assert.equal(fitsInOneRequest([1_000, asWav(MONOLOGUE_MIN_SECONDS), asWav(600)]), false);
   });
 
   it("counts the multipart wrapping, not just the parts", () => {

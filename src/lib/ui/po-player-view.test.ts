@@ -103,6 +103,15 @@ describe("the mic copy", () => {
     assert.match(micCopy("debate", "recording").label, /débat/);
   });
 
+  it("says the microphone is live before it says what the button does", () => {
+    // The commonest confusion on this screen is not knowing whether anything is
+    // being recorded. The badge and the ring say so too; this is the one place
+    // it is said in words, right next to the control.
+    const { hint } = micCopy("monologue", "recording");
+    assert.match(hint, /^Vous parlez\./);
+    assert.match(hint, /Cliquez pour terminer votre exposé\.$/);
+  });
+
   it("says how much time is still owed rather than refusing", () => {
     const { hint, label } = micCopy("monologue", "locked", 150);
     // 150 s rounds UP to 3 minutes: promising "2 min" and then still refusing at

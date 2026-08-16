@@ -16,21 +16,18 @@ import { AlertIcon } from "./icons";
  * top-layer stacking from the browser, which is most of what the Radix
  * primitive is for.
  *
- * The copy is a great deal stronger than the reference's, because the
- * consequences are. The reference loses a conversation it never recorded and
- * never scored, so « votre progression ne sera pas sauvegardée » is the whole
- * truth of it. Here, leaving does three things, and the dialog names all three
- * in the order they cost the candidate:
+ * The copy is deliberately short. It went through a long version first — the
+ * score, the historique, the effect on the average, and a comparison to walking
+ * out of the exam room — and every sentence of it was true and none of it was
+ * read: this dialog opens on someone who is mid-épreuve, possibly panicking,
+ * deciding in about two seconds. So it says the number, then the one other
+ * consequence, and stops.
  *
- *  1. **The épreuve is scored zero and joins their record.** This is the one
- *     that must not be buried, so it is a bordered block rather than a clause in
- *     a paragraph — and it is the reason `onConfirm` marks the sitting abandoned
- *     server-side rather than merely navigating away. A warning the product does
- *     not honour would be worse than no warning.
- *  2. **The recording is destroyed.** It lives in this tab and nowhere else
- *     until the épreuve ends, the fact `use-exam-controller`'s `beforeunload`
- *     note is written around.
- *  3. **The time already spent is gone.**
+ * What survives from the long version is the *structure*: the score is a
+ * bordered block of its own rather than a clause in a paragraph, because it is
+ * the fact that must not be skimmed past. It is also the reason `onConfirm`
+ * marks the sitting abandoned server-side rather than merely navigating away —
+ * a warning the product does not honour would be worse than no warning.
  *
  * The safe choice is the one that looks safe: "Rester" is the plain button and
  * the confirm is the danger one, which is the opposite of a dialog that styles
@@ -76,24 +73,20 @@ export function ExitDialog({
           Abandonner l&apos;épreuve ?
         </h2>
 
-        {/* The consequence that cannot be undone, given its own frame so it is
-            not read as the tail of a sentence about saving progress. */}
-        <div className="border-danger/40 bg-danger-subtle text-danger flex items-start gap-2.5 border p-3.5">
-          <AlertIcon className="mt-0.5 size-4 shrink-0" />
-          <p className="text-sm leading-relaxed">
-            <span className="font-semibold">
-              Cette épreuve comptera comme une tentative, notée 0/{COMPETENCY_MAX}.
-            </span>{" "}
-            Elle apparaîtra dans votre historique et pèsera sur votre moyenne,
-            exactement comme un candidat qui quitte la salle le jour de
-            l&apos;examen.
+        {/* One fact, in one line, in its own frame. This block used to carry
+            three sentences — the score, the historique, the moyenne, and a
+            comparison to leaving the exam room — and a candidate mid-épreuve
+            reads none of it. What they need to know is the number. */}
+        <div className="border-danger/40 bg-danger-subtle text-danger flex items-center gap-2.5 border p-3.5">
+          <AlertIcon className="size-4 shrink-0" />
+          <p className="text-sm font-semibold">
+            Vous aurez 0/{COMPETENCY_MAX} à cette épreuve.
           </p>
         </div>
 
         <p className="text-muted-foreground text-sm leading-relaxed">
-          Votre enregistrement n&apos;existe que dans cet onglet : le quitter le
-          détruit, et cette épreuve ne pourra plus être corrigée. Le temps déjà
-          écoulé est perdu.
+          Votre enregistrement sera perdu et l&apos;épreuve ne pourra pas être
+          corrigée.
         </p>
 
         <div className="flex flex-wrap justify-end gap-2 pt-1">
@@ -101,10 +94,10 @@ export function ExitDialog({
               candidate is most likely to press next should be the one that
               keeps their épreuve. */}
           <button type="button" onClick={onCancel} className={secondaryButton} autoFocus>
-            Continuer l&apos;épreuve
+            Continuer
           </button>
           <button type="button" onClick={onConfirm} className={dangerButton}>
-            Abandonner et prendre 0
+            Abandonner
           </button>
         </div>
       </div>

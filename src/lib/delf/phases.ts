@@ -60,11 +60,22 @@ export const PHASE_DURATIONS: Record<Exclude<OralPhase, "finished">, number> = {
 };
 
 /**
- * The minimum monologue length before the candidate may move on early. The real
- * épreuve expects 5-7 minutes; below 5 the "monologue suivi" task has not really
- * been attempted, so the UI keeps the advance button disabled until then.
+ * The minimum monologue length before the candidate may move on to the débat.
+ *
+ * This is a **UI gate, not a grading rule**, and the distinction is the whole
+ * reason it can be this short. It was 5 minutes, matching what the real épreuve
+ * expects of a "monologue suivi"; it is now 1, so a candidate can cut a
+ * monologue that has genuinely run out of things to say — and so the débat,
+ * which is the half most people actually want to practise, is reachable without
+ * sitting through five minutes first.
+ *
+ * Stopping early is still penalised, and by a completely separate number:
+ * `minDurationSeconds(tache)` in `constants.ts` computes the duration penalty
+ * from the *measured audio*, and it is unchanged. A candidate who stops at 61
+ * seconds may now do so, and will still lose the points the DELF's own floor
+ * costs them. The button no longer refuses; the grille still does.
  */
-export const MONOLOGUE_MIN_SECONDS = 5 * 60;
+export const MONOLOGUE_MIN_SECONDS = 1 * 60;
 
 /** How long this phase runs. `finished` has no clock. */
 export function phaseDurationSeconds(phase: OralPhase): number {

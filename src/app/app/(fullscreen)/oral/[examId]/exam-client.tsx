@@ -18,6 +18,7 @@ import {
 import type { OralTopic } from "@/lib/delf/topics";
 import { ConnectionBadge } from "./_components/connection-badge";
 import { EventLog } from "./_components/event-log";
+import { DevSpeechBox } from "./_components/dev-speech-box";
 import { RecordingBadge } from "./_components/recording-badge";
 import { BriefingScreen } from "./_components/briefing-screen";
 import { PreparationScreen } from "./_components/preparation-screen";
@@ -411,6 +412,7 @@ export function ExamClient({ examId, topic }: { examId: string; topic: OralTopic
         devPanel={
           process.env.NODE_ENV !== "production" ? (
             <div className="space-y-2">
+              <DevSpeechBox onSubmit={(text) => controller.injectCandidateSpeech(text)} />
               <EventLog events={state.events} />
               {/* Drives the path a real GoAway takes, so the 13-minute
                   resumption behaviour can be exercised in seconds instead of

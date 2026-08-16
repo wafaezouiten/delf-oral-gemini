@@ -206,8 +206,13 @@ export function micCopy(
     };
   }
 
+  // Two sentences, and the first one is the point: the candidate is speaking
+  // *now*, and the single most common confusion on this screen is not knowing
+  // whether the microphone is live. "Vous parlez." answers that before the
+  // instruction does — the badge and the pulsing ring say the same thing, and
+  // this is the one place it is said in words next to the control itself.
   return {
-    hint: `Appuyez pour terminer ${act}`,
+    hint: `Vous parlez. Cliquez pour terminer ${act}.`,
     label: `Terminer ${act}`,
   };
 }
