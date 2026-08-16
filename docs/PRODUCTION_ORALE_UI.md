@@ -218,6 +218,23 @@ Everything below is a decision, not an oversight:
    instruction was to adapt without redesigning the interface — the interface is
    the layout and the interactions, which are reproduced token for token in
    structure and mapped onto the existing colour vocabulary.
+
+   **Light only.** The palette's dark counterpart was removed rather than left
+   unused. Every surface in this product is named for printed matter — `--paper`,
+   `--paper-border`, the tricolore rule, the justified serif measure of an exam
+   booklet — and a dark inversion of a printed page is a photograph of a page
+   rather than the page. `color-scheme: light` goes with it so the browser's own
+   furniture (scrollbars, form controls, the `<dialog>` backdrop) matches.
+
+   **Navigation is a sidebar**, per the reference's `components/app-sidebar/*`:
+   a rail on desktop, and below `md` a slim top bar for the brand and the account
+   plus a fixed bottom tab bar. The reference's rail is collapsible to an icon
+   strip with a ⌘B shortcut because it navigates four épreuves each with three
+   sub-links; three destinations do not earn a provider, a persisted cookie and a
+   keyboard shortcut, so the anatomy and the active-state rules are reproduced
+   and the collapse control is not. The `(fullscreen)` group keeps no app chrome
+   at all — a tab bar across the foot of the passation would sit exactly where
+   the mic is.
 2. **No Hugeicons, no motion/react, no shadcn.** This project has none of the
    three as dependencies and adding them for icon glyphs and two keyframes would
    be a large dependency bill for a small surface. Icons are inline SVGs in one

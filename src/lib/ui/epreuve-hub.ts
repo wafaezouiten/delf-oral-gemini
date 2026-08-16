@@ -139,6 +139,34 @@ export const HUB_LINKS: HubLinks = {
   tableauDeBord: "/app/tableau-de-bord",
 };
 
+/**
+ * Whether a navigation link is the one the candidate is currently on.
+ *
+ * Two rules, because the rail holds two kinds of link and one rule cannot serve
+ * both:
+ *
+ *  - **A section link matches its own subtree.** `/app/sujets` stays lit while
+ *    the candidate is on `/app/sujets/whatever`, which is what a section means.
+ *  - **An index link matches only itself** (`exact`). The hub's href is `/app`,
+ *    and every route in the product is under it — so the subtree rule lights
+ *    "L'épreuve" on the sujets page, the dashboard, the simulateur and the
+ *    correction all at once, and the rail claims the candidate is somewhere they
+ *    are not. The reference hits the same thing and solves it the same way: its
+ *    `DASHBOARD_ITEM` is compared with `===` while its épreuve groups use a
+ *    prefix.
+ *
+ * Note the prefix is `${href}/` and not `href`: a bare `startsWith` would also
+ * match `/app/sujets-archive`, which shares the string but is not under the
+ * route.
+ *
+ * Here rather than in the component because it is a rule with two edges, and
+ * this is where rules with edges get a test in this repo.
+ */
+export function isNavLinkActive(pathname: string, href: string, exact = false): boolean {
+  if (exact) return pathname === href;
+  return pathname === href || pathname.startsWith(`${href}/`);
+}
+
 export function buildHubView(): HubView {
   return {
     title: "Production orale.",

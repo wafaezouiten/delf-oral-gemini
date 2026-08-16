@@ -8,6 +8,8 @@ import {
   buildHubSujets,
   buildHubView,
   buildShapePill,
+  HUB_LINKS,
+  isNavLinkActive,
   sujetMeta,
   sujetTeaser,
 } from "./epreuve-hub";
@@ -69,6 +71,34 @@ describe("the hub view", () => {
       buildHubView().capabilities.map((capability) => capability.icon),
       ["conditions", "correction", "score"],
     );
+  });
+});
+
+describe("the navigation's active link", () => {
+  it("lights a link on its own page", () => {
+    assert.equal(isNavLinkActive("/app", "/app"), true);
+    assert.equal(isNavLinkActive(HUB_LINKS.sujets, HUB_LINKS.sujets), true);
+  });
+
+  it("does not light the index link on every page in the product", () => {
+    // `/app` is a prefix of every route here, so the subtree rule would light
+    // "L'épreuve" on the sujets page, the dashboard, the simulateur and the
+    // correction — the rail then claims the candidate is somewhere they are
+    // not. The index link is therefore matched exactly.
+    assert.equal(isNavLinkActive(HUB_LINKS.sujets, "/app", true), false);
+    assert.equal(isNavLinkActive(HUB_LINKS.tableauDeBord, "/app", true), false);
+    assert.equal(isNavLinkActive("/app/oral/12", "/app", true), false);
+    assert.equal(isNavLinkActive("/app", "/app", true), true);
+  });
+
+  it("lights a section link on its own children", () => {
+    assert.equal(isNavLinkActive("/app/sujets/teletravail", HUB_LINKS.sujets), true);
+  });
+
+  it("does not match a sibling that merely shares a prefix string", () => {
+    // "/app/sujets-archive" starts with "/app/sujets" as a string but is not
+    // under it as a route.
+    assert.equal(isNavLinkActive("/app/sujets-archive", HUB_LINKS.sujets), false);
   });
 });
 

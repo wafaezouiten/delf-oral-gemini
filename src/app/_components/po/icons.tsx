@@ -164,6 +164,17 @@ export function UserIcon(props: IconProps) {
   );
 }
 
+/** The sujets catalogue: a sheet with lines on it, not a book. */
+export function DocumentIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M6 3.5h7.5L19 9v11.5H6z" />
+      <path d="M13.2 3.6V9H18.8" />
+      <path d="M9 13h6M9 16.5h4" />
+    </Icon>
+  );
+}
+
 export function ClockIcon(props: IconProps) {
   return (
     <Icon {...props}>

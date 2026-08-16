@@ -19,8 +19,32 @@
  * word for it.
  */
 
+/**
+ * Light only, on purpose.
+ *
+ * The palette had a full dark counterpart behind `prefers-color-scheme`, and it
+ * is gone rather than merely unused. The épreuve this product reproduces arrives
+ * on paper: a document déclencheur on warm stock, a corrector's grid ruled in
+ * navy. Every surface here is named for that — `--paper`, `--paper-border`, the
+ * tricolore rule, the justified serif measure of an exam booklet — and a dark
+ * inversion of a printed page is a photograph of a page rather than the page.
+ * The one screen where it showed most was the sujet: warm cream at #fdfcf8
+ * became a near-black card, and the whole reason the candidate is meant to read
+ * it as a handout went with it.
+ *
+ * `color-scheme: light` rather than the removal of the media query alone. It
+ * tells the browser to render its own furniture — form controls, scrollbars,
+ * the `<dialog>` backdrop — in light too. Without it a candidate on a dark
+ * system gets a light page with a dark scrollbar and dark spinner controls,
+ * which is the mismatch that reads as a bug.
+ *
+ * The print block below still overrides these. It always did: it is not the
+ * dark scheme's replacement but a third target, and it flattens the tinted
+ * surfaces to white because a greyscale printer renders every one of them as
+ * the same grey block.
+ */
 :root {
-  color-scheme: light dark;
+  color-scheme: light;
 
   --background: #f7f7f5;
   --foreground: #16181d;
@@ -63,44 +87,6 @@
   --band-green-subtle: #e7f2ea;
   --band-emerald: #10614f;
   --band-emerald-subtle: #e2f1ed;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0d0f13;
-    --foreground: #ecedf1;
-    --muted: #191c22;
-    --muted-foreground: #99a0ac;
-    --border: #272c35;
-    --card: #13161b;
-
-    --paper: #15181e;
-    --paper-border: #2f3641;
-
-    --primary: #8fb0ee;
-    --primary-foreground: #0d0f13;
-    --primary-subtle: #16203a;
-
-    --tricolore-blue: #2b5fc4;
-    --tricolore-white: #d8dae0;
-    --tricolore-red: #e0475c;
-
-    --success: #5cc98b;
-    --success-subtle: #11251a;
-    --warning: #f0b64a;
-    --warning-subtle: #2a2010;
-    --danger: #f18490;
-    --danger-subtle: #2b1418;
-
-    --band-red: #f18490;
-    --band-red-subtle: #2b1418;
-    --band-amber: #f0b64a;
-    --band-amber-subtle: #2a2010;
-    --band-green: #5cc98b;
-    --band-green-subtle: #11251a;
-    --band-emerald: #58ccb4;
-    --band-emerald-subtle: #0e2621;
-  }
 }
 
 @theme inline {
