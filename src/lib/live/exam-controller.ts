@@ -949,6 +949,13 @@ export class ExamController {
       this.closeSession();
     }
 
+    // DEVELOPMENT ONLY — the transcription panel lives on the exposé and nowhere
+    // else (#36), so leaving the monologue is what gives the microphone back.
+    // Without this the mode would outlive the only screen that can use it: the
+    // débat would be neither typeable nor recordable, and it would arrive at the
+    // correction with an empty transcript and zero seconds.
+    if (this.devTextMode && current === "monologue") this.setDevTextMode(false);
+
     this.phase = target;
     this.phaseStart = this.now();
     this.elapsed = 0;

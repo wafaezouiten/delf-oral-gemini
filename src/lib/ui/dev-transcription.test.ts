@@ -3,11 +3,11 @@ import { describe, it } from "node:test";
 
 import { DEBATE_FLOOR_SECONDS, MONOLOGUE_FLOOR_SECONDS } from "@/lib/delf/orale-rubric";
 import {
+  DEV_PANEL_COPY,
   MAX_DEV_SECONDS,
   SPOKEN_WORDS_PER_MINUTE,
   countWords,
   describeDraft,
-  devPanelCopy,
   estimateSpokenSeconds,
   exampleExpose,
   parseDurationInput,
@@ -96,18 +96,13 @@ describe("the counter under the field", () => {
 });
 
 describe("the panel's copy", () => {
-  it("names the phase it is about to replace", () => {
-    assert.match(devPanelCopy("monologue").description, /l'exposé/);
-    assert.match(devPanelCopy("debate").description, /débat/);
-  });
-
-  it("labels the button with what is being sent", () => {
-    assert.equal(devPanelCopy("monologue").submit, "Envoyer l'exposé");
-    assert.equal(devPanelCopy("debate").submit, "Envoyer la réponse");
+  it("names what it replaces — the exposé, and only the exposé", () => {
+    assert.match(DEV_PANEL_COPY.description, /l'exposé/);
+    assert.equal(DEV_PANEL_COPY.submit, "Envoyer l'exposé");
   });
 
   it("promises the rest of the déroulé continues, which is the panel's whole claim", () => {
-    assert.match(devPanelCopy("monologue").description, /correction/);
+    assert.match(DEV_PANEL_COPY.description, /débat et la correction/);
   });
 });
 

@@ -9,7 +9,6 @@
  */
 
 import { formatClock } from "@/lib/delf/phases";
-import type { TranscriptPhase } from "@/lib/delf/transcript";
 
 /**
  * Words per minute assumed when turning a typed transcript into a spoken
@@ -87,39 +86,22 @@ export function describeDraft(text: string, rawDuration: string): string {
   return `${words} ${words === 1 ? "mot" : "mots"} · ${formatClock(seconds)}`;
 }
 
-export interface DevPanelCopy {
-  title: string;
-  /** What the panel replaces, and what it leaves alone. */
-  description: string;
-  placeholder: string;
-  submit: string;
-}
-
 /**
- * The panel's words, per phase.
+ * The panel's words.
  *
- * Two phases rather than the reference's one: the panel is reachable in the
- * débat too, because somebody typing the exposé is usually testing the whole
- * déroulé and would otherwise have to speak the second half of it.
+ * The exposé only, and no per-phase variant: the panel is reachable on the
+ * monologue and nowhere else, so the débat is spoken. That is why the controller
+ * hands the microphone back when the monologue ends — a mode that outlived the
+ * only screen offering it would leave the débat neither typeable nor recordable.
  */
-export function devPanelCopy(phase: TranscriptPhase): DevPanelCopy {
-  if (phase === "debate") {
-    return {
-      title: "Transcription directe",
-      description:
-        "Remplace l'enregistrement et la transcription du débat. L'examinateur reçoit le texte et répond normalement ; la correction suit son cours.",
-      placeholder: "Collez ici ce que le candidat répond à l'examinateur.",
-      submit: "Envoyer la réponse",
-    };
-  }
-  return {
-    title: "Transcription directe",
-    description:
-      "Remplace l'enregistrement et la transcription de l'exposé. La suite du déroulé (débat, correction) se déroule normalement.",
-    placeholder: "Collez ici la transcription de l'exposé.",
-    submit: "Envoyer l'exposé",
-  };
-}
+export const DEV_PANEL_COPY = {
+  title: "Transcription directe",
+  /** What it replaces, and what it leaves alone. */
+  description:
+    "Remplace l'enregistrement et la transcription de l'exposé. Le débat et la correction se déroulent normalement.",
+  placeholder: "Collez ici la transcription de l'exposé.",
+  submit: "Envoyer l'exposé",
+} as const;
 
 /**
  * A sample exposé, for the « Exemple » button.

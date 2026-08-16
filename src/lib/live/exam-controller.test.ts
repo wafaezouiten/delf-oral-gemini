@@ -1170,18 +1170,37 @@ describe("recording the candidate", () => {
       await completeClosing(h);
     }
 
-    it("claims the seconds a typed turn says it took, and adds them up", async () => {
+    it("claims the seconds a typed exposé says it took, and adds them up", async () => {
       const h = harness();
       await intoMonologue(h);
       h.controller.setDevTextMode(true);
       h.controller.injectCandidateSpeech("Premier paragraphe.", 200);
       h.controller.injectCandidateSpeech("Second paragraphe.", 130);
-      await runToFinish(h, () => {
-        h.controller.injectCandidateSpeech("Une réponse au débat.", 320);
-      });
+      await runToFinish(h, () => {});
 
       assert.equal(h.controller.getSnapshot().phase, "finished");
-      assert.deepEqual(h.finished[0]?.devSeconds, { monologue: 330, debate: 320 });
+      assert.deepEqual(h.finished[0]?.devSeconds, { monologue: 330, debate: 0 });
+    });
+
+    it("gives the microphone back when the monologue ends, so the débat records", async () => {
+      // The panel is on the exposé and nowhere else. A mode that outlived it
+      // would leave the débat neither typeable nor recordable — an empty
+      // transcript and zero seconds arriving at the correction.
+      const h = harness();
+      await intoMonologue(h);
+      h.controller.setDevTextMode(true);
+      h.controller.injectCandidateSpeech("Un exposé tapé.", 330);
+      h.advanceClock(MONOLOGUE_MIN_SECONDS + 10);
+      await h.controller.advanceEarly();
+      await completeClosing(h);
+
+      assert.equal(h.controller.getSnapshot().phase, "debate");
+      assert.equal(h.controller.getSnapshot().devTextMode, false, "the mode stood down");
+      assert.equal(h.recorder.paused, false, "the microphone is back");
+
+      h.advanceClock(60);
+      assert.equal(h.recorder.measuredSeconds("debate"), 60, "and the débat is recording");
+      assert.equal(h.controller.getSnapshot().recording, true);
     });
 
     it("sends no claim at all when nothing was typed", async () => {

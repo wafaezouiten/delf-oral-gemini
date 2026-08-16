@@ -455,13 +455,17 @@ export function ExamClient({ examId, topic }: { examId: string; topic: OralTopic
         devPanel={
           process.env.NODE_ENV !== "production" ? (
             <div className="space-y-2">
-              <DevTranscriptionPanel
-                phase={state.phase === "debate" ? "debate" : "monologue"}
-                subject={topic.title}
-                active={state.devTextMode}
-                onActiveChange={(on) => controller.setDevTextMode(on)}
-                onSubmit={(text, seconds) => controller.injectCandidateSpeech(text, seconds)}
-              />
+              {/* The exposé and nowhere else. The débat is spoken, and the
+                  controller hands the microphone back when the monologue ends
+                  so it can be. */}
+              {state.phase === "monologue" && (
+                <DevTranscriptionPanel
+                  subject={topic.title}
+                  active={state.devTextMode}
+                  onActiveChange={(on) => controller.setDevTextMode(on)}
+                  onSubmit={(text, seconds) => controller.injectCandidateSpeech(text, seconds)}
+                />
+              )}
               <EventLog events={state.events} />
               {/* Drives the path a real GoAway takes, so the 13-minute
                   resumption behaviour can be exercised in seconds instead of
