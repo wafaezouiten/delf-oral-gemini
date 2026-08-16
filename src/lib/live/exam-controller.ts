@@ -229,6 +229,11 @@ export interface ExamFinishedPayload {
   /** One entry per phase the candidate actually entered. */
   phases: PhaseReport[];
   reconnectCount: number;
+  /**
+   * DEVELOPMENT ONLY — the seconds typed phases claim to have lasted (#36).
+   * Undefined on every real sitting. See `ExamController`'s `devSeconds`.
+   */
+  devSeconds?: Record<RecordedPhase, number>;
 }
 
 export interface ExamControllerDeps {
@@ -324,6 +329,23 @@ export class ExamController {
    * it returns before assigning there.
    */
   private devTextMode = false;
+
+  /**
+   * DEVELOPMENT ONLY — the seconds a typed phase claims to have lasted (#36).
+   *
+   * Zero on every real sitting, and on every production build, because
+   * `injectCandidateSpeech` is the only writer and it returns before reaching
+   * this line there.
+   *
+   * **How far the claim travels.** It is carried in the finished payload and the
+   * finish route substitutes it for the measured duration — but only in a
+   * development build, and only for a phase that uploaded no audio at all. That
+   * route measures a real sitting's duration out of the bytes it received
+   * precisely so a client cannot claim one, and this does not weaken that: with
+   * a recording present the recording still wins, so the override cannot be used
+   * to dress a short sitting up as a long one.
+   */
+  private devSeconds: Record<RecordedPhase, number> = { monologue: 0, debate: 0 };
 
   private transcript: TranscriptEntry[] = [];
   private events: ExamEvent[] = [];
@@ -790,22 +812,30 @@ export class ExamController {
    * Three things it deliberately does NOT do, because each would make what it
    * produces a lie about a real sitting:
    *
-   *  - **It records no audio.** The measured duration stays whatever the
-   *    microphone actually captured — nothing at all, under
-   *    {@link setDevTextMode}, which is how this is meant to be used — so a
-   *    typed sitting is graded from its transcript and takes the duration
-   *    penalty. That is the correct answer: nothing was spoken.
+   *  - **It records no audio.** Under {@link setDevTextMode}, which is how this
+   *    is meant to be used, the microphone is off and the phase measures zero
+   *    seconds. `seconds` is what the phase should *claim* to have lasted
+   *    instead — see {@link devSeconds} for how far that claim travels, and how
+   *    far it deliberately does not.
    *  - **It does not advance the phase.** The clock and the state machine are
    *    untouched.
    *  - **It does not run in production.** The guard is on `NODE_ENV` and is the
    *    first line, so a build cannot ship a way to write an exam transcript
    *    without speaking.
+   *
+   * @param seconds How long this turn would have taken to say. Accumulated per
+   *   phase, so several submissions add up the way several minutes of speaking
+   *   would.
    */
-  injectCandidateSpeech(text: string): void {
+  injectCandidateSpeech(text: string, seconds = 0): void {
     if (process.env.NODE_ENV === "production") return;
     const trimmed = text.trim();
     if (!trimmed) return;
     if (this.phase !== "monologue" && this.phase !== "debate") return;
+
+    if (Number.isFinite(seconds) && seconds > 0) {
+      this.devSeconds[this.phase] += Math.round(seconds);
+    }
 
     this.addFragment("candidate", trimmed);
     // The examiner has to hear it too, or the débat argues with silence.
@@ -1107,6 +1137,12 @@ export class ExamController {
       recordings,
       phases,
       reconnectCount: this.reconnectCount,
+      // Only when something was actually typed, so a real sitting sends no such
+      // field at all rather than a pair of zeroes the route has to interpret.
+      devSeconds:
+        this.devSeconds.monologue > 0 || this.devSeconds.debate > 0
+          ? { ...this.devSeconds }
+          : undefined,
     });
   }
 

@@ -89,6 +89,26 @@ export const finishPayloadSchema = z.object({
       "a phase cannot be reported twice",
     ),
   reconnectCount: z.number().int().nonnegative(),
+  /**
+   * DEVELOPMENT ONLY — the seconds a typed phase claims to have lasted (#36).
+   *
+   * The one number in this file that can reach a grade, which is why the bound
+   * is not the only thing standing in front of it. The route ignores this
+   * outright in a production build, and honours it only for a phase that
+   * uploaded no audio: with a recording present the recording still wins, so
+   * this cannot dress a short sitting up as a long one. It exists because a
+   * typed sitting has no audio at all, and a permanent −3 makes the rubric's
+   * only interesting threshold untestable without a microphone.
+   *
+   * Validated here regardless of environment. A schema that changes shape with
+   * `NODE_ENV` is a schema whose tests prove nothing about production.
+   */
+  devSeconds: z
+    .object({
+      monologue: z.number().nonnegative().max(MAX_PHASE_SECONDS),
+      debate: z.number().nonnegative().max(MAX_PHASE_SECONDS),
+    })
+    .optional(),
 });
 
 export type FinishPayload = z.infer<typeof finishPayloadSchema>;

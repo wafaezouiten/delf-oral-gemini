@@ -19,7 +19,7 @@ import {
 import type { OralTopic } from "@/lib/delf/topics";
 import { ConnectionBadge } from "./_components/connection-badge";
 import { EventLog } from "./_components/event-log";
-import { DevSpeechBox } from "./_components/dev-speech-box";
+import { DevTranscriptionPanel } from "./_components/dev-transcription-panel";
 import { RecordingBadge } from "./_components/recording-badge";
 import { BriefingScreen } from "./_components/briefing-screen";
 import { PreparationScreen } from "./_components/preparation-screen";
@@ -112,6 +112,9 @@ export function ExamClient({ examId, topic }: { examId: string; topic: OralTopic
         transcript: payload.transcript,
         phases: payload.phases,
         reconnectCount: payload.reconnectCount,
+        // Undefined on any sitting that was actually spoken, and ignored by the
+        // route in a production build (#36).
+        devSeconds: payload.devSeconds,
       });
       form.set("payload", json);
 
@@ -452,10 +455,12 @@ export function ExamClient({ examId, topic }: { examId: string; topic: OralTopic
         devPanel={
           process.env.NODE_ENV !== "production" ? (
             <div className="space-y-2">
-              <DevSpeechBox
+              <DevTranscriptionPanel
+                phase={state.phase === "debate" ? "debate" : "monologue"}
+                subject={topic.title}
                 active={state.devTextMode}
                 onActiveChange={(on) => controller.setDevTextMode(on)}
-                onSubmit={(text) => controller.injectCandidateSpeech(text)}
+                onSubmit={(text, seconds) => controller.injectCandidateSpeech(text, seconds)}
               />
               <EventLog events={state.events} />
               {/* Drives the path a real GoAway takes, so the 13-minute

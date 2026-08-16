@@ -247,8 +247,33 @@ export async function POST(
   const measuredSeconds = (phase: OralSpeakingPhase): number =>
     recordings.find((recording) => recording.phase === phase)?.durationSeconds ?? 0;
 
-  const monologueSeconds = measuredSeconds("monologue");
-  const debateSeconds = measuredSeconds("debate");
+  /**
+   * DEVELOPMENT ONLY — the duration a typed phase claims (#36).
+   *
+   * Three conditions, and each removes a different way this could become the
+   * client-claimed duration the rest of this file exists to refuse:
+   *
+   *  1. **Not in production.** `NODE_ENV` is "production" in every deployed
+   *     build, preview environments included, so this is unreachable off a
+   *     developer's own machine.
+   *  2. **Only with no recording for that phase.** Audio present always wins, so
+   *     a real sitting cannot have its measured duration talked upwards.
+   *  3. **Bounded by the schema**, like every other number the browser sends.
+   *
+   * What it buys: a typed sitting measures zero seconds and would otherwise take
+   * the short-duration penalty every single time, which makes the threshold —
+   * the rubric's one piece of arithmetic that changes a mark — untestable
+   * without twenty minutes of speaking French.
+   */
+  const devSeconds = (phase: OralSpeakingPhase): number | null => {
+    if (process.env.NODE_ENV === "production") return null;
+    if (!payload.devSeconds) return null;
+    if (recordings.some((recording) => recording.phase === phase)) return null;
+    return payload.devSeconds[phase];
+  };
+
+  const monologueSeconds = devSeconds("monologue") ?? measuredSeconds("monologue");
+  const debateSeconds = devSeconds("debate") ?? measuredSeconds("debate");
 
   /**
    * Audio-aware grading whenever we actually have a recording; the text path is
