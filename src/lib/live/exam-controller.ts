@@ -31,6 +31,7 @@
  */
 
 import type { PhaseRecording, RecordedPhase } from "@/lib/audio/archive";
+import { DEV_TOOLS_ENABLED } from "@/lib/dev-tools";
 import {
   canAdvanceEarly,
   isPhaseTimeUp,
@@ -164,10 +165,10 @@ export interface ExamState {
    * DEVELOPMENT ONLY — the candidate is typing instead of speaking, and the
    * microphone is off for as long as that is true (#36).
    *
-   * Always `false` in a production build: `setDevTextMode` refuses there, so
-   * nothing can set it. Rendered so the dev panel's toggle reads its own state
-   * off the controller rather than keeping a second copy that could disagree
-   * with the microphone.
+   * Always `false` where `DEV_TOOLS_ENABLED` is false: `setDevTextMode` refuses
+   * there, so nothing can set it. Rendered so the dev panel's toggle reads its
+   * own state off the controller rather than keeping a second copy that could
+   * disagree with the microphone.
    */
   devTextMode: boolean;
 }
@@ -769,11 +770,12 @@ export class ExamController {
    *    duration penalty is then computed from a genuinely shorter recording,
    *    which is the truth about a phase that was half spoken and half typed.
    *  - **It does not run in production.** Same guard, and the same reason, as
-   *    {@link injectCandidateSpeech}: two independent NODE_ENV checks, because
+   *    {@link injectCandidateSpeech}: two independent checks of the same flag,
+   *    because
    *    the other one is a UI condition somebody could refactor away.
    */
   setDevTextMode(on: boolean): void {
-    if (process.env.NODE_ENV === "production") return;
+    if (!DEV_TOOLS_ENABLED) return;
     if (this.devTextMode === on) return;
 
     this.devTextMode = on;
@@ -819,16 +821,17 @@ export class ExamController {
    *    far it deliberately does not.
    *  - **It does not advance the phase.** The clock and the state machine are
    *    untouched.
-   *  - **It does not run in production.** The guard is on `NODE_ENV` and is the
-   *    first line, so a build cannot ship a way to write an exam transcript
-   *    without speaking.
+   *  - **It does not run where marks are real.** The guard is `DEV_TOOLS_ENABLED`
+   *    and it is the first line, so a production build cannot carry a way to
+   *    write an exam transcript without speaking. See `lib/dev-tools.ts` for
+   *    which environments that leaves.
    *
    * @param seconds How long this turn would have taken to say. Accumulated per
    *   phase, so several submissions add up the way several minutes of speaking
    *   would.
    */
   injectCandidateSpeech(text: string, seconds = 0): void {
-    if (process.env.NODE_ENV === "production") return;
+    if (!DEV_TOOLS_ENABLED) return;
     const trimmed = text.trim();
     if (!trimmed) return;
     if (this.phase !== "monologue" && this.phase !== "debate") return;
