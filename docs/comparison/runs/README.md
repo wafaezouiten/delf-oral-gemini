@@ -15,18 +15,23 @@ contents rather than their names:
 Reproducing a run:
 
 ```bash
-pnpm compare -- --repeats=2
+INCUMBENT_REPO=/path/to/delf-audit pnpm compare -- --repeats=2
 ```
 
-That spends money on two accounts — this repository's `GEMINI_API_KEY` and the
-reference checkout's `AI_GATEWAY_API_KEY` — so it is not part of any gate and is
-never run in CI. `--skip-incumbent` runs this system alone and spends nothing on
-the gateway.
+`INCUMBENT_REPO` is the reference checkout (`delf-preps`) on disk. It is required
+and has no default — there is no path that is correct on more than one machine,
+and a default that resolves on exactly one laptop fails confusingly everywhere
+else. See `scripts/comparison/incumbent-runner.ts` for why that corrector has to
+be invoked in its own tree rather than reimplemented in this one.
 
-The incumbent half needs the reference checkout on disk. It defaults to
-`C:/Users/lenovo/Desktop/delf-audit`; point `INCUMBENT_REPO` elsewhere if yours
-lives somewhere else. See `scripts/comparison/incumbent-runner.ts` for why that
-corrector has to be invoked in its own tree rather than reimplemented in this one.
+A run spends money on two accounts — this repository's `GEMINI_API_KEY` and the
+reference checkout's `AI_GATEWAY_API_KEY` — so it is not part of any gate and is
+never run in CI. `--skip-incumbent` runs this system alone: it needs no
+`INCUMBENT_REPO` and spends nothing on the gateway.
+
+The child process that runs the incumbent's corrector is given only the
+environment variables Node needs to start, never this repository's. It reads the
+incumbent's own `.env.local` and has no business seeing our keys.
 
 **A run file records what was returned, never what was concluded.** Failures are
 kept with their error and how long they took to fail, and every measured number is

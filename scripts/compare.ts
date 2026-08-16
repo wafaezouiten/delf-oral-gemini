@@ -39,11 +39,70 @@ import { evaluateExam } from "../src/lib/gemini/evaluate";
 import { SITTINGS, asIncumbentMessages, type SittingProfile } from "./comparison/sittings";
 import type { RunFile, OurRecord, IncumbentRecord } from "./comparison/run-file";
 
-/** Where the reference checkout lives. Overridable; it is not in this repository. */
-const INCUMBENT_REPO = process.env.INCUMBENT_REPO ?? "C:/Users/lenovo/Desktop/delf-audit";
+/**
+ * Where the reference checkout lives. Required, with no default: it is not in
+ * this repository and there is no path that is right on more than one machine.
+ * Demanded only when the incumbent is actually going to run, so `--skip-incumbent`
+ * needs nothing.
+ */
+function incumbentRepo(): string {
+  const configured = process.env.INCUMBENT_REPO;
+  if (!configured) {
+    throw new Error(
+      "INCUMBENT_REPO is not set. Point it at the reference checkout (delf-preps) to grade\n" +
+        "with the incumbent's corrector, e.g.\n\n" +
+        "  INCUMBENT_REPO=/path/to/delf-audit pnpm compare\n\n" +
+        "Or run `pnpm compare -- --skip-incumbent` to grade with this system alone.",
+    );
+  }
+  return configured;
+}
 
-/** The drop site inside the incumbent's tree — git-ignored, so its tree stays clean. */
-const DROP_DIR = join(INCUMBENT_REPO, "node_modules", ".delf-compare");
+/**
+ * The environment the foreign runner gets: what a Node process needs to start on
+ * this platform, and nothing else.
+ *
+ * NOT `...process.env`. That would hand this repository's `GEMINI_API_KEY`,
+ * `CLERK_SECRET_KEY` and `DATABASE_URL` to a script executing inside a different
+ * repository — for no reason, since the runner loads the incumbent's own
+ * `.env.local` and needs none of ours.
+ */
+const CHILD_ENV_KEYS = [
+  "PATH",
+  "PATHEXT",
+  "SystemRoot",
+  "windir",
+  "COMSPEC",
+  "TEMP",
+  "TMP",
+  "APPDATA",
+  "LOCALAPPDATA",
+  "USERPROFILE",
+  "HOME",
+  "HOMEDRIVE",
+  "HOMEPATH",
+  "ProgramFiles",
+  "ProgramFiles(x86)",
+  "ProgramData",
+  "NUMBER_OF_PROCESSORS",
+];
+
+/** Windows does not agree with itself about the case of `PATH`, so match loosely. */
+function childEnv(): NodeJS.ProcessEnv {
+  const wanted = new Set(CHILD_ENV_KEYS.map((key) => key.toLowerCase()));
+  const env: NodeJS.ProcessEnv = {
+    // Carried explicitly rather than by the loop below: Next augments
+    // `ProcessEnv` to require it, and pnpm and tsx both branch on it.
+    NODE_ENV: process.env.NODE_ENV,
+    // `server-only`, which the incumbent's corrector imports, refuses to load
+    // without this condition.
+    NODE_OPTIONS: "--conditions=react-server",
+  };
+  for (const [key, value] of Object.entries(process.env)) {
+    if (wanted.has(key.toLowerCase())) env[key] = value;
+  }
+  return env;
+}
 
 /** Must match `incumbent-runner.ts`; see there for why it cannot be imported. */
 const RESULT_MARKER = "\n<<<DELF-COMPARE-RESULT>>>\n";
@@ -162,8 +221,11 @@ function runIncumbent(sittings: readonly SittingProfile[], repeats: number): {
     }
   }
 
-  mkdirSync(DROP_DIR, { recursive: true });
-  const runnerPath = join(DROP_DIR, "incumbent-runner.ts");
+  const repo = incumbentRepo();
+  // Git-ignored over there, so the reference working tree stays clean.
+  const dropDir = join(repo, "node_modules", ".delf-compare");
+  mkdirSync(dropDir, { recursive: true });
+  const runnerPath = join(dropDir, "incumbent-runner.ts");
   copyFileSync(resolve(import.meta.dirname, "comparison/incumbent-runner.ts"), runnerPath);
 
   try {
@@ -171,12 +233,12 @@ function runIncumbent(sittings: readonly SittingProfile[], repeats: number): {
       "pnpm",
       ["exec", "tsx", runnerPath],
       {
-        cwd: INCUMBENT_REPO,
+        cwd: repo,
         input: JSON.stringify(jobs),
         encoding: "utf8",
         shell: process.platform === "win32",
         maxBuffer: 64 * 1024 * 1024,
-        env: { ...process.env, NODE_OPTIONS: "--conditions=react-server" },
+        env: childEnv(),
         stdio: ["pipe", "pipe", "inherit"],
       },
     );
@@ -196,7 +258,7 @@ function runIncumbent(sittings: readonly SittingProfile[], repeats: number): {
     // The reference checkout is a live working tree on a real branch. Leaving a
     // file in it, even an ignored one, is how a measurement starts changing what
     // it measures.
-    rmSync(DROP_DIR, { recursive: true, force: true });
+    rmSync(dropDir, { recursive: true, force: true });
   }
 }
 
