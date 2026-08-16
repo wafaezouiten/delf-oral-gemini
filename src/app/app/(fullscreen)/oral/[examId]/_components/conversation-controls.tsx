@@ -62,15 +62,17 @@ export function ConversationControls({
   const locked = state === "locked";
 
   return (
-    <div className="border-border bg-card/95 shrink-0 border-t backdrop-blur">
-      {/* The alert shares this row, to the right of « Terminer l'épreuve ».
+    <div className="border-border bg-card/95 relative shrink-0 border-t backdrop-blur">
+      {/* The controls stay in a centred 760px column; the alert is pushed out of
+          it, into the bar's own right-hand corner — see the `xl:absolute` on it
+          below. Positioning it against THIS element rather than the column is
+          what "extreme right" means: the column ends at 996px on a 1280 screen,
+          the bar ends at 1280.
 
-          The mic was briefly pinned to the row's centre so it could not be
-          pushed sideways by the alert appearing. Measuring killed that: out of
-          flow, the mic no longer reserved any width, so the right-hand group
-          slid under it and « Terminer l'épreuve » ended up drawn across the
-          microphone. In flow it is, and the alert is kept compact — one short
-          line and a two-word button — so the shift it causes is small. */}
+          It is only pulled out from `xl` up, because that is where the margin
+          beside the column is wide enough to hold it. Narrower than that it
+          stays in the row beside « Terminer l'épreuve », which is the most
+          right-hand place that exists when there is no margin to move into. */}
       <div className="mx-auto flex w-full max-w-[47.5rem] flex-wrap items-center gap-3 px-4 py-3 sm:px-6">
         {hasNotes && (
           <button
@@ -141,13 +143,15 @@ export function ConversationControls({
             Terminer l&apos;épreuve
           </button>
 
-          {/* To the right of « Terminer l'épreuve », in the same row. It wraps
-              under the button only when the viewport genuinely cannot hold both,
-              and even then the mic does not move — it is pinned above. */}
+          {/* `xl:absolute` lifts it out of the flex row and into the bar's
+              corner. That also stops it costing the mic any width: in flow the
+              mic is centred in what is left over, so on a wide screen the alert
+              appearing used to slide it 131px sideways. Above `xl` it no longer
+              moves at all. */}
           {emptyTranscript && (
             <div
               role="alert"
-              className="border-warning/40 bg-warning-subtle text-warning flex items-center gap-2.5 rounded-md border px-3 py-1.5"
+              className="border-warning/40 bg-warning-subtle text-warning flex items-center gap-2.5 rounded-md border px-3 py-1.5 xl:absolute xl:top-1/2 xl:right-6 xl:-translate-y-1/2"
             >
               <AlertIcon className="size-4 shrink-0" />
               <div className="min-w-0">
