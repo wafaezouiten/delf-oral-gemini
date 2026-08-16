@@ -1,5 +1,5 @@
-import Link from "next/link";
 import { auth } from "@clerk/nextjs/server";
+import { SignInButton, SignUpButton } from "@clerk/nextjs";
 import { redirect } from "next/navigation";
 
 import { primaryButton, secondaryButton } from "./_components/button-styles";
@@ -67,13 +67,53 @@ export default async function HomePage() {
           )}
           .
         </p>
+        {/* Modals, not navigations.
+         *
+         * These were two `<Link>`s to `/sign-up` and `/sign-in`, which meant a
+         * candidate who only wanted to start an épreuve left the page, waited on
+         * a route, filled a form, waited on a verification step, and came back —
+         * several full page loads before they had seen anything of the product.
+         * `mode="modal"` runs the whole flow in an overlay on top of this page:
+         * same Clerk forms, same verification, no navigation between the steps.
+         *
+         * `withSignUp` on the sign-in button is the other half of it. Without
+         * it, someone who clicks "Se connecter" and turns out not to have an
+         * account is bounced to a separate sign-up flow and starts again; with
+         * it, Clerk carries the address they already typed straight into
+         * creating the account.
+         *
+         * `forceRedirectUrl` on both, and the *cross* redirects too
+         * (`signUpForceRedirectUrl` / `signInForceRedirectUrl`): a candidate who
+         * enters through one door and leaves through the other must still land
+         * on the dashboard rather than back on this page, which — being a
+         * landing page that redirects signed-in visitors — would then bounce
+         * them and make the whole thing look like a loop.
+         *
+         * The `/sign-in` and `/sign-up` routes stay. They are what
+         * `requireUserId()` redirects a deep link to, and Clerk needs real
+         * routes for the SSO callback and the email-link return; the modal is
+         * the front door, not the only one.
+         */}
         <div className="flex flex-wrap gap-3">
-          <Link href="/sign-up" className={`${primaryButton} px-5 py-2.5`}>
-            Créer un compte
-          </Link>
-          <Link href="/sign-in" className={`${secondaryButton} px-5 py-2.5`}>
-            Se connecter
-          </Link>
+          <SignUpButton
+            mode="modal"
+            forceRedirectUrl="/app"
+            signInForceRedirectUrl="/app"
+          >
+            <button type="button" className={`${primaryButton} px-5 py-2.5`}>
+              Créer un compte
+            </button>
+          </SignUpButton>
+          <SignInButton
+            mode="modal"
+            withSignUp
+            forceRedirectUrl="/app"
+            signUpForceRedirectUrl="/app"
+          >
+            <button type="button" className={`${secondaryButton} px-5 py-2.5`}>
+              Se connecter
+            </button>
+          </SignInButton>
         </div>
       </div>
 
