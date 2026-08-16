@@ -49,39 +49,16 @@ import { sittingOutcome } from "@/lib/exams/sitting-persistence";
  *    settle which of them did anything.
  */
 
-/** Reads about a sitting that are not ownership questions. Kept out of
- *  `exam-guard.ts` on purpose: that module answers exactly one question and gets
- *  to stay small enough to audit. */
-
 /**
- * The subject recorded on a sitting.
- *
- * The authoritative answer to "which subject is this exam?", and the reason it
- * exists: before Phase 4 both the exam page (`?sujet=`) and the token route took
- * the browser's word for it, so a candidate could sit subject A on a row that
- * says subject B. Cross-user safe — the slug is validated against the catalogue
- * either way — but the grade would then be filed against a subject nobody
- * prepared.
- *
- * Returns `undefined` rather than throwing when the database cannot answer. A
- * token is minted on every reconnect, so an outage here must degrade to whatever
- * the candidate is visibly looking at rather than end a débat in progress. The
- * callers decide what to do with the absence; this only reports it.
+ * `findSittingTopicSlug` used to live here — the authoritative answer to "which
+ * subject is this exam?", which is why the exam page and the token route stopped
+ * taking the browser's word for it in Phase 4. It is gone rather than moved: it
+ * was only ever called right after the ownership lookup had read the same row,
+ * so it is now a `leftJoin` inside that one query and the answer arrives on
+ * `ExamAccess` (#22). Both promises it made are kept there — a database that
+ * cannot answer degrades rather than ending a débat, and a sitting with no
+ * readable subject is still owned.
  */
-export async function findSittingTopicSlug(examId: number): Promise<string | undefined> {
-  try {
-    const [row] = await getDb()
-      .select({ slug: oralTopics.slug })
-      .from(oralExams)
-      .innerJoin(oralTopics, eq(oralExams.topicId, oralTopics.id))
-      .where(eq(oralExams.id, examId))
-      .limit(1);
-    return row?.slug;
-  } catch (error) {
-    console.error("[sittings] could not read the subject of exam", examId, error);
-    return undefined;
-  }
-}
 
 /**
  * The sitting is this caller's, and it has not been finished.
@@ -356,6 +333,11 @@ export function neonSittingStore(): SittingStore {
             finishedAt: oralExams.finishedAt,
           })
           .from(oralExams)
+          // Inner, where the ownership lookup's is left, and the difference is
+          // what each one costs when the join finds nothing. Ownership was
+          // settled before this ran, so an empty result here means the results
+          // page renders from the browser's copy; there it would mean a 404 on
+          // a sitting somebody owns. See `findExamOwner` in `exam-guard.ts`.
           .innerJoin(oralTopics, eq(oralExams.topicId, oralTopics.id))
           .where(owned)
           .limit(1),

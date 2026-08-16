@@ -9,7 +9,7 @@
     "lint": "eslint",
     "typecheck": "next typegen && tsc --noEmit",
     "check": "pnpm typecheck && eslint",
-    "test:unit": "node --import tsx --test \"src/**/*.test.ts\"",
+    "test:unit": "node --import tsx --experimental-test-module-mocks --disable-warning=ExperimentalWarning --test \"src/**/*.test.ts\"",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:push": "drizzle-kit push",

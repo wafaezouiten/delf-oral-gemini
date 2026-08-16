@@ -18,10 +18,36 @@
  * neither of those permits reading or writing a persisted sitting.
  */
 
-/** A sitting reduced to the two columns an ownership decision needs. */
+/**
+ * A sitting reduced to what a caller needs in order to act on it.
+ *
+ * The first two columns are the ownership decision. `topicSlug` rides along
+ * because every caller that establishes ownership then wants the subject, and
+ * asking for it separately was a second round trip to the same row on every
+ * connect — including every reconnect, which is when the network is already
+ * unwell (#22).
+ *
+ * It is nullable, and that is not a formality: it says the row was read and
+ * named no subject we could resolve. Ownership does not depend on it, and
+ * neither does anything else that matters — see {@link ExamAccess}.
+ */
 export interface ExamOwnerRow {
   id: number;
   userId: string;
+  topicSlug: string | null;
+}
+
+/**
+ * A sitting proven to belong to the caller.
+ *
+ * Split out from {@link ExamAccess} so that a caller which has already been
+ * through the gate — `requireExamAccess` hands one of these back — carries a
+ * type that cannot describe a sitting nobody proved was theirs.
+ */
+export interface OwnedSitting {
+  examId: number;
+  /** The subject recorded on the row. Null when it named none we could read. */
+  topicSlug: string | null;
 }
 
 /** Reads one sitting by id, or nothing. Rejects if the database cannot answer. */
@@ -47,7 +73,7 @@ type NoSittingReason =
   | "lookup-failed";
 
 export type ExamAccess =
-  | { status: "owned"; userId: string; examId: number }
+  | ({ status: "owned"; userId: string } & OwnedSitting)
   | { status: "no-sitting"; userId: string; reason: NoSittingReason }
   | { status: "denied"; reason: ExamAccessDenial };
 
@@ -115,7 +141,12 @@ export async function resolveExamAccess({
 
   if (!row || row.userId !== userId) return { status: "denied", reason: "not-found" };
 
-  return { status: "owned", userId, examId: row.id };
+  // Note what does NOT appear in this condition: the subject. A row whose
+  // `topicSlug` came back null is still owned by whoever owns it, and a caller
+  // that cannot resolve a subject has its own answer for that — the token route
+  // mints for the requested one, the exam page falls back to the query string.
+  // Folding the join in must not turn a missing subject into a missing sitting.
+  return { status: "owned", userId, examId: row.id, topicSlug: row.topicSlug };
 }
 
 /** What a page should do with an outcome. */

@@ -88,16 +88,13 @@ describe("live token request validation", () => {
 });
 
 describe("who may be minted a live token", () => {
-  const owned: ExamAccess = { status: "owned", userId: "user_1", examId: 42 };
+  /** The sitting says SLUG. Since #22 the subject arrives on the access itself. */
+  const owned: ExamAccess = { status: "owned", userId: "user_1", examId: 42, topicSlug: SLUG };
 
   it("mints for the subject recorded on the sitting, not the one asked for", () => {
     // The integrity bug this closes: a candidate could sit subject A on a row
     // that says subject B, and the grade would be filed against B.
-    const gate = gateLiveToken({
-      access: owned,
-      sittingTopicSlug: SLUG,
-      requestedTopicSlug: OTHER_SLUG,
-    });
+    const gate = gateLiveToken({ access: owned, requestedTopicSlug: OTHER_SLUG });
     assert.deepEqual(gate, { decision: "mint", topicSlug: SLUG, source: "sitting" });
   });
 
@@ -138,7 +135,10 @@ describe("who may be minted a live token", () => {
     // Should not happen — `topic_id` is NOT NULL — but a join that came back
     // empty is a server fault, and ending a live débat over one is worse than
     // continuing with the subject the candidate is visibly looking at.
-    const gate = gateLiveToken({ access: owned, requestedTopicSlug: OTHER_SLUG });
+    const gate = gateLiveToken({
+      access: { ...owned, topicSlug: null },
+      requestedTopicSlug: OTHER_SLUG,
+    });
     assert.deepEqual(gate, { decision: "mint", topicSlug: OTHER_SLUG, source: "request" });
   });
 });
