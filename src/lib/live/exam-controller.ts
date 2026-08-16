@@ -34,6 +34,7 @@ import type { PhaseRecording, RecordedPhase } from "@/lib/audio/archive";
 import {
   canAdvanceEarly,
   isPhaseTimeUp,
+  monologueWasSilent,
   nextPhase,
   phaseUsesLiveSession,
   remainingSeconds,
@@ -72,6 +73,9 @@ export interface RecorderLike {
   endPhase(): void;
   /** Seconds of audio recorded for one phase, measured from the samples. */
   measuredSeconds(phase: RecordedPhase): number;
+  /** Of those, the seconds that carried speech. The two differ exactly when a
+   *  microphone worked and the candidate did not speak into it. */
+  voicedSeconds(phase: RecordedPhase): number;
   /** Seconds recorded across the sitting. Read by the stall watchdog, which
    *  only cares that the number is still moving. */
   readonly recordedSeconds: number;
@@ -134,6 +138,14 @@ export interface ExamState {
   started: boolean;
   monologueSeconds: number;
   debateSeconds: number;
+  /**
+   * Whether the monologue has a working microphone and almost no speech on it.
+   *
+   * Grounds for asking the candidate a question before they move on, never for
+   * refusing to let them — see `monologueWasSilent` for why the measure behind
+   * it cannot be trusted with a refusal.
+   */
+  monologueSilent: boolean;
 }
 
 /**
@@ -366,7 +378,26 @@ export class ExamController {
       started: this.started,
       monologueSeconds: this.phaseSeconds.monologue,
       debateSeconds: this.phaseSeconds.debate,
+      monologueSilent: this.monologueSilent(),
     };
+  }
+
+  /**
+   * Whether the monologue so far reads as never attempted (#39).
+   *
+   * Read off the recorder every snapshot rather than tracked as state: both
+   * numbers are counters the archive already keeps, so this is two reads and no
+   * bookkeeping that could drift from the audio it describes.
+   *
+   * `false` with no recorder at all, which is the same asymmetry
+   * `monologueWasSilent` is built on — no microphone is not a silent candidate.
+   */
+  private monologueSilent(): boolean {
+    if (!this.recorder) return false;
+    return monologueWasSilent(
+      this.recorder.measuredSeconds("monologue"),
+      this.recorder.voicedSeconds("monologue"),
+    );
   }
 
   private emit(): void {

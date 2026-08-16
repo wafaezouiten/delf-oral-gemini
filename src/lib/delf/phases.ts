@@ -77,6 +77,48 @@ export const PHASE_DURATIONS: Record<Exclude<OralPhase, "finished">, number> = {
  */
 export const MONOLOGUE_MIN_SECONDS = 1 * 60;
 
+/**
+ * Voiced seconds below which a monologue reads as never attempted.
+ *
+ * Low on purpose. A candidate who genuinely spoke for the minute the clock
+ * demands will have produced far more than this; one who sat in silence
+ * produces almost none. Setting it near the middle of that gap rather than near
+ * a "good" monologue means the question is only ever asked of someone who
+ * really did say next to nothing.
+ *
+ * Five seconds is also about 125 frames, which is what makes the crude
+ * per-frame measure behind it safe: a click marks one frame, and no plausible
+ * amount of door-slamming reaches five seconds of speech-loud audio.
+ */
+export const MIN_VOICED_SECONDS = 5;
+
+/**
+ * Whether the monologue was silent — the candidate had a working microphone and
+ * did not use it.
+ *
+ * The asymmetry in the first line is the important part. **A microphone that
+ * captured nothing is not a silent candidate**: it is a broken microphone, the
+ * product already has a notice, a watchdog and a whole "corrigé sans l'audio"
+ * path for that, and someone whose capture failed while they spoke for six
+ * minutes must never be told they said nothing. So this answers `false` when
+ * there is no audio at all, and only claims silence when the recording exists
+ * and is empty of speech.
+ *
+ * What the caller does with a `true` is offer a confirmation, never a refusal.
+ * The measure underneath is a crude amplitude test (`lib/audio/voice-activity`)
+ * and a quiet speaker on a low-gain microphone can defeat it; the cost of being
+ * wrong therefore has to stay at one extra dialog. Blocking on it would risk
+ * stranding a candidate who cannot reach the débat *or* the end of the épreuve,
+ * which is worse than the accident it prevents.
+ */
+export function monologueWasSilent(
+  capturedSeconds: number,
+  voicedSeconds: number,
+): boolean {
+  if (!(capturedSeconds > 0)) return false;
+  return voicedSeconds < MIN_VOICED_SECONDS;
+}
+
 /** How long this phase runs. `finished` has no clock. */
 export function phaseDurationSeconds(phase: OralPhase): number {
   return phase === "finished" ? 0 : PHASE_DURATIONS[phase];

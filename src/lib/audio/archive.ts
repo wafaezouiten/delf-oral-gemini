@@ -36,6 +36,7 @@
 
 import { INPUT_SAMPLE_RATE } from "@/lib/gemini/constants";
 import { pcm16ToWav } from "./pcm";
+import { isVoiced } from "./voice-activity";
 
 /**
  * The phases that produce a recording — the two the candidate speaks in.
@@ -88,6 +89,9 @@ export const wavRecordingEncoder: RecordingEncoder = async (pcm, sampleRate) => 
 interface Segment {
   frames: Int16Array[];
   samples: number;
+  /** Samples in frames that carried speech rather than room tone. See
+   *  {@link voicedSeconds} for what this is and is not. */
+  voicedSamples: number;
 }
 
 export class PhaseArchive {
@@ -117,7 +121,9 @@ export class PhaseArchive {
    */
   begin(phase: RecordedPhase): void {
     if (this.open === phase) return;
-    if (!this.segments.has(phase)) this.segments.set(phase, { frames: [], samples: 0 });
+    if (!this.segments.has(phase)) {
+      this.segments.set(phase, { frames: [], samples: 0, voicedSamples: 0 });
+    }
     this.open = phase;
   }
 
@@ -148,6 +154,16 @@ export class PhaseArchive {
     }
     segment.frames.push(frame);
     segment.samples += frame.length;
+    // Measured on the way past, so nothing has to be re-read to answer "did the
+    // candidate actually say anything?" — the frames are retained for the
+    // artefact, but walking twenty minutes of them again to decide whether to
+    // show a dialog would be work done at exactly the wrong moment.
+    if (isVoiced(frame)) segment.voicedSamples += frame.length;
+  }
+
+  /** Samples filed under a phase that carried speech. */
+  voicedSamplesIn(phase: RecordedPhase): number {
+    return this.segments.get(phase)?.voicedSamples ?? 0;
   }
 
   /** Samples filed under a phase. */
@@ -160,6 +176,25 @@ export class PhaseArchive {
    * that captured nothing, which is a real answer — a candidate whose
    * microphone died has no audio, and the penalty rules should hear that.
    */
+  /**
+   * Seconds of a phase's recording that carried speech, as opposed to an open
+   * microphone in a quiet room.
+   *
+   * Deliberately NOT the same number as {@link measuredSeconds}, and the gap
+   * between them is the whole point: a candidate who sat in silence for a minute
+   * measures sixty seconds captured and near zero voiced, while one whose
+   * microphone died measures zero of both. Only the first of those is a
+   * candidate choosing not to attempt the task, and until this existed nothing
+   * could tell them apart (#39).
+   *
+   * It is a floor, not a transcript. It says something was carried; it cannot
+   * say it was French, or the candidate, or on topic. Everything downstream
+   * treats it as grounds for asking a question, never for refusing one.
+   */
+  voicedSeconds(phase: RecordedPhase): number {
+    return this.voicedSamplesIn(phase) / this.sampleRate;
+  }
+
   measuredSeconds(phase: RecordedPhase): number {
     return this.samplesIn(phase) / this.sampleRate;
   }

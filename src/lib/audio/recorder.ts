@@ -380,6 +380,12 @@ export class MicRecorder {
     return this.archive.measuredSeconds(phase);
   }
 
+  /** Seconds of a phase that carried speech rather than an open microphone in a
+   *  quiet room. See `PhaseArchive.voicedSeconds`. */
+  voicedSeconds(phase: RecordedPhase): number {
+    return this.archive.voicedSeconds(phase);
+  }
+
   /** The phase currently being recorded, or null between phases. */
   get recordingPhase(): RecordedPhase | null {
     return this.archive.openPhase;

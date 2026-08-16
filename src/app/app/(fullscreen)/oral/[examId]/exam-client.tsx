@@ -25,6 +25,7 @@ import { BriefingScreen } from "./_components/briefing-screen";
 import { PreparationScreen } from "./_components/preparation-screen";
 import { PassationScreen } from "./_components/passation-screen";
 import { FinishedScreen } from "./_components/finished-screen";
+import { SilentMonologueDialog } from "./_components/silent-monologue-dialog";
 
 /**
  * The simulateur: one screen per phase, and a phase switch.
@@ -60,6 +61,8 @@ export function ExamClient({ examId, topic }: { examId: string; topic: OralTopic
   const [showExitDialog, setShowExitDialog] = useState(false);
   const [abandoning, setAbandoning] = useState(false);
   const [abandonFailed, setAbandonFailed] = useState(false);
+  const [silenceWarned, setSilenceWarned] = useState(false);
+  const [showSilenceDialog, setShowSilenceDialog] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<FinishFailure | null>(null);
   const submittedRef = useRef(false);
@@ -251,6 +254,29 @@ export function ExamClient({ examId, topic }: { examId: string; topic: OralTopic
   const leave = () => router.push("/app");
 
   /**
+   * End the current phase — asking first, if the monologue sounds empty (#39).
+   *
+   * The check is here rather than in the controller for the same reason
+   * `canAdvanceEarly` is not consulted twice: this is a question about what to
+   * *show*, and the controller's job is to run the épreuve. `advanceEarly`
+   * remains callable and remains unrefusing, so nothing about this can strand a
+   * candidate.
+   *
+   * Asked at most once per sitting. A candidate who has been told, gone back and
+   * genuinely spoken should not meet it again — and one who was told and chose
+   * to continue anyway has already answered the question. Asking twice would
+   * turn a warning into an obstacle, which is the thing this must not become.
+   */
+  const advance = () => {
+    if (state.phase === "monologue" && state.monologueSilent && !silenceWarned) {
+      setSilenceWarned(true);
+      setShowSilenceDialog(true);
+      return;
+    }
+    void controller.advanceEarly();
+  };
+
+  /**
    * Abandon: mark the sitting, confirm it was marked, then leave.
    *
    * The exit dialog promises the candidate this épreuve will count as a zero, so
@@ -427,7 +453,7 @@ export function ExamClient({ examId, topic }: { examId: string; topic: OralTopic
         notes={notes}
         notesOpen={notesOpen}
         onToggleNotes={() => setNotesOpen((open) => !open)}
-        onAdvance={() => void controller.advanceEarly()}
+        onAdvance={advance}
         onExit={() => setShowExitDialog(true)}
         badges={
           <>
@@ -461,6 +487,14 @@ export function ExamClient({ examId, topic }: { examId: string; topic: OralTopic
         }
       />
       {exitDialog}
+      <SilentMonologueDialog
+        open={showSilenceDialog}
+        onKeepSpeaking={() => setShowSilenceDialog(false)}
+        onContinueAnyway={() => {
+          setShowSilenceDialog(false);
+          void controller.advanceEarly();
+        }}
+      />
     </>
   );
 }

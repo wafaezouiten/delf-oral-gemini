@@ -162,6 +162,14 @@ class FakeRecorder implements RecorderLike {
     return this.seconds[phase];
   }
 
+  /** Voiced audio, defaulted to "all of it was speech" so every existing test
+   *  keeps describing a candidate who spoke. Tests about silence set it. */
+  voiced: Record<RecordedPhase, number | null> = { monologue: null, debate: null };
+
+  voicedSeconds(phase: RecordedPhase): number {
+    return this.voiced[phase] ?? this.seconds[phase];
+  }
+
   /** Asynchronous like the real one, which compresses on the way out. */
   async recordings(): Promise<PhaseRecording[]> {
     return (["monologue", "debate"] as const)
@@ -893,6 +901,59 @@ describe("recording the candidate", () => {
     assert.deepEqual(h.recorder.calls, ["monologue"], "the recording was never closed");
     assert.equal(h.recorder.measuredSeconds("monologue"), 120);
     assert.equal(h.controller.getSnapshot().recording, true);
+  });
+
+  describe("a silent monologue", () => {
+    it("is flagged when the microphone recorded and carried no speech", async () => {
+      const h = harness();
+      await intoMonologue(h);
+      // Set before the clock: `advanceClock` is what feeds the recorder and
+      // rebuilds the snapshot, and `getSnapshot` returns the cached one.
+      h.recorder.voiced.monologue = 0;
+      h.advanceClock(120);
+
+      assert.equal(h.recorder.measuredSeconds("monologue"), 120, "the mic worked");
+      assert.equal(h.controller.getSnapshot().monologueSilent, true);
+    });
+
+    it("is not flagged once enough speech was carried", async () => {
+      const h = harness();
+      await intoMonologue(h);
+      h.recorder.voiced.monologue = 45;
+      h.advanceClock(120);
+
+      assert.equal(h.controller.getSnapshot().monologueSilent, false);
+    });
+
+    it("is not flagged when the microphone captured nothing at all", async () => {
+      // A dead microphone is not a silent candidate. Someone whose capture
+      // failed while they spoke for six minutes must never be told they said
+      // nothing — that is the "corrigé sans l'audio" path.
+      const h = harness();
+      await intoMonologue(h);
+      h.advanceClockSilently(120);
+
+      assert.equal(h.recorder.measuredSeconds("monologue"), 0, "nothing was captured");
+      assert.equal(h.controller.getSnapshot().monologueSilent, false);
+    });
+
+    it("never blocks the advance — the flag is grounds for a question, not a refusal", async () => {
+      // The measure behind it is a crude amplitude test that a quiet speaker can
+      // defeat. Refusing on it could strand someone who cannot reach the débat
+      // *or* the end of the épreuve, which is worse than the accident it stops.
+      const h = harness();
+      await intoMonologue(h);
+      h.recorder.voiced.monologue = 0;
+      h.advanceClock(120);
+
+      assert.equal(h.controller.getSnapshot().monologueSilent, true);
+      assert.equal(h.controller.getSnapshot().canAdvance, true, "the button is live");
+
+      await h.controller.advanceEarly();
+      // The monologue ends through the closing handshake rather than an instant
+      // phase flip, so what proves it was not refused is that closing began.
+      assert.equal(h.controller.getSnapshot().closing, true);
+    });
   });
 });
 
