@@ -31,6 +31,7 @@
  */
 
 import type { PhaseRecording, RecordedPhase } from "@/lib/audio/archive";
+import { DEV_TOOLS_ENABLED } from "@/lib/dev-tools";
 import {
   canAdvanceEarly,
   isPhaseTimeUp,
@@ -164,10 +165,10 @@ export interface ExamState {
    * DEVELOPMENT ONLY — the candidate is typing instead of speaking, and the
    * microphone is off for as long as that is true (#36).
    *
-   * Always `false` in a production build: `setDevTextMode` refuses there, so
-   * nothing can set it. Rendered so the dev panel's toggle reads its own state
-   * off the controller rather than keeping a second copy that could disagree
-   * with the microphone.
+   * Always `false` where `DEV_TOOLS_ENABLED` is false: `setDevTextMode` refuses
+   * there, so nothing can set it. Rendered so the dev panel's toggle reads its
+   * own state off the controller rather than keeping a second copy that could
+   * disagree with the microphone.
    */
   devTextMode: boolean;
 }
@@ -229,6 +230,11 @@ export interface ExamFinishedPayload {
   /** One entry per phase the candidate actually entered. */
   phases: PhaseReport[];
   reconnectCount: number;
+  /**
+   * DEVELOPMENT ONLY — the seconds typed phases claim to have lasted (#36).
+   * Undefined on every real sitting. See `ExamController`'s `devSeconds`.
+   */
+  devSeconds?: Record<RecordedPhase, number>;
 }
 
 export interface ExamControllerDeps {
@@ -324,6 +330,23 @@ export class ExamController {
    * it returns before assigning there.
    */
   private devTextMode = false;
+
+  /**
+   * DEVELOPMENT ONLY — the seconds a typed phase claims to have lasted (#36).
+   *
+   * Zero on every real sitting, and on every production build, because
+   * `injectCandidateSpeech` is the only writer and it returns before reaching
+   * this line there.
+   *
+   * **How far the claim travels.** It is carried in the finished payload and the
+   * finish route substitutes it for the measured duration — but only in a
+   * development build, and only for a phase that uploaded no audio at all. That
+   * route measures a real sitting's duration out of the bytes it received
+   * precisely so a client cannot claim one, and this does not weaken that: with
+   * a recording present the recording still wins, so the override cannot be used
+   * to dress a short sitting up as a long one.
+   */
+  private devSeconds: Record<RecordedPhase, number> = { monologue: 0, debate: 0 };
 
   private transcript: TranscriptEntry[] = [];
   private events: ExamEvent[] = [];
@@ -747,11 +770,12 @@ export class ExamController {
    *    duration penalty is then computed from a genuinely shorter recording,
    *    which is the truth about a phase that was half spoken and half typed.
    *  - **It does not run in production.** Same guard, and the same reason, as
-   *    {@link injectCandidateSpeech}: two independent NODE_ENV checks, because
+   *    {@link injectCandidateSpeech}: two independent checks of the same flag,
+   *    because
    *    the other one is a UI condition somebody could refactor away.
    */
   setDevTextMode(on: boolean): void {
-    if (process.env.NODE_ENV === "production") return;
+    if (!DEV_TOOLS_ENABLED) return;
     if (this.devTextMode === on) return;
 
     this.devTextMode = on;
@@ -790,22 +814,31 @@ export class ExamController {
    * Three things it deliberately does NOT do, because each would make what it
    * produces a lie about a real sitting:
    *
-   *  - **It records no audio.** The measured duration stays whatever the
-   *    microphone actually captured — nothing at all, under
-   *    {@link setDevTextMode}, which is how this is meant to be used — so a
-   *    typed sitting is graded from its transcript and takes the duration
-   *    penalty. That is the correct answer: nothing was spoken.
+   *  - **It records no audio.** Under {@link setDevTextMode}, which is how this
+   *    is meant to be used, the microphone is off and the phase measures zero
+   *    seconds. `seconds` is what the phase should *claim* to have lasted
+   *    instead — see {@link devSeconds} for how far that claim travels, and how
+   *    far it deliberately does not.
    *  - **It does not advance the phase.** The clock and the state machine are
    *    untouched.
-   *  - **It does not run in production.** The guard is on `NODE_ENV` and is the
-   *    first line, so a build cannot ship a way to write an exam transcript
-   *    without speaking.
+   *  - **It does not run where marks are real.** The guard is `DEV_TOOLS_ENABLED`
+   *    and it is the first line, so a production build cannot carry a way to
+   *    write an exam transcript without speaking. See `lib/dev-tools.ts` for
+   *    which environments that leaves.
+   *
+   * @param seconds How long this turn would have taken to say. Accumulated per
+   *   phase, so several submissions add up the way several minutes of speaking
+   *   would.
    */
-  injectCandidateSpeech(text: string): void {
-    if (process.env.NODE_ENV === "production") return;
+  injectCandidateSpeech(text: string, seconds = 0): void {
+    if (!DEV_TOOLS_ENABLED) return;
     const trimmed = text.trim();
     if (!trimmed) return;
     if (this.phase !== "monologue" && this.phase !== "debate") return;
+
+    if (Number.isFinite(seconds) && seconds > 0) {
+      this.devSeconds[this.phase] += Math.round(seconds);
+    }
 
     this.addFragment("candidate", trimmed);
     // The examiner has to hear it too, or the débat argues with silence.
@@ -918,6 +951,13 @@ export class ExamController {
     } else if (current === "debate") {
       this.closeSession();
     }
+
+    // DEVELOPMENT ONLY — the transcription panel lives on the exposé and nowhere
+    // else (#36), so leaving the monologue is what gives the microphone back.
+    // Without this the mode would outlive the only screen that can use it: the
+    // débat would be neither typeable nor recordable, and it would arrive at the
+    // correction with an empty transcript and zero seconds.
+    if (this.devTextMode && current === "monologue") this.setDevTextMode(false);
 
     this.phase = target;
     this.phaseStart = this.now();
@@ -1107,6 +1147,12 @@ export class ExamController {
       recordings,
       phases,
       reconnectCount: this.reconnectCount,
+      // Only when something was actually typed, so a real sitting sends no such
+      // field at all rather than a pair of zeroes the route has to interpret.
+      devSeconds:
+        this.devSeconds.monologue > 0 || this.devSeconds.debate > 0
+          ? { ...this.devSeconds }
+          : undefined,
     });
   }
 

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import {
+  MAX_PHASE_SECONDS,
   MAX_TRANSCRIPT_CHARS,
   MAX_TURNS,
   MAX_TURN_CHARS,
@@ -207,5 +208,43 @@ describe("keeping the audit trail worth having", () => {
   it("still rejects the NaN that used to reach the INSERT", () => {
     assert.equal(accepts(payload({ reconnectCount: Number.NaN })), false);
     assert.equal(accepts(payload({ reconnectCount: -1 })), false);
+  });
+
+  describe("the development duration claim (#36)", () => {
+    // The only field in this payload that can reach a mark. The schema is not
+    // what stops it being abused — the route ignores it in production and lets
+    // any real recording win — but it is what stops a hand-crafted one reaching
+    // the arithmetic as NaN, as a negative, or as a four-figure hour count.
+    it("is optional, and absent on every real sitting", () => {
+      assert.equal(accepts(payload()), true);
+      assert.equal(accepts(payload({ devSeconds: undefined })), true);
+    });
+
+    it("accepts a plausible pair", () => {
+      assert.equal(accepts(payload({ devSeconds: { monologue: 330, debate: 320 } })), true);
+      assert.equal(accepts(payload({ devSeconds: { monologue: 0, debate: 0 } })), true);
+    });
+
+    it("refuses a half-filled claim, so neither phase can default silently", () => {
+      assert.equal(accepts(payload({ devSeconds: { monologue: 330 } })), false);
+      assert.equal(accepts(payload({ devSeconds: {} })), false);
+    });
+
+    it("refuses the values that would poison the arithmetic", () => {
+      assert.equal(accepts(payload({ devSeconds: { monologue: Number.NaN, debate: 0 } })), false);
+      assert.equal(accepts(payload({ devSeconds: { monologue: -1, debate: 0 } })), false);
+      assert.equal(
+        accepts(payload({ devSeconds: { monologue: Number.POSITIVE_INFINITY, debate: 0 } })),
+        false,
+      );
+    });
+
+    it("is bounded by the same ceiling as the wall clock beside it", () => {
+      assert.equal(accepts(payload({ devSeconds: { monologue: MAX_PHASE_SECONDS, debate: 0 } })), true);
+      assert.equal(
+        accepts(payload({ devSeconds: { monologue: MAX_PHASE_SECONDS + 1, debate: 0 } })),
+        false,
+      );
+    });
   });
 });
