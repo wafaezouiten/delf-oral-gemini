@@ -107,10 +107,13 @@ export type LiveTokenGate =
     };
 
 export interface LiveTokenGateInput {
-  /** The ownership answer for `examId`, from `authorizeExam`. */
+  /**
+   * The ownership answer for `examId`, from `authorizeExam`. It carries the
+   * sitting's subject when there is one — the route used to read that with a
+   * second query and pass it in beside this, which was both a round trip and a
+   * way for the two to be about different sittings (#22).
+   */
   access: ExamAccess;
-  /** The subject recorded on the sitting. Absent unless the row was read. */
-  sittingTopicSlug?: string;
   /** The subject the browser asked for. Already validated by {@link parseLiveTokenRequest}. */
   requestedTopicSlug: string;
 }
@@ -122,19 +125,15 @@ export interface LiveTokenGateInput {
  * this route is the fifth caller of that module, and a second opinion about who
  * owns a sitting is exactly the kind of drift that reopens an IDOR quietly.
  */
-export function gateLiveToken({
-  access,
-  sittingTopicSlug,
-  requestedTopicSlug,
-}: LiveTokenGateInput): LiveTokenGate {
+export function gateLiveToken({ access, requestedTopicSlug }: LiveTokenGateInput): LiveTokenGate {
   if (access.status === "denied") {
     const { status, error } = EXAM_ACCESS_DENIALS[access.reason];
     return { decision: "deny", status, error };
   }
 
   // Owned, and the sitting says what was asked. The authoritative path.
-  if (access.status === "owned" && sittingTopicSlug) {
-    return { decision: "mint", topicSlug: sittingTopicSlug, source: "sitting" };
+  if (access.status === "owned" && access.topicSlug) {
+    return { decision: "mint", topicSlug: access.topicSlug, source: "sitting" };
   }
 
   // Either there is no sitting to read (no database, or a degraded `local-…`

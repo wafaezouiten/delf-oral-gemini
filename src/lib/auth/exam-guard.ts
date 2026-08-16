@@ -4,8 +4,14 @@ import { auth } from "@clerk/nextjs/server";
 import { eq } from "drizzle-orm";
 import { notFound } from "next/navigation";
 
-import { getDb, isDatabaseConfigured, oralExams } from "@/lib/db";
-import { pageGate, resolveExamAccess, type ExamAccess, type ExamOwnerRow } from "./exam-access";
+import { getDb, isDatabaseConfigured, oralExams, oralTopics } from "@/lib/db";
+import {
+  pageGate,
+  resolveExamAccess,
+  type ExamAccess,
+  type ExamOwnerRow,
+  type OwnedSitting,
+} from "./exam-access";
 
 /**
  * The server binding for `exam-access.ts` — Clerk on one side, Drizzle on the
@@ -22,11 +28,30 @@ import { pageGate, resolveExamAccess, type ExamAccess, type ExamOwnerRow } from 
  *    needs the row, and the row is here.
  */
 
-/** Reads the owner of one sitting. The only query in the ownership path. */
+/**
+ * Reads the owner of one sitting, and the subject it was set. The only query in
+ * the ownership path, and now the only one on the paths that follow it.
+ *
+ * It used to read the id and the owner and nothing else, and every caller that
+ * got `owned` back went and read the same row again for its subject — two
+ * sequential round trips per mint, and a token is minted on every connect
+ * INCLUDING every reconnect. Exhausting the client's backoff was five mints and
+ * ten round trips, precisely when the network was already unwell (#22).
+ *
+ * `leftJoin`, not `innerJoin`, and the difference is the whole reason this is
+ * safe to fold together: an inner join makes a sitting whose subject cannot be
+ * resolved indistinguishable from a sitting that does not exist, which is a 404
+ * served to the owner of a real épreuve. `topic_id` is `not null` with a
+ * restricted FK so the join should always match — "should" being exactly the
+ * word that has no place in the query the ownership decision is made from. The
+ * row answers who owns it; the join answers what it is about; neither gets a
+ * vote on the other.
+ */
 async function findExamOwner(examId: number): Promise<ExamOwnerRow | undefined> {
   const [row] = await getDb()
-    .select({ id: oralExams.id, userId: oralExams.userId })
+    .select({ id: oralExams.id, userId: oralExams.userId, topicSlug: oralTopics.slug })
     .from(oralExams)
+    .leftJoin(oralTopics, eq(oralExams.topicId, oralTopics.id))
     .where(eq(oralExams.id, examId))
     .limit(1);
   return row;
@@ -88,20 +113,27 @@ export async function requireUserId(): Promise<string> {
 }
 
 /**
- * Gate a page on `examId`, and hand back the sitting's row id when there is one.
+ * Gate a page on `examId`, and hand back the sitting when there is one.
  *
- * The return type is the point: **this cannot return a number unless ownership
+ * The return type is the point: **this cannot return a sitting unless ownership
  * was established.** `null` means there is provably no sitting to own — no
  * database, or one of the degraded `local-…` ids — so a caller that reads
  * persisted data keys off the id and has no way to reach a row it did not earn.
- * Nothing needs the id today; it is here so the Phase 8 read path cannot be
- * written any other way.
+ *
+ * The subject comes back with it rather than being fetched afterwards, for the
+ * reason given on {@link findExamOwner}. One consequence is worth stating
+ * plainly, because it is a change rather than a saving: the exam page used to
+ * survive a subject lookup that failed on its own by falling back to `?sujet=`,
+ * and there is no longer a lookup that can fail on its own. A database that
+ * cannot answer is now one outcome, `lookup-failed`, and a page refuses to
+ * render on it — which is the call {@link pageGate} already documents, applied
+ * to one more case rather than a new policy.
  *
  * A sitting the caller does not own is a 404, exactly as it is over the API. An
  * ownership question the database could not answer is a 500 — see
  * {@link pageGate} for why that is not the same as "nothing to own".
  */
-export async function requireExamAccess(examId: string): Promise<number | null> {
+export async function requireExamAccess(examId: string): Promise<OwnedSitting | null> {
   // One `auth()` for both answers: whether there is a caller, and where to send
   // them if there is not. Clerk memoises per request, but re-deriving
   // `redirectToSignIn` from a second call would only hide that it was here.
@@ -122,6 +154,8 @@ export async function requireExamAccess(examId: string): Promise<number | null> 
       // What failed is our ability to say so, and that is a server error.
       throw new Error(`[exam-guard] ownership of exam ${examId} could not be verified`);
     case "render":
-      return access.status === "owned" ? access.examId : null;
+      return access.status === "owned"
+        ? { examId: access.examId, topicSlug: access.topicSlug }
+        : null;
   }
 }

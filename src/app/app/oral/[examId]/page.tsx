@@ -1,7 +1,6 @@
 import { notFound } from "next/navigation";
 
 import { requireExamAccess } from "@/lib/auth/exam-guard";
-import { findSittingTopicSlug } from "@/lib/db/sittings";
 import { findTopic } from "@/lib/delf/topics";
 import { ExamClient } from "./exam-client";
 
@@ -27,15 +26,15 @@ export default async function OralExamPage({
   searchParams,
 }: PageProps<"/app/oral/[examId]">) {
   const { examId } = await params;
-  // Non-null only when ownership was established, so this cannot read a row the
-  // candidate did not earn.
-  const sittingId = await requireExamAccess(examId);
+  // Non-null only when ownership was established, and it carries the subject —
+  // so the row the candidate did not earn is unreachable, and the row they did
+  // is read once rather than twice.
+  const sitting = await requireExamAccess(examId);
 
   const query = await searchParams;
   const requestedSlug = typeof query.sujet === "string" ? query.sujet : undefined;
-  const sittingSlug = sittingId === null ? undefined : await findSittingTopicSlug(sittingId);
 
-  const slug = sittingSlug ?? requestedSlug;
+  const slug = sitting?.topicSlug ?? requestedSlug;
   const topic = slug ? findTopic(slug) : undefined;
   if (!topic) notFound();
 

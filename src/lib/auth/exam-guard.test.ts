@@ -62,10 +62,18 @@ function mockPackage(specifier: string, namedExports: Record<string, unknown>) {
 const OWNER = "user_owner";
 const INTRUDER = "user_intruder";
 
-/** Two sittings, one each, so "someone else's exam" is a real row and not a gap. */
+const SLUG = "vie-professionnelle";
+
+/**
+ * Two sittings, one each, so "someone else's exam" is a real row and not a gap.
+ *
+ * The second names no subject. `topic_id` is `not null` with a restricted FK, so
+ * the `leftJoin` should always match — and the row that proves it does not have
+ * to is the one that keeps the join from getting a vote on ownership (#22).
+ */
 const ROWS = [
-  { id: 41, userId: OWNER },
-  { id: 42, userId: INTRUDER },
+  { id: 41, userId: OWNER, topicSlug: SLUG },
+  { id: 42, userId: INTRUDER, topicSlug: null },
 ];
 
 /**
@@ -117,7 +125,7 @@ const db = drizzle(async (sql, params) => {
   if (world.lookupFails) throw new Error("connection terminated unexpectedly");
 
   const row = ROWS.find((candidate) => candidate.id === Number(params[0]));
-  return { rows: row ? [[row.id, row.userId]] : [] };
+  return { rows: row ? [[row.id, row.userId, row.topicSlug]] : [] };
 });
 
 mockPackage("@/lib/db", {
@@ -153,9 +161,9 @@ function lastQuery() {
 }
 
 describe("exam guard (API)", () => {
-  it("resolves the owner's own sitting to that row", async () => {
+  it("resolves the owner's own sitting to that row, and its subject", async () => {
     const access = await guard.authorizeExam("41");
-    assert.deepEqual(access, { status: "owned", userId: OWNER, examId: 41 });
+    assert.deepEqual(access, { status: "owned", userId: OWNER, examId: 41, topicSlug: SLUG });
   });
 
   it("asks about the sitting in the URL, and only that one", async () => {
@@ -165,11 +173,30 @@ describe("exam guard (API)", () => {
     await guard.authorizeExam("41");
 
     const { sql, params } = lastQuery();
-    assert.equal(world.queries.length, 1, "one statement per ownership question");
-    assert.match(sql, /from "oral_exams" where "oral_exams"\."id" = \$1/);
+    assert.match(sql, /from "oral_exams".* where "oral_exams"\."id" = \$1/);
     // `$2` is the `limit`; the id is the first parameter and is the number in
     // the URL, parsed, not the string.
     assert.equal(params[0], 41);
+  });
+
+  it("reads the owner and the subject in one round trip", async () => {
+    // The point of #22: this used to be two sequential statements against the
+    // same row, on every connect and so on every reconnect — up to ten of them
+    // across an exhausted backoff, exactly when the network is already unwell.
+    await guard.authorizeExam("41");
+
+    assert.equal(world.queries.length, 1, "one statement per ownership question");
+    assert.match(lastQuery().sql, /left join "oral_topics"/);
+  });
+
+  it("owns a sitting whose subject could not be joined", async () => {
+    // The reason the join is a LEFT one. An inner join would return no row here,
+    // and no row is how "someone else's sitting" looks — so the owner of a real
+    // épreuve would be 404'd out of it by a broken catalogue row.
+    world.userId = INTRUDER;
+    const access = await guard.authorizeExam("42");
+
+    assert.deepEqual(access, { status: "owned", userId: INTRUDER, examId: 42, topicSlug: null });
   });
 
   it("refuses another signed-in user's sitting as a 404", async () => {
@@ -248,8 +275,12 @@ describe("exam guard (API)", () => {
 });
 
 describe("exam guard (page)", () => {
-  it("hands back the row id for a sitting the caller owns", async () => {
-    assert.equal(await guard.requireExamAccess("41"), 41);
+  it("hands back the row and its subject for a sitting the caller owns", async () => {
+    // The subject is here so the exam page does not go back for it: it renders
+    // the sujet the examiner will be arguing about, read from the same row that
+    // said the candidate may sit it.
+    assert.deepEqual(await guard.requireExamAccess("41"), { examId: 41, topicSlug: SLUG });
+    assert.equal(world.queries.length, 1);
   });
 
   it("404s on another user's sitting", async () => {
@@ -274,9 +305,9 @@ describe("exam guard (page)", () => {
     await assert.rejects(guard.requireExamAccess("41"), /could not be verified/);
   });
 
-  it("returns null, not an id, when there is provably no sitting", async () => {
+  it("returns null, not a sitting, when there is provably no sitting", async () => {
     // The return type is the invariant: a caller that reads persisted data keys
-    // off this id, so a number here would be a row nobody proved was theirs.
+    // off this id, so a row here would be one nobody proved was theirs.
     world.databaseConfigured = false;
     assert.equal(await guard.requireExamAccess("41"), null);
 

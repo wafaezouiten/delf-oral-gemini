@@ -37,7 +37,6 @@ import { GoogleGenAI } from "@google/genai";
 import { NextResponse } from "next/server";
 
 import { authorizeExam } from "@/lib/auth/exam-guard";
-import { findSittingTopicSlug } from "@/lib/db/sittings";
 import { findTopic } from "@/lib/delf/topics";
 import { LIVE_MODEL } from "@/lib/gemini/constants";
 import { liveConfigForPhase } from "@/lib/gemini/live-config";
@@ -54,9 +53,8 @@ const NEW_SESSION_WINDOW_MINUTES = 2;
 
 export async function POST(request: Request) {
   // Before anything that costs a round trip. A misconfigured environment would
-  // otherwise pay for two queries against `oral_exams` on every request —
-  // including every reconnect — only to fail at the end for a reason that was
-  // knowable at the start.
+  // otherwise query `oral_exams` on every request — including every reconnect —
+  // only to fail at the end for a reason that was knowable at the start.
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
     console.error("[live-token] GEMINI_API_KEY is not set");
@@ -72,11 +70,12 @@ export async function POST(request: Request) {
   }
   const { phase, examId, requestedTopicSlug, resumptionHandle } = parsed.request;
 
+  // One query, and it answers both halves: who owns the sitting, and what it is
+  // about. It used to be two sequential round trips to the same row — see
+  // `findExamOwner` — which a bad-network episode multiplied by five.
   const access = await authorizeExam(examId);
-  const sittingTopicSlug =
-    access.status === "owned" ? await findSittingTopicSlug(access.examId) : undefined;
 
-  const gate = gateLiveToken({ access, sittingTopicSlug, requestedTopicSlug });
+  const gate = gateLiveToken({ access, requestedTopicSlug });
   if (gate.decision === "deny") {
     return NextResponse.json({ error: gate.error }, { status: gate.status });
   }

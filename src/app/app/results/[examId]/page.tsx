@@ -31,16 +31,19 @@ export default async function ResultsPage({ params }: PageProps<"/app/results/[e
   // the owner rather than trusting the row id on its own. `auth()` is memoised
   // per request, so this is not a second round trip to Clerk.
   const userId = await requireUserId();
-  const rowId = await requireExamAccess(examId);
+  const owned = await requireExamAccess(examId);
 
-  if (rowId === null) return <ResultsClient examId={examId} />;
+  if (owned === null) return <ResultsClient examId={examId} />;
 
+  // The subject comes back with the gate now, and this page still does not use
+  // it: `readSitting` reads the whole sitting anyway, and the slug it returns is
+  // from the same statement as everything else it renders.
   const sitting = await neonSittingStore()
-    .readSitting({ examId: rowId, userId })
+    .readSitting({ examId: owned.examId, userId })
     .catch((error: unknown) => {
       // A results page that 500s on a database blip is worse than one that
       // renders from the copy the browser is already holding.
-      console.error("[results] could not read sitting", rowId, error);
+      console.error("[results] could not read sitting", owned.examId, error);
       return null;
     });
 
