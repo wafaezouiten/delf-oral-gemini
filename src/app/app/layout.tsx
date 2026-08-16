@@ -1,28 +1,24 @@
-import { UserButton } from "@clerk/nextjs";
-import { auth } from "@clerk/nextjs/server";
-import { redirect } from "next/navigation";
-import Link from "next/link";
+import { requireUserId } from "@/lib/auth/exam-guard";
 
 /**
- * The authenticated shell.
+ * The authenticated shell — the auth courtesy, and nothing else.
  *
- * `proxy.ts` already blocks unauthenticated requests to /app; this redirect is
- * the second lock. Route protection is the one place where being paranoid costs
- * nothing.
+ * This redirect is a courtesy, not the lock. A layout does not re-render on a
+ * client-side transition and does not control whether the segment below it
+ * renders — Next's own guidance ("Layouts and auth checks" in
+ * `node_modules/next/dist/docs/01-app/02-guides/authentication.md`) is that the
+ * check belongs next to the data. So every page under `/app` runs its own, and
+ * this one only spares a signed-out visitor the flash of an empty shell.
+ *
+ * The masthead used to live here and now lives one level down, in `(hub)`. The
+ * reason is the reference's route-group split: its simulateur sits under a
+ * `(fullscreen)` group with no app chrome at all, because the simulateur draws
+ * its own — `SimulatorTopBar` IS the chrome, and a second header above it would
+ * be two navigations stacked over an épreuve that needs the whole viewport. The
+ * two groups below reproduce that. Neither changes a URL.
  */
 export default async function AppLayout({ children }: LayoutProps<"/app">) {
-  const { userId } = await auth();
-  if (!userId) redirect("/sign-in");
+  await requireUserId();
 
-  return (
-    <div className="flex min-h-full flex-1 flex-col">
-      <header className="border-border flex items-center justify-between border-b px-6 py-3">
-        <Link href="/app" className="text-sm font-semibold">
-          DELF B2 · Production orale
-        </Link>
-        <UserButton />
-      </header>
-      <div className="flex flex-1 flex-col">{children}</div>
-    </div>
-  );
+  return <div className="flex min-h-full flex-1 flex-col">{children}</div>;
 }

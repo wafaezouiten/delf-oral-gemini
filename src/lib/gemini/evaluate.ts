@@ -21,17 +21,23 @@ import "server-only";
 import { GoogleGenAI, Type, createPartFromUri, type Part } from "@google/genai";
 
 import {
-  CRITERION_DESCRIPTIONS,
+  BAND_SCALE,
+  EVALUATION_RULES,
   ORAL_CRITERIA,
-  applyDurationPenalty,
-  criteriaToScore25,
-  snapCriteria,
-  type CriteriaScores,
+  ORAL_CRITERIA_DESCRIPTIONS,
   type OralCriterion,
-} from "@/lib/delf/rubric";
+} from "@/lib/delf/criteria";
+import { scoreSitting, type CriteriaBands } from "@/lib/delf/orale-rubric";
+import {
+  criterionJustifications,
+  criterionScores,
+  parseEvaluationResponse,
+} from "./evaluation-response";
+import { readEvaluationUsage, type EvaluationUsage } from "./evaluation-usage";
 import { formatTranscript, type TranscriptEntry } from "@/lib/delf/transcript";
 import type { OralTopic } from "@/lib/delf/topics";
-import type { EvaluationFeedback } from "@/lib/db/schema";
+import type { EvaluationFeedback, EvaluationMode, OralSpeakingPhase } from "@/lib/db/schema";
+import { phonologyInstruction, type AttachedRecording } from "./phonology-instruction";
 
 /**
  * The corrector model. Deliberately NOT the Live model: grading is a careful
@@ -50,48 +56,80 @@ import type { EvaluationFeedback } from "@/lib/db/schema";
  */
 export const EVAL_MODEL = process.env.GEMINI_EVAL_MODEL ?? "gemini-3.6-flash";
 
-export const EVAL_PROMPT_VERSION = "2026-08-11.1";
+/**
+ * Bumped whenever the prompt changes, so a stored score can be traced to the
+ * words that produced it.
+ *
+ * `2026-08-15.0` is the first version whose band scale and evaluation rules are
+ * the ported grille text (`delf/criteria.ts`) rather than this file's
+ * paraphrase of it. Scores either side of this string are not strictly
+ * comparable, which is the entire reason the column exists.
+ */
+export const EVAL_PROMPT_VERSION = "2026-08-15.0";
 
-export type EvaluationMode = "text" | "audio";
+/** Re-exported, not redeclared: the mode is a stored column, and `evaluations.mode`
+ *  is where its legal values are defined. */
+export type { EvaluationMode };
 
 /**
- * The band scale, spelled out. The wording matters: without the explicit
- * instruction to use the whole scale, models converge on 3 for everything and
- * the result stops discriminating between a good candidate and a weak one.
+ * Using the whole scale — this project's addition, not the grille's words.
+ *
+ * Kept separate from {@link BAND_SCALE} on purpose: that block is the ported
+ * definition of what each band *means*, and paraphrasing it would change what
+ * the model grades. This is a behavioural instruction about how to use it,
+ * learned by running the corrector: without it, models put 3 on everything and
+ * the result stops telling a good candidate from a weak one (see
+ * docs/EVALUATION_FINDINGS.md).
  */
-const BAND_SCALE = `ÉCHELLE DE NOTATION : chaque critère reçoit EXACTEMENT l'une de ces quatre notes : 0, 1, 3 ou 5. N'utilisez JAMAIS 2 ni 4.
-- 0 = Rien d'évaluable pour ce critère.
-- 1 = En dessous du niveau B2 : les lacunes gênent la communication.
-- 3 = Au niveau B2 : critère globalement satisfait, avec des maladresses ponctuelles.
-- 5 = B2 pleinement maîtrisé, voire B2+ : un vrai point fort, sans réserve majeure.
+const SCALE_USE = `UTILISEZ TOUTE L'ÉCHELLE. N'attribuez pas 3 par défaut. Un critère réellement réussi reçoit 5, un critère faible reçoit 1. Deux prestations de qualité différente DOIVENT recevoir des notes différentes. Des erreurs occasionnelles qui ne gênent pas la communication sont normales au niveau B2 et restent compatibles avec un 5 : n'exigez pas un niveau C1 pour l'accorder.`;
 
-UTILISEZ TOUTE L'ÉCHELLE. N'attribuez pas 3 par défaut. Un critère réellement réussi reçoit 5, un critère faible reçoit 1. Deux prestations de qualité différente DOIVENT recevoir des notes différentes. Des erreurs occasionnelles qui ne gênent pas la communication sont normales au niveau B2 et restent compatibles avec un 5 : n'exigez pas un niveau C1 pour l'accorder.`;
+/**
+ * Which task each criterion is judged on — also this project's, and for a
+ * structural reason rather than a stylistic one.
+ *
+ * The reference implementation corrects ONE task per correction, so it never
+ * has to say where a criterion's evidence lives. Here the monologue and the
+ * débat are one sitting and one mark, and the two pragmatic criteria are earned
+ * in different halves of it: a candidate who argues well alone and folds under
+ * contradiction is a real, common profile, and a corrector not told where to
+ * look grades both criteria off whichever half it read last.
+ */
+const TASK_ATTRIBUTION = `RÉPARTITION DES CRITÈRES SUR LES DEUX TÂCHES :
+- « realisationTache » se juge principalement sur le MONOLOGUE SUIVI : prise de position, structure, qualité des arguments et des exemples.
+- « interaction » se juge principalement sur le DEBAT : capacité à réagir aux objections, à défendre et à nuancer sa position, à apporter de NOUVEAUX exemples, à maintenir l'échange.
+- « lexique » et « morphosyntaxe » se jugent sur l'ENSEMBLE des deux tâches.
+- N'utilisez jamais de tiret cadratin ni de tiret demi-cadratin dans vos commentaires.`;
 
+/** The five criteria and what each measures, in the grille's own words. */
 function criteriaBlock(): string {
   return ORAL_CRITERIA.map(
-    (key, index) => `${index + 1}. ${key} : ${CRITERION_DESCRIPTIONS[key]}`,
+    (key, index) => `${index + 1}. ${key} : ${ORAL_CRITERIA_DESCRIPTIONS[key]}`,
   ).join("\n");
 }
 
 /**
- * The phonologie instruction, which is the ONE place the two modes genuinely
- * differ. In text mode the model is grading an absence and must be told so
- * honestly; in audio mode it is grading a recording and should say what it
- * hears.
+ * The corrector's prompt.
+ *
+ * Note what it does NOT contain: any arithmetic. The band scale is stated so
+ * the model knows which four numbers it may return, and nothing else about the
+ * mark is asked of it — the sum, the duration penalty and the competency floor
+ * are computed from what it returns, by `orale-rubric.ts`. A prompt that told
+ * the model to subtract three points for a short épreuve would be a second
+ * implementation of the rubric, written in French, unversioned and untestable
+ * (#9).
+ *
+ * The durations are given for context only, so the model can read a thin
+ * monologue as thin rather than as a bad one. They are the measured seconds,
+ * from the recordings.
  */
-function phonologyInstruction(mode: EvaluationMode): string {
-  if (mode === "audio") {
-    return `PHONOLOGIE : vous disposez de l'ENREGISTREMENT AUDIO réel du candidat. Écoutez-le et jugez la prononciation, l'accentuation, le rythme, l'intonation, la fluidité et l'intelligibilité effectives. Appuyez votre note sur ce que vous entendez, en citant des exemples précis (sons mal réalisés, syllabes accentuées à tort, débit, pauses). Ne déduisez PAS la phonologie du texte : vous avez le son.`;
-  }
-  return `PHONOLOGIE : vous ne disposez QUE de la transcription, sans le son. Vous ne pouvez donc pas juger la prononciation elle-même. Jugez uniquement les indices de fluidité visibles dans le texte : hésitations (« euh », « hum »), faux départs, autocorrections, répétitions, énoncés abandonnés ou fragmentés. Beaucoup de ces marques indiquent un débit haché : notez bas. Un texte fluide et des phrases menées à terme : notez 3, voire 5 si la fluidité est remarquable sur toute la durée. Mettez « phonologieNonEvaluable » à true si la production est trop brève pour juger quoi que ce soit.`;
-}
-
 function buildPrompt(params: {
   mode: EvaluationMode;
   topic: OralTopic;
   transcript: readonly TranscriptEntry[];
   monologueSeconds: number;
   debateSeconds: number;
+  /** Which tasks the attached audio actually covers. See `phonology-instruction.ts`. */
+  recordings?: readonly AttachedRecording[];
 }): string {
   const { mode, topic, transcript, monologueSeconds, debateSeconds } = params;
 
@@ -108,21 +146,16 @@ L'épreuve comporte DEUX tâches, présentes toutes les deux dans la transcripti
 
 ${BAND_SCALE}
 
+${SCALE_USE}
+
 LES CINQ CRITÈRES (chacun noté 0, 1, 3 ou 5 ; leur somme = total25) :
 ${criteriaBlock()}
 
-RÈGLES D'ÉVALUATION (PRIORITÉ ABSOLUE)
-- Seules les répliques « CANDIDAT: » sont notées. Les répliques « EXAMINATEUR: » sont du contexte : ne notez jamais le vocabulaire, les idées ou les structures de l'examinateur.
-- « realisationTache » se juge principalement sur le MONOLOGUE : prise de position, structure, qualité des arguments et des exemples.
-- « interaction » se juge principalement sur le DEBAT : capacité à réagir aux objections, à défendre et à nuancer sa position, à apporter de NOUVEAUX exemples, à maintenir l'échange. Abandonner sa position sans la défendre est une faiblesse à ce critère.
-- « lexique » et « morphosyntaxe » se jugent sur l'ENSEMBLE des deux tâches.
-- Évaluez la MANIÈRE de s'exprimer, JAMAIS l'opinion défendue.
-- Si aucune réplique « CANDIDAT: » ne contient de contenu évaluable, mettez 0 à TOUS les critères.
-- Chaque justification doit citer une tournure ou une réplique réelle du candidat, nommer la bande atteinte et dire pourquoi.
-- N'utilisez jamais de tiret cadratin ni de tiret demi-cadratin dans vos commentaires.
-- Restez bienveillant mais rigoureux.
+${EVALUATION_RULES}
 
-${phonologyInstruction(mode)}
+${TASK_ATTRIBUTION}
+
+${phonologyInstruction(mode, params.recordings)}
 
 TRANSCRIPTION DE L'ÉPREUVE
 ${formatTranscript(transcript) || "(aucune production)"}`;
@@ -163,30 +196,57 @@ const responseSchema = {
   ],
 };
 
-interface RawEvaluation {
-  total25: number;
-  phonologieNonEvaluable: boolean;
-  appreciationGlobale: string;
-  pointsForts: string[];
-  axesPrioritaires: string[];
-  conseil: string;
-  [criterion: string]: unknown;
-}
-
 export interface EvaluationResult {
   mode: EvaluationMode;
-  criteria: CriteriaScores;
+  criteria: CriteriaBands;
   /** What the model literally returned, pre-snap. Kept because a model that
    *  starts emitting illegal 2s and 4s looks perfectly healthy once snapped. */
   rawCriteria: Record<OralCriterion, number>;
   /** The model's own arithmetic, for comparison only. Never shown. */
   modelTotal25: number;
   rawScore25: number;
+  /**
+   * What the rubric asked to dock for a short épreuve, nominal — and which
+   * parts were short, so the figure can be explained rather than just applied.
+   * Both come from `orale-rubric.ts`; neither is derived here.
+   */
+  durationPenalty: number;
+  shortParts: Array<"monologue" | "debate">;
+  /**
+   * Whether « phonologie » was held to the ceiling because this correction had no
+   * audio (#29). Surfaced so a 3 can be explained as "not heard" rather than read
+   * as "heard, and merely adequate".
+   */
+  phonologyCapped: boolean;
   score25: number;
+  /** Whether the mark clears the ≥ 5/25 competency floor. Computed by the
+   *  rubric, so the route no longer needs its own copy of the threshold. */
+  meetsFloor: boolean;
   feedback: EvaluationFeedback;
   model: string;
   promptVersion: string;
   latencySeconds: number;
+  /**
+   * What the correction actually cost, in tokens, as the API reported it.
+   *
+   * Exists because #12 asks for cost per sitting measured rather than estimated,
+   * and a harness that counted the prompt itself would be measuring its own
+   * arithmetic instead of the call. The reading lives in `evaluation-usage.ts`
+   * so it can be tested.
+   *
+   * WHERE IT GOES, precisely — an earlier version of this comment claimed it
+   * went nowhere, which was half true and is the kind of half that misleads:
+   *
+   *  - **Not stored.** `toCorrectionRow` omits it and `evaluations` has no
+   *    column for it. That boundary is real and enforced by the schema.
+   *  - **Does reach the browser.** The finish route returns the whole
+   *    `EvaluationResult` on a fresh grading, so these token counts land in the
+   *    JSON next to `rawCriteria`, `modelTotal25` and `latencySeconds` — the
+   *    three diagnostics that have always travelled that way. Deliberately not
+   *    stripped: removing one of four would imply a boundary the route does not
+   *    have, and none of them is sensitive. Nothing in the UI reads any of them.
+   */
+  usage: EvaluationUsage;
 }
 
 export interface EvaluateParams {
@@ -195,8 +255,37 @@ export interface EvaluateParams {
   transcript: readonly TranscriptEntry[];
   monologueSeconds: number;
   debateSeconds: number;
-  /** The candidate's WAV. Required for `audio` mode, ignored otherwise. */
-  audio?: Blob;
+  /**
+   * The candidate's recording. Required for `audio` mode, ignored otherwise.
+   *
+   * Two shapes, because there are two kinds of caller. Phase 6's exam produces
+   * one artefact per task and passes them **labelled**, in exam order — the
+   * corrector is then told which task each file is, which matters most in the
+   * case where only one of them exists (see `phonology-instruction.ts`). A bare
+   * `Blob` is a whole-sitting recording, which is what the verification scripts
+   * and the audio-versus-text experiment hand over, and is described to the
+   * corrector as covering the épreuve rather than a task.
+   */
+  audio?: Blob | readonly EvaluationRecording[];
+}
+
+/** One recording, and which task of the épreuve it is of. */
+export interface EvaluationRecording {
+  phase: OralSpeakingPhase;
+  blob: Blob;
+  /**
+   * What the file is, as read out of its bytes by the caller. Optional because
+   * the scripts hand over a WAV they just wrote; the finish route sniffs it,
+   * because since #24 a sitting arrives as Ogg Opus and a file uploaded under
+   * the wrong type is a correction of silence.
+   */
+  mimeType?: string;
+}
+
+/** A blob knows what it is; a blob built without a type does not, and the
+ *  scripts' recordings are always the WAV `pcm16ToWav` wrote. */
+function mimeTypeOf(blob: Blob): string {
+  return blob.type || "audio/wav";
 }
 
 /**
@@ -212,24 +301,46 @@ export async function evaluateExam(params: EvaluateParams): Promise<EvaluationRe
   const ai = new GoogleGenAI({ apiKey });
   const startedAt = Date.now();
 
-  const parts: Part[] = [{ text: buildPrompt(params) }];
+  // A bare blob is a whole-sitting recording and belongs to no single task, so
+  // it carries a null phase rather than being guessed at.
+  const recordings: Array<{
+    phase: OralSpeakingPhase | null;
+    blob: Blob;
+    mimeType: string;
+  }> = !params.audio
+    ? []
+    : params.audio instanceof Blob
+      ? [{ phase: null, blob: params.audio, mimeType: mimeTypeOf(params.audio) }]
+      : params.audio.map((recording) => ({
+          phase: recording.phase,
+          blob: recording.blob,
+          mimeType: recording.mimeType ?? mimeTypeOf(recording.blob),
+        }));
+
+  const parts: Part[] = [{ text: buildPrompt({ ...params, recordings }) }];
 
   if (params.mode === "audio") {
-    if (!params.audio) {
+    if (recordings.length === 0) {
       throw new Error("Audio mode requires the candidate's recording");
     }
-    // Uploaded via the Files API rather than inlined: a full B2 exam is roughly
-    // 20 minutes of 16 kHz PCM, tens of megabytes, well past the inline request
-    // limit. The upload also lets the same recording be re-scored later without
-    // re-sending it.
-    const uploaded = await ai.files.upload({
-      file: params.audio,
-      config: { mimeType: "audio/wav" },
-    });
-    if (!uploaded.uri || !uploaded.mimeType) {
-      throw new Error("File upload returned no usable URI");
+    // Uploaded via the Files API rather than inlined: a full B2 exam is 20
+    // minutes of audio, past the inline request limit even compressed. The
+    // upload also lets the same recording be re-scored later without re-sending
+    // it. `audio/ogg` is accepted and transcribed — verified against the real
+    // service, see docs/AUDIO_UPLOAD.md.
+    //
+    // Sequential rather than concurrent: the free tier rate-limits uploads, and
+    // two files is not a latency problem worth a 429 for.
+    for (const recording of recordings) {
+      const uploaded = await ai.files.upload({
+        file: recording.blob,
+        config: { mimeType: recording.mimeType },
+      });
+      if (!uploaded.uri || !uploaded.mimeType) {
+        throw new Error("File upload returned no usable URI");
+      }
+      parts.push(createPartFromUri(uploaded.uri, uploaded.mimeType));
     }
-    parts.push(createPartFromUri(uploaded.uri, uploaded.mimeType));
   }
 
   const response = await ai.models.generateContent({
@@ -247,49 +358,50 @@ export async function evaluateExam(params: EvaluateParams): Promise<EvaluationRe
   const text = response.text;
   if (!text) throw new Error("The evaluator returned no output");
 
-  let raw: RawEvaluation;
-  try {
-    raw = JSON.parse(text) as RawEvaluation;
-  } catch {
-    throw new Error(`The evaluator returned invalid JSON: ${text.slice(0, 200)}`);
-  }
+  // Checked, not coerced. The previous reading defaulted a missing criterion to
+  // zero, so a truncated or refused generation cost the candidate five points
+  // silently; a breach of the contract now throws and the caller can retry.
+  const raw = parseEvaluationResponse(text);
+  const rawCriteria = criterionScores(raw);
 
-  const rawCriteria = Object.fromEntries(
-    ORAL_CRITERIA.map((key) => {
-      const entry = raw[key] as { score?: number } | undefined;
-      return [key, Number(entry?.score ?? 0)];
-    }),
-  ) as Record<OralCriterion, number>;
-
-  const criteria = snapCriteria(rawCriteria);
-  const rawScore25 = criteriaToScore25(criteria);
-  const totalSpeaking = params.monologueSeconds + params.debateSeconds;
-  const score25 = applyDurationPenalty(rawScore25, totalSpeaking);
-
-  const justifications = Object.fromEntries(
-    ORAL_CRITERIA.map((key) => {
-      const entry = raw[key] as { justification?: string } | undefined;
-      return [key, entry?.justification ?? ""];
-    }),
-  ) as Record<OralCriterion, string>;
+  // The whole rubric, in one call. Snapping, the sum, the per-part duration
+  // penalty and the competency floor are all `orale-rubric.ts`'s, in the order
+  // it defines — nothing about the mark is computed here.
+  const scored = scoreSitting(rawCriteria, {
+    monologueSeconds: params.monologueSeconds,
+    debateSeconds: params.debateSeconds,
+    // The one place the mode reaches the rubric. `audio` is the only mode that
+    // puts the recording in front of the corrector, so it is the only one that
+    // may award the top phonologie band (#29).
+    phonologyHeard: params.mode === "audio",
+  });
 
   return {
     mode: params.mode,
-    criteria,
+    criteria: scored.criteria,
     rawCriteria,
-    modelTotal25: Number(raw.total25 ?? 0),
-    rawScore25,
-    score25,
+    modelTotal25: raw.total25,
+    rawScore25: scored.rawScore25,
+    durationPenalty: scored.durationPenalty,
+    shortParts: scored.shortParts,
+    phonologyCapped: scored.phonologyCapped,
+    score25: scored.score25,
+    meetsFloor: scored.meetsFloor,
+    // No `?? ""` or `Boolean(...)` here any more: every one of these is required
+    // by the response schema, so a default would be dead code that also implied
+    // the field might be missing — which is exactly the reading that let a
+    // missing criterion score zero.
     feedback: {
-      justifications,
-      appreciationGlobale: raw.appreciationGlobale ?? "",
-      pointsForts: raw.pointsForts ?? [],
-      axesPrioritaires: raw.axesPrioritaires ?? [],
-      conseil: raw.conseil ?? "",
-      phonologieNonEvaluable: Boolean(raw.phonologieNonEvaluable),
+      justifications: criterionJustifications(raw),
+      appreciationGlobale: raw.appreciationGlobale,
+      pointsForts: raw.pointsForts,
+      axesPrioritaires: raw.axesPrioritaires,
+      conseil: raw.conseil,
+      phonologieNonEvaluable: raw.phonologieNonEvaluable,
     },
     model: EVAL_MODEL,
     promptVersion: EVAL_PROMPT_VERSION,
     latencySeconds: (Date.now() - startedAt) / 1000,
+    usage: readEvaluationUsage(response.usageMetadata),
   };
 }

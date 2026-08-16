@@ -32,13 +32,22 @@ is the safe reading of "the server is about to hang up". This is unit-tested.
 
 ### 2. Session resumption — keep the examiner's memory
 
-Both phase configs set `sessionResumption: { transparent: true }`. Without that
-field the server sends no `sessionResumptionUpdate` messages at all and a
+Both phase configs set `sessionResumption: {}` — present, and **empty**. Without
+the field the server sends no `sessionResumptionUpdate` messages at all and a
 reconnect has nothing to resume from, which would silently restart the exam.
+Adding the `transparent: true` the SDK types and the docs describe is worse than
+useless: the Developer API rejects the connection outright with *"transparent
+parameter is only supported in Gemini Enterprise Agent Platform mode"*. See
+[`GEMINI_LIVE_FINDINGS.md` §1](GEMINI_LIVE_FINDINGS.md). Resumption works fine
+without it.
 
 Every update carries a handle; the manager keeps the newest one and passes it to
 the next `connect()`. That is what makes the examiner still remember, after a
 reconnect, the argument the candidate made four minutes earlier.
+
+A connect that presents a handle is a **`resuming`**, not a `connecting`, and
+the two are separate states precisely because only one of them preserves that
+memory — see [`SESSION_STATE_MACHINE.md`](SESSION_STATE_MACHINE.md).
 
 One subtlety: **a resumed session must not be re-seeded.** The débat's opening
 session is seeded with the monologue transcript via `sendClientContent`, but the
@@ -60,6 +69,12 @@ An unexpected `onclose` triggers exponential backoff (400 ms doubling, capped at
 disconnected is buffered, bounded at 50 chunks (~2 s), and flushed on reconnect;
 beyond that the audio is genuinely unrecoverable and an unbounded buffer would
 just leak.
+
+The flush happens **after** `connect()` resolves, not only inside `onopen`. The
+SDK fires the open event *before* the connect promise settles, so a flush from
+`onopen` alone runs while the session's socket field is still null: every
+buffered chunk is refused and pushed straight back onto the queue. That silently
+discarded exactly the audio the buffer exists to save. Pinned by a unit test.
 
 ## Why the candidate does not notice
 
@@ -88,6 +103,13 @@ work. Two seams make it testable:
 **`controller.forceReconnect()`** closes the socket and immediately reopens it
 with the stored handle — the same code a real `GoAway` drives. It is wired to a
 development-only button on the exam screen.
+
+**`ExamLiveSession`'s injected transport and timers.** The token endpoint, the
+socket and the clock all arrive through interfaces, so `session-manager.test.ts`
+drives a real goAway, its deadline, five rounds of backoff and an exhaustion in
+microseconds. Before those seams existed the only testable thing in the file was
+the duration parser below — which left the most load-bearing code in the project
+covered by hope.
 
 **The headless acceptance test** (`exam-controller.test.ts`) runs the entire
 20-minute exam against a fake session and a fake clock in about 50 ms, forcing a

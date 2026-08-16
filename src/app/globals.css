@@ -1,52 +1,92 @@
 @import "tailwindcss";
 
 /**
- * A small, deliberate token set.
+ * The DELF surface.
  *
- * The brief says not to spend time on polish before the Gemini core works, so
- * this is the minimum that keeps the exam readable: neutrals stay grey, and the
- * only colours carry meaning — blue for the product voice, amber for "the clock
- * is running out", red for a lost connection, green for a passing score.
+ * The visual language is borrowed from the épreuve itself rather than invented:
+ * France Éducation international's diplomas and corrector grids are institutional
+ * navy on paper, ruled rather than shadowed, with the tricolore as the only
+ * decoration. A candidate who has seen a real convocation should recognise this
+ * screen, and — more usefully — a candidate who has not should still read the
+ * subject as a document and the grille as a grid, because that is what they will
+ * meet on the day.
+ *
+ * Colour never carries meaning alone. Every token below has a word or a shape
+ * beside it wherever it is used: the clock says "dernière minute", the connection
+ * badge names its state, and a band on the grille is marked as well as tinted.
+ * These are the accessibility requirement of #11 restated as a rule about tokens,
+ * so that a new state cannot be added in colour only without also inventing a
+ * word for it.
  */
 
+/**
+ * Light only, on purpose.
+ *
+ * The palette had a full dark counterpart behind `prefers-color-scheme`, and it
+ * is gone rather than merely unused. The épreuve this product reproduces arrives
+ * on paper: a document déclencheur on warm stock, a corrector's grid ruled in
+ * navy. Every surface here is named for that — `--paper`, `--paper-border`, the
+ * tricolore rule, the justified serif measure of an exam booklet — and a dark
+ * inversion of a printed page is a photograph of a page rather than the page.
+ * The one screen where it showed most was the sujet: warm cream at #fdfcf8
+ * became a near-black card, and the whole reason the candidate is meant to read
+ * it as a handout went with it.
+ *
+ * `color-scheme: light` rather than the removal of the media query alone. It
+ * tells the browser to render its own furniture — form controls, scrollbars,
+ * the `<dialog>` backdrop — in light too. Without it a candidate on a dark
+ * system gets a light page with a dark scrollbar and dark spinner controls,
+ * which is the mismatch that reads as a bug.
+ *
+ * The print block below still overrides these. It always did: it is not the
+ * dark scheme's replacement but a third target, and it flattens the tinted
+ * surfaces to white because a greyscale printer renders every one of them as
+ * the same grey block.
+ */
 :root {
-  --background: #ffffff;
-  --foreground: #14161a;
-  --muted: #f4f5f7;
-  --muted-foreground: #5f6570;
-  --border: #e3e5ea;
+  color-scheme: light;
+
+  --background: #f7f7f5;
+  --foreground: #16181d;
+  --muted: #ecedea;
+  --muted-foreground: #5b6069;
+  --border: #dcdcd6;
   --card: #ffffff;
 
-  --primary: #2563eb;
+  /* The document déclencheur is printed, not rendered: warm paper, ruled. */
+  --paper: #fdfcf8;
+  --paper-border: #d9d5c7;
+
+  /* Institutional navy — the DELF/DALF blue. */
+  --primary: #1b3a7a;
   --primary-foreground: #ffffff;
+  --primary-subtle: #e8edf7;
 
-  --success: #15803d;
-  --success-subtle: #eaf6ee;
-  --warning: #b45309;
-  --warning-subtle: #fdf3e3;
-  --danger: #b91c1c;
-  --danger-subtle: #fdeeee;
-}
+  /* The tricolore, used only as a 3px rule under the masthead. */
+  --tricolore-blue: #0a3d91;
+  --tricolore-white: #ffffff;
+  --tricolore-red: #c8102e;
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0c0e12;
-    --foreground: #eceef2;
-    --muted: #171a20;
-    --muted-foreground: #9aa1ad;
-    --border: #262b33;
-    --card: #12151a;
+  --success: #1c6b3f;
+  --success-subtle: #e7f2ea;
+  --warning: #8a5200;
+  --warning-subtle: #fbf0dd;
+  --danger: #a4132a;
+  --danger-subtle: #fbeaec;
 
-    --primary: #5b8def;
-    --primary-foreground: #0c0e12;
-
-    --success: #4ade80;
-    --success-subtle: #10241a;
-    --warning: #fbbf24;
-    --warning-subtle: #2a2010;
-    --danger: #f87171;
-    --danger-subtle: #2a1414;
-  }
+  /**
+   * The four grille bands. One token pair per `BandTone` in
+   * `src/lib/delf/grille.ts` — the names are that union, so a tone added there
+   * has an obvious and unavoidable home here rather than falling back to grey.
+   */
+  --band-red: #a4132a;
+  --band-red-subtle: #fbeaec;
+  --band-amber: #8a5200;
+  --band-amber-subtle: #fbf0dd;
+  --band-green: #1c6b3f;
+  --band-green-subtle: #e7f2ea;
+  --band-emerald: #10614f;
+  --band-emerald-subtle: #e2f1ed;
 }
 
 @theme inline {
@@ -56,15 +96,27 @@
   --color-muted-foreground: var(--muted-foreground);
   --color-border: var(--border);
   --color-card: var(--card);
+  --color-paper: var(--paper);
+  --color-paper-border: var(--paper-border);
   --color-primary: var(--primary);
   --color-primary-foreground: var(--primary-foreground);
+  --color-primary-subtle: var(--primary-subtle);
   --color-success: var(--success);
   --color-success-subtle: var(--success-subtle);
   --color-warning: var(--warning);
   --color-warning-subtle: var(--warning-subtle);
   --color-danger: var(--danger);
   --color-danger-subtle: var(--danger-subtle);
+  --color-band-red: var(--band-red);
+  --color-band-red-subtle: var(--band-red-subtle);
+  --color-band-amber: var(--band-amber);
+  --color-band-amber-subtle: var(--band-amber-subtle);
+  --color-band-green: var(--band-green);
+  --color-band-green-subtle: var(--band-green-subtle);
+  --color-band-emerald: var(--band-emerald);
+  --color-band-emerald-subtle: var(--band-emerald-subtle);
   --font-sans: var(--font-inter);
+  --font-serif: var(--font-spectral);
 }
 
 body {
@@ -75,4 +127,190 @@ body {
 /* Numbers in clocks and scores must not jitter as they tick. */
 .tabular {
   font-variant-numeric: tabular-nums;
+}
+
+/**
+ * One visible focus ring for the whole product, defined once.
+ *
+ * "Controls are reachable by keyboard" is only half of the requirement — a
+ * candidate tabbing to the button that ends their monologue has to be able to
+ * see which control they are on. The ring is drawn in the product's own navy
+ * rather than the browser default so it stays visible on the primary buttons,
+ * which are themselves navy.
+ */
+:where(a, button, summary, textarea, [tabindex]):focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+/**
+ * The tricolore rule under the masthead. A gradient rather than three elements,
+ * because it is decoration and has no business in the accessibility tree.
+ */
+.tricolore {
+  height: 3px;
+  background: linear-gradient(
+    to right,
+    var(--tricolore-blue) 0 33.34%,
+    var(--tricolore-white) 33.34% 66.67%,
+    var(--tricolore-red) 66.67% 100%
+  );
+}
+
+/**
+ * The paperwork treatment — what stops these screens reading as a generic SaaS
+ * dashboard, and what makes them look like this product rather than the one they
+ * were reproduced from.
+ *
+ * The reference is a rounded-card interface: `rounded-2xl` panels, soft shadows,
+ * pill everything. That is a perfectly good look and it is not this one. An
+ * épreuve arrives as a printed form — ruled, squared, sectioned and numbered —
+ * so the panels here are squared off to a 2px radius and the sections are ruled
+ * with the double line a corrector's grid uses to close a block. The difference
+ * costs nothing structurally: the same components, the same layout, the same
+ * spacing rhythm, drawn as stationery instead of as cards.
+ *
+ * `.sheet` rather than a Tailwind radius utility, so the whole product's
+ * squareness is one number in one place — and so it cannot drift the way eight
+ * hand-written `rounded-*` classes did before it existed.
+ */
+.sheet {
+  border-radius: 2px;
+}
+
+/**
+ * The rule that closes a section: a heavy line over a hairline, the way a
+ * corrector's grid separates one compétence from the next. Drawn with a border
+ * plus a box-shadow rather than two elements, because it is decoration and has
+ * no business in the accessibility tree.
+ */
+.rule-double {
+  border-bottom: 1px solid var(--border);
+  box-shadow: 0 3px 0 -2px var(--border);
+}
+
+/**
+ * The document déclencheur, set as a printed page: serif, justified, with the
+ * generous measure of an exam booklet rather than the tight one of an app.
+ */
+.document-text {
+  font-family: var(--font-serif), Georgia, serif;
+  font-size: 1.0625rem;
+  line-height: 1.75;
+  text-align: justify;
+  hyphens: auto;
+}
+
+/**
+ * The passation's two moving parts, as CSS rather than as a library.
+ *
+ * The reference implementation runs both on motion/react. Reproducing them with
+ * `@keyframes` is not a shortcut around a dependency this project would
+ * otherwise want: it is what puts them under the `prefers-reduced-motion` rule
+ * below, which is a blanket `animation-duration: 0.001ms` and reaches every
+ * animation in the product *except* a JavaScript one, which keeps running
+ * because it never asked the cascade. A candidate who has told their system they
+ * do not want motion should not have a ring pulsing at them for twenty minutes.
+ *
+ * `po-ring` is the "who holds the floor" pulse — a border expanding out of a
+ * speaker's avatar and fading, which is the same figure the recording dot uses
+ * and for the same reason: a static ring reads as decoration.
+ *
+ * `po-bar` is one bar of the five-bar "a mic is live" glyph. It is decorative
+ * motion and NOT a level meter — it says the microphone is being listened to,
+ * not how loud anything is. The five bars are staggered by inline delay so the
+ * wave travels rather than throbbing as a block.
+ */
+@keyframes po-ring {
+  from {
+    transform: scale(1);
+    opacity: 0.5;
+  }
+  to {
+    transform: scale(1.55);
+    opacity: 0;
+  }
+}
+
+@keyframes po-bar {
+  0%,
+  100% {
+    transform: scaleY(0.25);
+  }
+  50% {
+    transform: scaleY(1);
+  }
+}
+
+.po-ring {
+  animation: po-ring 1.5s ease-out infinite;
+}
+
+.po-bar {
+  transform-origin: center;
+  animation: po-bar 1s ease-in-out infinite;
+}
+
+/**
+ * Motion is a statement here, not a flourish: the recording dot pulses because a
+ * static red dot reads as a decoration. A candidate who has asked their system
+ * for less motion gets the dot without the pulse — the badge still says
+ * "Enregistrement" in words, so nothing is lost but the animation.
+ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+/**
+ * The correction is the thing a candidate keeps, so it has to survive Ctrl+P.
+ * The navigation and the "new épreuve" link are not part of a grade sheet.
+ */
+@media print {
+  .no-print {
+    display: none !important;
+  }
+
+  /**
+   * Print is always the light scheme, whatever the screen was: a dark card
+   * printed literally is a page of toner, and most printers drop background
+   * fills anyway — so the same sheet comes out differently depending on a
+   * setting nobody thinks about.
+   *
+   * The subtle fills are flattened to white rather than kept, because a
+   * greyscale printer renders every one of them as the same grey block and the
+   * band scale stops being a scale. Nothing is lost: every tinted surface in
+   * this product was already required to carry a mark and a word as well as its
+   * colour, so on paper the awarded band is still the bold double-ruled cell and
+   * « Au niveau B2 » is still written beside it. The foreground colours are kept
+   * — they print as ink on a colour printer and as legible grey on a mono one.
+   */
+  :root {
+    --background: #ffffff;
+    --foreground: #000000;
+    --card: #ffffff;
+    --paper: #ffffff;
+    --muted: #ffffff;
+    --muted-foreground: #444444;
+    --border: #999999;
+    --paper-border: #999999;
+    --primary-subtle: #ffffff;
+    --success-subtle: #ffffff;
+    --warning-subtle: #ffffff;
+    --danger-subtle: #ffffff;
+    --band-red-subtle: #ffffff;
+    --band-amber-subtle: #ffffff;
+    --band-green-subtle: #ffffff;
+    --band-emerald-subtle: #ffffff;
+  }
+
+  body {
+    background: #ffffff;
+    color: #000000;
+  }
 }

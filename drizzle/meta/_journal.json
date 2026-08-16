@@ -8,6 +8,27 @@
       "when": 1786474321749,
       "tag": "0000_wise_sharon_ventura",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1786640483449,
+      "tag": "0001_delf_sitting_and_correction",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1786731046134,
+      "tag": "0002_per_phase_recordings",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1786890159852,
+      "tag": "0003_abandoned_sittings",
+      "breakpoints": true
     }
   ]
 }

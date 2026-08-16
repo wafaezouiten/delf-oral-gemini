@@ -19,14 +19,22 @@
  *
  * The layering it enforces:
  *
- *   exam     ───────────────────────────────────────  transcript, audio archive
- *   phase    ──────────────┤├─────────────────────────  clocks
+ *   exam     ───────────────────────────────────────  transcript, microphone
+ *   phase    ──────────────┤├─────────────────────────  clocks, recordings
  *   session  ────┤├────┤├──┤├────┤├────┤├─────────────  Gemini connection
+ *
+ * Read downwards, that diagram is also the recording's specification. The
+ * microphone is opened once and outlives every session; each artefact belongs to
+ * exactly one phase and outlives every reconnect inside it; and the Gemini
+ * connection — the shortest-lived thing on the page — cannot take a hole out of
+ * either.
  */
 
+import type { PhaseRecording, RecordedPhase } from "@/lib/audio/archive";
 import {
   canAdvanceEarly,
   isPhaseTimeUp,
+  monologueWasSilent,
   nextPhase,
   phaseUsesLiveSession,
   remainingSeconds,
@@ -36,11 +44,13 @@ import { closingInstruction, examinerOpeningLine } from "@/lib/delf/examiner-pro
 import type { OralTopic } from "@/lib/delf/topics";
 import {
   appendFragment,
+  entriesForPhase,
   monologueAsHistory,
   type TranscriptEntry,
   type TranscriptPhase,
 } from "@/lib/delf/transcript";
 import type { ConnectionState, SessionManagerCallbacks } from "./session-manager";
+import { examStatus, type ExamStatus } from "./state-machine";
 
 /** What the controller needs from a Gemini session. */
 export interface LiveSessionLike {
@@ -57,7 +67,30 @@ export interface LiveSessionLike {
 export interface RecorderLike {
   start(): Promise<void>;
   stop(): Promise<void>;
-  toWavBlob(): Blob | null;
+  /** Begin the artefact for a speaking phase. */
+  beginPhase(phase: RecordedPhase): void;
+  /** Close it, keeping what it captured. */
+  endPhase(): void;
+  /** Stop capturing and streaming without releasing the device, and start
+   *  again. The device stays open across both, so there is no second permission
+   *  prompt — which is the whole reason the development text mode can turn the
+   *  microphone off and back on mid-phase. See {@link ExamController.setDevTextMode}. */
+  pause(): void;
+  resume(): void;
+  /** Seconds of audio recorded for one phase, measured from the samples. */
+  measuredSeconds(phase: RecordedPhase): number;
+  /** Of those, the seconds that carried speech. The two differ exactly when a
+   *  microphone worked and the candidate did not speak into it. */
+  voicedSeconds(phase: RecordedPhase): number;
+  /** Seconds recorded across the sitting. Read by the stall watchdog, which
+   *  only cares that the number is still moving. */
+  readonly recordedSeconds: number;
+  /** The finished artefacts, one per phase that captured anything. Compressing
+   *  them is what makes a sitting small enough to upload, and it is not
+   *  instant — see `audio/opus-encoder.ts`. */
+  recordings(): Promise<PhaseRecording[]>;
+  /** Release the recording's memory once the blobs are cut. */
+  discard(): void;
 }
 
 /** What the controller needs from the speaker. */
@@ -67,6 +100,11 @@ export interface PlayerLike {
   interrupt(): void;
   close(): Promise<void>;
 }
+
+/** Diagnostics from the audio layer, routed into the same session log the
+ *  Gemini connection writes to — a capture rate the browser refused and a
+ *  reconnect are the same kind of fact when an épreuve goes wrong. */
+export type AudioEventSink = (name: string, detail?: unknown) => void;
 
 export interface ExamEvent {
   at: number;
@@ -80,6 +118,14 @@ export interface ExamState {
   elapsed: number;
   remaining: number;
   connection: ConnectionState;
+  /**
+   * The two machines flattened into one value (`lib/live/state-machine.ts`).
+   *
+   * Derived on every snapshot rather than stored, so it cannot drift from the
+   * phase and the connection it is derived from. `phase` and `connection` are
+   * still exposed: this is the summary, not a replacement.
+   */
+  status: ExamStatus;
   examinerSpeaking: boolean;
   transcript: readonly TranscriptEntry[];
   events: readonly ExamEvent[];
@@ -87,16 +133,101 @@ export interface ExamState {
   canAdvance: boolean;
   closing: boolean;
   micError: string | null;
+  /**
+   * Whether the candidate's voice is being recorded right now.
+   *
+   * Rendered, so "nothing is recorded before consent" is something the candidate
+   * can watch happen — the indicator is dark through the whole of preparation
+   * and lights up at the monologue, after the browser has asked them.
+   */
+  recording: boolean;
   started: boolean;
   monologueSeconds: number;
   debateSeconds: number;
+  /**
+   * Whether the monologue has a working microphone and almost no speech on it.
+   *
+   * This began as grounds for *asking* the candidate a question. It is now
+   * grounds for refusing: a monologue with nothing on it has nothing to grade,
+   * so the phase is held open until it is attempted. What keeps that from being
+   * a trap is `monologueWasSilent`'s own asymmetry — a microphone that captured
+   * nothing is never called silent — plus the exit, which still works and is
+   * honest about costing 0/25.
+   */
+  monologueSilent: boolean;
+  /**
+   * The monologue is being held open because nothing was recorded: the clock
+   * has stopped and the phase will not end until it is attempted.
+   */
+  monologueHeld: boolean;
+  /**
+   * DEVELOPMENT ONLY — the candidate is typing instead of speaking, and the
+   * microphone is off for as long as that is true (#36).
+   *
+   * Always `false` in a production build: `setDevTextMode` refuses there, so
+   * nothing can set it. Rendered so the dev panel's toggle reads its own state
+   * off the controller rather than keeping a second copy that could disagree
+   * with the microphone.
+   */
+  devTextMode: boolean;
+}
+
+/**
+ * What one speaking phase produced, with its two durations kept apart.
+ *
+ * They are not the same number and pretending otherwise is the mistake this
+ * phase exists to stop. `elapsedSeconds` is the clock: how long the phase ran,
+ * which is what the candidate watched count down. `recordedSeconds` is the
+ * audio: how much of it actually reached the recording, which is smaller
+ * whenever the microphone was not delivering — a device unplugged four minutes
+ * in, a tab whose audio graph the browser suspended, a permission revoked.
+ *
+ * The duration penalty is computed from `recordedSeconds`, because a penalty is
+ * a statement about a performance and the only evidence of the performance is
+ * the recording. `elapsedSeconds` is kept because "the phase ran 7 minutes and
+ * recorded 90 seconds" is a diagnosis, while either number alone is a mystery.
+ */
+export interface PhaseReport {
+  phase: RecordedPhase;
+  /** Wall clock: how long the phase lasted. */
+  elapsedSeconds: number;
+  /** Measured from the samples: how much audio exists. */
+  recordedSeconds: number;
+  /**
+   * Epoch ms, for the audit trail. Never null: a phase is reported only because
+   * it was entered, and entering it is what stamps this. The nullability lives
+   * on `phaseStamps`, where "not entered" is a real state; by the time a report
+   * exists that state has been filtered out, and the type should say so rather
+   * than making every reader re-derive it.
+   */
+  startedAt: number;
+  /** Null for a phase entered but never left. */
+  endedAt: number | null;
+}
+
+/**
+ * A speaking phase that has just ended, reported while the exam is still running.
+ *
+ * The clock stamps are here and no duration is: how much the candidate actually
+ * spoke is measured from the audio, and the audio does not leave this tab until
+ * the épreuve is submitted. What this buys is the transcript — the turns of a
+ * completed phase, on the server, before the tab has a chance to lose them.
+ */
+export interface FinalisedPhaseReport {
+  phase: RecordedPhase;
+  /** This phase's turns only. The server appends them to what it already has. */
+  entries: TranscriptEntry[];
+  /** Epoch ms. Both non-null: the phase was entered, and it has now ended. */
+  startedAt: number;
+  endedAt: number;
 }
 
 export interface ExamFinishedPayload {
   transcript: TranscriptEntry[];
-  audio: Blob | null;
-  monologueSeconds: number;
-  debateSeconds: number;
+  /** One playable artefact per phase that captured anything. */
+  recordings: PhaseRecording[];
+  /** One entry per phase the candidate actually entered. */
+  phases: PhaseReport[];
   reconnectCount: number;
 }
 
@@ -108,9 +239,25 @@ export interface ExamControllerDeps {
     callbacks: SessionManagerCallbacks,
     history: Array<{ role: "user" | "model"; parts: Array<{ text: string }> }>,
   ) => LiveSessionLike;
-  createRecorder: (onChunk: (base64: string) => void) => RecorderLike;
-  createPlayer: (onSpeakingChange: (speaking: boolean) => void) => PlayerLike;
+  createRecorder: (callbacks: {
+    onChunk: (base64: string) => void;
+    onEvent: AudioEventSink;
+    onLost: (reason: string) => void;
+  }) => RecorderLike;
+  createPlayer: (callbacks: {
+    onSpeakingChange: (speaking: boolean) => void;
+    onEvent: AudioEventSink;
+  }) => PlayerLike;
   onFinished: (payload: ExamFinishedPayload) => void;
+  /**
+   * A speaking phase has ended and the exam continues.
+   *
+   * Optional, and called for its side effect only — the controller does not
+   * await it, does not retry it and does not care whether it succeeded. The
+   * épreuve must not pause, stall or fail because a progress request did, so
+   * everything about that is the binding's problem (`use-exam-controller.ts`).
+   */
+  onPhaseFinalised?: (report: FinalisedPhaseReport) => void;
   /** Injected so tests can drive a fake clock. */
   now?: () => number;
   /**
@@ -125,6 +272,32 @@ export interface ExamControllerDeps {
 const CLOSING_SAFETY_MS = 12_000;
 const TICK_MS = 250;
 
+/**
+ * How long the recording may stop growing, mid-phase, before the candidate is
+ * told.
+ *
+ * A working microphone delivers ~25 blocks a second, so four seconds of nothing
+ * is not a slow machine, it is a capture that has stopped: an audio graph the
+ * browser suspended behind a backgrounded tab, a device the OS handed to another
+ * application, a track that ended without firing `ended`. The clock keeps
+ * running through all of them and the page keeps looking healthy, which is
+ * precisely why this has to be watched rather than waited for.
+ */
+const CAPTURE_STALL_MS = 4_000;
+
+/** The two phases that produce a recording, in exam order. */
+const SPEAKING_PHASES: readonly RecordedPhase[] = ["monologue", "debate"];
+
+const MIC_MESSAGES = {
+  denied:
+    "L'accès au microphone a été refusé. Autorisez-le dans votre navigateur, puis rechargez la page.",
+  unavailable:
+    "Le microphone n'est pas accessible. Vérifiez qu'aucune autre application ne l'utilise.",
+  lost: "Le microphone s'est déconnecté. Ce qui a déjà été enregistré est conservé, mais la suite de l'épreuve ne le sera pas.",
+  stalled:
+    "Votre microphone n'envoie plus de son. Vérifiez qu'il est branché et gardez cet onglet au premier plan.",
+} as const;
+
 export class ExamController {
   private listeners = new Set<() => void>();
   private snapshot: ExamState;
@@ -133,6 +306,24 @@ export class ExamController {
   private phaseStart: number | null = null;
   private examStart = 0;
   private elapsed = 0;
+
+  /**
+   * The monologue is being held open because nothing was recorded (#39).
+   *
+   * While this is set the phase clock does not move and the phase cannot end —
+   * not on the candidate's button and not on its own time-up. Cleared only by
+   * `restartMonologue()`, which is what « Réessayer la transcription » calls.
+   */
+  private monologueHeld = false;
+
+  /**
+   * DEVELOPMENT ONLY — the microphone is off because the developer is typing
+   * the candidate's turns instead of speaking them (#36).
+   *
+   * Never true in a production build; `setDevTextMode` is the only writer and
+   * it returns before assigning there.
+   */
+  private devTextMode = false;
 
   private transcript: TranscriptEntry[] = [];
   private events: ExamEvent[] = [];
@@ -154,13 +345,37 @@ export class ExamController {
    */
   private activityEnded = false;
   private phaseSeconds = { monologue: 0, debate: 0 };
+  /** Wall-clock stamps per speaking phase, for `oral_exam_phases`' audit trail.
+   *  Null means the phase was never entered, which is the truth about an
+   *  abandoned sitting rather than a gap to fill in. */
+  private phaseStamps: Record<RecordedPhase, { startedAt: number | null; endedAt: number | null }> =
+    {
+      monologue: { startedAt: null, endedAt: null },
+      debate: { startedAt: null, endedAt: null },
+    };
+
+  /** The stall watchdog's state: the recording's length last time we looked,
+   *  and when it was last seen to grow. See {@link CAPTURE_STALL_MS}. */
+  private lastRecordedSeconds = 0;
+  private lastCaptureAt: number | null = null;
+  private captureStalled = false;
+  /** Terminal, unlike a stall: a device that ended does not come back, so the
+   *  watchdog stands down rather than reporting the same silence twice. */
+  private captureLost = false;
 
   private session: LiveSessionLike | null = null;
   private recorder: RecorderLike | null = null;
   private player: PlayerLike | null = null;
+  /** In flight, so a second `prepareAudio()` joins it rather than opening a
+   *  second pair of devices. */
+  private preparingAudio: Promise<boolean> | null = null;
+  /** Set once by {@link destroy}. Terminal, like the session's `closed`: the
+   *  controller is gone and nothing it opens afterwards has an owner. */
+  private destroyed = false;
 
   private ticker: ReturnType<typeof setInterval> | null = null;
-  private closingTimer: ReturnType<typeof setTimeout> | null = null;
+  /** When the closing handshake started, for its safety deadline. See `tick()`. */
+  private closingStartedAt: number | null = null;
 
   private readonly now: () => number;
 
@@ -185,6 +400,7 @@ export class ExamController {
       elapsed: this.elapsed,
       remaining: remainingSeconds(this.phase, this.elapsed),
       connection: this.connection,
+      status: examStatus(this.phase, this.connection),
       examinerSpeaking: this.examinerSpeaking,
       transcript: this.transcript,
       events: this.events,
@@ -192,10 +408,52 @@ export class ExamController {
       canAdvance: canAdvanceEarly(this.phase, this.elapsed) && !this.closing,
       closing: this.closing,
       micError: this.micError,
+      // False during a stall too, not only after a lost device. The point of the
+      // indicator is that the candidate can check the claim, and a pulsing
+      // "Enregistrement" over a capture that has stopped delivering is the one
+      // state where the claim is false and the indicator says it is true.
+      // False in the development text mode too, for the same reason: the
+      // recorder is paused, so the badge would be describing a capture that is
+      // not happening.
+      recording:
+        this.recorder !== null &&
+        !this.captureLost &&
+        !this.captureStalled &&
+        !this.devTextMode &&
+        (this.phase === "monologue" || this.phase === "debate"),
       started: this.started,
       monologueSeconds: this.phaseSeconds.monologue,
       debateSeconds: this.phaseSeconds.debate,
+      monologueSilent: this.isMonologueSilent(),
+      monologueHeld: this.monologueHeld,
+      devTextMode: this.devTextMode,
     };
+  }
+
+  /**
+   * Whether the monologue so far reads as never attempted (#39).
+   *
+   * Read off the recorder every snapshot rather than tracked as state: both
+   * numbers are counters the archive already keeps, so this is two reads and no
+   * bookkeeping that could drift from the audio it describes.
+   *
+   * `false` with no recorder at all, which is the same asymmetry
+   * `monologueWasSilent` is built on — no microphone is not a silent candidate.
+   *
+   * The development text mode takes that same exit, and it is the same rule
+   * rather than an exception to it: while it is on there is no microphone in
+   * this sitting, so there is no silent candidate to catch. Without it the
+   * dictation box would be unusable — room tone captured before the mode was
+   * switched on is measured audio carrying no speech, which is exactly what #39
+   * holds the phase for, and the developer would be trapped at a monologue they
+   * had just typed in full.
+   */
+  private isMonologueSilent(): boolean {
+    if (!this.recorder || this.devTextMode) return false;
+    return monologueWasSilent(
+      this.recorder.measuredSeconds("monologue"),
+      this.recorder.voicedSeconds("monologue"),
+    );
   }
 
   private emit(): void {
@@ -252,39 +510,157 @@ export class ExamController {
    * candidate is about to speak, not thirty minutes earlier.
    */
   async prepareAudio(): Promise<boolean> {
+    if (this.destroyed) return false;
     if (this.recorder) return true;
+    // A second attempt after a failed one used to build a second player and
+    // abandon the first, still holding an open AudioContext. `advanceEarly()`
+    // is a button, and a candidate who has just been told their microphone is
+    // blocked presses it again.
+    if (this.preparingAudio) return this.preparingAudio;
+    this.preparingAudio = this.openAudio();
     try {
-      const player = this.deps.createPlayer((speaking) => {
-        this.examinerSpeaking = speaking;
-        this.emit();
+      return await this.preparingAudio;
+    } finally {
+      this.preparingAudio = null;
+    }
+  }
+
+  private async openAudio(): Promise<boolean> {
+    // Held locally until BOTH devices are open. Assigning as we went meant a
+    // microphone failure — the common one; it is the half that needs
+    // permission — left the speaker's context open with nothing to close it
+    // until the exam ended.
+    let player: PlayerLike | null = null;
+    try {
+      player = this.deps.createPlayer({
+        onSpeakingChange: (speaking) => {
+          this.examinerSpeaking = speaking;
+          this.emit();
+        },
+        onEvent: (name, detail) => this.log(name, detail),
       });
       await player.resume();
-      this.player = player;
 
-      const recorder = this.deps.createRecorder((base64) => this.session?.sendAudio(base64));
+      const recorder = this.deps.createRecorder({
+        // The recording does not go through here and must not: `sendAudio` on a
+        // torn-down session is a no-op, and a sitting has several of those.
+        onChunk: (base64) => this.session?.sendAudio(base64),
+        onEvent: (name, detail) => this.log(name, detail),
+        onLost: (reason) => this.handleCaptureLost(reason),
+      });
       await recorder.start();
-      this.recorder = recorder;
 
+      // `destroy()` can land while the permission prompt is up — which is the
+      // very window this method was moved late in the exam to create. The
+      // devices are installed on the controller only at the lines below, so a
+      // teardown that ran meanwhile found both fields null and closed nothing;
+      // without this check they are then adopted by a controller that is
+      // already gone, and nothing will ever stop them again. The microphone
+      // and the speaker each guard their own version of this internally; this
+      // is the same race one layer up, where only the controller can see it.
+      if (this.destroyed) {
+        await recorder.stop().catch(() => {});
+        await player.close().catch(() => {});
+        this.log("audio-discarded", "the sitting ended while the devices were opening");
+        return false;
+      }
+
+      this.player = player;
+      this.recorder = recorder;
+      // The development text mode can be switched on during preparation, before
+      // there is any microphone to turn off. The device has to arrive already
+      // paused, or the toggle silently means nothing for the phase it was
+      // pressed for.
+      if (this.devTextMode) recorder.pause();
       this.micError = null;
       this.log("audio-ready");
       return true;
     } catch (error) {
+      await player?.close().catch(() => {
+        /* nothing left to report; the exam failure below is the story */
+      });
       const denied =
         typeof DOMException !== "undefined" &&
         error instanceof DOMException &&
         (error.name === "NotAllowedError" || error.name === "SecurityError");
-      this.micError = denied
-        ? "L'accès au microphone a été refusé. Autorisez-le dans votre navigateur, puis rechargez la page."
-        : "Le microphone n'est pas accessible. Vérifiez qu'aucune autre application ne l'utilise.";
+      this.micError = denied ? MIC_MESSAGES.denied : MIC_MESSAGES.unavailable;
       this.log("audio-failed", String(error));
       this.emit();
       return false;
     }
   }
 
+  /**
+   * The microphone went away mid-sitting.
+   *
+   * The exam is deliberately NOT ended. What was recorded up to this point is a
+   * real artefact of a real performance and is kept; the candidate is told, in a
+   * sentence that says both halves of that, and the phase runs on so they can
+   * finish speaking to an examiner that is still listening over the socket. The
+   * measured duration then reports the shortfall on its own, without anyone
+   * having to reconstruct when the device died.
+   */
+  private handleCaptureLost(reason: string): void {
+    if (this.captureLost) return;
+    this.captureLost = true;
+    this.captureStalled = false;
+    this.micError = MIC_MESSAGES.lost;
+    this.log("microphone-lost", reason);
+    this.emit();
+  }
+
+  /**
+   * Whether the recording is still growing, checked from the phase clock.
+   *
+   * Cheaper and more honest than trusting the device to report its own death:
+   * `ended` does not fire for a suspended AudioContext, and a candidate who has
+   * been silently unrecorded for four minutes cannot be given those minutes
+   * back. The clock is the injected one, like every other deadline here.
+   */
+  private checkCaptureAlive(): void {
+    const recorder = this.recorder;
+    if (!recorder || this.captureLost) return;
+    if (this.phase !== "monologue" && this.phase !== "debate") return;
+    // A microphone we turned off ourselves is not a microphone that failed.
+    // Without this the development text mode would raise the stalled-capture
+    // notice four seconds in, every time, and teach developers to ignore the
+    // one notice that means something.
+    if (this.devTextMode) return;
+
+    const seconds = recorder.recordedSeconds;
+    const now = this.now();
+
+    if (seconds > this.lastRecordedSeconds) {
+      this.lastRecordedSeconds = seconds;
+      this.lastCaptureAt = now;
+      if (this.captureStalled) {
+        this.captureStalled = false;
+        this.micError = null;
+        this.log("capture-resumed");
+        this.emit();
+      }
+      return;
+    }
+
+    this.lastCaptureAt ??= now;
+    if (!this.captureStalled && now - this.lastCaptureAt >= CAPTURE_STALL_MS) {
+      this.captureStalled = true;
+      this.micError = MIC_MESSAGES.stalled;
+      this.log("capture-stalled", { recordedSeconds: Number(seconds.toFixed(2)) });
+      this.emit();
+    }
+  }
+
   /** The candidate ends the current phase early. */
   async advanceEarly(): Promise<void> {
     if (!canAdvanceEarly(this.phase, this.elapsed)) return;
+    // Refused rather than confirmed: a monologue with no speech on it has
+    // nothing to grade, so the only way on is to attempt it. See
+    // `holdMonologue` for the two things that stop this being a trap.
+    if (this.phase === "monologue" && this.isMonologueSilent()) {
+      this.holdMonologue("the candidate ended a monologue with no speech on it");
+      return;
+    }
     if (this.phase === "preparation") {
       const ready = await this.prepareAudio();
       if (!ready) return;
@@ -292,6 +668,153 @@ export class ExamController {
       return;
     }
     this.beginClosingHandshake();
+  }
+
+  /**
+   * Put the monologue's clock back to zero so the candidate can attempt it
+   * again.
+   *
+   * Reached from « Réessayer la transcription », after they tried to move on
+   * having recorded no speech (#39). The point is that a monologue nobody
+   * attempted cannot be spent: the clock restarts, the minimum before they may
+   * move on applies again, and the task is still there to do.
+   *
+   * Only during the monologue, and only before the closing handshake has begun —
+   * once the examiner has been asked to wrap up, the turn is over and rewinding
+   * the clock underneath it would leave the two disagreeing about which phase is
+   * running.
+   *
+   * **The phase's own time-up is untouched, and that is deliberate.** It is the
+   * one thing standing between "you must attempt the task" and a candidate
+   * trapped forever — someone whose microphone is delivering sound that is not
+   * their voice can still let the clock run out and be carried into the débat by
+   * `isPhaseTimeUp`. What restarting removes is the *shortcut*, not the exit.
+   */
+  restartMonologue(): void {
+    if (this.phase !== "monologue" || this.closing) return;
+
+    this.monologueHeld = false;
+    this.phaseStart = this.now();
+    this.elapsed = 0;
+    this.phaseSeconds.monologue = 0;
+    this.log("monologue-restarted", "no speech was recorded");
+    this.emit();
+  }
+
+  /**
+   * Stop the monologue's clock and refuse to leave the phase.
+   *
+   * Two things stop this being a trap, and neither is incidental:
+   *
+   *  - **A dead microphone is never held.** `monologueWasSilent` answers false
+   *    when nothing was captured at all, so a candidate whose capture failed
+   *    while they spoke passes straight through and is graded on the "corrigé
+   *    sans l'audio" path. Only a working microphone with no voice on it is
+   *    held.
+   *  - **Abandoning still works.** The exit is untouched, and it is honest
+   *    about its price — the épreuve is recorded as a walk-out scored 0/25.
+   *
+   * What is gone is the clock as an escape: a candidate with a working
+   * microphone who never speaks is now required to speak, which is the rule
+   * this product was asked for.
+   */
+  private holdMonologue(why: string): void {
+    if (this.monologueHeld) return;
+    this.monologueHeld = true;
+    this.log("monologue-held", why);
+    this.emit();
+  }
+
+  /**
+   * DEVELOPMENT ONLY — turn the microphone off and type the candidate's turns
+   * instead (#36).
+   *
+   * The dictation box used to sit open beside a live microphone, so a typed
+   * sitting recorded whatever the room happened to contain. That is a worse lie
+   * than no recording at all: the artefact is real audio of nobody speaking, it
+   * is uploaded, it is graded, and the « Enregistrement » badge says it is
+   * happening. This makes the mode mean what it says — while it is on, nothing
+   * is captured and nothing is streamed.
+   *
+   * `pause()` rather than `stop()`, because the device stays open: the mode is
+   * a toggle, and releasing the microphone would put a browser permission
+   * prompt in the middle of a phase every time it went back on.
+   *
+   * What it does NOT do:
+   *
+   *  - **It does not discard what was already captured.** Audio recorded before
+   *    the mode went on belongs to the phase and stays in the artefact. The
+   *    duration penalty is then computed from a genuinely shorter recording,
+   *    which is the truth about a phase that was half spoken and half typed.
+   *  - **It does not run in production.** Same guard, and the same reason, as
+   *    {@link injectCandidateSpeech}: two independent NODE_ENV checks, because
+   *    the other one is a UI condition somebody could refactor away.
+   */
+  setDevTextMode(on: boolean): void {
+    if (process.env.NODE_ENV === "production") return;
+    if (this.devTextMode === on) return;
+
+    this.devTextMode = on;
+    if (on) {
+      this.recorder?.pause();
+    } else {
+      this.recorder?.resume();
+      // The watchdog stood down while the mode was on, so its bookkeeping is
+      // four minutes stale and would fire a stall the instant it resumes.
+      // Rewound to now, exactly as a phase change rewinds it.
+      this.lastCaptureAt = this.now();
+      this.lastRecordedSeconds = this.recorder?.recordedSeconds ?? 0;
+      if (this.captureStalled) {
+        this.captureStalled = false;
+        this.micError = null;
+      }
+    }
+    this.log("dev-text-mode", on ? "on — the microphone is off" : "off");
+    this.emit();
+  }
+
+  /**
+   * DEVELOPMENT ONLY — type what the candidate would have said.
+   *
+   * Testing this product otherwise means speaking French into a microphone for
+   * twenty minutes, twice, every time anything downstream of the transcript
+   * changes: the rubric, the persistence, the results page, the duration
+   * penalty. That is slow enough that those paths get tested rarely, which is
+   * the opposite of what they need.
+   *
+   * So this appends a candidate turn to the transcript exactly as a
+   * transcription fragment would, and the examiner is told the same text
+   * through `sendDirective` so the conversation stays coherent — a débat where
+   * the examiner never heard the exposé is not a useful thing to test against.
+   *
+   * Three things it deliberately does NOT do, because each would make what it
+   * produces a lie about a real sitting:
+   *
+   *  - **It records no audio.** The measured duration stays whatever the
+   *    microphone actually captured — nothing at all, under
+   *    {@link setDevTextMode}, which is how this is meant to be used — so a
+   *    typed sitting is graded from its transcript and takes the duration
+   *    penalty. That is the correct answer: nothing was spoken.
+   *  - **It does not advance the phase.** The clock and the state machine are
+   *    untouched.
+   *  - **It does not run in production.** The guard is on `NODE_ENV` and is the
+   *    first line, so a build cannot ship a way to write an exam transcript
+   *    without speaking.
+   */
+  injectCandidateSpeech(text: string): void {
+    if (process.env.NODE_ENV === "production") return;
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    if (this.phase !== "monologue" && this.phase !== "debate") return;
+
+    this.addFragment("candidate", trimmed);
+    // The examiner has to hear it too, or the débat argues with silence.
+    try {
+      this.session?.sendDirective(trimmed);
+    } catch (error) {
+      this.log("dev-inject-directive-failed", String(error));
+    }
+    this.log("dev-inject-speech", `${trimmed.length} chars`);
   }
 
   /**
@@ -304,6 +827,15 @@ export class ExamController {
   async forceReconnect(): Promise<void> {
     if (!this.session) {
       this.log("force-reconnect-skipped", "no active session");
+      return;
+    }
+    // A recovery already under way does not need helping along. The candidate's
+    // button is a real button and gets double-clicked; the session's generation
+    // guard means that cannot open two sockets, but each press still mints and
+    // discards an ephemeral token, and the second press does nothing the first
+    // is not already doing.
+    if (this.connection === "reconnecting" || this.connection === "resuming") {
+      this.log("force-reconnect-skipped", "already recovering");
       return;
     }
     await this.session.reconnect();
@@ -334,21 +866,23 @@ export class ExamController {
     if (this.phase === "monologue") this.endMonologueActivity();
     this.session?.sendDirective(closingInstruction(this.phase));
 
-    this.closingTimer = setTimeout(() => {
-      if (!this.closing) return;
-      this.closing = false;
-      this.log("closing-safety-timeout");
-      void this.advance();
-    }, CLOSING_SAFETY_MS);
+    // Stamped, not scheduled. The deadline is checked from `tick()` against the
+    // injected clock, like every other timing decision here — this used to be a
+    // real `setTimeout`, the one path in the file that ignored `deps.now()`, and
+    // it cost the unit suite a genuine twelve-second sleep to reach.
+    this.closingStartedAt = this.now();
 
     this.emit();
   }
 
+  /** Whether the examiner has had its promised sentence and then some. */
+  private closingHasTimedOut(): boolean {
+    if (!this.closing || this.closingStartedAt === null) return false;
+    return this.now() - this.closingStartedAt >= CLOSING_SAFETY_MS;
+  }
+
   private clearClosingTimer(): void {
-    if (this.closingTimer) {
-      clearTimeout(this.closingTimer);
-      this.closingTimer = null;
-    }
+    this.closingStartedAt = null;
   }
 
   /** Every phase transition runs through here, so ordering lives in one place. */
@@ -360,9 +894,16 @@ export class ExamController {
     this.clearClosingTimer();
     this.closing = false;
 
-    // Bank this phase's speaking time before the clock resets.
-    if (this.phaseStart !== null && (current === "monologue" || current === "debate")) {
-      this.phaseSeconds[current] = Math.round((this.now() - this.phaseStart) / 1000);
+    // Bank this phase's speaking time before the clock resets, and close its
+    // artefact. `endPhase()` runs before the session teardown below because it
+    // flushes the framer's partial frame, and those are the candidate's last
+    // words of THIS task — they belong in this recording, not in the next one.
+    if (current === "monologue" || current === "debate") {
+      if (this.phaseStart !== null) {
+        this.phaseSeconds[current] = Math.round((this.now() - this.phaseStart) / 1000);
+      }
+      this.phaseStamps[current].endedAt = this.now();
+      this.recorder?.endPhase();
     }
 
     this.log("phase-transition", `${current} -> ${target}`);
@@ -384,16 +925,94 @@ export class ExamController {
     this.emit();
 
     if (target === "monologue" || target === "debate") {
+      // Every entry into a speaking phase goes through here, which is the point.
+      // `advanceEarly()` opens the devices itself and refuses to advance without
+      // them, but preparation can also end by simply running out — and on that
+      // path nothing had ever asked for a microphone, so a candidate who sat
+      // through the full thirty minutes reached the monologue with no recording
+      // and no message saying why. A failure here is not fatal: the micError is
+      // already on screen and the épreuve is still worth sitting.
+      await this.prepareAudio();
+      this.beginRecording(target);
       await this.openSession(target);
+    }
+
+    // Deliberately last, and deliberately not on the way into `finished`.
+    //
+    // Last, because the transcript is what is being reported and Gemini's
+    // transcription of the monologue arrives asynchronously: the awaits above
+    // are free time for the fragments still in flight, and any that land after
+    // this carry the NEXT phase's tag, so they cannot contaminate what is sent.
+    // Not on the way into `finished`, because `finish()` is about to post the
+    // whole sitting — transcript, recordings and all — and a progress request
+    // racing it would be a second write of the same turns for no insurance.
+    if (target !== "finished" && (current === "monologue" || current === "debate")) {
+      this.reportFinalisedPhase(current);
     }
 
     if (target === "finished") await this.finish();
   }
 
+  /** Hand a completed phase to whoever is persisting it. Never throws upward. */
+  private reportFinalisedPhase(phase: RecordedPhase): void {
+    const { startedAt, endedAt } = this.phaseStamps[phase];
+    // A phase that was never entered, or somehow never stamped its end, has
+    // nothing honest to report. The finish payload still carries its turns.
+    if (startedAt === null || endedAt === null) return;
+
+    try {
+      this.deps.onPhaseFinalised?.({
+        phase,
+        entries: entriesForPhase(this.transcript, phase),
+        startedAt,
+        endedAt,
+      });
+    } catch (error) {
+      // A throwing listener must not take a phase transition down with it.
+      this.log("error", `progress report failed: ${String(error)}`);
+    }
+  }
+
+  /** Open this phase's artefact and arm the stall watchdog for it. */
+  private beginRecording(phase: RecordedPhase): void {
+    this.phaseStamps[phase].startedAt = this.now();
+    // Re-armed per phase: the gap between the monologue's last frame and the
+    // débat's first one is a phase transition, not a stalled microphone.
+    this.lastCaptureAt = this.now();
+    this.lastRecordedSeconds = this.recorder?.recordedSeconds ?? 0;
+    // A stall warning from the previous phase does not survive into this one.
+    // Without this it would sit on screen until audio next arrives, which for a
+    // candidate whose microphone recovered at the boundary is never.
+    if (this.captureStalled) {
+      this.captureStalled = false;
+      this.micError = null;
+    }
+    this.recorder?.beginPhase(phase);
+  }
+
   private async openSession(target: TranscriptPhase): Promise<void> {
+    // Each phase gets its own session, and therefore its own connection
+    // machine. Without this the previous phase's terminal `closed` would show
+    // as the new session's starting state until its first callback arrived.
+    this.connection = "idle";
+
     const callbacks: SessionManagerCallbacks = {
       onStateChange: (state) => {
-        if (state === "reconnecting") this.reconnectCount += 1;
+        // Counts OUTAGES, not attempts, and the `from connected` is what makes
+        // the difference. A backoff sequence re-enters `reconnecting` once per
+        // failed attempt — `resuming` → throw → `reconnecting` → `resuming` —
+        // so counting every entry reported three reconnections for one flaky
+        // ten-second episode. That number is persisted on the sitting as a
+        // reliability signal, and a signal that cannot tell one bad minute from
+        // three separate ones is not one.
+        //
+        // Only a transition out of a HEALTHY connection starts a new episode.
+        // A first connect that fails goes `connecting` → `reconnecting` and is
+        // deliberately not counted either: nothing was ever connected, so
+        // nothing reconnected.
+        if (state === "reconnecting" && this.connection === "connected") {
+          this.reconnectCount += 1;
+        }
         this.connection = state;
         this.emit();
       },
@@ -402,7 +1021,13 @@ export class ExamController {
       onExaminerAudio: (base64) => this.player?.enqueue(base64),
       onInterrupted: () => this.player?.interrupt(),
       onTurnComplete: () => {
-        // The examiner has delivered its closing sentence: the phase may end.
+        // The ONLY thing Gemini is allowed to influence about the exam's flow,
+        // and only inside a window the app opened: once the clock has run out
+        // and the closing directive has gone out, the examiner's turn ending is
+        // what releases the phase. Outside a closing handshake this is ignored —
+        // the examiner finishing a sentence mid-débat must not end the débat.
+        // The timer decides when a phase ends; the model only decides when it
+        // has stopped talking about it.
         if (this.closing) {
           this.closing = false;
           this.clearClosingTimer();
@@ -447,25 +1072,68 @@ export class ExamController {
     this.stopTicker();
 
     this.player?.interrupt();
-    const audio = this.recorder?.toWavBlob() ?? null;
-    await this.recorder?.stop();
-    await this.player?.close();
+
+    // Stopped BEFORE the artefacts are taken, not after. `stop()` is what
+    // flushes the partial frame still in the framer, so cutting the blobs first
+    // dropped the candidate's last few tens of milliseconds from the recording
+    // the phonologie score is measured on. Cheap to get right, invisible when
+    // wrong.
+    const recorder = this.recorder;
     this.recorder = null;
+    await recorder?.stop();
+    // Awaited: the artefacts are compressed on the way out of the archive, so
+    // this is where a 38 MB sitting becomes a 2.4 MB upload (#24).
+    const recordings = (await recorder?.recordings()) ?? [];
+    const phases = this.phaseReports(recorder);
+    // The blobs are cut and own their bytes; the PCM behind them is a second
+    // copy of a sitting, and this tab is about to load a results page.
+    recorder?.discard();
+
+    const player = this.player;
     this.player = null;
+    await player?.close();
 
     this.log("exam-finished", {
-      monologue: this.phaseSeconds.monologue,
-      debate: this.phaseSeconds.debate,
+      phases: phases.map((report) => ({
+        phase: report.phase,
+        elapsed: report.elapsedSeconds,
+        recorded: Number(report.recordedSeconds.toFixed(2)),
+      })),
       reconnects: this.reconnectCount,
     });
 
     this.deps.onFinished({
       transcript: this.transcript,
-      audio,
-      monologueSeconds: this.phaseSeconds.monologue,
-      debateSeconds: this.phaseSeconds.debate,
+      recordings,
+      phases,
       reconnectCount: this.reconnectCount,
     });
+  }
+
+  /**
+   * One report per phase the candidate actually entered.
+   *
+   * A sitting abandoned during the monologue reports the monologue and nothing
+   * else — which is the truth about it, and better than a débat row claiming
+   * zero seconds of a task that never happened.
+   */
+  private phaseReports(recorder: RecorderLike | null): PhaseReport[] {
+    const reports: PhaseReport[] = [];
+    for (const phase of SPEAKING_PHASES) {
+      const { startedAt, endedAt } = this.phaseStamps[phase];
+      // Not entered. Written as a narrowing `continue` rather than a filter so
+      // `startedAt` is a number below without an assertion talking the compiler
+      // out of something it was right about.
+      if (startedAt === null) continue;
+      reports.push({
+        phase,
+        elapsedSeconds: this.phaseSeconds[phase],
+        recordedSeconds: recorder?.measuredSeconds(phase) ?? 0,
+        startedAt,
+        endedAt,
+      });
+    }
+    return reports;
   }
 
   // -------------------------------------------------------------------- clock
@@ -491,13 +1159,48 @@ export class ExamController {
   tick(): void {
     if (!this.started || this.phase === "finished" || this.phaseStart === null) return;
 
+    // Held: re-anchor the phase's start to now so the elapsed count stands
+    // still. Re-anchoring rather than tracking a paused duration means every
+    // other reader of `phaseStart` — the time-up check, the phase report —
+    // keeps working off one number with no second notion of time to reconcile.
+    if (this.monologueHeld) {
+      this.phaseStart = this.now() - this.elapsed * 1000;
+      this.checkCaptureAlive();
+      return;
+    }
+
     const seconds = Math.floor((this.now() - this.phaseStart) / 1000);
     if (seconds !== this.elapsed) {
       this.elapsed = seconds;
       this.emit();
     }
 
+    // Checked on the phase clock rather than on a timer of its own: the exam
+    // already has one heartbeat driven by the injected clock, and a recording
+    // that has stopped growing is exactly the kind of fact it should notice.
+    this.checkCaptureAlive();
+
+    // The examiner was asked for one closing sentence and never delivered it.
+    // Advancing anyway is what stops a silent model stranding the candidate on
+    // a frozen clock — the failure the reference implementation hit in
+    // production.
+    if (this.closingHasTimedOut()) {
+      this.closing = false;
+      this.clearClosingTimer();
+      this.log("closing-safety-timeout");
+      void this.advance();
+      return;
+    }
+
     if (isPhaseTimeUp(this.phase, seconds) && !this.closing) {
+      // A monologue that ran its whole length in silence does not become a
+      // débat. The clock stops, the screen says so, and the task stays to be
+      // done — the same refusal the candidate's own button meets, applied to
+      // the one path that would otherwise carry them past it.
+      if (this.phase === "monologue" && this.isMonologueSilent()) {
+        this.holdMonologue("the monologue's time ran out in silence");
+        return;
+      }
       if (phaseUsesLiveSession(this.phase)) this.beginClosingHandshake();
       else void this.advance();
     }
@@ -505,12 +1208,20 @@ export class ExamController {
 
   /** Release everything. Safe to call twice. */
   destroy(): void {
+    // Set before anything else: a `prepareAudio()` still waiting on the
+    // permission prompt reads this when it resolves, and closes what it opened
+    // rather than handing it to a controller that no longer exists.
+    this.destroyed = true;
     this.stopTicker();
     this.clearClosingTimer();
     this.closeSession();
-    void this.recorder?.stop();
-    void this.player?.close();
+    const recorder = this.recorder;
     this.recorder = null;
+    // Released rather than kept: `destroy()` runs when the tab is going away or
+    // the exam is over, and by then either the artefacts have already been taken
+    // (`finish()` nulls the field first) or the page they belonged to is gone.
+    void recorder?.stop().then(() => recorder.discard());
+    void this.player?.close();
     this.player = null;
     this.listeners.clear();
   }

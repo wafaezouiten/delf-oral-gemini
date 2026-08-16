@@ -7,9 +7,9 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "typecheck": "tsc --noEmit",
-    "check": "tsc --noEmit && eslint",
-    "test:unit": "node --import tsx --test \"src/**/*.test.ts\"",
+    "typecheck": "next typegen && tsc --noEmit",
+    "check": "pnpm typecheck && eslint",
+    "test:unit": "node --import tsx --experimental-test-module-mocks --disable-warning=ExperimentalWarning --test \"src/**/*.test.ts\"",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:push": "drizzle-kit push",
@@ -17,6 +17,10 @@
     "smoke": "tsx scripts/smoke-gemini.ts",
     "verify:live": "tsx scripts/verify-live.ts",
     "verify:eval": "cross-env NODE_OPTIONS=--conditions=react-server tsx scripts/verify-eval.ts",
+    "verify:db": "cross-env NODE_OPTIONS=--conditions=react-server tsx scripts/verify-persistence.ts",
+    "compare": "cross-env NODE_OPTIONS=--conditions=react-server tsx scripts/compare.ts",
+    "compare:summarise": "tsx scripts/comparison/summarise.ts",
+    "measure:live": "cross-env NODE_OPTIONS=--conditions=react-server tsx scripts/measure-live.ts",
     "models": "node scripts/list-models.mjs"
   },
   "dependencies": {

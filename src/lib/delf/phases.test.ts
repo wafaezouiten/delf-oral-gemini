@@ -1,8 +1,11 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
+import { ORAL_PARTS_B2 } from "./constants";
 import {
+  MIN_VOICED_SECONDS,
   MONOLOGUE_MIN_SECONDS,
+  monologueWasSilent,
   PHASE_DURATIONS,
   canAdvanceEarly,
   formatClock,
@@ -30,6 +33,22 @@ describe("exam state machine", () => {
     // could not satisfy this.
     const distinct = new Set(Object.values(PHASE_DURATIONS));
     assert.equal(distinct.size, 3);
+  });
+
+  it("takes its timings from the ported B2 part specs, not a second copy of them", () => {
+    // The same three numbers exist in `constants.ts`, where they are the DELF
+    // business rule the duration penalty also reads. If the phase clock ever
+    // stops deriving them, the timer and the rubric can disagree about how long
+    // a monologue is, and nothing will say so.
+    const [monologue, debate] = ORAL_PARTS_B2;
+    assert.equal(PHASE_DURATIONS.preparation, monologue.preparationSeconds);
+    assert.equal(PHASE_DURATIONS.monologue, monologue.durationSeconds);
+    assert.equal(PHASE_DURATIONS.debate, debate.durationSeconds);
+
+    // And the official numbers themselves, so a change to either file is loud.
+    assert.equal(PHASE_DURATIONS.preparation, 30 * 60);
+    assert.equal(PHASE_DURATIONS.monologue, 7 * 60);
+    assert.equal(PHASE_DURATIONS.debate, 13 * 60);
   });
 
   it("ends a phase exactly once, even when the clock jumps past the boundary", () => {
@@ -64,5 +83,29 @@ describe("exam state machine", () => {
     assert.equal(formatClock(65), "1:05");
     assert.equal(formatClock(780), "13:00");
     assert.equal(formatClock(-10), "0:00");
+  });
+});
+
+describe("a silent monologue", () => {
+  it("is silent when the microphone worked and carried almost nothing", () => {
+    assert.equal(monologueWasSilent(90, 0), true);
+    assert.equal(monologueWasSilent(90, MIN_VOICED_SECONDS - 0.1), true);
+  });
+
+  it("is not silent once enough speech was carried", () => {
+    assert.equal(monologueWasSilent(90, MIN_VOICED_SECONDS), false);
+    assert.equal(monologueWasSilent(400, 240), false);
+  });
+
+  it("never calls a dead microphone a silent candidate", () => {
+    // The asymmetry this function exists for. Someone whose capture failed
+    // while they spoke for six minutes must not be told they said nothing —
+    // that is the "corrigé sans l'audio" path, not an unattempted task.
+    assert.equal(monologueWasSilent(0, 0), false);
+  });
+
+  it("treats a nonsense capture the same as none", () => {
+    assert.equal(monologueWasSilent(Number.NaN, 0), false);
+    assert.equal(monologueWasSilent(-1, 0), false);
   });
 });

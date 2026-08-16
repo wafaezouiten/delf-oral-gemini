@@ -18,6 +18,8 @@
  *    reconnect feel like a new exam).
  */
 
+import { getOralPartSpec, type OralPartSpec } from "./constants";
+
 export type OralPhase = "preparation" | "monologue" | "debate" | "finished";
 
 /** The phases in exam order. `finished` is terminal. */
@@ -28,27 +30,94 @@ export const ORAL_PHASES: readonly OralPhase[] = [
   "finished",
 ] as const;
 
+/** The B2 part spec for a task number, or a loud failure. The parts are a fixed
+ *  two-row table, so an absent one is a broken build, not a runtime condition. */
+function requirePart(tache: number): OralPartSpec {
+  const spec = getOralPartSpec(tache);
+  if (!spec) throw new Error(`No DELF B2 oral part ${tache} in ORAL_PARTS_B2`);
+  return spec;
+}
+
+const MONOLOGUE_PART = requirePart(1);
+const DEBATE_PART = requirePart(2);
+
 /**
- * Official DELF B2 production orale timings, in seconds.
+ * Official DELF B2 production orale timings, in seconds: 30 min preparation, a
+ * 5-7 min monologue suivi, then a ~13 min débat.
  *
- * Sourced from the real épreuve (and cross-checked against the reference
- * implementation's `ORAL_PARTS_BY_LEVEL`): 30 min preparation, a 5-7 min
- * monologue suivi, then a débat that brings the total speaking time to ~20 min.
- * The brief fixes the débat target at ~13 min, which is the upper end of the
- * real exam and the number the acceptance test measures against.
+ * **Derived, not restated.** These same three numbers already exist in
+ * `constants.ts` as `ORAL_PARTS_B2` — ported verbatim from the reference
+ * implementation, where they are the DELF business rule. Writing `7 * 60` here
+ * as well would create two sources of truth for the exam's length, and the one
+ * the timer reads would not be the one the duration penalty reads. Reading them
+ * off the part specs means the phase clock and the rubric cannot disagree about
+ * how long a monologue is.
  */
 export const PHASE_DURATIONS: Record<Exclude<OralPhase, "finished">, number> = {
-  preparation: 30 * 60,
-  monologue: 7 * 60,
-  debate: 13 * 60,
+  preparation: MONOLOGUE_PART.preparationSeconds,
+  monologue: MONOLOGUE_PART.durationSeconds,
+  debate: DEBATE_PART.durationSeconds,
 };
 
 /**
- * The minimum monologue length before the candidate may move on early. The real
- * épreuve expects 5-7 minutes; below 5 the "monologue suivi" task has not really
- * been attempted, so the UI keeps the advance button disabled until then.
+ * The minimum monologue length before the candidate may move on to the débat.
+ *
+ * This is a **UI gate, not a grading rule**, and the distinction is the whole
+ * reason it can be this short. It was 5 minutes, matching what the real épreuve
+ * expects of a "monologue suivi"; it is now 1, so a candidate can cut a
+ * monologue that has genuinely run out of things to say — and so the débat,
+ * which is the half most people actually want to practise, is reachable without
+ * sitting through five minutes first.
+ *
+ * Stopping early is still penalised, and by a completely separate number:
+ * `minDurationSeconds(tache)` in `constants.ts` computes the duration penalty
+ * from the *measured audio*, and it is unchanged. A candidate who stops at 61
+ * seconds may now do so, and will still lose the points the DELF's own floor
+ * costs them. The button no longer refuses; the grille still does.
  */
-export const MONOLOGUE_MIN_SECONDS = 5 * 60;
+export const MONOLOGUE_MIN_SECONDS = 1 * 60;
+
+/**
+ * Voiced seconds below which a monologue reads as never attempted.
+ *
+ * Low on purpose. A candidate who genuinely spoke for the minute the clock
+ * demands will have produced far more than this; one who sat in silence
+ * produces almost none. Setting it near the middle of that gap rather than near
+ * a "good" monologue means the question is only ever asked of someone who
+ * really did say next to nothing.
+ *
+ * Five seconds is also about 125 frames, which is what makes the crude
+ * per-frame measure behind it safe: a click marks one frame, and no plausible
+ * amount of door-slamming reaches five seconds of speech-loud audio.
+ */
+export const MIN_VOICED_SECONDS = 5;
+
+/**
+ * Whether the monologue was silent — the candidate had a working microphone and
+ * did not use it.
+ *
+ * The asymmetry in the first line is the important part. **A microphone that
+ * captured nothing is not a silent candidate**: it is a broken microphone, the
+ * product already has a notice, a watchdog and a whole "corrigé sans l'audio"
+ * path for that, and someone whose capture failed while they spoke for six
+ * minutes must never be told they said nothing. So this answers `false` when
+ * there is no audio at all, and only claims silence when the recording exists
+ * and is empty of speech.
+ *
+ * What the caller does with a `true` is offer a confirmation, never a refusal.
+ * The measure underneath is a crude amplitude test (`lib/audio/voice-activity`)
+ * and a quiet speaker on a low-gain microphone can defeat it; the cost of being
+ * wrong therefore has to stay at one extra dialog. Blocking on it would risk
+ * stranding a candidate who cannot reach the débat *or* the end of the épreuve,
+ * which is worse than the accident it prevents.
+ */
+export function monologueWasSilent(
+  capturedSeconds: number,
+  voicedSeconds: number,
+): boolean {
+  if (!(capturedSeconds > 0)) return false;
+  return voicedSeconds < MIN_VOICED_SECONDS;
+}
 
 /** How long this phase runs. `finished` has no clock. */
 export function phaseDurationSeconds(phase: OralPhase): number {
