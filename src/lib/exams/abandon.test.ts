@@ -98,7 +98,24 @@ describe("requesting an abandon", () => {
         }),
     );
 
-    const outcome = await requestAbandon("12", fetchImpl as unknown as typeof fetch, 20);
-    assert.deepEqual(outcome, { recorded: false, reason: "unreachable" });
+    /**
+     * `AbortSignal.timeout()` schedules an **unref'd** timer in Node, so it does
+     * not by itself keep the event loop alive. With a fake `fetch` that never
+     * settles, this test is the only thing pending — the loop drains, the abort
+     * never fires, and the test is cancelled rather than failed. It passed
+     * locally only because other test files happened to keep the loop busy, and
+     * failed in CI, which is the more honest environment.
+     *
+     * A ref'd timer for the duration is what makes it deterministic. Nothing
+     * about the code under test changes: browsers have no unref concept, and
+     * this module only ever runs in one.
+     */
+    const keepLoopAlive = setTimeout(() => {}, 1_000);
+    try {
+      const outcome = await requestAbandon("12", fetchImpl as unknown as typeof fetch, 20);
+      assert.deepEqual(outcome, { recorded: false, reason: "unreachable" });
+    } finally {
+      clearTimeout(keepLoopAlive);
+    }
   });
 });
