@@ -141,11 +141,19 @@ export interface ExamState {
   /**
    * Whether the monologue has a working microphone and almost no speech on it.
    *
-   * Grounds for asking the candidate a question before they move on, never for
-   * refusing to let them — see `monologueWasSilent` for why the measure behind
-   * it cannot be trusted with a refusal.
+   * This began as grounds for *asking* the candidate a question. It is now
+   * grounds for refusing: a monologue with nothing on it has nothing to grade,
+   * so the phase is held open until it is attempted. What keeps that from being
+   * a trap is `monologueWasSilent`'s own asymmetry — a microphone that captured
+   * nothing is never called silent — plus the exit, which still works and is
+   * honest about costing 0/25.
    */
   monologueSilent: boolean;
+  /**
+   * The monologue is being held open because nothing was recorded: the clock
+   * has stopped and the phase will not end until it is attempted.
+   */
+  monologueHeld: boolean;
 }
 
 /**
@@ -283,6 +291,15 @@ export class ExamController {
   private examStart = 0;
   private elapsed = 0;
 
+  /**
+   * The monologue is being held open because nothing was recorded (#39).
+   *
+   * While this is set the phase clock does not move and the phase cannot end —
+   * not on the candidate's button and not on its own time-up. Cleared only by
+   * `restartMonologue()`, which is what « Réessayer la transcription » calls.
+   */
+  private monologueHeld = false;
+
   private transcript: TranscriptEntry[] = [];
   private events: ExamEvent[] = [];
   private connection: ConnectionState = "idle";
@@ -378,7 +395,8 @@ export class ExamController {
       started: this.started,
       monologueSeconds: this.phaseSeconds.monologue,
       debateSeconds: this.phaseSeconds.debate,
-      monologueSilent: this.monologueSilent(),
+      monologueSilent: this.isMonologueSilent(),
+      monologueHeld: this.monologueHeld,
     };
   }
 
@@ -392,7 +410,7 @@ export class ExamController {
    * `false` with no recorder at all, which is the same asymmetry
    * `monologueWasSilent` is built on — no microphone is not a silent candidate.
    */
-  private monologueSilent(): boolean {
+  private isMonologueSilent(): boolean {
     if (!this.recorder) return false;
     return monologueWasSilent(
       this.recorder.measuredSeconds("monologue"),
@@ -588,6 +606,13 @@ export class ExamController {
   /** The candidate ends the current phase early. */
   async advanceEarly(): Promise<void> {
     if (!canAdvanceEarly(this.phase, this.elapsed)) return;
+    // Refused rather than confirmed: a monologue with no speech on it has
+    // nothing to grade, so the only way on is to attempt it. See
+    // `holdMonologue` for the two things that stop this being a trap.
+    if (this.phase === "monologue" && this.isMonologueSilent()) {
+      this.holdMonologue("the candidate ended a monologue with no speech on it");
+      return;
+    }
     if (this.phase === "preparation") {
       const ready = await this.prepareAudio();
       if (!ready) return;
@@ -620,10 +645,35 @@ export class ExamController {
   restartMonologue(): void {
     if (this.phase !== "monologue" || this.closing) return;
 
+    this.monologueHeld = false;
     this.phaseStart = this.now();
     this.elapsed = 0;
     this.phaseSeconds.monologue = 0;
     this.log("monologue-restarted", "no speech was recorded");
+    this.emit();
+  }
+
+  /**
+   * Stop the monologue's clock and refuse to leave the phase.
+   *
+   * Two things stop this being a trap, and neither is incidental:
+   *
+   *  - **A dead microphone is never held.** `monologueWasSilent` answers false
+   *    when nothing was captured at all, so a candidate whose capture failed
+   *    while they spoke passes straight through and is graded on the "corrigé
+   *    sans l'audio" path. Only a working microphone with no voice on it is
+   *    held.
+   *  - **Abandoning still works.** The exit is untouched, and it is honest
+   *    about its price — the épreuve is recorded as a walk-out scored 0/25.
+   *
+   * What is gone is the clock as an escape: a candidate with a working
+   * microphone who never speaks is now required to speak, which is the rule
+   * this product was asked for.
+   */
+  private holdMonologue(why: string): void {
+    if (this.monologueHeld) return;
+    this.monologueHeld = true;
+    this.log("monologue-held", why);
     this.emit();
   }
 
@@ -1012,6 +1062,16 @@ export class ExamController {
   tick(): void {
     if (!this.started || this.phase === "finished" || this.phaseStart === null) return;
 
+    // Held: re-anchor the phase's start to now so the elapsed count stands
+    // still. Re-anchoring rather than tracking a paused duration means every
+    // other reader of `phaseStart` — the time-up check, the phase report —
+    // keeps working off one number with no second notion of time to reconcile.
+    if (this.monologueHeld) {
+      this.phaseStart = this.now() - this.elapsed * 1000;
+      this.checkCaptureAlive();
+      return;
+    }
+
     const seconds = Math.floor((this.now() - this.phaseStart) / 1000);
     if (seconds !== this.elapsed) {
       this.elapsed = seconds;
@@ -1036,6 +1096,14 @@ export class ExamController {
     }
 
     if (isPhaseTimeUp(this.phase, seconds) && !this.closing) {
+      // A monologue that ran its whole length in silence does not become a
+      // débat. The clock stops, the screen says so, and the task stays to be
+      // done — the same refusal the candidate's own button meets, applied to
+      // the one path that would otherwise carry them past it.
+      if (this.phase === "monologue" && this.isMonologueSilent()) {
+        this.holdMonologue("the monologue's time ran out in silence");
+        return;
+      }
       if (phaseUsesLiveSession(this.phase)) this.beginClosingHandshake();
       else void this.advance();
     }

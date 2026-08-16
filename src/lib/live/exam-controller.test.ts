@@ -937,35 +937,80 @@ describe("recording the candidate", () => {
       assert.equal(h.controller.getSnapshot().monologueSilent, false);
     });
 
-    it("still lets the controller advance — the refusal is the screen's, not the machine's", async () => {
-      // `canAdvanceEarly` stays a statement about the clock. The screen refuses
-      // a silent monologue (#39), and keeping that out of the state machine is
-      // what leaves the time-up path free to carry the candidate on regardless.
+    it("refuses the advance and stops the clock", async () => {
       const h = harness();
       await intoMonologue(h);
       h.recorder.voiced.monologue = 0;
       h.advanceClock(120);
-
-      assert.equal(h.controller.getSnapshot().monologueSilent, true);
-      assert.equal(h.controller.getSnapshot().canAdvance, true);
 
       await h.controller.advanceEarly();
-      assert.equal(h.controller.getSnapshot().closing, true);
+
+      const state = h.controller.getSnapshot();
+      assert.equal(state.monologueHeld, true);
+      assert.equal(state.phase, "monologue", "the phase did not move");
+      assert.equal(state.closing, false, "and the examiner was not asked to wrap up");
+      assert.equal(state.elapsed, 120);
+
+      // The clock is stopped, not merely paused for a tick.
+      h.advanceClock(45);
+      assert.equal(h.controller.getSnapshot().elapsed, 120, "the clock stood still");
     });
 
-    it("puts the monologue's clock back so the task has to be attempted", async () => {
+    it("does not let the monologue's own time-up carry a silent candidate on", async () => {
+      // The path the screen cannot see: nobody pressed anything, the clock
+      // simply ran out. It used to hand the candidate to the débat regardless.
+      const h = harness();
+      await intoMonologue(h);
+      h.recorder.voiced.monologue = 0;
+      h.advanceClock(PHASE_DURATIONS.monologue + 5);
+
+      const state = h.controller.getSnapshot();
+      assert.equal(state.monologueHeld, true);
+      assert.equal(state.phase, "monologue");
+      assert.equal(state.closing, false);
+    });
+
+    it("lets the time-up through as usual once the candidate has spoken", async () => {
+      const h = harness();
+      await intoMonologue(h);
+      h.advanceClock(PHASE_DURATIONS.monologue + 5);
+
+      const state = h.controller.getSnapshot();
+      assert.equal(state.monologueHeld, false);
+      assert.equal(state.closing, true, "the examiner was asked to wrap up");
+    });
+
+    it("never holds a dead microphone — that is not a silent candidate", async () => {
+      // Someone whose capture failed while they spoke for six minutes must not
+      // be held. They pass through and are graded on the audio-less path.
+      const h = harness();
+      await intoMonologue(h);
+      h.advanceClockSilently(PHASE_DURATIONS.monologue + 5);
+
+      const state = h.controller.getSnapshot();
+      assert.equal(h.recorder.measuredSeconds("monologue"), 0, "nothing was captured");
+      assert.equal(state.monologueHeld, false);
+      assert.equal(state.closing, true, "and the épreuve moved on");
+    });
+
+    it("restarts the clock and releases the hold", async () => {
       const h = harness();
       await intoMonologue(h);
       h.recorder.voiced.monologue = 0;
       h.advanceClock(120);
-      assert.equal(h.controller.getSnapshot().elapsed, 120);
+      await h.controller.advanceEarly();
+      assert.equal(h.controller.getSnapshot().monologueHeld, true);
 
       h.controller.restartMonologue();
 
       const state = h.controller.getSnapshot();
+      assert.equal(state.monologueHeld, false, "the hold is released");
       assert.equal(state.elapsed, 0, "the clock is back to zero");
-      assert.equal(state.phase, "monologue", "and the phase did not move");
       assert.equal(state.canAdvance, false, "so the minimum applies again");
+
+      // And it runs again, rather than staying frozen.
+      h.advanceClock(30);
+      assert.equal(h.controller.getSnapshot().elapsed, 30);
     });
 
     it("refuses to rewind once the closing handshake has begun", async () => {
@@ -979,21 +1024,6 @@ describe("recording the candidate", () => {
 
       h.controller.restartMonologue();
       assert.equal(h.controller.getSnapshot().elapsed, 120, "the clock stood still");
-    });
-
-    it("does not rewind a phase that is not the monologue", async () => {
-      const h = harness();
-      await intoMonologue(h);
-      h.advanceClock(120);
-
-      h.controller.restartMonologue();
-      assert.equal(h.controller.getSnapshot().elapsed, 0);
-      // …and in preparation it is a no-op, because there is nothing to attempt.
-      const fresh = harness();
-      fresh.controller.start();
-      fresh.advanceClock(30);
-      fresh.controller.restartMonologue();
-      assert.equal(fresh.controller.getSnapshot().elapsed, 30);
     });
   });
 });

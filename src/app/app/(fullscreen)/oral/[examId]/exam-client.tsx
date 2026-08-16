@@ -60,7 +60,6 @@ export function ExamClient({ examId, topic }: { examId: string; topic: OralTopic
   const [showExitDialog, setShowExitDialog] = useState(false);
   const [abandoning, setAbandoning] = useState(false);
   const [abandonFailed, setAbandonFailed] = useState(false);
-  const [emptyTranscript, setEmptyTranscript] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<FinishFailure | null>(null);
   const submittedRef = useRef(false);
@@ -252,33 +251,15 @@ export function ExamClient({ examId, topic }: { examId: string; topic: OralTopic
   const leave = () => router.push("/app");
 
   /**
-   * End the current phase — refused, on the monologue, if nothing was recorded.
+   * End the current phase.
    *
-   * A refusal and not a question. The monologue suivi is a graded task, and
-   * ending it with no speech on the recording is not a decision to be confirmed:
-   * there is nothing to grade, so the only way on is to attempt it. The strip
-   * the refusal raises carries the way back — « Réessayer la transcription »,
-   * which puts the clock to zero and leaves the task to do.
-   *
-   * Two things stop this becoming a trap, and neither is optional:
-   *
-   *  - **A dead microphone is never refused.** `monologueWasSilent` answers
-   *    false when nothing was captured at all, so a candidate whose capture
-   *    failed while they spoke passes straight through to the débat and is
-   *    graded on the "corrigé sans l'audio" path. Only a working microphone
-   *    with no voice on it is refused.
-   *  - **The phase still ends on its own.** `isPhaseTimeUp` carries the
-   *    candidate into the débat when the monologue's clock runs out, whatever
-   *    this thinks. What is removed is the shortcut, not the exit.
+   * The refusal is no longer here. A monologue with no speech on it is held
+   * open by the controller — on this button *and* on its own time-up — because
+   * the second of those is a path the screen cannot see. Leaving the rule in
+   * one place is what keeps the two from disagreeing; this just calls it, and
+   * reads `state.monologueHeld` to know what to draw.
    */
-  const advance = () => {
-    if (state.phase === "monologue" && state.monologueSilent) {
-      setEmptyTranscript(true);
-      return;
-    }
-    setEmptyTranscript(false);
-    void controller.advanceEarly();
-  };
+  const advance = () => void controller.advanceEarly();
 
   /**
    * Abandon: mark the sitting, confirm it was marked, then leave.
@@ -459,11 +440,8 @@ export function ExamClient({ examId, topic }: { examId: string; topic: OralTopic
         onToggleNotes={() => setNotesOpen((open) => !open)}
         onAdvance={advance}
         onExit={() => setShowExitDialog(true)}
-        emptyTranscript={emptyTranscript}
-        onRetryTranscription={() => {
-          setEmptyTranscript(false);
-          controller.restartMonologue();
-        }}
+        emptyTranscript={state.monologueHeld}
+        onRetryTranscription={() => controller.restartMonologue()}
         badges={
           <>
             <RecordingBadge recording={state.recording} />

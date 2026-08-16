@@ -1,6 +1,6 @@
 "use client";
 
-import { LoadingIcon, MicIcon, PencilIcon, StopIcon } from "@/app/_components/po/icons";
+import { AlertIcon, LoadingIcon, MicIcon, PencilIcon, StopIcon } from "@/app/_components/po/icons";
 import { cn } from "@/lib/ui/class-names";
 import { micCopy, secondsToMonologueFloor, type SpeakingPhase } from "@/lib/ui/po-player-view";
 
@@ -40,6 +40,8 @@ export function ConversationControls({
   notesOpen,
   onToggleNotes,
   onAdvance,
+  emptyTranscript = false,
+  onRetryTranscription,
 }: {
   phase: SpeakingPhase;
   /** The state machine's own rule: may this phase be ended now? */
@@ -51,6 +53,9 @@ export function ConversationControls({
   notesOpen: boolean;
   onToggleNotes: () => void;
   onAdvance: () => void;
+  /** The monologue was ended with no speech on it, and the phase is held open. */
+  emptyTranscript?: boolean;
+  onRetryTranscription?: () => void;
 }) {
   const state = connecting ? "connecting" : canAdvance ? "recording" : "locked";
   const { hint, label } = micCopy(phase, state, secondsToMonologueFloor(elapsed));
@@ -58,7 +63,11 @@ export function ConversationControls({
 
   return (
     <div className="border-border bg-card/95 shrink-0 border-t backdrop-blur">
-      <div className="mx-auto flex w-full max-w-[47.5rem] items-center gap-3 px-4 py-3 sm:px-6">
+      {/* `flex-wrap`, because the alert below shares this row. On a wide screen
+          it sits to the right of « Terminer l'épreuve »; on a narrow one it
+          drops to its own line rather than squeezing the mic, which is the one
+          control that must never move. */}
+      <div className="mx-auto flex w-full max-w-[47.5rem] flex-wrap items-center gap-3 px-4 py-3 sm:px-6">
         {hasNotes && (
           <button
             type="button"
@@ -126,6 +135,38 @@ export function ConversationControls({
         >
           Terminer l&apos;épreuve
         </button>
+
+        {/* In the same container as « Terminer l'épreuve », on its own line
+            beneath it.
+
+            It took a share of the row first, and measuring showed why that is
+            wrong: the mic is centred in the space left over, so the alert
+            appearing slid it 150px sideways. The mic is the one control a
+            candidate reaches for mid-épreuve without looking, and it must not
+            move because something else appeared. `order-last w-full` gives the
+            alert its own line, so the row above it is byte-for-byte the layout
+            it was before. */}
+        {emptyTranscript && (
+          <div
+            role="alert"
+            className="border-warning/40 bg-warning-subtle text-warning order-last flex w-full flex-wrap items-center gap-x-3 gap-y-2 rounded-md border px-3 py-2 sm:justify-end"
+          >
+            <AlertIcon className="size-4 shrink-0" />
+            <div className="min-w-0 flex-1 sm:flex-none">
+              <p className="text-xs font-semibold">Transcription vide</p>
+              <p className="text-[0.6875rem] leading-snug">
+                Le chronomètre est arrêté. Reprenez votre monologue.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={onRetryTranscription}
+              className="border-warning/50 bg-card hover:bg-muted shrink-0 rounded-md border px-3 py-1.5 text-xs font-semibold transition-colors"
+            >
+              Réessayer la transcription
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );
