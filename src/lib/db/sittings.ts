@@ -333,6 +333,11 @@ export function neonSittingStore(): SittingStore {
             finishedAt: oralExams.finishedAt,
           })
           .from(oralExams)
+          // Inner, where the ownership lookup's is left, and the difference is
+          // what each one costs when the join finds nothing. Ownership was
+          // settled before this ran, so an empty result here means the results
+          // page renders from the browser's copy; there it would mean a 404 on
+          // a sitting somebody owns. See `findExamOwner` in `exam-guard.ts`.
           .innerJoin(oralTopics, eq(oralExams.topicId, oralTopics.id))
           .where(owned)
           .limit(1),

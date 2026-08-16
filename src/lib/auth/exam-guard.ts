@@ -46,6 +46,13 @@ import {
  * word that has no place in the query the ownership decision is made from. The
  * row answers who owns it; the join answers what it is about; neither gets a
  * vote on the other.
+ *
+ * That argument is about this query and not about the same join elsewhere:
+ * `readSitting` joins `oral_topics` inner, and is right to. It runs only after
+ * this function has already established ownership, so an empty result there
+ * costs a render — the results page falls back to the copy the browser is
+ * holding — rather than telling a candidate their own épreuve does not exist.
+ * The looseness is bought where an authorisation decision is being made.
  */
 async function findExamOwner(examId: number): Promise<ExamOwnerRow | undefined> {
   const [row] = await getDb()
