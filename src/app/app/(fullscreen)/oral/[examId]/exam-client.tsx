@@ -1,0 +1,414 @@
+"use client";
+
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
+
+import { Notice } from "@/app/_components/notice";
+import { dangerButton } from "@/app/_components/button-styles";
+import { ExitDialog } from "@/app/_components/po/exit-dialog";
+import { useExamController } from "@/lib/live/use-exam-controller";
+import type { ExamFinishedPayload } from "@/lib/live/exam-controller";
+import { isOpusEncodingSupported } from "@/lib/audio/opus-encoder";
+import { selectDeliverable } from "@/lib/exams/uploaded-recording";
+import { describeFinishFailure, type FinishFailure } from "@/lib/ui/finish-failure";
+import {
+  candidateStatus as candidateStatusLine,
+  examinerStatus as examinerStatusLine,
+} from "@/lib/ui/po-player-view";
+import type { OralTopic } from "@/lib/delf/topics";
+import { ConnectionBadge } from "./_components/connection-badge";
+import { EventLog } from "./_components/event-log";
+import { RecordingBadge } from "./_components/recording-badge";
+import { BriefingScreen } from "./_components/briefing-screen";
+import { PreparationScreen } from "./_components/preparation-screen";
+import { PassationScreen } from "./_components/passation-screen";
+import { FinishedScreen } from "./_components/finished-screen";
+
+/**
+ * The simulateur: one screen per phase, and a phase switch.
+ *
+ * PORT NOTE: this is the reference's `simulateur-client.tsx` — an orchestrator
+ * that holds the notes, the exit dialog and the finished payload, decides which
+ * of four screens is on, and owns no layout at all. Every branch below returns a
+ * whole screen rather than composing one out of conditionals, which is the
+ * property that made the reference's four screens possible to reason about
+ * separately.
+ *
+ * What is NOT the reference's is everything about the épreuve itself: the phases,
+ * the clocks, the socket, the microphone and the upload all belong to
+ * `ExamController` exactly as before. This file was reshaped, not rewritten —
+ * the finish handler below is unchanged from the screen this replaces, down to
+ * the comments, because none of what it says stopped being true when the layout
+ * changed.
+ */
+
+/**
+ * How long the briefing waits for the browser to say whether it can encode.
+ *
+ * `AudioEncoder.isConfigSupported` answers in milliseconds; this is only here so
+ * that one that never answers costs the candidate three seconds rather than the
+ * épreuve.
+ */
+const BROWSER_CHECK_TIMEOUT_MS = 3_000;
+
+export function ExamClient({ examId, topic }: { examId: string; topic: OralTopic }) {
+  const router = useRouter();
+  const [notes, setNotes] = useState("");
+  const [notesOpen, setNotesOpen] = useState(false);
+  const [showExitDialog, setShowExitDialog] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<FinishFailure | null>(null);
+  const submittedRef = useRef(false);
+
+  /**
+   * The phases whose recording could not be attached to the finish request.
+   *
+   * Rendered rather than only logged, which is the whole point: a candidate
+   * should be able to go from start to correction without reading a console, and
+   * "your débat was graded from the transcript and measured zero seconds" is
+   * exactly the kind of thing that used to live in a `console.warn` nobody
+   * opens. Said on this screen, at the moment it happens, because the results
+   * page is read back from the database and this is not a fact the database
+   * holds.
+   */
+  const [droppedPhases, setDroppedPhases] = useState<Array<"monologue" | "debate">>([]);
+
+  /**
+   * The finished sitting, kept so the upload can be retried.
+   *
+   * `submittedRef` is already reset when a finish fails — the controller's
+   * payload is the only thing that was missing, and without it the retry had no
+   * way to be offered. The audio lives in this tab and nowhere else, so this ref
+   * is the last copy of the épreuve; it is not cleared on success only because
+   * the screen navigates away.
+   */
+  const finishedPayload = useRef<ExamFinishedPayload | null>(null);
+
+  /**
+   * Ship the finished exam for grading. The evaluation is stashed in
+   * sessionStorage as well as persisted, so the results page renders even with
+   * no database configured.
+   *
+   * The recordings go up as one file per phase rather than one per sitting: the
+   * duration floors are per task, and two artefacts are what lets a candidate
+   * re-listen to the half that went wrong. Multipart because a 13-minute
+   * recording has no business being base64'd into a JSON body.
+   */
+  const onFinished = useCallback(
+    async (payload: ExamFinishedPayload) => {
+      if (submittedRef.current) return;
+      submittedRef.current = true;
+      finishedPayload.current = payload;
+      setSubmitting(true);
+      setSubmitError(null);
+
+      const form = new FormData();
+      const json = JSON.stringify({
+        topicSlug: topic.slug,
+        transcript: payload.transcript,
+        phases: payload.phases,
+        reconnectCount: payload.reconnectCount,
+      });
+      form.set("payload", json);
+
+      /**
+       * Weighed before it is sent, because the route refuses an oversized
+       * upload with a 413 for the whole request and there is nothing here that
+       * can recover from one: the exam is one-way, and a retry would re-send
+       * the same bytes to be refused the same way (#24).
+       *
+       * A sitting encoded as Opus is about 2.4 MB and always fits, so in the
+       * ordinary case this drops nothing. What it is for is the browser that
+       * could not encode — where the artefact is a WAV, and a WAV is over the
+       * per-file cap after 98 seconds.
+       *
+       * Dropping a recording costs the candidate more than phonologie: the
+       * phase then measures zero seconds, and the duration penalty is computed
+       * from measured audio. That is the same rule a dead microphone meets and
+       * the only honest one available here — the server cannot grade audio it
+       * was not given — but it is why this drops per artefact instead of
+       * all-or-nothing, and why the briefing says so before the épreuve starts.
+       */
+      const deliverable = selectDeliverable(
+        payload.recordings,
+        (recording) => recording.blob.size,
+        new TextEncoder().encode(json).length,
+      );
+      for (const recording of deliverable) {
+        const extension = recording.mimeType === "audio/ogg" ? "ogg" : "wav";
+        form.set(`audio-${recording.phase}`, recording.blob, `${recording.phase}.${extension}`);
+      }
+      const dropped: Array<"monologue" | "debate"> = [];
+      for (const recording of payload.recordings) {
+        if (deliverable.includes(recording)) continue;
+        dropped.push(recording.phase);
+        // Deliberately not "too large": a recording is also dropped when it is
+        // legal on its own and the pair is not, and a triage message that names
+        // the wrong limit sends the reader to the wrong constant.
+        console.warn(
+          `[finish] the ${recording.phase} recording (${recording.blob.size} bytes, ` +
+            `${recording.mimeType}) was not attached: it does not fit in one request ` +
+            "beside the rest of the sitting. That phase will be graded from its " +
+            "transcript and will measure zero seconds.",
+        );
+      }
+      setDroppedPhases(dropped);
+
+      // What the results page shows, and what the penalty was computed from: the
+      // measured length of the recording, not the phase clock. They differ
+      // exactly when something went wrong with the microphone, and showing the
+      // clock there would hide it.
+      const recordedSeconds = (phase: "monologue" | "debate") =>
+        payload.phases.find((report) => report.phase === phase)?.recordedSeconds ?? 0;
+
+      try {
+        const response = await fetch(`/api/exams/${examId}/finish`, {
+          method: "POST",
+          body: form,
+        });
+        // A platform error is an HTML page, not this route's JSON, so parsing is
+        // allowed to fail without losing the status — which is the half of the
+        // failure that decides whether a retry is worth offering.
+        const body = await response.json().catch(() => null);
+        if (!response.ok) {
+          setSubmitError(describeFinishFailure(response.status, body?.error));
+          setSubmitting(false);
+          submittedRef.current = false;
+          return;
+        }
+
+        sessionStorage.setItem(
+          `delf-eval-${examId}`,
+          JSON.stringify({
+            evaluation: body.evaluation,
+            topic,
+            transcript: payload.transcript,
+            monologueSeconds: recordedSeconds("monologue"),
+            debateSeconds: recordedSeconds("debate"),
+            reconnectCount: payload.reconnectCount,
+          }),
+        );
+        router.push(`/app/results/${examId}`);
+      } catch (error) {
+        // The request never got an answer — offline, DNS, a dropped upload. The
+        // exception's own words ("Failed to fetch") are for the console; the
+        // candidate gets a sentence and a retry, because nothing was refused.
+        console.error(error);
+        setSubmitError(describeFinishFailure(null, null));
+        setSubmitting(false);
+        // Allow a retry: the transcript is still in memory.
+        submittedRef.current = false;
+      }
+    },
+    [examId, topic, router],
+  );
+
+  const { state, controller } = useExamController({ examId, topic, onFinished });
+
+  /**
+   * Whether this browser can compress the recording, asked before the épreuve
+   * rather than discovered after it.
+   *
+   * A browser without WebCodecs archives a WAV, and a WAV sitting is far past
+   * what one request may carry — so the recording is never sent, the correction
+   * is made from the transcript alone, and the duration penalty applies as if
+   * nothing had been recorded (#24). That is the whole product lost, and the
+   * only moment the candidate can do anything about it is now, before thirty
+   * minutes of preparation.
+   *
+   * Which is why the épreuve does not start until the question has been
+   * answered. `isConfigSupported` is fast, but "fast" is not "synchronous": a
+   * candidate who clicks straight through on a slow device would take the
+   * briefing — and with it the only warning there will ever be — off screen
+   * before it could render, and the briefing does not come back.
+   *
+   * The timeout is the other half of that. A browser that never answers must
+   * not hold the exam shut, so the wait is bounded; past it the sitting starts
+   * unwarned, which is exactly where this began and no worse.
+   */
+  const [canEncode, setCanEncode] = useState<boolean | null>(null);
+  const [checkingBrowser, setCheckingBrowser] = useState(true);
+  useEffect(() => {
+    let live = true;
+    const settle = (supported: boolean | null) => {
+      if (!live) return;
+      if (supported !== null) setCanEncode(supported);
+      setCheckingBrowser(false);
+    };
+
+    void isOpusEncodingSupported().then(settle);
+    const timer = setTimeout(() => settle(null), BROWSER_CHECK_TIMEOUT_MS);
+    return () => {
+      live = false;
+      clearTimeout(timer);
+    };
+  }, []);
+
+  const leave = () => router.push("/app");
+
+  /**
+   * Every failure the épreuve can produce, in the order a candidate cares about
+   * it: the connection that has stopped coming back, then the microphone. Both
+   * are messages first and a control second — a red button on its own is not an
+   * explanation.
+   *
+   * Shared by the préparation and passation screens rather than written into
+   * each, because a failure is not less true for having happened during the
+   * quiet phase: the microphone can be refused while the browser is asked for
+   * it, which happens on the boundary between the two.
+   */
+  const notices = (
+    <>
+      {state.status === "error" && (
+        <Notice
+          tone="danger"
+          title="La connexion avec l'examinateur est perdue"
+          action={
+            <button
+              type="button"
+              onClick={() => void controller.forceReconnect()}
+              className={dangerButton}
+            >
+              Reprendre la connexion
+            </button>
+          }
+        >
+          Les tentatives automatiques de reconnexion n&apos;ont pas abouti. Le
+          temps de cette partie continue de s&apos;écouler et ce qui a déjà été
+          dit est conservé. Vérifiez votre connexion internet, puis reprenez.
+        </Notice>
+      )}
+
+      {state.micError && (
+        <Notice tone="warning" title="Microphone">
+          {state.micError}
+        </Notice>
+      )}
+    </>
+  );
+
+  const hasNotices = state.status === "error" || Boolean(state.micError);
+
+  // ------------------------------------------------------------------ screens
+
+  if (!state.started) {
+    return (
+      <BriefingScreen
+        topic={topic}
+        canEncode={canEncode}
+        checking={checkingBrowser}
+        onStart={() => controller.start()}
+        onSkip={() => {
+          // The reference's "Passer et aller directement à l'épreuve", against a
+          // controller that has no such jump: preparation must be entered before
+          // it can be left early. Two calls rather than a new controller path,
+          // because the second one is the same button the préparation rail
+          // offers and shares its microphone prompt.
+          controller.start();
+          void controller.advanceEarly();
+        }}
+        onBack={leave}
+      />
+    );
+  }
+
+  if (state.phase === "finished") {
+    return (
+      <FinishedScreen
+        submitting={submitting}
+        submitError={submitError}
+        droppedPhases={droppedPhases}
+        onRetry={() => {
+          const payload = finishedPayload.current;
+          if (payload) void onFinished(payload);
+        }}
+        onLeave={leave}
+      />
+    );
+  }
+
+  const exitDialog = (
+    <ExitDialog
+      open={showExitDialog}
+      onCancel={() => setShowExitDialog(false)}
+      onConfirm={leave}
+    />
+  );
+
+  if (state.phase === "preparation") {
+    return (
+      <>
+        <PreparationScreen
+          topic={topic}
+          notes={notes}
+          onNotes={setNotes}
+          remaining={state.remaining}
+          onStartExam={() => void controller.advanceEarly()}
+          onExit={() => setShowExitDialog(true)}
+          notices={hasNotices ? notices : undefined}
+        />
+        {exitDialog}
+      </>
+    );
+  }
+
+  return (
+    <>
+      <PassationScreen
+        phase={state.phase}
+        elapsed={state.elapsed}
+        remaining={state.remaining}
+        recording={state.recording}
+        examinerSpeaking={state.examinerSpeaking}
+        connected={state.connection === "connected"}
+        connecting={state.connection === "connecting"}
+        canAdvance={state.canAdvance}
+        examinerStatus={examinerStatusLine({
+          connected: state.connection === "connected",
+          connecting: state.connection === "connecting",
+          speaking: state.examinerSpeaking,
+        })}
+        candidateStatus={candidateStatusLine({
+          connected: state.connection === "connected",
+          examinerSpeaking: state.examinerSpeaking,
+          recording: state.recording,
+        })}
+        notes={notes}
+        notesOpen={notesOpen}
+        onToggleNotes={() => setNotesOpen((open) => !open)}
+        onAdvance={() => void controller.advanceEarly()}
+        onExit={() => setShowExitDialog(true)}
+        badges={
+          <>
+            <RecordingBadge recording={state.recording} />
+            <ConnectionBadge state={state.connection} />
+          </>
+        }
+        notices={hasNotices ? notices : undefined}
+        devPanel={
+          process.env.NODE_ENV !== "production" ? (
+            <div className="space-y-2">
+              <EventLog events={state.events} />
+              {/* Drives the path a real GoAway takes, so the 13-minute
+                  resumption behaviour can be exercised in seconds instead of
+                  waiting for the connection limit. Stands down once the real
+                  recovery control is on screen in the notice above — two
+                  buttons doing the same thing side by side is how a developer
+                  ends up testing the wrong one. */}
+              {state.status !== "error" && (
+                <button
+                  type="button"
+                  onClick={() => void controller.forceReconnect()}
+                  className="border-border text-muted-foreground rounded-md border px-3 py-1.5 text-xs font-semibold"
+                >
+                  Forcer une reconnexion ({state.reconnectCount})
+                </button>
+              )}
+            </div>
+          ) : undefined
+        }
+      />
+      {exitDialog}
+    </>
+  );
+}

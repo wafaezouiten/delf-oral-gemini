@@ -184,6 +184,56 @@ body {
 }
 
 /**
+ * The passation's two moving parts, as CSS rather than as a library.
+ *
+ * The reference implementation runs both on motion/react. Reproducing them with
+ * `@keyframes` is not a shortcut around a dependency this project would
+ * otherwise want: it is what puts them under the `prefers-reduced-motion` rule
+ * below, which is a blanket `animation-duration: 0.001ms` and reaches every
+ * animation in the product *except* a JavaScript one, which keeps running
+ * because it never asked the cascade. A candidate who has told their system they
+ * do not want motion should not have a ring pulsing at them for twenty minutes.
+ *
+ * `po-ring` is the "who holds the floor" pulse — a border expanding out of a
+ * speaker's avatar and fading, which is the same figure the recording dot uses
+ * and for the same reason: a static ring reads as decoration.
+ *
+ * `po-bar` is one bar of the five-bar "a mic is live" glyph. It is decorative
+ * motion and NOT a level meter — it says the microphone is being listened to,
+ * not how loud anything is. The five bars are staggered by inline delay so the
+ * wave travels rather than throbbing as a block.
+ */
+@keyframes po-ring {
+  from {
+    transform: scale(1);
+    opacity: 0.5;
+  }
+  to {
+    transform: scale(1.55);
+    opacity: 0;
+  }
+}
+
+@keyframes po-bar {
+  0%,
+  100% {
+    transform: scaleY(0.25);
+  }
+  50% {
+    transform: scaleY(1);
+  }
+}
+
+.po-ring {
+  animation: po-ring 1.5s ease-out infinite;
+}
+
+.po-bar {
+  transform-origin: center;
+  animation: po-bar 1s ease-in-out infinite;
+}
+
+/**
  * Motion is a statement here, not a flourish: the recording dot pulses because a
  * static red dot reads as a decoration. A candidate who has asked their system
  * for less motion gets the dot without the pulse — the badge still says
