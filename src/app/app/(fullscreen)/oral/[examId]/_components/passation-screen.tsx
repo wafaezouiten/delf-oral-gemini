@@ -151,46 +151,51 @@ export function PassationScreen({
           {devPanel}
         </div>
 
-        {/* Docked directly above the mic, not floated over the middle of the
-            screen: the candidate has just pressed that button and this is the
-            answer to it, so it belongs where their eye already is. A strip
-            rather than a dialog because nothing here is a choice — the only way
-            on is to attempt the task. */}
-        {emptyTranscript && (
-          <div
-            role="alert"
-            className="border-warning/40 bg-warning-subtle text-warning shrink-0 border-t px-4 py-3 sm:px-6"
-          >
-            <div className="mx-auto flex w-full max-w-[47.5rem] flex-wrap items-center justify-between gap-3">
-              <div className="min-w-0">
-                <p className="text-sm font-semibold">Transcription vide</p>
-                <p className="text-xs leading-relaxed">
-                  Rien n&apos;a été enregistré pendant votre monologue. Cette
-                  partie est notée : reprenez-la avant de passer au débat.
-                </p>
-              </div>
+        {/* Anchored to the bottom-right corner, alongside « Terminer l'épreuve »
+            rather than across the whole foot of the screen.
+
+            `bottom-full` on a wrapper around the control bar rather than a
+            guessed offset: the card then sits exactly above the bar whatever
+            that bar's height turns out to be, and cannot drift on top of the
+            mic when the hint under it wraps to two lines.
+
+            Right-anchored from `sm` up, where there is room beside the button.
+            Below that it stretches to both edges instead — a corner card on a
+            375px screen would either cover the mic or be too narrow to read,
+            and this is an alert about a graded task. */}
+        <div className="relative shrink-0">
+          {emptyTranscript && (
+            <div
+              role="alert"
+              className="border-warning/40 bg-warning-subtle text-warning absolute bottom-full right-0 left-0 z-30 mb-2 border p-3 sm:left-auto sm:mr-4 sm:w-[19rem]"
+            >
+              <p className="text-sm font-semibold">Transcription vide</p>
+              <p className="mt-0.5 text-xs leading-relaxed">
+                Rien n&apos;a été enregistré pendant votre monologue. Cette
+                partie est notée : reprenez-la avant de passer au débat.
+              </p>
               <button
                 type="button"
                 onClick={onRetryTranscription}
-                className="border-warning/50 bg-card hover:bg-muted shrink-0 rounded-md border px-3.5 py-2 text-xs font-semibold transition-colors"
+                className="border-warning/50 bg-card hover:bg-muted mt-2.5 w-full rounded-md border px-3 py-1.5 text-xs font-semibold transition-colors"
               >
                 Réessayer la transcription
               </button>
             </div>
-          </div>
-        )}
+          )}
 
-        <ConversationControls
-          phase={phase}
-          canAdvance={canAdvance}
-          connecting={connecting}
-          recording={recording}
-          elapsed={elapsed}
-          hasNotes={hasNotes}
-          notesOpen={notesOpen}
-          onToggleNotes={onToggleNotes}
-          onAdvance={onAdvance}
-        />
+          <ConversationControls
+            phase={phase}
+            canAdvance={canAdvance}
+            connecting={connecting}
+            recording={recording}
+            elapsed={elapsed}
+            hasNotes={hasNotes}
+            notesOpen={notesOpen}
+            onToggleNotes={onToggleNotes}
+            onAdvance={onAdvance}
+          />
+        </div>
 
         {hasNotes && (
           <NotesDrawer open={notesOpen} notes={notes} onClose={onToggleNotes} />
