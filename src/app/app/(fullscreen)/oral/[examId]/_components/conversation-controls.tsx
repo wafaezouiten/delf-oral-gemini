@@ -1,5 +1,7 @@
 "use client";
 
+import type { ReactNode } from "react";
+
 import { AlertIcon, LoadingIcon, MicIcon, PencilIcon, StopIcon } from "@/app/_components/po/icons";
 import { cn } from "@/lib/ui/class-names";
 import { micCopy, secondsToMonologueFloor, type SpeakingPhase } from "@/lib/ui/po-player-view";
@@ -42,6 +44,7 @@ export function ConversationControls({
   onAdvance,
   emptyTranscript = false,
   onRetryTranscription,
+  devPanel,
 }: {
   phase: SpeakingPhase;
   /** The state machine's own rule: may this phase be ended now? */
@@ -56,6 +59,9 @@ export function ConversationControls({
   /** The monologue was ended with no speech on it, and the phase is held open. */
   emptyTranscript?: boolean;
   onRetryTranscription?: () => void;
+  /** DEVELOPMENT ONLY — the transcription panel, which belongs beside the
+   *  empty-transcript notice rather than under the conversation (#36). */
+  devPanel?: ReactNode;
 }) {
   const state = connecting ? "connecting" : canAdvance ? "recording" : "locked";
   const { hint, label } = micCopy(phase, state, secondsToMonologueFloor(elapsed));
@@ -143,32 +149,42 @@ export function ConversationControls({
             Terminer l&apos;épreuve
           </button>
 
-          {/* `xl:absolute` lifts it out of the flex row and into the bar's
-              corner. That also stops it costing the mic any width: in flow the
+          {/* `xl:absolute` lifts the pair out of the flex row and into the bar's
+              corner. That also stops them costing the mic any width: in flow the
               mic is centred in what is left over, so on a wide screen the alert
               appearing used to slide it 131px sideways. Above `xl` it no longer
-              moves at all. */}
-          {emptyTranscript && (
-            <div
-              role="alert"
-              className="border-warning/40 bg-warning-subtle text-warning flex items-center gap-2.5 rounded-md border px-3 py-1.5 xl:absolute xl:top-1/2 xl:right-6 xl:-translate-y-1/2"
-            >
-              <AlertIcon className="size-4 shrink-0" />
-              <div className="min-w-0">
-                <p className="text-xs font-semibold whitespace-nowrap">
-                  Transcription vide
-                </p>
-                <p className="text-[0.6875rem] leading-snug whitespace-nowrap">
-                  Chronomètre arrêté.
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={onRetryTranscription}
-                className="border-warning/50 bg-card hover:bg-muted shrink-0 rounded-md border px-2.5 py-1.5 text-xs font-semibold whitespace-nowrap transition-colors"
-              >
-                Réessayer
-              </button>
+              moves at all.
+
+              The alert and the development panel share one wrapper because they
+              are about the same thing — the transcript, and its being empty —
+              and because they must move together: two separately-positioned
+              elements in one corner is how they end up on top of each other. */}
+          {(emptyTranscript || devPanel) && (
+            <div className="flex flex-wrap items-center gap-2 xl:absolute xl:top-1/2 xl:right-6 xl:-translate-y-1/2">
+              {emptyTranscript && (
+                <div
+                  role="alert"
+                  className="border-warning/40 bg-warning-subtle text-warning flex items-center gap-2.5 rounded-md border px-3 py-1.5"
+                >
+                  <AlertIcon className="size-4 shrink-0" />
+                  <div className="min-w-0">
+                    <p className="text-xs font-semibold whitespace-nowrap">
+                      Transcription vide
+                    </p>
+                    <p className="text-[0.6875rem] leading-snug whitespace-nowrap">
+                      Chronomètre arrêté.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={onRetryTranscription}
+                    className="border-warning/50 bg-card hover:bg-muted shrink-0 rounded-md border px-2.5 py-1.5 text-xs font-semibold whitespace-nowrap transition-colors"
+                  >
+                    Réessayer
+                  </button>
+                </div>
+              )}
+              {devPanel}
             </div>
           )}
         </div>
