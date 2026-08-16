@@ -223,11 +223,22 @@ export interface EvaluationResult {
   /**
    * What the correction actually cost, in tokens, as the API reported it.
    *
-   * Reported rather than stored: nothing persists this, and no candidate-facing
-   * behaviour reads it. It exists because #12 asks for cost per sitting measured
-   * rather than estimated, and a harness that counted the prompt itself would be
-   * measuring its own arithmetic instead of the call. See `evaluation-usage.ts`,
-   * where the reading lives so it can be tested.
+   * Exists because #12 asks for cost per sitting measured rather than estimated,
+   * and a harness that counted the prompt itself would be measuring its own
+   * arithmetic instead of the call. The reading lives in `evaluation-usage.ts`
+   * so it can be tested.
+   *
+   * WHERE IT GOES, precisely — an earlier version of this comment claimed it
+   * went nowhere, which was half true and is the kind of half that misleads:
+   *
+   *  - **Not stored.** `toCorrectionRow` omits it and `evaluations` has no
+   *    column for it. That boundary is real and enforced by the schema.
+   *  - **Does reach the browser.** The finish route returns the whole
+   *    `EvaluationResult` on a fresh grading, so these token counts land in the
+   *    JSON next to `rawCriteria`, `modelTotal25` and `latencySeconds` — the
+   *    three diagnostics that have always travelled that way. Deliberately not
+   *    stripped: removing one of four would imply a boundary the route does not
+   *    have, and none of them is sensitive. Nothing in the UI reads any of them.
    */
   usage: EvaluationUsage;
 }

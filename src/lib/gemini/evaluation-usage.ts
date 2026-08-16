@@ -7,10 +7,12 @@
  * than eyeballing — an absent count must not become a zero, and the audio slice
  * has to be found in a list rather than read off a field.
  *
- * Reported, never stored. Nothing persists these numbers and no candidate-facing
- * behaviour reads them; they exist because #12 asks for cost per sitting measured
- * rather than estimated, and a harness that counted the prompt itself would be
- * measuring its own arithmetic instead of the call.
+ * These numbers are never persisted — `evaluations` has no column for them — but
+ * they do travel to the browser on a fresh grading, alongside the other
+ * diagnostics the finish route returns. See `EvaluationResult.usage` for the
+ * exact boundary and why it is drawn there. They exist because #12 asks for cost
+ * per sitting measured rather than estimated, and a harness that counted the
+ * prompt itself would be measuring its own arithmetic instead of the call.
  */
 
 import { MediaModality, type GenerateContentResponse } from "@google/genai";
