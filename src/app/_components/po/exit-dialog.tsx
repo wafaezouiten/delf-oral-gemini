@@ -39,13 +39,22 @@ import { AlertIcon } from "./icons";
  */
 export function ExitDialog({
   open,
+  pending = false,
+  failed = false,
   onCancel,
   onConfirm,
+  onLeaveAnyway,
 }: {
   open: boolean;
+  /** The abandon is in flight. See `ExamClient`. */
+  pending?: boolean;
+  /** The server did not record it — the promised zero was not written. */
+  failed?: boolean;
   onCancel: () => void;
-  /** Marks the sitting abandoned, then leaves. See `ExamClient`. */
+  /** Marks the sitting abandoned, then leaves. */
   onConfirm: () => void;
+  /** Leaves without a record, once recording it has been tried and failed. */
+  onLeaveAnyway: () => void;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
 
@@ -89,15 +98,42 @@ export function ExitDialog({
           corrigée.
         </p>
 
+        {/* The promise could not be kept, and saying nothing would make that the
+            second broken promise of one click. Assertive, because the candidate
+            is on their way out and will not come looking for it. */}
+        {failed && (
+          <p role="alert" className="border-border bg-muted text-foreground border p-3 text-sm leading-relaxed">
+            L&apos;abandon n&apos;a pas pu être enregistré. Vous pouvez réessayer,
+            ou quitter quand même — cette épreuve restera alors en cours et ne
+            comptera pas.
+          </p>
+        )}
+
         <div className="flex flex-wrap justify-end gap-2 pt-1">
           {/* Autofocused: the dialog opens on the way out, so the key the
               candidate is most likely to press next should be the one that
               keeps their épreuve. */}
-          <button type="button" onClick={onCancel} className={secondaryButton} autoFocus>
+          <button
+            type="button"
+            onClick={onCancel}
+            className={secondaryButton}
+            disabled={pending}
+            autoFocus
+          >
             Continuer
           </button>
-          <button type="button" onClick={onConfirm} className={dangerButton}>
-            Abandonner
+          {failed && (
+            <button type="button" onClick={onLeaveAnyway} className={secondaryButton}>
+              Quitter quand même
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={onConfirm}
+            disabled={pending}
+            className={dangerButton}
+          >
+            {pending ? "Abandon en cours…" : failed ? "Réessayer" : "Abandonner"}
           </button>
         </div>
       </div>

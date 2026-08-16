@@ -10,6 +10,7 @@ import { useExamController } from "@/lib/live/use-exam-controller";
 import type { ExamFinishedPayload } from "@/lib/live/exam-controller";
 import { isOpusEncodingSupported } from "@/lib/audio/opus-encoder";
 import { selectDeliverable } from "@/lib/exams/uploaded-recording";
+import { requestAbandon } from "@/lib/exams/abandon";
 import { describeFinishFailure, type FinishFailure } from "@/lib/ui/finish-failure";
 import {
   candidateStatus as candidateStatusLine,
@@ -57,6 +58,8 @@ export function ExamClient({ examId, topic }: { examId: string; topic: OralTopic
   const [notes, setNotes] = useState("");
   const [notesOpen, setNotesOpen] = useState(false);
   const [showExitDialog, setShowExitDialog] = useState(false);
+  const [abandoning, setAbandoning] = useState(false);
+  const [abandonFailed, setAbandonFailed] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<FinishFailure | null>(null);
   const submittedRef = useRef(false);
@@ -248,26 +251,44 @@ export function ExamClient({ examId, topic }: { examId: string; topic: OralTopic
   const leave = () => router.push("/app");
 
   /**
-   * Abandon: mark the sitting, then leave.
+   * Abandon: mark the sitting, confirm it was marked, then leave.
    *
    * The exit dialog promises the candidate this épreuve will count as a zero, so
-   * the promise is kept here before the navigation rather than left to a server
-   * that would otherwise only ever see a sitting go quiet — which is
-   * indistinguishable from a flat battery, and only one of those is a decision.
+   * the promise has to be kept before the navigation — not handed to a server
+   * that would otherwise only ever see a sitting go quiet, which is
+   * indistinguishable from a flat battery.
    *
-   * Not awaited, and `keepalive` for the same reason `reportPhase` uses it: the
-   * router is tearing this page down as the request goes, and an ordinary fetch
-   * would be cancelled with it. A failure costs the record of the walk-out, not
-   * the walk-out — so nothing here blocks the candidate leaving, and the catch
-   * is a log rather than a message on a screen they are no longer looking at.
+   * This is **awaited**, and the first version's refusal to await it is what
+   * made #38: it fired the request and called `router.push` in the same tick, on
+   * the reasoning that the page was being torn down. `router.push` is a soft
+   * navigation — React stays mounted, nothing unloads — so there was nothing to
+   * outrun, and the dashboard could render from a history the write had not
+   * reached yet. `requestAbandon` bounds the wait so awaiting cannot strand a
+   * candidate who has already decided to leave.
+   *
+   * `router.refresh()` after the push for the other half of the same symptom:
+   * `/app` is `force-dynamic`, but a soft navigation can still be served from
+   * the client Router Cache, and the whole point of this call is that the page
+   * they land on has changed.
    */
-  const abandon = () => {
-    void fetch(`/api/exams/${examId}/abandon`, { method: "POST", keepalive: true }).catch(
-      (error: unknown) => {
-        console.warn("[abandon] the walk-out was not recorded on the server", error);
-      },
-    );
+  const abandon = async () => {
+    if (abandoning) return;
+    setAbandoning(true);
+    setAbandonFailed(false);
+
+    const outcome = await requestAbandon(examId);
+    if (!outcome.recorded) {
+      // Told, not swallowed. The candidate was promised a zero; if the product
+      // could not record one, saying nothing would be the second broken promise
+      // of the same click. They keep both ways forward — retry, or go anyway.
+      console.warn("[abandon] the walk-out was not recorded on the server", outcome);
+      setAbandoning(false);
+      setAbandonFailed(true);
+      return;
+    }
+
     leave();
+    router.refresh();
   };
 
   /**
@@ -354,8 +375,14 @@ export function ExamClient({ examId, topic }: { examId: string; topic: OralTopic
   const exitDialog = (
     <ExitDialog
       open={showExitDialog}
-      onCancel={() => setShowExitDialog(false)}
-      onConfirm={abandon}
+      pending={abandoning}
+      failed={abandonFailed}
+      onCancel={() => {
+        setShowExitDialog(false);
+        setAbandonFailed(false);
+      }}
+      onConfirm={() => void abandon()}
+      onLeaveAnyway={leave}
     />
   );
 
