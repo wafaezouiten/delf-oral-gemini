@@ -5,8 +5,10 @@ import { ORAL_CRITERIA, type OralCriterion } from "@/lib/delf/criteria";
 import {
   buildDashboardView,
   currentStreak,
+  describeOutcome,
   formatPracticeTime,
   RECENT_LIMIT,
+  zeroCriteria,
   type DashboardSitting,
 } from "./dashboard-view";
 
@@ -23,15 +25,49 @@ function sitting(overrides: Partial<DashboardSitting> = {}): DashboardSitting {
     examId: 1,
     topicSlug: "teletravail",
     topicTitle: "Le télétravail a-t-il vraiment amélioré nos vies ?",
+    outcome: "corrected",
     score25: 15,
     meetsFloor: true,
     mode: "audio",
     criteria: { ...BANDS },
     spokenSeconds: 600,
-    finishedAt: new Date("2026-08-16T10:00:00Z"),
+    phase: "finished",
+    endedAt: new Date("2026-08-16T10:00:00Z"),
     ...overrides,
   };
 }
+
+/** A walk-out, as `readCandidateHistory` builds one. */
+function abandoned(overrides: Partial<DashboardSitting> = {}): DashboardSitting {
+  return sitting({
+    outcome: "abandoned",
+    score25: 0,
+    meetsFloor: false,
+    mode: null,
+    criteria: zeroCriteria(),
+    spokenSeconds: 0,
+    phase: "monologue",
+    ...overrides,
+  });
+}
+
+describe("describing an outcome", () => {
+  it("distinguishes the two kinds of correction", () => {
+    assert.match(describeOutcome(sitting({ mode: "audio" })), /audio et la transcription/);
+    assert.match(describeOutcome(sitting({ mode: "text" })), /sans l'audio/);
+  });
+
+  it("names the phase a walk-out happened in", () => {
+    // "Abandonnée" alone invites the reading that the product lost the épreuve.
+    assert.match(describeOutcome(abandoned({ phase: "preparation" })), /préparation/);
+    assert.match(describeOutcome(abandoned({ phase: "monologue" })), /monologue/);
+    assert.match(describeOutcome(abandoned({ phase: "debate" })), /débat/);
+  });
+
+  it("still says something for a phase it does not recognise", () => {
+    assert.match(describeOutcome(abandoned({ phase: "finished" })), /Abandonnée/);
+  });
+});
 
 describe("practice time", () => {
   it("reports seconds rather than rounding a real sitting to zero", () => {
@@ -154,8 +190,8 @@ describe("the dashboard view", () => {
   });
 
   it("orders newest first regardless of how the query returned them", () => {
-    const older = sitting({ examId: 1, finishedAt: new Date("2026-08-10T09:00:00Z") });
-    const newer = sitting({ examId: 2, finishedAt: new Date("2026-08-15T09:00:00Z") });
+    const older = sitting({ examId: 1, endedAt: new Date("2026-08-10T09:00:00Z") });
+    const newer = sitting({ examId: 2, endedAt: new Date("2026-08-15T09:00:00Z") });
     const view = buildDashboardView([older, newer], today);
     assert.deepEqual(
       view.recent.map((row) => row.examId),
@@ -168,7 +204,7 @@ describe("the dashboard view", () => {
       sitting({
         examId: index,
         score25: 10,
-        finishedAt: new Date(2026, 7, index + 1),
+        endedAt: new Date(2026, 7, index + 1),
       }),
     );
     const view = buildDashboardView(many, today);
@@ -176,6 +212,43 @@ describe("the dashboard view", () => {
     // The average is still over all of them, not over the five shown.
     assert.equal(view.count, RECENT_LIMIT + 3);
     assert.equal(view.tiles.find((tile) => tile.key === "moyenne")?.value, "10");
+  });
+
+  it("drags the average down with a walk-out, which is the point of counting it", () => {
+    // The exit dialog promises the candidate exactly this. If the zero did not
+    // reach the average, the warning would be a bluff.
+    const view = buildDashboardView([sitting({ score25: 20 }), abandoned()], today);
+    assert.equal(view.tiles.find((tile) => tile.key === "moyenne")?.value, "10");
+  });
+
+  it("counts a walk-out against the pass rate", () => {
+    const view = buildDashboardView([sitting({ meetsFloor: true }), abandoned()], today);
+    assert.equal(view.tiles.find((tile) => tile.key === "reussite")?.value, "50 %");
+  });
+
+  it("says how many épreuves were abandoned rather than calling them all corrected", () => {
+    // "2 épreuves corrigées" over an average containing a walk-out is a lie
+    // about where the number came from.
+    const view = buildDashboardView([sitting(), abandoned()], today);
+    const caption = view.tiles.find((tile) => tile.key === "moyenne")?.caption ?? "";
+    assert.match(caption, /1 abandonnée/);
+    assert.doesNotMatch(caption, /corrigée/);
+  });
+
+  it("pulls the criterion averages down too, since a walk-out scores nothing", () => {
+    const view = buildDashboardView([sitting(), abandoned()], today);
+    // Lexique was 3 on the corrected sitting and 0 on the walk-out.
+    assert.equal(view.criteria.find((row) => row.key === "lexique")?.average, 1.5);
+  });
+
+  it("adds no practice time for a walk-out", () => {
+    const view = buildDashboardView([sitting({ spokenSeconds: 600 }), abandoned()], today);
+    assert.equal(view.tiles.find((tile) => tile.key === "pratique")?.value, "10 min");
+  });
+
+  it("counts a walk-out toward the streak: turning up and leaving is still a day", () => {
+    const view = buildDashboardView([abandoned({ endedAt: today })], today);
+    assert.equal(view.tiles.find((tile) => tile.key === "serie")?.value, "1 j");
   });
 
   it("renders an empty history without dividing by zero", () => {

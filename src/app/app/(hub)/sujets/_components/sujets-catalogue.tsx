@@ -132,7 +132,7 @@ export function SujetsCatalogue({
       </div>
 
       {filtered.length === 0 ? (
-        <p className="border-border text-muted-foreground mt-6 rounded-lg border border-dashed px-6 py-12 text-center text-sm">
+        <p className="border-border text-muted-foreground mt-6 sheet border border-dashed px-6 py-12 text-center text-sm">
           Aucun sujet ne correspond à « {query} ».
         </p>
       ) : (
@@ -199,7 +199,9 @@ function SujetCard({
       type="button"
       onClick={onOpen}
       aria-label={`Lire le sujet : ${sujet.title}`}
-      className="group border-border bg-card hover:border-primary/60 flex h-full w-full cursor-pointer flex-col items-start rounded-lg border p-5 text-left transition-colors"
+      // Paper stock, matching the hub's row and the sheet behind it: a stack of
+      // sujets rather than a grid of cards.
+      className="group border-paper-border bg-paper hover:border-primary/60 sheet flex h-full w-full cursor-pointer flex-col items-start border p-5 text-left transition-colors"
     >
       <div className="flex w-full items-center justify-between gap-2.5">
         <span className="text-muted-foreground tabular text-[0.65625rem] font-medium tracking-[0.06em]">
@@ -305,7 +307,7 @@ function SujetSheet({
             {/* The same paper stock the épreuve prints it on, so the thing the
                 candidate reads here and the thing they meet inside the exam are
                 visibly the same object. */}
-            <div className="border-paper-border bg-paper mt-6 rounded-lg border p-5 sm:p-6">
+            <div className="border-paper-border bg-paper mt-6 sheet border p-5 sm:p-6">
               <h3 className="text-muted-foreground border-border border-b pb-2 text-[0.6875rem] font-semibold tracking-[0.16em] uppercase">
                 Document déclencheur
               </h3>
@@ -369,7 +371,7 @@ function LaunchDialog({ sujet, onClose }: { sujet: KioskSujet | null; onClose: (
         onClose();
       }}
       aria-labelledby="launch-dialog-title"
-      className="bg-card text-foreground border-border m-auto w-[min(29rem,92vw)] rounded-lg border p-0 backdrop:bg-black/50"
+      className="bg-card text-foreground border-border m-auto w-[min(29rem,92vw)] sheet border p-0 backdrop:bg-black/50"
     >
       {sujet && (
         <div className="space-y-4 p-6">

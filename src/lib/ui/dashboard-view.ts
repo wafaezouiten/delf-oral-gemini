@@ -42,26 +42,56 @@ import { ORAL_CRITERIA, ORAL_CRITERIA_LABELS, type OralCriterion } from "@/lib/d
 const GRILLE_MAX_BAND = GRILLE_BANDS[GRILLE_BANDS.length - 1];
 
 /**
- * One corrected sitting, as the dashboard needs it.
+ * How a sitting ended. Only these two reach the candidate's record.
  *
- * Only corrected sittings appear: a sitting with no correction has no score, no
- * criteria and — since `spoken_seconds` is written by the finish route — no
- * measured practice time either. Counting abandoned attempts in a "score moyen"
- * would drag it toward zero for a reason that is not about the candidate's
- * French.
+ * A sitting still in progress is neither: it has no score to average and no
+ * decision to report, and counting one would mean a candidate's standing
+ * changed the moment they opened an épreuve in another tab.
+ */
+export type SittingOutcome = "corrected" | "abandoned";
+
+/**
+ * One sitting on the candidate's record.
+ *
+ * Two kinds reach it. A **corrected** sitting carries what the rubric returned.
+ * An **abandoned** one is a walk-out: the candidate confirmed the exit dialog,
+ * having been told in so many words that it would count, so it is scored
+ * `0/25` — the same rule as leaving the room on the day.
+ *
+ * The zero is computed here rather than stored as an evaluation row, and that
+ * distinction is load-bearing: no model read an abandoned performance, so there
+ * is no correction to write. The score is the *consequence* of an abandonment,
+ * not a grading of one, and the criteria are all zero for the same reason
+ * they would be on a blank paper.
  */
 export interface DashboardSitting {
   examId: number;
   topicSlug: string;
   topicTitle: string;
+  outcome: SittingOutcome;
   score25: number;
   meetsFloor: boolean;
-  /** `audio` when the recording reached the grader, `text` when it did not. */
-  mode: "text" | "audio";
+  /**
+   * `audio` when the recording reached the grader, `text` when it did not, and
+   * `null` for an abandoned sitting — which was not graded at all, and would be
+   * misreported by either of the other two.
+   */
+  mode: "text" | "audio" | null;
   criteria: Record<OralCriterion, number>;
   /** Measured audio, summed across the two speaking phases. Never the clock. */
   spokenSeconds: number;
-  finishedAt: Date;
+  /** How far the candidate got. `preparation` for a walk-out before speaking. */
+  phase: string;
+  /** Graded, or walked out of. Newest-first ordering is on this. */
+  endedAt: Date;
+}
+
+/** The zero an abandoned sitting scores, on every criterion. */
+export function zeroCriteria(): Record<OralCriterion, number> {
+  return Object.fromEntries(ORAL_CRITERIA.map((key) => [key, 0])) as Record<
+    OralCriterion,
+    number
+  >;
 }
 
 export interface DashboardTile {
@@ -173,16 +203,25 @@ function buildTiles(sittings: readonly DashboardSitting[], today: Date): Dashboa
   const passed = sittings.filter((sitting) => sitting.meetsFloor).length;
   const practice = sittings.reduce((total, sitting) => total + sitting.spokenSeconds, 0);
   const streak = currentStreak(
-    sittings.map((sitting) => sitting.finishedAt),
+    sittings.map((sitting) => sitting.endedAt),
     today,
   );
+
+  // Named separately, because the average is not "how well you speak French" once
+  // a walk-out is in it — it is a record, and the caption has to say so or the
+  // number reads as a verdict on the candidate's level.
+  const abandoned = sittings.filter((sitting) => sitting.outcome === "abandoned").length;
+  const plural = sittings.length > 1 ? "s" : "";
 
   return [
     {
       key: "moyenne",
       label: "Note moyenne",
       value: `${mean(scores)}`,
-      caption: `sur ${COMPETENCY_MAX}, ${sittings.length} épreuve${sittings.length > 1 ? "s" : ""} corrigée${sittings.length > 1 ? "s" : ""}`,
+      caption:
+        abandoned > 0
+          ? `sur ${COMPETENCY_MAX}, ${sittings.length} épreuve${plural} dont ${abandoned} abandonnée${abandoned > 1 ? "s" : ""}`
+          : `sur ${COMPETENCY_MAX}, ${sittings.length} épreuve${plural} corrigée${plural}`,
     },
     {
       key: "reussite",
@@ -239,7 +278,7 @@ export function buildDashboardView(
   today: Date,
 ): DashboardView {
   const ordered = [...sittings].sort(
-    (a, b) => b.finishedAt.getTime() - a.finishedAt.getTime(),
+    (a, b) => b.endedAt.getTime() - a.endedAt.getTime(),
   );
 
   return {
@@ -253,4 +292,42 @@ export function buildDashboardView(
 /** "16 août" — a sitting's date, in the list. */
 export function formatSittingDate(date: Date): string {
   return date.toLocaleDateString("fr-FR", { day: "numeric", month: "long" });
+}
+
+/** "16 août 2026, 14:32" — the historique's fuller stamp. */
+export function formatSittingDateTime(date: Date): string {
+  return date.toLocaleString("fr-FR", {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+/**
+ * What happened to a sitting, in the candidate's words, for the historique.
+ *
+ * An abandonment names the phase it was abandoned in, because "abandonnée" on
+ * its own invites the reading that the product lost the épreuve. Naming the
+ * moment — during the préparation, during the monologue — makes it a record of
+ * something the candidate did.
+ */
+export function describeOutcome(sitting: DashboardSitting): string {
+  if (sitting.outcome === "corrected") {
+    return sitting.mode === "text"
+      ? "Corrigée sans l'audio, sur la transcription seule"
+      : "Corrigée sur l'audio et la transcription";
+  }
+
+  switch (sitting.phase) {
+    case "preparation":
+      return "Abandonnée pendant la préparation, avant toute prise de parole";
+    case "monologue":
+      return "Abandonnée pendant le monologue";
+    case "debate":
+      return "Abandonnée pendant le débat";
+    default:
+      return "Abandonnée avant la correction";
+  }
 }

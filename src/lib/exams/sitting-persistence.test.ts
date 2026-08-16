@@ -102,6 +102,7 @@ interface ExamRow {
   reconnectCount: number;
   startedAt: Date;
   finishedAt: Date | null;
+  abandonedAt: Date | null;
 }
 
 /** `oral_phase` is declared in exam order and Postgres compares enums by
@@ -134,6 +135,7 @@ class MemoryStore implements SittingStore {
       reconnectCount: 0,
       startedAt: new Date("2026-08-15T09:30:00Z"),
       finishedAt: null,
+      abandonedAt: null,
     });
   }
 
@@ -171,6 +173,17 @@ class MemoryStore implements SittingStore {
     exam.transcript = claim.transcript;
     exam.reconnectCount = claim.reconnectCount;
     exam.finishedAt = claim.finishedAt;
+    return true;
+  }
+
+  async abandonSitting(ref: SittingRef, abandonedAt: Date): Promise<boolean> {
+    const exam = this.owned(ref);
+    if (!exam) return false;
+    // The same three refusals the SQL encodes: already gone, or already graded.
+    if (exam.abandonedAt !== null) return false;
+    if (this.evaluations.some((row) => row.examId === ref.examId)) return false;
+
+    exam.abandonedAt = abandonedAt;
     return true;
   }
 
@@ -550,5 +563,54 @@ describe("correcting a sitting", () => {
 
     // And the sitting it addresses is untouched.
     assert.equal(store.exams.find((row) => row.id === 42)?.finishedAt, null);
+  });
+});
+
+describe("abandoning a sitting", () => {
+  let store: MemoryStore;
+  const OTHER = "user_other";
+
+  beforeEach(() => {
+    store = new MemoryStore();
+    store.createSitting(OWNER, REF.examId);
+    store.createSitting(OTHER, 42);
+  });
+
+  it("records the walk-out", async () => {
+    const at = new Date("2026-08-16T11:00:00Z");
+    assert.equal(await store.abandonSitting(REF, at), true);
+    assert.deepEqual(store.exams.find((row) => row.id === REF.examId)?.abandonedAt, at);
+  });
+
+  it("does not touch the phase or finished_at", async () => {
+    // Both mean "this épreuve ran its course", and the whole point of the row
+    // is that it did not: `phase` has to keep saying where the candidate
+    // stopped, because that is what the historique prints beside the zero.
+    await store.abandonSitting(REF, new Date());
+    const exam = store.exams.find((row) => row.id === REF.examId);
+    assert.equal(exam?.phase, "preparation");
+    assert.equal(exam?.finishedAt, null);
+  });
+
+  it("keeps the first stamp when the exit button is double-clicked", async () => {
+    const first = new Date("2026-08-16T11:00:00Z");
+    await store.abandonSitting(REF, first);
+    assert.equal(await store.abandonSitting(REF, new Date("2026-08-16T11:00:05Z")), false);
+    assert.deepEqual(store.exams.find((row) => row.id === REF.examId)?.abandonedAt, first);
+  });
+
+  it("refuses once a correction exists: a graded sitting outranks a walk-out", async () => {
+    // The real race, not a theoretical one. The finish request is in flight
+    // while the candidate reads the exit dialog, so "I gave up on the upload"
+    // and "the upload succeeded" can arrive in either order.
+    await correctSitting(store, REF, finishInput());
+    assert.equal(await store.abandonSitting(REF, new Date()), false);
+    assert.equal(store.exams.find((row) => row.id === REF.examId)?.abandonedAt, null);
+  });
+
+  it("cannot mark a neighbouring user's sitting", async () => {
+    // This writes a zero onto somebody's record, and exam ids are sequential.
+    assert.equal(await store.abandonSitting({ examId: 42, userId: OWNER }, new Date()), false);
+    assert.equal(store.exams.find((row) => row.id === 42)?.abandonedAt, null);
   });
 });

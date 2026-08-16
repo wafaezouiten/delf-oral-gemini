@@ -28,6 +28,37 @@ import type { HubCapability, HubSujet, HubView } from "@/lib/ui/epreuve-hub";
  */
 
 /**
+ * A section heading, set as an exam booklet sets one: a numbered kicker, a serif
+ * line, and the double rule a corrector's grid uses to close a block.
+ *
+ * This is the main thing that keeps the hub from reading as the reference's
+ * (rounded cards under a bold sans heading) while changing nothing structural.
+ * The numeral is `aria-hidden`: it is stationery, and a screen reader announcing
+ * "zero one, Le format de l'épreuve" is being read the furniture.
+ */
+function SectionHeading({
+  n,
+  children,
+  right,
+}: {
+  n: string;
+  children: React.ReactNode;
+  right?: React.ReactNode;
+}) {
+  return (
+    <div className="rule-double flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 pb-2">
+      <h2 className="flex items-baseline gap-2.5">
+        <span className="text-primary/50 tabular text-xs font-semibold" aria-hidden>
+          {n}
+        </span>
+        <span className="font-serif text-lg font-semibold tracking-tight">{children}</span>
+      </h2>
+      {right}
+    </div>
+  );
+}
+
+/**
  * The hub's opening: one serif headline, the lead, and the shape pill.
  *
  * The reference's note is worth keeping because it is a rule and not a
@@ -69,13 +100,11 @@ export function HubFormat({ view }: { view: HubView }) {
 
   return (
     <section className="mt-10">
-      <h2 className="font-serif text-lg font-semibold tracking-tight">
-        Le format de l&apos;épreuve
-      </h2>
+      <SectionHeading n="01">Le format de l&apos;épreuve</SectionHeading>
 
       <div className="mt-4 grid gap-4">
         {view.format.map((item, index) => (
-          <div key={item.key} className="border-border bg-card rounded-lg border p-5 sm:p-6">
+          <div key={item.key} className="border-border bg-card sheet border p-5 sm:p-6">
             <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
               <Tag>{item.pill}</Tag>
               <h3 className="text-base font-semibold tracking-tight">{item.title}</h3>
@@ -134,15 +163,19 @@ export function HubSujets({
 
   return (
     <section className="mt-10">
-      <div className="flex items-baseline justify-between gap-3">
-        <h2 className="font-serif text-lg font-semibold tracking-tight">Sujets à la une</h2>
-        <Link
-          href={allSujetsHref}
-          className="text-primary shrink-0 text-xs font-semibold hover:underline"
-        >
-          Tous les sujets
-        </Link>
-      </div>
+      <SectionHeading
+        n="02"
+        right={
+          <Link
+            href={allSujetsHref}
+            className="text-primary shrink-0 text-xs font-semibold hover:underline"
+          >
+            Tous les sujets
+          </Link>
+        }
+      >
+        Sujets à la une
+      </SectionHeading>
 
       <ul className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {sujets.map((sujet) => (
@@ -151,7 +184,11 @@ export function HubSujets({
               // Straight to this sujet's sheet on the kiosk, rather than to the
               // top of the page with a hash the grid would have to hunt for.
               href={`${allSujetsHref}?sujet=${sujet.slug}`}
-              className="group border-border bg-card hover:border-primary/60 flex w-full flex-col rounded-lg border p-5 transition-colors"
+              // Paper stock, not a white card: the thing the candidate picks and
+              // the thing they read inside the épreuve are visibly the same
+              // object, and a grid of sheets is nothing like the reference's
+              // grid of cards.
+              className="group border-paper-border bg-paper hover:border-primary/60 sheet flex w-full flex-col border p-5 transition-colors"
             >
               <div className="flex items-center justify-between gap-2">
                 <Tag>{sujet.kind}</Tag>
@@ -202,7 +239,7 @@ const CAPABILITY_ICONS: Record<
 
 export function HubCapabilities({ view }: { view: HubView }) {
   return (
-    <section className="border-border bg-card mt-10 grid rounded-lg border sm:grid-cols-3">
+    <section className="border-border bg-card mt-10 grid sheet border sm:grid-cols-3">
       {view.capabilities.map((capability, index) => {
         const Glyph = CAPABILITY_ICONS[capability.icon];
         return (

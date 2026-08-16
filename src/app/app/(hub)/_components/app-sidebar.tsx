@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { UserButton } from "@clerk/nextjs";
 
-import { ChartIcon, DocumentIcon, MicIcon } from "@/app/_components/po/icons";
+import { ChartIcon, ClockIcon, DocumentIcon, MicIcon } from "@/app/_components/po/icons";
 import { cn } from "@/lib/ui/class-names";
 import { HUB_LINKS, isNavLinkActive } from "@/lib/ui/epreuve-hub";
 
@@ -40,6 +40,13 @@ const LINKS = [
     label: "Tableau de bord",
     short: "Progrès",
     Icon: ChartIcon,
+    exact: false,
+  },
+  {
+    href: HUB_LINKS.historique,
+    label: "Historique",
+    short: "Historique",
+    Icon: ClockIcon,
     exact: false,
   },
 ] as const;

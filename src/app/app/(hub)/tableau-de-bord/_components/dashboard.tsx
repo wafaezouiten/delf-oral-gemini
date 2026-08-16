@@ -2,10 +2,11 @@ import Link from "next/link";
 
 import { primaryButton, secondaryButton } from "@/app/_components/button-styles";
 import { ChartIcon, MicIcon } from "@/app/_components/po/icons";
-import { Kicker, Tag } from "@/app/_components/po/tag";
+import { Kicker } from "@/app/_components/po/tag";
 import { COMPETENCY_MAX } from "@/lib/delf/constants";
 import { HUB_LINKS } from "@/lib/ui/epreuve-hub";
-import { formatSittingDate, type DashboardView } from "@/lib/ui/dashboard-view";
+import type { DashboardView } from "@/lib/ui/dashboard-view";
+import { SittingRow } from "../../_components/sitting-row";
 
 /**
  * The tableau de bord, as pure presentation — no fetching, so it renders from a
@@ -44,7 +45,7 @@ export function Dashboard({ view }: { view: DashboardView }) {
 
       <ul className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         {view.tiles.map((tile) => (
-          <li key={tile.key} className="border-border bg-card rounded-lg border p-4">
+          <li key={tile.key} className="border-border bg-card sheet border p-4">
             <p className="text-muted-foreground text-[0.6875rem] font-semibold tracking-[0.16em] uppercase">
               {tile.label}
             </p>
@@ -56,8 +57,8 @@ export function Dashboard({ view }: { view: DashboardView }) {
         ))}
       </ul>
 
-      <section className="border-border bg-card mt-6 rounded-lg border">
-        <div className="border-border flex items-center gap-2 border-b px-6 py-4">
+      <section className="border-border bg-card mt-6 sheet border">
+        <div className="rule-double flex items-center gap-2 px-6 py-4">
           <ChartIcon className="text-muted-foreground size-4" />
           <h2 className="font-serif text-base font-semibold">Moyenne par critère</h2>
         </div>
@@ -80,46 +81,27 @@ export function Dashboard({ view }: { view: DashboardView }) {
           ))}
         </ul>
         <p className="text-muted-foreground border-border border-t px-6 py-3 text-xs leading-relaxed">
-          Moyenne sur {view.count} épreuve{view.count > 1 ? "s" : ""} corrigée
-          {view.count > 1 ? "s" : ""}, sur l&apos;échelle 0 · 1 · 3 · 5 de la
-          grille officielle.
+          Moyenne sur {view.count} épreuve{view.count > 1 ? "s" : ""}, sur
+          l&apos;échelle 0 · 1 · 3 · 5 de la grille officielle. Une épreuve
+          abandonnée compte pour 0 sur chaque critère.
         </p>
       </section>
 
-      <section className="border-border bg-card mt-6 rounded-lg border">
-        <h2 className="border-border font-serif border-b px-6 py-4 text-base font-semibold">
-          Dernières épreuves
-        </h2>
+      <section className="border-border bg-card mt-6 sheet border">
+        <div className="rule-double flex flex-wrap items-baseline justify-between gap-3 px-6 py-4">
+          <h2 className="font-serif text-base font-semibold">Dernières épreuves</h2>
+          {view.count > view.recent.length && (
+            <Link
+              href={HUB_LINKS.historique}
+              className="text-primary shrink-0 text-xs font-semibold hover:underline"
+            >
+              Tout l&apos;historique ({view.count})
+            </Link>
+          )}
+        </div>
         <ul className="divide-border divide-y">
           {view.recent.map((sitting) => (
-            <li
-              key={sitting.examId}
-              className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 px-6 py-3"
-            >
-              <div className="min-w-0">
-                {/* `block`, because `truncate` is `overflow:hidden` +
-                    `text-overflow:ellipsis` and neither does anything to an
-                    inline box — the link kept its full intrinsic width and
-                    pushed the row past the viewport on a phone. */}
-                <Link
-                  href={`/app/results/${sitting.examId}`}
-                  className="block truncate text-sm font-medium hover:underline"
-                >
-                  {sitting.topicTitle}
-                </Link>
-                <p className="text-muted-foreground mt-0.5 text-xs">
-                  {formatSittingDate(sitting.finishedAt)}
-                  {/* Named, because a /25 reached without hearing the candidate
-                      is not the same /25. The results page says so at length;
-                      here it is four words so the list stays scannable. */}
-                  {sitting.mode === "text" && " · corrigée sans l'audio"}
-                </p>
-              </div>
-              <Tag tone={sitting.meetsFloor ? "success" : "danger"}>
-                <span aria-hidden>{sitting.meetsFloor ? "✓" : "✕"}</span>
-                {sitting.score25}/{COMPETENCY_MAX}
-              </Tag>
-            </li>
+            <SittingRow key={sitting.examId} sitting={sitting} />
           ))}
         </ul>
       </section>
@@ -130,10 +112,10 @@ export function Dashboard({ view }: { view: DashboardView }) {
 /**
  * Nothing to show yet.
  *
- * It names what does not count and why — an abandoned sitting has no score, no
- * criteria and no measured audio, so it is absent rather than a zero. Without
- * that sentence, a candidate who started an épreuve, closed the tab and came
- * here would read the empty page as a bug.
+ * It names what does and does not reach the record. A sitting still in progress
+ * is absent — there is nothing to say about it yet — while an abandoned one very
+ * much is not, and saying so here is the same warning the exit dialog gives,
+ * met before the candidate has anything to lose by it.
  */
 function EmptyDashboard() {
   return (
@@ -142,13 +124,13 @@ function EmptyDashboard() {
         <MicIcon className="size-7" />
       </span>
       <h1 className="font-serif mt-5 text-2xl font-semibold">
-        Aucune épreuve corrigée pour le moment
+        Aucune épreuve à votre actif
       </h1>
-      <p className="text-muted-foreground mx-auto mt-3 max-w-[46ch] text-sm leading-relaxed">
+      <p className="text-muted-foreground mx-auto mt-3 max-w-[48ch] text-sm leading-relaxed">
         Passez une première production orale pour voir ici votre note sur{" "}
         {COMPETENCY_MAX}, vos cinq critères et votre temps de parole. Une épreuve
-        abandonnée en cours de route n&apos;apparaît pas : il n&apos;y a rien à en
-        dire.
+        en cours n&apos;apparaît pas encore ; une épreuve abandonnée, elle,
+        compte comme une tentative notée 0.
       </p>
       <div className="mt-7">
         <Link href={HUB_LINKS.sujets} className={primaryButton}>

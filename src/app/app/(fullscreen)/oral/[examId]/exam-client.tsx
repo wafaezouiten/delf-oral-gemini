@@ -247,6 +247,29 @@ export function ExamClient({ examId, topic }: { examId: string; topic: OralTopic
   const leave = () => router.push("/app");
 
   /**
+   * Abandon: mark the sitting, then leave.
+   *
+   * The exit dialog promises the candidate this épreuve will count as a zero, so
+   * the promise is kept here before the navigation rather than left to a server
+   * that would otherwise only ever see a sitting go quiet — which is
+   * indistinguishable from a flat battery, and only one of those is a decision.
+   *
+   * Not awaited, and `keepalive` for the same reason `reportPhase` uses it: the
+   * router is tearing this page down as the request goes, and an ordinary fetch
+   * would be cancelled with it. A failure costs the record of the walk-out, not
+   * the walk-out — so nothing here blocks the candidate leaving, and the catch
+   * is a log rather than a message on a screen they are no longer looking at.
+   */
+  const abandon = () => {
+    void fetch(`/api/exams/${examId}/abandon`, { method: "POST", keepalive: true }).catch(
+      (error: unknown) => {
+        console.warn("[abandon] the walk-out was not recorded on the server", error);
+      },
+    );
+    leave();
+  };
+
+  /**
    * Every failure the épreuve can produce, in the order a candidate cares about
    * it: the connection that has stopped coming back, then the microphone. Both
    * are messages first and a control second — a red button on its own is not an
@@ -331,7 +354,7 @@ export function ExamClient({ examId, topic }: { examId: string; topic: OralTopic
     <ExitDialog
       open={showExitDialog}
       onCancel={() => setShowExitDialog(false)}
-      onConfirm={leave}
+      onConfirm={abandon}
     />
   );
 

@@ -44,6 +44,7 @@ export interface HubCapability {
 export interface HubLinks {
   sujets: string;
   tableauDeBord: string;
+  historique: string;
 }
 
 /** The whole hub, ready to render. */
@@ -137,6 +138,7 @@ export function buildHubCriteria(): string[] {
 export const HUB_LINKS: HubLinks = {
   sujets: "/app/sujets",
   tableauDeBord: "/app/tableau-de-bord",
+  historique: "/app/historique",
 };
 
 /**

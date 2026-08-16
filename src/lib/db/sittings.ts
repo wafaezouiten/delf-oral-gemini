@@ -298,6 +298,41 @@ export function neonSittingStore(): SittingStore {
       return toStoredCorrection(inserted);
     },
 
+    async abandonSitting(ref: SittingRef, abandonedAt: Date) {
+      /**
+       * One statement, and every clause in the WHERE is load-bearing:
+       *
+       *  - the owner, because this writes a zero onto somebody's record and an
+       *    exam id is a sequential serial;
+       *  - `abandoned_at is null`, so a double-clicked exit button stamps the
+       *    moment the candidate first left rather than the moment they clicked
+       *    again;
+       *  - `not exists (…evaluations…)`, the same guard `claimForCorrection`
+       *    uses, so a correction that landed while the dialog was open outranks
+       *    the walk-out. A sitting is graded or abandoned, never both.
+       *
+       * `phase` is deliberately NOT advanced to `finished`, and `finished_at`
+       * is deliberately NOT stamped. Both mean "this épreuve ran its course",
+       * and the entire point of this row is that it did not — `phase` keeps
+       * saying where the candidate stopped, which is the only honest record of
+       * an abandonment and the thing the history page prints.
+       */
+      const abandoned = await db
+        .update(oralExams)
+        .set({ abandonedAt })
+        .where(
+          and(
+            eq(oralExams.id, ref.examId),
+            eq(oralExams.userId, ref.userId),
+            isNull(oralExams.abandonedAt),
+            sql`not exists (select 1 from ${evaluations} where ${evaluations.examId} = ${oralExams.id})`,
+          ),
+        )
+        .returning({ id: oralExams.id });
+
+      return abandoned.length > 0;
+    },
+
     async findCorrection(ref: SittingRef) {
       const [row] = await db
         .select({ evaluation: evaluations })

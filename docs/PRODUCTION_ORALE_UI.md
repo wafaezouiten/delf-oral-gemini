@@ -208,6 +208,32 @@ bars, a recent-sittings list, the empty state.
 
 ---
 
+## 3b. Departures from the reference that are product rules, not layout
+
+**Walking out counts.** The reference's exit dialog warns only that progress will
+not be saved, because it records nothing and scores nothing. Here, confirming the
+exit stamps `oral_exams.abandoned_at`, and the sitting joins the candidate's
+record as `0/25` — it drags the average down, counts against the pass rate, and
+appears in the historique naming the phase it was walked out of. The dialog says
+exactly that before the candidate commits, because a warning the product does not
+honour is worse than no warning.
+
+The zero is computed where the history is read, never stored as an evaluation
+row: no model read an abandoned performance, so there is no correction to write,
+and a zero-scored `evaluations` row would claim otherwise.
+
+The column is a separate one rather than a reading of `finished_at` and `phase`.
+Between them those two can already describe a sitting that ran to the end and was
+never graded — but they cannot tell that apart from a tab closed by a flat
+battery, and only one of those is a decision. That difference is the whole point:
+what is being recorded is the candidate's *choice* to leave after an explicit
+warning.
+
+**A historique page**, which the reference has no equivalent of — its tableau de
+bord shows a recent list and nothing more. It is a list and only a list: the
+dashboard answers "how am I doing?", this answers "what have I done?", and two
+pages that both open on a row of statistics would be the same page twice.
+
 ## 4. Deliberate departures, collected
 
 Everything below is a decision, not an oversight:
@@ -225,6 +251,15 @@ Everything below is a decision, not an oversight:
    booklet — and a dark inversion of a printed page is a photograph of a page
    rather than the page. `color-scheme: light` goes with it so the browser's own
    furniture (scrollbars, form controls, the `<dialog>` backdrop) matches.
+
+   **The paperwork treatment.** The reproduction initially read too much like the
+   reference, which is a rounded-card interface: `rounded-2xl` panels, soft
+   shadows, pill everything. The layout and interactions are unchanged; what
+   changed is that panels are squared to a 2 px radius (`.sheet`), sections carry
+   a numbered kicker and the double rule a corrector's grid closes a block with
+   (`.rule-double`), and the sujet cards sit on the warm paper stock the sujet
+   itself is printed on — so the catalogue reads as a stack of sujets rather than
+   a grid of cards. Same components, same spacing rhythm, drawn as stationery.
 
    **Navigation is a sidebar**, per the reference's `components/app-sidebar/*`:
    a rail on desktop, and below `md` a slim top bar for the brand and the account

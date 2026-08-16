@@ -374,7 +374,7 @@ export function ResultsClient({
             </div>
 
             {evaluation.feedback.appreciationGlobale && (
-              <div className="border-border bg-muted/40 mt-2.5 rounded-md border p-4">
+              <div className="border-border bg-muted/40 mt-2.5 sheet border p-4">
                 <h3 className="text-xs font-bold">Appréciation globale</h3>
                 <p className="text-muted-foreground mt-1.5 text-xs leading-relaxed">
                   {evaluation.feedback.appreciationGlobale}
@@ -383,7 +383,7 @@ export function ResultsClient({
             )}
 
             {evaluation.feedback.conseil && (
-              <div className="border-primary/30 bg-primary-subtle mt-2.5 flex items-start gap-2.5 rounded-md border p-4">
+              <div className="border-primary/30 bg-primary-subtle mt-2.5 flex items-start gap-2.5 sheet border p-4">
                 <IdeaIcon className="text-primary mt-0.5 size-4 shrink-0" />
                 <p className="text-foreground/85 text-xs leading-relaxed">
                   <span className="text-primary font-semibold">Conseil : </span>
@@ -433,7 +433,7 @@ function TranscriptColumn({
   return (
     <section className="bg-muted/30 min-h-0 lg:overflow-y-auto">
       <div className="mx-auto max-w-[42.5rem] px-4 py-6 pb-16 sm:px-7">
-        <article className="border-paper-border bg-paper rounded-lg border p-7 sm:p-9">
+        <article className="border-paper-border bg-paper sheet border p-7 sm:p-9">
           <div className="border-border flex flex-wrap items-baseline justify-between gap-3 border-b pb-3">
             <Kicker>Transcription de l&apos;épreuve</Kicker>
             <span className="text-muted-foreground tabular shrink-0 text-[0.6875rem]">
@@ -577,7 +577,7 @@ function FeedbackPanel({
   return (
     <div
       className={cn(
-        "rounded-md border p-4",
+        "sheet border p-4",
         tone === "success"
           ? "border-success/30 bg-success-subtle/50"
           : "border-warning/40 bg-warning-subtle/50",
@@ -629,7 +629,7 @@ function CentredCard({
     <main className="bg-background flex h-full items-center justify-center p-6">
       <div
         role={tone === "danger" ? "alert" : "status"}
-        className="border-border bg-card flex max-w-md flex-col items-center rounded-lg border px-8 py-14 text-center"
+        className="border-border bg-card flex max-w-md flex-col items-center sheet border px-8 py-14 text-center"
       >
         {tone === "danger" && (
           <span className="bg-danger-subtle text-danger flex size-14 items-center justify-center rounded-full">

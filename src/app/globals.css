@@ -158,6 +158,38 @@ body {
 }
 
 /**
+ * The paperwork treatment — what stops these screens reading as a generic SaaS
+ * dashboard, and what makes them look like this product rather than the one they
+ * were reproduced from.
+ *
+ * The reference is a rounded-card interface: `rounded-2xl` panels, soft shadows,
+ * pill everything. That is a perfectly good look and it is not this one. An
+ * épreuve arrives as a printed form — ruled, squared, sectioned and numbered —
+ * so the panels here are squared off to a 2px radius and the sections are ruled
+ * with the double line a corrector's grid uses to close a block. The difference
+ * costs nothing structurally: the same components, the same layout, the same
+ * spacing rhythm, drawn as stationery instead of as cards.
+ *
+ * `.sheet` rather than a Tailwind radius utility, so the whole product's
+ * squareness is one number in one place — and so it cannot drift the way eight
+ * hand-written `rounded-*` classes did before it existed.
+ */
+.sheet {
+  border-radius: 2px;
+}
+
+/**
+ * The rule that closes a section: a heavy line over a hairline, the way a
+ * corrector's grid separates one compétence from the next. Drawn with a border
+ * plus a box-shadow rather than two elements, because it is decoration and has
+ * no business in the accessibility tree.
+ */
+.rule-double {
+  border-bottom: 1px solid var(--border);
+  box-shadow: 0 3px 0 -2px var(--border);
+}
+
+/**
  * The document déclencheur, set as a printed page: serif, justified, with the
  * generous measure of an exam booklet rather than the tight one of an app.
  */
