@@ -1,5 +1,5 @@
 import { auth } from "@clerk/nextjs/server";
-import { SignInButton, SignUpButton } from "@clerk/nextjs";
+import { GoogleOneTap, SignInButton, SignUpButton } from "@clerk/nextjs";
 import { redirect } from "next/navigation";
 
 import { primaryButton, secondaryButton } from "./_components/button-styles";
@@ -27,6 +27,26 @@ export default async function HomePage() {
 
   return (
     <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col justify-center gap-10 px-6 py-16">
+      {/* The shortest path that exists: a visitor already signed in to Google
+       *  gets a single tap, with no modal, no form and nothing typed.
+       *
+       *  Rendered unconditionally because this page has already redirected every
+       *  signed-in visitor — by the time anything here renders, the reader is
+       *  signed out by construction, so a `<SignedOut>` wrapper would be a
+       *  condition that cannot be false.
+       *
+       *  It is a **progressive enhancement, never the only way in.** Google owns
+       *  this prompt and declines to show it more often than one might expect: a
+       *  visitor not signed in to Google, one who dismissed it recently (Google
+       *  imposes its own cooldown), or one on a browser where neither FedCM nor
+       *  third-party cookies are available sees nothing at all. That is why the
+       *  two buttons below stay exactly as they are — this either saves the
+       *  candidate the whole flow, or it is invisible and costs them nothing.
+       *
+       *  Both redirects are set for the same reason the buttons set theirs: a
+       *  One Tap that lands back here would meet the redirect above and bounce,
+       *  which reads as a loop rather than as a sign-in. */}
+      <GoogleOneTap signInForceRedirectUrl="/app" signUpForceRedirectUrl="/app" />
       <div className="space-y-4">
         <p className="text-primary text-[0.6875rem] font-semibold tracking-[0.16em] uppercase">
           DELF B2 · Production orale
