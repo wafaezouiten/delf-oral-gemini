@@ -33,6 +33,7 @@ import {
   criterionScores,
   parseEvaluationResponse,
 } from "./evaluation-response";
+import { readEvaluationUsage, type EvaluationUsage } from "./evaluation-usage";
 import { formatTranscript, type TranscriptEntry } from "@/lib/delf/transcript";
 import type { OralTopic } from "@/lib/delf/topics";
 import type { EvaluationFeedback, EvaluationMode, OralSpeakingPhase } from "@/lib/db/schema";
@@ -219,6 +220,27 @@ export interface EvaluationResult {
   model: string;
   promptVersion: string;
   latencySeconds: number;
+  /**
+   * What the correction actually cost, in tokens, as the API reported it.
+   *
+   * Exists because #12 asks for cost per sitting measured rather than estimated,
+   * and a harness that counted the prompt itself would be measuring its own
+   * arithmetic instead of the call. The reading lives in `evaluation-usage.ts`
+   * so it can be tested.
+   *
+   * WHERE IT GOES, precisely — an earlier version of this comment claimed it
+   * went nowhere, which was half true and is the kind of half that misleads:
+   *
+   *  - **Not stored.** `toCorrectionRow` omits it and `evaluations` has no
+   *    column for it. That boundary is real and enforced by the schema.
+   *  - **Does reach the browser.** The finish route returns the whole
+   *    `EvaluationResult` on a fresh grading, so these token counts land in the
+   *    JSON next to `rawCriteria`, `modelTotal25` and `latencySeconds` — the
+   *    three diagnostics that have always travelled that way. Deliberately not
+   *    stripped: removing one of four would imply a boundary the route does not
+   *    have, and none of them is sensitive. Nothing in the UI reads any of them.
+   */
+  usage: EvaluationUsage;
 }
 
 export interface EvaluateParams {
@@ -369,5 +391,6 @@ export async function evaluateExam(params: EvaluateParams): Promise<EvaluationRe
     model: EVAL_MODEL,
     promptVersion: EVAL_PROMPT_VERSION,
     latencySeconds: (Date.now() - startedAt) / 1000,
+    usage: readEvaluationUsage(response.usageMetadata),
   };
 }

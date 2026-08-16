@@ -1,0 +1,92 @@
+{
+  "measuredAt": "2026-08-16T09:57:43.573Z",
+  "model": "gemini-3.1-flash-live-preview",
+  "topicSlug": "teletravail",
+  "turnsAttempted": 4,
+  "turnsCompleted": 4,
+  "conversationSeconds": 157.62,
+  "candidateAudioSecondsSent": 39.64375,
+  "examinerAudioChunks": 237,
+  "examinerTranscript": "Vous soulignez la restitution de temps aux salariés. Mais ne pensez-vous pas que l'absence de barrière physique entre travail et domicile conduit à une surcharge de travail ou à une connexion permanente ? Comment garantir que ce temps récupéré ne soit pas de nouveau absorbé ?Admettons, mais même avec un droit à la déconnexion, la distance physique affaiblit le lien social et l'esprit d'équipe. Ne pensez-vous pas que cette perte de cohésion puisse, à terme, nuire à l'innovation et à la performance collective, au-delà des exemples personnels que vous évoquiez ?Puisque vous parlez des infirmières, cela soulève une autre question : celle de l'équité. Le télétravail ne crée-t-il pas une fracture sociale majeure entre des cadres privilégiés et des travailleurs de première ligne ? Comment justifier cette disparité ?Mais cette productivité à distance, est-elle vraiment pérenne sur le long terme ? L'isolement des nouveaux arrivants, l'absence de mentorat ou la difficulté à transmettre une culture d'entreprise ne risquent-ils pas d'impacter la performance future, même s'il y a des gains immédiats ? Avez-vous des exemples d'entreprises qui fonctionnent totalement à distance sur plusieurs années, sans problème ?",
+  "usageIsCumulative": true,
+  "totalPromptTokens": 3960,
+  "totalResponseTokens": 524,
+  "promptByModality": {
+    "TEXT": 1307,
+    "AUDIO": 2422
+  },
+  "responseByModality": {
+    "AUDIO": 524
+  },
+  "snapshots": [
+    {
+      "turn": 0,
+      "atSecond": 36.326,
+      "promptTokens": 1498,
+      "responseTokens": 400,
+      "totalTokens": 1898,
+      "promptByModality": {
+        "TEXT": 985,
+        "AUDIO": 486
+      },
+      "responseByModality": {
+        "AUDIO": 400
+      }
+    },
+    {
+      "turn": 1,
+      "atSecond": 77.974,
+      "promptTokens": 2364,
+      "responseTokens": 423,
+      "totalTokens": 2787,
+      "promptByModality": {
+        "TEXT": 1090,
+        "AUDIO": 1177
+      },
+      "responseByModality": {
+        "AUDIO": 423
+      }
+    },
+    {
+      "turn": 2,
+      "atSecond": 114.634,
+      "promptTokens": 3201,
+      "responseTokens": 365,
+      "totalTokens": 3566,
+      "promptByModality": {
+        "TEXT": 1207,
+        "AUDIO": 1827
+      },
+      "responseByModality": {
+        "AUDIO": 365
+      }
+    },
+    {
+      "turn": 3,
+      "atSecond": 156.786,
+      "promptTokens": 3960,
+      "responseTokens": 524,
+      "totalTokens": 4484,
+      "promptByModality": {
+        "TEXT": 1307,
+        "AUDIO": 2422
+      },
+      "responseByModality": {
+        "AUDIO": 524
+      }
+    }
+  ],
+  "derived": {
+    "promptTokensPerMinute": 1507.42291587362,
+    "responseTokensPerMinute": 199.46707270650933,
+    "costPerMinuteUsd": 0.0069158736200989725,
+    "extrapolatedSittingSeconds": 1200,
+    "extrapolatedSittingCostUsd": 0.13831747240197945
+  },
+  "rates": {
+    "input": 3,
+    "output": 12,
+    "source": "https://ai.google.dev/gemini-api/docs/pricing",
+    "note": "Audio modality. Text tokens on the same session (the system instruction, the transcriptions) are billed at the model's text rate, which is why the Live measurement records the two modalities separately."
+  }
+}
