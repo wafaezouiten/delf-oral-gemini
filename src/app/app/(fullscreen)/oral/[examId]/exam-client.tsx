@@ -18,7 +18,6 @@ import {
 } from "@/lib/ui/po-player-view";
 import type { OralTopic } from "@/lib/delf/topics";
 import { ConnectionBadge } from "./_components/connection-badge";
-import { EventLog } from "./_components/event-log";
 import { DEV_TOOLS_ENABLED } from "@/lib/dev-tools";
 import { DevTranscriptionPanel } from "./_components/dev-transcription-panel";
 import { RecordingBadge } from "./_components/recording-badge";
@@ -464,10 +463,11 @@ export function ExamClient({ examId, topic }: { examId: string; topic: OralTopic
                   subject={topic.title}
                   active={state.devTextMode}
                   onActiveChange={(on) => controller.setDevTextMode(on)}
-                  onSubmit={(text, seconds) => controller.injectCandidateSpeech(text, seconds)}
+                  // « Envoyer l'exposé » ends the monologue: the text is not a
+                  // fragment of it, it is the whole thing.
+                  onSubmit={(text, seconds) => controller.submitTypedExpose(text, seconds)}
                 />
               )}
-              <EventLog events={state.events} />
               {/* Drives the path a real GoAway takes, so the 13-minute
                   resumption behaviour can be exercised in seconds instead of
                   waiting for the connection limit. Stands down once the real

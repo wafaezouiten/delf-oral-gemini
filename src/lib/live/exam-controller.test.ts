@@ -1223,6 +1223,86 @@ describe("recording the candidate", () => {
       assert.equal(h.finished[0]?.devSeconds, undefined);
     });
 
+    describe("« Envoyer l'exposé »", () => {
+      it("ends the monologue and carries the épreuve into the débat", async () => {
+        // The typed text is not a fragment of the monologue, it is the whole
+        // thing — so sending it is the same act as finishing speaking.
+        const h = harness();
+        await intoMonologue(h);
+        h.controller.setDevTextMode(true);
+        h.advanceClock(20);
+
+        h.controller.submitTypedExpose("Un exposé complet, tapé.", 330);
+        assert.equal(h.controller.getSnapshot().closing, true, "the examiner was asked to close");
+
+        await completeClosing(h);
+        assert.equal(h.controller.getSnapshot().phase, "debate");
+        assert.equal(h.recorder.paused, false, "and the microphone came back for it");
+      });
+
+      it("does not wait out the five-minute floor", async () => {
+        // The floor stops a candidate skipping the task. Here the task has been
+        // handed over complete, and not spending five minutes saying it is the
+        // entire reason to type it.
+        const h = harness();
+        await intoMonologue(h);
+        h.controller.setDevTextMode(true);
+        h.advanceClock(5);
+        assert.equal(h.controller.getSnapshot().canAdvance, false, "the floor is still on");
+
+        h.controller.submitTypedExpose("Bien avant les cinq minutes.", 330);
+        assert.equal(h.controller.getSnapshot().closing, true);
+      });
+
+      it("carries the transcript and the claimed duration with it", async () => {
+        const h = harness();
+        await intoMonologue(h);
+        h.controller.setDevTextMode(true);
+        h.controller.submitTypedExpose("Le télétravail a transformé le rapport au bureau.", 330);
+        await completeClosing(h);
+
+        const said = h.controller
+          .getSnapshot()
+          .transcript.filter((entry) => entry.phase === "monologue" && entry.speaker === "candidate")
+          .map((entry) => entry.text)
+          .join(" ");
+        assert.match(said, /Le télétravail a transformé le rapport au bureau\./);
+
+        h.advanceClock(PHASE_DURATIONS.debate);
+        await completeClosing(h);
+        assert.deepEqual(h.finished[0]?.devSeconds, { monologue: 330, debate: 0 });
+      });
+
+      it("refuses an empty exposé, which would be a way to skip the monologue", async () => {
+        const h = harness();
+        await intoMonologue(h);
+        h.controller.setDevTextMode(true);
+        h.advanceClock(20);
+
+        h.controller.submitTypedExpose("   ", 330);
+
+        const state = h.controller.getSnapshot();
+        assert.equal(state.closing, false, "the phase was not ended");
+        assert.equal(state.phase, "monologue");
+      });
+
+      it("does nothing once the closing handshake is already under way", async () => {
+        const h = harness();
+        await intoMonologue(h);
+        h.controller.setDevTextMode(true);
+        h.controller.submitTypedExpose("Premier envoi.", 330);
+        assert.equal(h.controller.getSnapshot().closing, true);
+
+        h.controller.submitTypedExpose("Second envoi, trop tard.", 90);
+
+        assert.equal(
+          h.controller.getSnapshot().transcript.some((e) => /trop tard/.test(e.text)),
+          false,
+          "the turn is over; a second exposé does not join it",
+        );
+      });
+    });
+
     it("ignores a toggle that changes nothing", async () => {
       const h = harness();
       await intoMonologue(h);

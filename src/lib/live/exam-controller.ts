@@ -820,7 +820,8 @@ export class ExamController {
    *    instead — see {@link devSeconds} for how far that claim travels, and how
    *    far it deliberately does not.
    *  - **It does not advance the phase.** The clock and the state machine are
-   *    untouched.
+   *    untouched. {@link submitTypedExpose} is the one that does, and it is what
+   *    the panel's « Envoyer l'exposé » calls.
    *  - **It does not run where marks are real.** The guard is `DEV_TOOLS_ENABLED`
    *    and it is the first line, so a production build cannot carry a way to
    *    write an exam transcript without speaking. See `lib/dev-tools.ts` for
@@ -848,6 +849,39 @@ export class ExamController {
       this.log("dev-inject-directive-failed", String(error));
     }
     this.log("dev-inject-speech", `${trimmed.length} chars`);
+  }
+
+  /**
+   * DEVELOPMENT ONLY — deliver a typed exposé and end the monologue with it.
+   *
+   * What « Envoyer l'exposé » means. The text is not a fragment of the
+   * monologue, it *is* the monologue: sending it is the same act as finishing
+   * speaking, so the phase ends and the débat begins, through the same closing
+   * handshake the microphone button uses. Leaving the developer on a monologue
+   * they had just delivered in full — waiting out a clock for a task that was
+   * done — was the thing that made the panel feel like it had not worked.
+   *
+   * **The five-minute floor does not apply, and that is the point.** `canAdvanceEarly`
+   * exists to stop a candidate skipping the task; here the task has been handed
+   * over complete, and the whole reason to type it was not to spend five minutes
+   * saying it. The floor still governs every real candidate, because this method
+   * cannot be reached in a build where the tooling is off.
+   *
+   * Everything after that is the ordinary path: the examiner is asked to close,
+   * its last sentence plays, the phase advances, and leaving the monologue hands
+   * the microphone back for the débat.
+   */
+  submitTypedExpose(text: string, seconds = 0): void {
+    if (!DEV_TOOLS_ENABLED) return;
+    if (this.phase !== "monologue") return;
+    // Nothing typed is not a delivered exposé, so it must not end the phase —
+    // otherwise the button becomes a way to skip the monologue entirely.
+    if (!text.trim()) return;
+    if (this.closing) return;
+
+    this.injectCandidateSpeech(text, seconds);
+    this.log("dev-expose-submitted", "ending the monologue");
+    this.beginClosingHandshake();
   }
 
   /**
