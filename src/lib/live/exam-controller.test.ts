@@ -937,22 +937,63 @@ describe("recording the candidate", () => {
       assert.equal(h.controller.getSnapshot().monologueSilent, false);
     });
 
-    it("never blocks the advance — the flag is grounds for a question, not a refusal", async () => {
-      // The measure behind it is a crude amplitude test that a quiet speaker can
-      // defeat. Refusing on it could strand someone who cannot reach the débat
-      // *or* the end of the épreuve, which is worse than the accident it stops.
+    it("still lets the controller advance — the refusal is the screen's, not the machine's", async () => {
+      // `canAdvanceEarly` stays a statement about the clock. The screen refuses
+      // a silent monologue (#39), and keeping that out of the state machine is
+      // what leaves the time-up path free to carry the candidate on regardless.
       const h = harness();
       await intoMonologue(h);
       h.recorder.voiced.monologue = 0;
       h.advanceClock(120);
 
       assert.equal(h.controller.getSnapshot().monologueSilent, true);
-      assert.equal(h.controller.getSnapshot().canAdvance, true, "the button is live");
+      assert.equal(h.controller.getSnapshot().canAdvance, true);
 
       await h.controller.advanceEarly();
-      // The monologue ends through the closing handshake rather than an instant
-      // phase flip, so what proves it was not refused is that closing began.
       assert.equal(h.controller.getSnapshot().closing, true);
+    });
+
+    it("puts the monologue's clock back so the task has to be attempted", async () => {
+      const h = harness();
+      await intoMonologue(h);
+      h.recorder.voiced.monologue = 0;
+      h.advanceClock(120);
+      assert.equal(h.controller.getSnapshot().elapsed, 120);
+
+      h.controller.restartMonologue();
+
+      const state = h.controller.getSnapshot();
+      assert.equal(state.elapsed, 0, "the clock is back to zero");
+      assert.equal(state.phase, "monologue", "and the phase did not move");
+      assert.equal(state.canAdvance, false, "so the minimum applies again");
+    });
+
+    it("refuses to rewind once the closing handshake has begun", async () => {
+      // The examiner has been asked to wrap up; rewinding the clock underneath
+      // that would leave the two disagreeing about which phase is running.
+      const h = harness();
+      await intoMonologue(h);
+      h.advanceClock(120);
+      await h.controller.advanceEarly();
+      assert.equal(h.controller.getSnapshot().closing, true);
+
+      h.controller.restartMonologue();
+      assert.equal(h.controller.getSnapshot().elapsed, 120, "the clock stood still");
+    });
+
+    it("does not rewind a phase that is not the monologue", async () => {
+      const h = harness();
+      await intoMonologue(h);
+      h.advanceClock(120);
+
+      h.controller.restartMonologue();
+      assert.equal(h.controller.getSnapshot().elapsed, 0);
+      // …and in preparation it is a no-op, because there is nothing to attempt.
+      const fresh = harness();
+      fresh.controller.start();
+      fresh.advanceClock(30);
+      fresh.controller.restartMonologue();
+      assert.equal(fresh.controller.getSnapshot().elapsed, 30);
     });
   });
 });

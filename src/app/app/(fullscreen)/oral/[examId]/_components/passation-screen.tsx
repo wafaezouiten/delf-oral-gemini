@@ -58,6 +58,8 @@ export function PassationScreen({
   onToggleNotes,
   onAdvance,
   onExit,
+  emptyTranscript = false,
+  onRetryTranscription,
   badges,
   notices,
   devPanel,
@@ -77,6 +79,9 @@ export function PassationScreen({
   onToggleNotes: () => void;
   onAdvance: () => void;
   onExit: () => void;
+  /** The monologue was ended with no speech recorded — the advance was refused. */
+  emptyTranscript?: boolean;
+  onRetryTranscription?: () => void;
   /** The recording and connection badges. See the strip below for why not the chrome. */
   badges: ReactNode;
   /** Controller failures — a lost connection, a dead microphone. */
@@ -145,6 +150,35 @@ export function PassationScreen({
 
           {devPanel}
         </div>
+
+        {/* Docked directly above the mic, not floated over the middle of the
+            screen: the candidate has just pressed that button and this is the
+            answer to it, so it belongs where their eye already is. A strip
+            rather than a dialog because nothing here is a choice — the only way
+            on is to attempt the task. */}
+        {emptyTranscript && (
+          <div
+            role="alert"
+            className="border-warning/40 bg-warning-subtle text-warning shrink-0 border-t px-4 py-3 sm:px-6"
+          >
+            <div className="mx-auto flex w-full max-w-[47.5rem] flex-wrap items-center justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-sm font-semibold">Transcription vide</p>
+                <p className="text-xs leading-relaxed">
+                  Rien n&apos;a été enregistré pendant votre monologue. Cette
+                  partie est notée : reprenez-la avant de passer au débat.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={onRetryTranscription}
+                className="border-warning/50 bg-card hover:bg-muted shrink-0 rounded-md border px-3.5 py-2 text-xs font-semibold transition-colors"
+              >
+                Réessayer la transcription
+              </button>
+            </div>
+          </div>
+        )}
 
         <ConversationControls
           phase={phase}

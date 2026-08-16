@@ -25,7 +25,6 @@ import { BriefingScreen } from "./_components/briefing-screen";
 import { PreparationScreen } from "./_components/preparation-screen";
 import { PassationScreen } from "./_components/passation-screen";
 import { FinishedScreen } from "./_components/finished-screen";
-import { SilentMonologueDialog } from "./_components/silent-monologue-dialog";
 
 /**
  * The simulateur: one screen per phase, and a phase switch.
@@ -61,8 +60,7 @@ export function ExamClient({ examId, topic }: { examId: string; topic: OralTopic
   const [showExitDialog, setShowExitDialog] = useState(false);
   const [abandoning, setAbandoning] = useState(false);
   const [abandonFailed, setAbandonFailed] = useState(false);
-  const [silenceWarned, setSilenceWarned] = useState(false);
-  const [showSilenceDialog, setShowSilenceDialog] = useState(false);
+  const [emptyTranscript, setEmptyTranscript] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<FinishFailure | null>(null);
   const submittedRef = useRef(false);
@@ -254,25 +252,31 @@ export function ExamClient({ examId, topic }: { examId: string; topic: OralTopic
   const leave = () => router.push("/app");
 
   /**
-   * End the current phase — asking first, if the monologue sounds empty (#39).
+   * End the current phase — refused, on the monologue, if nothing was recorded.
    *
-   * The check is here rather than in the controller for the same reason
-   * `canAdvanceEarly` is not consulted twice: this is a question about what to
-   * *show*, and the controller's job is to run the épreuve. `advanceEarly`
-   * remains callable and remains unrefusing, so nothing about this can strand a
-   * candidate.
+   * A refusal and not a question. The monologue suivi is a graded task, and
+   * ending it with no speech on the recording is not a decision to be confirmed:
+   * there is nothing to grade, so the only way on is to attempt it. The strip
+   * the refusal raises carries the way back — « Réessayer la transcription »,
+   * which puts the clock to zero and leaves the task to do.
    *
-   * Asked at most once per sitting. A candidate who has been told, gone back and
-   * genuinely spoken should not meet it again — and one who was told and chose
-   * to continue anyway has already answered the question. Asking twice would
-   * turn a warning into an obstacle, which is the thing this must not become.
+   * Two things stop this becoming a trap, and neither is optional:
+   *
+   *  - **A dead microphone is never refused.** `monologueWasSilent` answers
+   *    false when nothing was captured at all, so a candidate whose capture
+   *    failed while they spoke passes straight through to the débat and is
+   *    graded on the "corrigé sans l'audio" path. Only a working microphone
+   *    with no voice on it is refused.
+   *  - **The phase still ends on its own.** `isPhaseTimeUp` carries the
+   *    candidate into the débat when the monologue's clock runs out, whatever
+   *    this thinks. What is removed is the shortcut, not the exit.
    */
   const advance = () => {
-    if (state.phase === "monologue" && state.monologueSilent && !silenceWarned) {
-      setSilenceWarned(true);
-      setShowSilenceDialog(true);
+    if (state.phase === "monologue" && state.monologueSilent) {
+      setEmptyTranscript(true);
       return;
     }
+    setEmptyTranscript(false);
     void controller.advanceEarly();
   };
 
@@ -455,6 +459,11 @@ export function ExamClient({ examId, topic }: { examId: string; topic: OralTopic
         onToggleNotes={() => setNotesOpen((open) => !open)}
         onAdvance={advance}
         onExit={() => setShowExitDialog(true)}
+        emptyTranscript={emptyTranscript}
+        onRetryTranscription={() => {
+          setEmptyTranscript(false);
+          controller.restartMonologue();
+        }}
         badges={
           <>
             <RecordingBadge recording={state.recording} />
@@ -487,14 +496,6 @@ export function ExamClient({ examId, topic }: { examId: string; topic: OralTopic
         }
       />
       {exitDialog}
-      <SilentMonologueDialog
-        open={showSilenceDialog}
-        onKeepSpeaking={() => setShowSilenceDialog(false)}
-        onContinueAnyway={() => {
-          setShowSilenceDialog(false);
-          void controller.advanceEarly();
-        }}
-      />
     </>
   );
 }

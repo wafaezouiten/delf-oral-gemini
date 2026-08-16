@@ -598,6 +598,36 @@ export class ExamController {
   }
 
   /**
+   * Put the monologue's clock back to zero so the candidate can attempt it
+   * again.
+   *
+   * Reached from « Réessayer la transcription », after they tried to move on
+   * having recorded no speech (#39). The point is that a monologue nobody
+   * attempted cannot be spent: the clock restarts, the minimum before they may
+   * move on applies again, and the task is still there to do.
+   *
+   * Only during the monologue, and only before the closing handshake has begun —
+   * once the examiner has been asked to wrap up, the turn is over and rewinding
+   * the clock underneath it would leave the two disagreeing about which phase is
+   * running.
+   *
+   * **The phase's own time-up is untouched, and that is deliberate.** It is the
+   * one thing standing between "you must attempt the task" and a candidate
+   * trapped forever — someone whose microphone is delivering sound that is not
+   * their voice can still let the clock run out and be carried into the débat by
+   * `isPhaseTimeUp`. What restarting removes is the *shortcut*, not the exit.
+   */
+  restartMonologue(): void {
+    if (this.phase !== "monologue" || this.closing) return;
+
+    this.phaseStart = this.now();
+    this.elapsed = 0;
+    this.phaseSeconds.monologue = 0;
+    this.log("monologue-restarted", "no speech was recorded");
+    this.emit();
+  }
+
+  /**
    * DEVELOPMENT ONLY — type what the candidate would have said.
    *
    * Testing this product otherwise means speaking French into a microphone for
