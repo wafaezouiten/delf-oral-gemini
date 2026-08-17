@@ -78,8 +78,10 @@ export function PassationScreen({
   onExit,
   emptyTranscript = false,
   onRetryTranscription,
+  awaitingConsigne = false,
   badges,
   notices,
+  announcement,
   devPanel,
 }: {
   phase: SpeakingPhase;
@@ -109,11 +111,26 @@ export function PassationScreen({
   badges: ReactNode;
   /** Controller failures — a lost connection, a dead microphone. */
   notices?: ReactNode;
+  /**
+   * The examiner's spoken consigne for this phase (#37).
+   *
+   * Above the scene, under the notices, so it reads in the order it matters: what
+   * has gone wrong, then what you have been asked to do, then who is speaking.
+   * It stays for the whole phase, folded down to a line once it has been heard —
+   * see `AnnouncementCard` for why it does not disappear.
+   */
+  announcement?: ReactNode;
+  /**
+   * The phase has not started: its consigne is still being spoken, or is waiting
+   * for a click (#37). The clock is at its full length and nothing is recorded, so
+   * the status card must not say either has begun.
+   */
+  awaitingConsigne?: boolean;
   /** Development-only diagnostics. Never rendered in production. */
   devPanel?: ReactNode;
 }) {
   const total = phaseDurationSeconds(phase);
-  const status = passationStatus(phase, connected);
+  const status = passationStatus(phase, connected, awaitingConsigne);
   const hasNotes = notes.trim().length > 0;
   const partTitle = phase === "monologue" ? MONOLOGUE_TITLE : DEBATE_TITLE;
   const showTranscript = phase === "debate" && transcriptOpen;
@@ -153,6 +170,7 @@ export function PassationScreen({
       <main className="relative flex min-h-0 flex-1 flex-col">
         <div className="mx-auto flex min-h-0 w-full max-w-[47.5rem] flex-1 flex-col justify-center gap-4 overflow-y-auto px-4 py-4 sm:px-6">
           {notices}
+          {announcement}
 
           <ConversationScene
             phase={phase}

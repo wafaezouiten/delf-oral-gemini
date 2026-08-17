@@ -176,6 +176,29 @@ describe("the status lines", () => {
     assert.match(passationStatus("monologue", true).body, /ne vous coupera pas/);
     assert.match(passationStatus("debate", true).body, /objections/);
   });
+
+  it("says the examiner is speaking when the consigne is playing, not that they are offline", () => {
+    // The one state where the examiner is audible with no session behind them
+    // (#37). This said « L'examinateur n'est pas en ligne » over the sound of the
+    // examiner talking.
+    assert.match(
+      examinerStatus({ connected: false, connecting: false, speaking: true, announcing: true }),
+      /consigne/,
+    );
+  });
+
+  it("does not claim the clock has started while the consigne is still being given", () => {
+    // The two claims a candidate is most entitled to rely on, and both are false
+    // in the twenty-five seconds a consigne takes: nothing is recorded yet, and
+    // the phase clock has not begun. It used to say the opposite of both.
+    const status = passationStatus("monologue", false, true);
+    assert.ok(!/déjà commencé/.test(status.body), "must not claim the clock is running");
+    assert.match(status.body, /pas encore commencé/);
+    assert.match(status.body, /Rien n'est enregistré/);
+    // And the ordinary connecting card is untouched: outside a consigne the clock
+    // really is running while the socket opens.
+    assert.match(passationStatus("monologue", false).body, /déjà commencé/);
+  });
 });
 
 describe("the topbar stepper", () => {

@@ -229,7 +229,25 @@ export function micCopy(
 export function passationStatus(
   phase: SpeakingPhase,
   connected: boolean,
+  /**
+   * The phase is open but has not started: its consigne is being spoken, or is
+   * waiting for a click because the browser refused to play it (#37).
+   *
+   * Checked before everything else because both of the claims below become false
+   * in that window, and they are the two the candidate is most entitled to rely
+   * on: nothing is being recorded yet, and the clock has not begun. The window
+   * used to be milliseconds wide and is now twenty-five seconds of audible
+   * speech, which is long enough to read a sentence and believe it.
+   */
+  awaitingConsigne = false,
 ): { title: string; body: string } {
+  if (awaitingConsigne) {
+    return {
+      title: "Consigne de l'examinateur",
+      body: "Écoutez la consigne. Rien n'est enregistré pour l'instant et le temps de cette partie n'a pas encore commencé à courir : il démarrera quand l'examinateur aura fini de parler.",
+    };
+  }
+
   if (!connected) {
     return {
       title: "Connexion à l'examinateur",
@@ -255,7 +273,16 @@ export function examinerStatus(options: {
   connected: boolean;
   connecting: boolean;
   speaking: boolean;
+  /**
+   * A recorded consigne is playing (#37).
+   *
+   * First, because it is the one state where the examiner is audible with no
+   * session behind them: without it this said « L'examinateur n'est pas en ligne »
+   * over the sound of the examiner talking.
+   */
+  announcing?: boolean;
 }): string {
+  if (options.announcing) return "L'examinateur donne la consigne…";
   if (options.connecting) return "Connexion en cours…";
   if (!options.connected) return "L'examinateur n'est pas en ligne.";
   if (options.speaking) return "L'examinateur intervient…";
