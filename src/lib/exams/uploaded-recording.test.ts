@@ -188,8 +188,8 @@ describe("choosing what to attach", () => {
 
   it("attaches nothing when nothing can be delivered", () => {
     // A browser with no codec at all: two full-length WAVs, 38 MB. The sitting is
-    // graded from its transcript, which the results page reports and the briefing
-    // screen warned about before the épreuve began.
+    // graded from its transcript, which the results page reports and the
+    // préparation warned about before the passation began.
     const sitting = [recording("monologue", asWav(7 * 60)), recording("debate", asWav(13 * 60))];
 
     assert.deepEqual(selectDeliverable(sitting, sizeOf, transcript), []);

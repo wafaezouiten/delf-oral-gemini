@@ -71,22 +71,17 @@ same rule, so the reproduction keeps it.
                     └───────────────────────────────────┘
                                                         │
    ┌────────────────────────────────────────────────────▼──────────────────┐
-   │ 1. SUJET (briefing)   step 0                                          │
-   │    left: part title · déroulé de la séance · "Avant de commencer"     │
-   │          (mic test, endroit calme)                                    │
-   │    right: DELF pill · document déclencheur · consigne                 │
-   │    actions: [Passer]  [Commencer la préparation · 30:00]              │
-   └────────────────────────────────────────────────────┬──────────────────┘
-                                                        │ onStart
-   ┌────────────────────────────────────────────────────▼──────────────────┐
-   │ 2. PRÉPARATION        step 1 · timer ring in the topbar               │
-   │    left: sujet, justified, "Votre mission"                            │
-   │    right: passation card + CTA · notes textarea · structure attendue  │
+   │ 1. PRÉPARATION        step 0 · timer ring in the topbar · starts on   │
+   │                       arrival, consigne spoken (#37, #55)             │
+   │    left: notices · sujet, justified, "Votre mission"                  │
+   │    right: consigne card · passation card + CTA · "Avant de commencer" │
+   │           (mic test, endroit calme, navigateur) · notes textarea ·    │
+   │           structure attendue · déroulé de la séance                   │
    │    exits: time-up  |  "Commencer la passation"  |  Retour → dialog    │
    └────────────────────────────────────────────────────┬──────────────────┘
                                                         │
    ┌────────────────────────────────────────────────────▼──────────────────┐
-   │ 3. PASSATION          step 2 · timer ring + exit button               │
+   │ 2. PASSATION          steps 1–2 · timer ring + exit button            │
    │    scene: Examinateur (IA) ── beats + clock ── Vous                   │
    │    body:  exposé → one quiet status card                              │
    │           débat  → the live transcript, « Masquer » back to the card  │
@@ -95,7 +90,7 @@ same rule, so the reproduction keeps it.
    └────────────────────────────────────────────────────┬──────────────────┘
                                                         │ finish / time-up
    ┌────────────────────────────────────────────────────▼──────────────────┐
-   │ 4. ÉVALUATION                                                          │
+   │ 3. ÉVALUATION                                                          │
    │    loading  → "Évaluation en cours…"  (spinner card)                  │
    │    error    → "Évaluation impossible" + Réessayer                     │
    │    loaded   → header (sujet · level · Correction IA · Recommencer)    │
@@ -125,25 +120,39 @@ same rule, so the reproduction keeps it.
 
 ### Screen-by-screen
 
-**Briefing.** Reproduced whole: the two-column split, the déroulé rail, the
-pre-flight card with a real `getUserMedia` mic test, the document set as a
-justified printed page with its consigne ruled off below.
+**Briefing — dropped as a screen (#55).** The reference opens on a sujet screen
+whose CTA starts the préparation, and this project reproduced it whole. It could
+not stay: a sitting here is created by « Commencer » in the sujets kiosk, under a
+launch dialog that says « La préparation démarre dès l'ouverture », so the
+briefing asked the candidate to commit twice — and it held the examiner's first
+spoken consigne (#37), which `ExamController.start()` fires, behind the second
+click. Its own « Passer », a top-bar neighbour of the primary CTA, went straight
+past the préparation into the exposé. The épreuve now starts when the page does.
 
-- *Adapted:* the déroulé is built from `PHASE_DURATIONS`, so it prints this
-  project's three real phases rather than a level's `OralPartSpec`.
-- *Kept from here:* the WebCodecs support check. The reference has no equivalent
-  because it never uploads audio; here a browser that cannot encode loses the
-  whole audio correction, and the briefing is the last moment the candidate can
-  do anything about it. It renders as a fourth pre-flight row — the reference's
-  own shape for "can I do this now?" — plus the existing danger notice.
-- *Dropped:* the transport toggle row. It is admin-gated in the reference
-  (`connectionLabel` returns `undefined` for candidates) and this project has no
-  admin role, so the row would never render for anyone.
+What it carried was not dropped with it:
+
+- *Moved:* the pre-flight card, into the préparation rail as `PreflightCard`,
+  with the real `getUserMedia` mic test intact.
+- *Moved:* the déroulé, to the foot of the same rail. Still built from
+  `PHASE_DURATIONS`, so it prints this project's three real phases rather than a
+  level's `OralPartSpec`.
+- *Moved:* the WebCodecs danger notice, over the préparation's sujet. The
+  reference has no equivalent because it never uploads audio; here a browser that
+  cannot encode loses the whole audio correction, and the préparation is now the
+  last moment the candidate can do anything about it. « Commencer la passation »
+  is what waits for the answer.
+- *Dropped with the screen:* the transport toggle row — admin-gated in the
+  reference (`connectionLabel` returns `undefined` for candidates), and this
+  project has no admin role, so it never rendered for anyone — and the serif
+  part headline, whose `partSubtitle` helper went with its only caller.
 
 **Préparation.** Reproduced whole: the sujet on the left, the rail on the right
 carrying the passation card, the notes textarea and « Structure attendue », the
 single clock in the topbar and the "Passer et commencer maintenant" ghost button
-at the rail's foot.
+at the rail's foot. It is now the épreuve's first screen, so the rail also
+carries the consigne card, the pre-flight checks and the déroulé, and the topbar
+stepper stands on « Préparation » rather than on « Exposé » — it was written as a
+literal `1` when the stepper still counted screens.
 
 **Passation.** Reproduced whole: the scene with its two faces and pulsing rings,
 the beat stepper, the elapsed/total clock with its draining bar, the foot control
@@ -160,6 +169,13 @@ bar, the notes drawer.
   phase ends. The débat's automatic VAD streams turn by turn. The turns are set
   like the results page's transcript — speaker label over a paragraph, never chat
   bubbles.
+- *Added, against the reference (#55):* the **close is on screen**. Ending a part
+  asks the examiner for a closing sentence and waits up to `CLOSING_SAFETY_MS`
+  for it, so several seconds pass between the click and the next consigne. The
+  control now goes inert and says « Fin de l'exposé », and the status line says
+  what follows. Before, `canAdvance` went false and the control fell back to its
+  locked copy: « Encore 0 min avant de pouvoir conclure », over a monologue that
+  was concluding.
 - *Adapted:* the beats are `["Exposé", "Débat"]` driven by the actual phase, not
   by `EXPOSE_SHARE`. This project knows which beat it is in; approximating it
   would be worse data.
