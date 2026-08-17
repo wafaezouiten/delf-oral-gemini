@@ -1,6 +1,7 @@
 import Link from "next/link";
 
 import { Tag } from "@/app/_components/po/tag";
+import { ScoreTag } from "@/app/_components/score-band";
 import { COMPETENCY_MAX } from "@/lib/delf/constants";
 import { formatClock } from "@/lib/delf/phases";
 import {
@@ -69,11 +70,20 @@ export function SittingRow({
 
       {/* The mark and the word, never the tint alone: an abandoned zero and a
           failed correction are both red, and only one of them is about the
-          candidate's French. */}
-      <Tag tone={abandoned ? "danger" : sitting.meetsFloor ? "success" : "danger"}>
-        <span aria-hidden>{abandoned ? "—" : sitting.meetsFloor ? "✓" : "✕"}</span>
-        {sitting.score25}/{COMPETENCY_MAX}
-      </Tag>
+          candidate's French.
+
+          Which is why the abandonment keeps its own pill rather than joining the
+          /25 scale. A walk-out scores 0/25 as a consequence, not as a grading —
+          « Très insuffisant » would be a verdict on French nobody read. It stays
+          the em dash, and the line above says the word. */}
+      {abandoned ? (
+        <Tag tone="danger">
+          <span aria-hidden>—</span>
+          {sitting.score25}/{COMPETENCY_MAX}
+        </Tag>
+      ) : (
+        <ScoreTag score25={sitting.score25} mark={sitting.meetsFloor ? "✓" : "✕"} />
+      )}
     </li>
   );
 }

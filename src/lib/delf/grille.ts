@@ -15,11 +15,19 @@
  * it is the single source of truth for the bands, their labels, and snapping a
  * model's raw number onto the nearest legal band.
  *
- * PORT NOTE: copied byte-for-byte from the reference implementation
+ * PORT NOTE: the per-criterion half of this file — everything down to
+ * `bandLabel` — is copied byte-for-byte from the reference implementation
  * (`delf-preps@chore/240-remove-unused-series-actions`, `src/lib/grille.ts`).
- * The reproduction audit marks this file "Reproduce": the tie-rounding rule
- * (2 → 1, 4 → 3) is a deliberate conservative reading of the grille that changes
- * real grades, so it must not be re-derived. Do not "improve" this file.
+ * The reproduction audit marks it "Reproduce": the tie-rounding rule (2 → 1,
+ * 4 → 3) is a deliberate conservative reading of the grille that changes real
+ * grades, so it must not be re-derived. Do not "improve" that half.
+ *
+ * The `/25` scale at the foot of the file is this project's own and has no
+ * counterpart in the reference. It is additive — it reads none of the ported
+ * values and changes none of them — and it lives here rather than in a file of
+ * its own because it is the counterpart of `BAND_TONE`: the same question, asked
+ * of the total instead of of one criterion. Two files owning "what colour is
+ * this mark" is how the two answers drift apart (#50).
  */
 
 /** The only legal per-criterion scores on the official grille. */
@@ -68,4 +76,81 @@ export function snapToBand(n: number): GrilleBand {
 /** The band label for a raw score (snapped first). */
 export function bandLabel(n: number): string {
   return BAND_LABELS[snapToBand(n)];
+}
+
+/* ---------------------------------------------------------------------------
+ * The /25 total, on a five-step scale.
+ *
+ * The five criteria above are graded on four bands and coloured accordingly.
+ * The number they add up to — the one figure the whole épreuve reduces to — was
+ * coloured pass/fail from `meetsCompetencyFloor`, so 6/25 and 24/25 were both
+ * green. This is the /25's own gradation (#50).
+ *
+ * Two things about it are deliberate and are not to be tidied:
+ *
+ *  - **The first band holds six marks and the rest hold five.** 0–5 · 6–10 ·
+ *    11–15 · 16–20 · 21–25, as specified. It is not an off-by-one: it puts the
+ *    whole éliminatoire range *and the floor itself* in the reddest band.
+ *  - **This is a tint, not a verdict.** `meetsCompetencyFloor` still decides
+ *    whether a sitting is éliminatoire, and 5/25 clears that floor while sitting
+ *    in the red band. Both statements are true and the results page prints both.
+ *
+ * The labels are here rather than in a component for the same reason
+ * `BAND_LABELS` is: the rule that colour never carries meaning alone only holds
+ * if the word ships with the tone, from one place.
+ * ------------------------------------------------------------------------- */
+
+/** A coarse tone bucket for colouring a /25. Five steps, rouge → vert. */
+export type ScoreTone = "red" | "coral" | "orange" | "yellow" | "green";
+
+export interface ScoreBand {
+  /** The lowest /25 that falls in this band. */
+  min: number;
+  tone: ScoreTone;
+  /** What the band is called, in the candidate's language. */
+  label: string;
+}
+
+/**
+ * The five bands, highest first — the order `scoreBand` walks, so the table
+ * reads the way the lookup runs.
+ */
+export const SCORE_BANDS: readonly ScoreBand[] = [
+  { min: 21, tone: "green", label: "Très bien" },
+  { min: 16, tone: "yellow", label: "Bien" },
+  { min: 11, tone: "orange", label: "Passable" },
+  { min: 6, tone: "coral", label: "Insuffisant" },
+  { min: 0, tone: "red", label: "Très insuffisant" },
+];
+
+/** The reddest band, and the answer for anything that is not a mark. */
+const LOWEST_BAND = SCORE_BANDS[SCORE_BANDS.length - 1];
+
+/**
+ * Which band a /25 falls in.
+ *
+ * Guarded the way `snapToBand` is, because the same two things can reach it: a
+ * non-finite number (→ the lowest band, since a mark that cannot be read is not
+ * a good one) and a number outside 0–25. Above 25 lands in `green` and below 0
+ * in `red` by the walk itself, so neither needs a clamp.
+ *
+ * Fractions are not marks but the dashboard's average is one, and it is on this
+ * scale too. A 5.5 average is red: the boundary is at 6, not at "nearly 6".
+ */
+export function scoreBand(score25: number): ScoreBand {
+  if (!Number.isFinite(score25)) return LOWEST_BAND;
+  for (const band of SCORE_BANDS) {
+    if (score25 >= band.min) return band;
+  }
+  return LOWEST_BAND;
+}
+
+/** The tone for a /25. */
+export function scoreTone(score25: number): ScoreTone {
+  return scoreBand(score25).tone;
+}
+
+/** The band's French name for a /25 — the word that ships with the tone. */
+export function scoreBandLabel(score25: number): string {
+  return scoreBand(score25).label;
 }

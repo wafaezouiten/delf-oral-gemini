@@ -3,12 +3,11 @@ import Link from "next/link";
 import {
   ArrowRightIcon,
   ChartIcon,
-  CheckCircleIcon,
   ClockIcon,
   GridCheckIcon,
 } from "@/app/_components/po/icons";
 import { Kicker, Tag } from "@/app/_components/po/tag";
-import { COMPETENCY_MAX } from "@/lib/delf/constants";
+import { ScoreTag } from "@/app/_components/score-band";
 import type { HubCapability, HubSujet, HubView } from "@/lib/ui/epreuve-hub";
 
 /**
@@ -192,12 +191,11 @@ export function HubSujets({
             >
               <div className="flex items-center justify-between gap-2">
                 <Tag>{sujet.kind}</Tag>
-                {sujet.score !== null && (
-                  <Tag tone="success">
-                    <CheckCircleIcon className="size-3" />
-                    {sujet.score}/{COMPETENCY_MAX}
-                  </Tag>
-                )}
+                {/* The ✓ that used to sit here is gone with the pass/fail
+                    colour it belonged to: a tick on a « Très insuffisant » pill
+                    reads as approval of the mark rather than as "already sat",
+                    and the footer below already says « Refaire » for that. */}
+                {sujet.score !== null && <ScoreTag score25={sujet.score} />}
               </div>
 
               <h3 className="mt-3 line-clamp-3 text-[0.9375rem] leading-snug font-semibold tracking-tight">

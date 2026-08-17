@@ -87,6 +87,45 @@
   --band-green-subtle: #e7f2ea;
   --band-emerald: #10614f;
   --band-emerald-subtle: #e2f1ed;
+
+  /**
+   * The five /25 bands — a second family, not four of the band tones plus one.
+   *
+   * The criterion palette above has four tones because the grille has four
+   * bands; the /25 scale has five because #50 specifies five. They could have
+   * shared tokens — three of these values *are* the danger/warning/success ink,
+   * so the red band and the éliminatoire warning are the same red on purpose —
+   * but sharing the names would mean a change to the criterion palette silently
+   * repainting the total, and vice versa. One token pair per `ScoreTone` in
+   * `src/lib/delf/grille.ts`, so a tone added there has an unavoidable home
+   * here rather than falling back to grey.
+   *
+   * Every pair holds AA for normal text on its own subtle fill, and each ink is
+   * ≥ 24 ΔE from its neighbour's so « rouge » and « rouge clair » are told apart
+   * from *each other* and not merely from the page:
+   *
+   *   red    #a4132a on #fbeaec  6.68:1   (= --danger, deliberately)
+   *   coral  #b03509 on #fde3d6  5.10:1
+   *   orange #8a5200 on #fbf0dd  5.66:1   (= --warning, deliberately)
+   *   yellow #655c00 on #f7f3c9  6.04:1   ← the hard one: a yellow dark enough
+   *                                        to read is an olive, so the *fill*
+   *                                        carries the hue and the ink the
+   *                                        contrast
+   *   green  #1c6b3f on #e7f2ea  5.67:1   (= --success, deliberately)
+   *
+   * Colour is still never the message: `scoreBandLabel` ships the band's name
+   * with its tone, and every surface below prints both.
+   */
+  --score-red: #a4132a;
+  --score-red-subtle: #fbeaec;
+  --score-coral: #b03509;
+  --score-coral-subtle: #fde3d6;
+  --score-orange: #8a5200;
+  --score-orange-subtle: #fbf0dd;
+  --score-yellow: #655c00;
+  --score-yellow-subtle: #f7f3c9;
+  --score-green: #1c6b3f;
+  --score-green-subtle: #e7f2ea;
 }
 
 @theme inline {
@@ -115,6 +154,16 @@
   --color-band-green-subtle: var(--band-green-subtle);
   --color-band-emerald: var(--band-emerald);
   --color-band-emerald-subtle: var(--band-emerald-subtle);
+  --color-score-red: var(--score-red);
+  --color-score-red-subtle: var(--score-red-subtle);
+  --color-score-coral: var(--score-coral);
+  --color-score-coral-subtle: var(--score-coral-subtle);
+  --color-score-orange: var(--score-orange);
+  --color-score-orange-subtle: var(--score-orange-subtle);
+  --color-score-yellow: var(--score-yellow);
+  --color-score-yellow-subtle: var(--score-yellow-subtle);
+  --color-score-green: var(--score-green);
+  --color-score-green-subtle: var(--score-green-subtle);
   --font-sans: var(--font-inter);
   --font-serif: var(--font-spectral);
 }
@@ -307,6 +356,16 @@ body {
     --band-amber-subtle: #ffffff;
     --band-green-subtle: #ffffff;
     --band-emerald-subtle: #ffffff;
+    /* The /25 scale flattens for the same reason, and survives it for the same
+       reason: « Passable » is printed beside the mark, so a sheet with no fills
+       on it still says which band the total landed in. Five steps of grey would
+       be less distinguishable than two, which is exactly why the word is not
+       optional. */
+    --score-red-subtle: #ffffff;
+    --score-coral-subtle: #ffffff;
+    --score-orange-subtle: #ffffff;
+    --score-yellow-subtle: #ffffff;
+    --score-green-subtle: #ffffff;
   }
 
   body {
