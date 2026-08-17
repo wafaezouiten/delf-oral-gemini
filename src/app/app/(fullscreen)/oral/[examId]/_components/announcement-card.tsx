@@ -1,6 +1,6 @@
 "use client";
 
-import { PlayIcon, StopIcon } from "@/app/_components/po/icons";
+import { CheckCircleIcon, PlayIcon, StopIcon } from "@/app/_components/po/icons";
 import { Kicker } from "@/app/_components/po/tag";
 import { AudioBars } from "@/app/_components/po/audio-bars";
 import { primaryButton, secondaryButton } from "@/app/_components/button-styles";
@@ -54,6 +54,42 @@ export function AnnouncementCard({
   if (!view) return null;
 
   const { mode } = view;
+
+  /**
+   * Heard, and done with.
+   *
+   * A slim line rather than the card, because on the passation screen this sits
+   * between the sujet's title and the document it introduces — and by then the
+   * consigne has been given. It says so, and keeps the words one click away for
+   * anyone who missed them. « Réécouter » is right there because a candidate who
+   * mishears the instruction for a graded task should not have to wonder.
+   */
+  if (mode === "heard" && !muted) {
+    return (
+      <div className="border-border flex flex-wrap items-center gap-x-3 gap-y-1.5 border-y py-2">
+        <CheckCircleIcon className="text-success size-3.5 shrink-0" aria-hidden />
+        <span className="text-muted-foreground text-xs font-medium">
+          {ANNOUNCEMENT_COPY.heard}
+        </span>
+        <details className="min-w-0 basis-full sm:basis-auto">
+          <summary className="text-muted-foreground hover:text-foreground cursor-pointer text-xs font-medium">
+            Afficher le texte
+          </summary>
+          <p className="text-foreground/85 mt-2 text-[0.8125rem] leading-relaxed">
+            {view.announcement.text}
+          </p>
+        </details>
+        <button
+          type="button"
+          onClick={onPlay}
+          className="text-muted-foreground hover:text-foreground ml-auto flex shrink-0 items-center gap-1.5 text-[0.6875rem] font-semibold transition-colors"
+        >
+          <PlayIcon className="size-3" />
+          {ANNOUNCEMENT_COPY.replay}
+        </button>
+      </div>
+    );
+  }
 
   return (
     <section

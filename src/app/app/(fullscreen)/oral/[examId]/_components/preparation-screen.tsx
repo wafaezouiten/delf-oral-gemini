@@ -7,7 +7,7 @@ import { Kicker } from "@/app/_components/po/tag";
 import { SimulatorTopBar } from "@/app/_components/po/topbar";
 import { TimerRing } from "@/app/_components/po/timer-ring";
 import { PHASE_DURATIONS } from "@/lib/delf/phases";
-import { poKicker, shortPartLabel, structureSteps, MONOLOGUE_TITLE } from "@/lib/ui/po-player-view";
+import { poKicker, shortPartLabel, EXPOSE_PLAN, MONOLOGUE_TITLE } from "@/lib/ui/po-player-view";
 import type { OralTopic } from "@/lib/delf/topics";
 
 /**
@@ -140,14 +140,26 @@ export function PreparationScreen({
           </div>
 
           <div className="border-border bg-card shrink-0 rounded-lg border p-4">
+            {/* The same list the exposé screen prints as « Votre plan », so the
+                structure a candidate is given thirty minutes to absorb is the
+                one still in front of them while they speak. It used to be a
+                separate four-line list written in a different voice. */}
             <Kicker>Structure attendue</Kicker>
-            <ol className="mt-2.5 flex flex-col gap-2">
-              {structureSteps().map((line, index) => (
-                <li key={line} className="text-foreground/85 flex items-center gap-2.5 text-xs">
-                  <span className="bg-primary-subtle text-primary tabular flex size-4.5 shrink-0 items-center justify-center rounded-md text-[0.625rem] font-semibold">
+            <ol className="mt-2.5 flex flex-col gap-2.5">
+              {EXPOSE_PLAN.map((step, index) => (
+                <li key={step.title} className="flex items-start gap-2.5">
+                  <span
+                    className="bg-primary-subtle text-primary tabular mt-px flex size-4.5 shrink-0 items-center justify-center rounded-md text-[0.625rem] font-semibold"
+                    aria-hidden
+                  >
                     {index + 1}
                   </span>
-                  {line}
+                  <div className="min-w-0">
+                    <p className="text-foreground/85 text-xs font-semibold">{step.title}</p>
+                    <p className="text-muted-foreground mt-0.5 text-[0.6875rem] leading-relaxed">
+                      {step.detail}
+                    </p>
+                  </div>
                 </li>
               ))}
             </ol>

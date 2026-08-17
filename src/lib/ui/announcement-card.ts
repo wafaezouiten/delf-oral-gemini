@@ -21,6 +21,15 @@ export const ANNOUNCEMENT_COPY = {
   skip: "Passer l'annonce",
   /** Sticky, for the rest of the sitting. See `ExamController.muteAnnouncements`. */
   mute: "Couper les annonces",
+  /**
+   * The collapsed card, once the consigne is over.
+   *
+   * It states what happened rather than naming a control, because that is the
+   * question a candidate arriving at a part actually has: the examiner said
+   * something, is that dealt with? Two words answer it, and the text is one click
+   * behind them.
+   */
+  heard: "Consigne écoutée.",
   /** Once it has been heard. */
   replay: "Réécouter la consigne",
   /** After the browser refused to autoplay: the way to hear it after all. */

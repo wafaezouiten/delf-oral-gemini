@@ -12,16 +12,10 @@ import { isOpusEncodingSupported } from "@/lib/audio/opus-encoder";
 import { selectDeliverable } from "@/lib/exams/uploaded-recording";
 import { requestAbandon } from "@/lib/exams/abandon";
 import { describeFinishFailure, type FinishFailure } from "@/lib/ui/finish-failure";
-import {
-  candidateStatus as candidateStatusLine,
-  examinerStatus as examinerStatusLine,
-} from "@/lib/ui/po-player-view";
 import type { OralTopic } from "@/lib/delf/topics";
 import { AnnouncementCard } from "./_components/announcement-card";
-import { ConnectionBadge } from "./_components/connection-badge";
 import { DEV_TOOLS_ENABLED } from "@/lib/dev-tools";
 import { DevTranscriptionPanel } from "./_components/dev-transcription-panel";
-import { RecordingBadge } from "./_components/recording-badge";
 import { BriefingScreen } from "./_components/briefing-screen";
 import { PreparationScreen } from "./_components/preparation-screen";
 import { PassationScreen } from "./_components/passation-screen";
@@ -464,24 +458,15 @@ export function ExamClient({ examId, topic }: { examId: string; topic: OralTopic
     <>
       <PassationScreen
         phase={state.phase}
+        topic={topic}
         elapsed={state.elapsed}
         remaining={state.remaining}
         recording={state.recording}
-        examinerSpeaking={state.examinerSpeaking}
         connected={state.connection === "connected"}
         connecting={state.connection === "connecting"}
         canAdvance={state.canAdvance}
-        examinerStatus={examinerStatusLine({
-          connected: state.connection === "connected",
-          connecting: state.connection === "connecting",
-          speaking: state.examinerSpeaking,
-          announcing: state.announcementPlaying,
-        })}
-        candidateStatus={candidateStatusLine({
-          connected: state.connection === "connected",
-          examinerSpeaking: state.examinerSpeaking,
-          recording: state.recording,
-        })}
+        awaitingStart={state.awaitingStart}
+        onStart={() => controller.startSpeaking()}
         notes={notes}
         notesOpen={notesOpen}
         onToggleNotes={() => setNotesOpen((open) => !open)}
@@ -492,12 +477,6 @@ export function ExamClient({ examId, topic }: { examId: string; topic: OralTopic
         onExit={() => setShowExitDialog(true)}
         emptyTranscript={state.monologueHeld}
         onRetryTranscription={() => controller.restartMonologue()}
-        badges={
-          <>
-            <RecordingBadge recording={state.recording} />
-            <ConnectionBadge state={state.connection} />
-          </>
-        }
         notices={hasNotices ? notices : undefined}
         announcement={announcement}
         awaitingConsigne={awaitingConsigne}

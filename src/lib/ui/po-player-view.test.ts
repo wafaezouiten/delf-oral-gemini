@@ -3,18 +3,15 @@ import { describe, it } from "node:test";
 
 import { MONOLOGUE_MIN_SECONDS, PHASE_DURATIONS, formatClock } from "@/lib/delf/phases";
 import {
-  activeBeat,
   buildDeroule,
-  candidateStatus,
-  examinerStatus,
   micCopy,
   partSubtitle,
   passationStatus,
   poKicker,
-  PASSATION_BEATS,
   secondsToMonologueFloor,
   shortPartLabel,
-  structureSteps,
+  partieKicker,
+  EXPOSE_PLAN,
   topbarStep,
 } from "./po-player-view";
 
@@ -77,23 +74,30 @@ describe("the déroulé", () => {
   });
 });
 
-describe("the préparation rail", () => {
+describe("the exposé plan", () => {
   it("gives the argued arc, which is the only one B2 has a caller for", () => {
-    const steps = structureSteps();
-    assert.equal(steps.length, 4);
-    assert.match(steps[0], /problématique/);
-    assert.match(steps[3], /débat/);
-  });
-});
-
-describe("the passation beats", () => {
-  it("has exactly the two beats of the B2 épreuve", () => {
-    assert.deepEqual([...PASSATION_BEATS], ["Exposé", "Débat"]);
+    assert.equal(EXPOSE_PLAN.length, 4);
+    assert.match(EXPOSE_PLAN[0].detail, /problématique/);
+    assert.equal(EXPOSE_PLAN[3].title, "Conclusion");
   });
 
-  it("reads the beat off the phase instead of estimating it from the clock", () => {
-    assert.equal(activeBeat("monologue"), 0);
-    assert.equal(activeBeat("debate"), 1);
+  it("keeps « Point de vue » as a beat of its own", () => {
+    // B2's « présenter et défendre un point de vue » is graded on the candidate
+    // taking a position, not on surveying the arguments. Folding it into the
+    // développement is how an exposé comes out sounding like a B1 summary.
+    assert.equal(EXPOSE_PLAN[2].title, "Point de vue");
+    assert.match(EXPOSE_PLAN[2].detail, /concession/);
+  });
+
+  it("gives every beat a title and a usable instruction", () => {
+    // One list, printed twice: the préparation rail's « Structure attendue » and
+    // the exposé's « Votre plan » are the same four steps, so the structure a
+    // candidate absorbs is the one still in front of them while they speak.
+    for (const step of EXPOSE_PLAN) {
+      assert.ok(step.title.length > 0);
+      assert.ok(step.detail.length > 20, `"${step.title}" has no instruction`);
+      assert.ok(!step.title.includes("—"), "no em dash in text a candidate reads");
+    }
   });
 });
 
@@ -137,34 +141,7 @@ describe("the floor", () => {
   });
 });
 
-describe("the status lines", () => {
-  it("distinguishes connecting from disconnected, which look the same otherwise", () => {
-    assert.match(
-      examinerStatus({ connected: false, connecting: true, speaking: false }),
-      /Connexion/,
-    );
-    assert.match(
-      examinerStatus({ connected: false, connecting: false, speaking: false }),
-      /pas en ligne/,
-    );
-  });
-
-  it("puts listening above speaking: the examiner talking outranks the mic", () => {
-    // Both are true while the examiner interrupts, and "vous avez la parole"
-    // next to a talking examiner is the one that misleads.
-    assert.equal(
-      candidateStatus({ connected: true, examinerSpeaking: true, recording: true }),
-      "En écoute…",
-    );
-  });
-
-  it("says the microphone is waiting when it is, rather than claiming the floor", () => {
-    assert.match(
-      candidateStatus({ connected: true, examinerSpeaking: false, recording: false }),
-      /Microphone/,
-    );
-  });
-
+describe("the status card", () => {
   it("tells the candidate the clock is already running while the socket opens", () => {
     // The phase clock starts with the phase, not with the connection, and a
     // candidate who thinks otherwise loses the difference in silence.
@@ -177,20 +154,12 @@ describe("the status lines", () => {
     assert.match(passationStatus("debate", true).body, /objections/);
   });
 
-  it("says the examiner is speaking when the consigne is playing, not that they are offline", () => {
-    // The one state where the examiner is audible with no session behind them
-    // (#37). This said « L'examinateur n'est pas en ligne » over the sound of the
-    // examiner talking.
-    assert.match(
-      examinerStatus({ connected: false, connecting: false, speaking: true, announcing: true }),
-      /consigne/,
-    );
-  });
-
-  it("does not claim the clock has started while the consigne is still being given", () => {
+  it("does not claim the clock has started before the part has begun", () => {
     // The two claims a candidate is most entitled to rely on, and both are false
-    // in the twenty-five seconds a consigne takes: nothing is recorded yet, and
-    // the phase clock has not begun. It used to say the opposite of both.
+    // while the consigne is being given and while the part sits armed: nothing is
+    // recorded yet, and the clock has not begun. It used to say the opposite of
+    // both, in a window that was milliseconds wide before #37 and is now as long
+    // as the candidate takes to read the sujet.
     const status = passationStatus("monologue", false, true);
     assert.ok(!/déjà commencé/.test(status.body), "must not claim the clock is running");
     assert.match(status.body, /pas encore commencé/);
@@ -202,15 +171,26 @@ describe("the status lines", () => {
 });
 
 describe("the topbar stepper", () => {
-  it("stays on Sujet until the épreuve starts", () => {
+  it("stands on the préparation until the épreuve starts", () => {
+    // The briefing is where a candidate about to prepare is standing, so the
+    // sujet screen and the préparation share a step rather than the stepper
+    // spending one of its three on a screen nobody is examined on.
     assert.equal(topbarStep("preparation", false), 0);
+    assert.equal(topbarStep("preparation", true), 0);
   });
 
-  it("tracks the three screens, not the four phases", () => {
-    assert.equal(topbarStep("preparation", true), 1);
-    assert.equal(topbarStep("monologue", true), 2);
+  it("names the épreuve's parts, so the exposé and the débat are not one step", () => {
+    // It used to fold both into a single « Passage », which told a candidate
+    // halfway through the épreuve they were on the last step — and forced a
+    // second stepper inside the scene to say which half they were in.
+    assert.equal(topbarStep("monologue", true), 1);
     assert.equal(topbarStep("debate", true), 2);
-    // `finished` is the évaluation's loading state, not a fourth step.
+    // `finished` is the évaluation's loading state, not a fourth part.
     assert.equal(topbarStep("finished", true), 2);
+  });
+
+  it("numbers the parts as the DELF does", () => {
+    assert.equal(partieKicker("monologue"), "Partie 1 · Monologue suivi");
+    assert.equal(partieKicker("debate"), "Partie 2 · Débat");
   });
 });

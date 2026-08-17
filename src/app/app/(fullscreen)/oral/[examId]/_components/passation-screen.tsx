@@ -3,143 +3,132 @@
 import type { ReactNode } from "react";
 
 import { ExitIcon } from "@/app/_components/po/icons";
+import { Kicker } from "@/app/_components/po/tag";
 import { SimulatorTopBar } from "@/app/_components/po/topbar";
 import { TimerRing } from "@/app/_components/po/timer-ring";
 import { phaseDurationSeconds } from "@/lib/delf/phases";
+import type { OralTopic } from "@/lib/delf/topics";
 import type { TranscriptEntry } from "@/lib/delf/transcript";
 import { DEBATE_TRANSCRIPT_COPY } from "@/lib/ui/debate-transcript";
 import {
   MONOLOGUE_TITLE,
   DEBATE_TITLE,
+  SITE_FOOTER,
+  partieKicker,
   passationStatus,
   poKicker,
-  shortPartLabel,
+  topbarStep,
   type SpeakingPhase,
 } from "@/lib/ui/po-player-view";
-import { ConversationScene } from "./conversation-scene";
 import { ConversationControls } from "./conversation-controls";
 import { DebateTranscript } from "./debate-transcript";
+import { ExposePlan } from "./expose-plan";
 import { NotesDrawer } from "./notes-drawer";
 
 /**
- * The passation, whole: chrome, scene, status card, control bar, notes drawer.
+ * The passation: the sujet the candidate is speaking about, in front of them
+ * while they speak about it.
  *
- * PORT NOTE: this is the reference's `phase === "conversation"` branch of
- * `simulateur-client.tsx` plus the layout half of `conversation-simulateur.tsx`,
- * assembled into one screen so the orchestrator below stays a phase switch. The
- * reference splits them because its transport component owns the session; here
- * the session belongs to `ExamController`, which leaves this file with no state
- * of its own and nothing to own it for.
+ * **What this screen used to be, and why it changed.** It was a pair of examiner
+ * and candidate avatars with a status card underneath, and the sujet was left
+ * behind on the préparation screen. That reproduced the reference faithfully and
+ * it was the wrong thing to reproduce: a candidate delivering a seven-minute
+ * argued exposé about a document cannot see the document, cannot see the plan
+ * they were told to follow, and is watching two faces that convey nothing the
+ * status line does not already say in words. The avatars are gone; the sujet, the
+ * plan and the record control take the room they were using.
  *
- * **The débat prints its exchange; the monologue does not (#48).** The reference
- * has no transcript feed anywhere, and this screen reproduced that: the exchange
- * is spoken, not printed, and watching a transcript arrive is the fastest way to
- * stop listening to the examiner. That argument was never wrong — it is now
- * outweighed in one phase and left standing in the other, and the two halves
- * come apart cleanly:
+ * The two parts share the frame and differ in one panel:
  *
- *  - **The monologue keeps the quiet card.** Verified against the live service:
- *    during a manual-VAD activity nothing is transcribed until the floor is
- *    released, so the whole exposé arrives at once at the end. A feed there
- *    would sit empty for seven minutes and then print everything at the moment
- *    the phase is over — a panel that looks broken, then a panel that is too
- *    late to read.
- *  - **The débat runs on automatic VAD**, so both sides stream turn by turn, and
- *    a candidate who missed what the examiner just objected to can read it.
- *    This is a training simulator rather than the épreuve, and being able to see
- *    the objection is worth more here than the fidelity of not seeing it. The
- *    distraction risk is real and accepted, which is why « Masquer » exists: the
- *    reference's behaviour is one click away and stays available all through the
- *    phase.
+ *  - **The exposé keeps « Votre plan ».** Four beats, the same list the
+ *    préparation rail gives thirty minutes to absorb, still on screen while the
+ *    clock runs.
+ *  - **The débat prints the exchange instead (#48).** A plan is a script for a
+ *    monologue; during the débat the candidate is answering objections, and being
+ *    able to re-read the one they are answering is worth more than the fidelity
+ *    of not seeing it. « Masquer » still puts the reference's behaviour one click
+ *    away, and hiding it falls back to the status card.
  *
- * The feed takes the status card's place rather than stacking under it. Both at
- * once costs the scene its room on a phone, and the card's sentence is guidance
- * for before the exchange starts — so it is handed to the feed, which prints it
- * until the first turn lands.
+ * **Nothing runs until « Enregistrer ».** The part opens armed: the consigne is
+ * given, the sujet and the plan are readable, the timer shows the part's full
+ * length and no artefact is open. The candidate starts it themselves. Reading the
+ * document you are about to argue from should not be charged to the seven minutes
+ * you have to argue in, and the DELF grades how long you spoke.
  */
 export function PassationScreen({
   phase,
+  topic,
   elapsed,
   remaining,
   recording,
-  examinerSpeaking,
   connected,
   connecting,
   canAdvance,
-  examinerStatus,
-  candidateStatus,
+  awaitingStart,
   notes,
   notesOpen,
   onToggleNotes,
   transcript,
   transcriptOpen,
   onToggleTranscript,
+  onStart,
   onAdvance,
   onExit,
   emptyTranscript = false,
   onRetryTranscription,
   awaitingConsigne = false,
-  badges,
   notices,
   announcement,
   devPanel,
 }: {
   phase: SpeakingPhase;
+  /** The sujet, on screen throughout. The reason this screen exists. */
+  topic: OralTopic;
   elapsed: number;
   remaining: number;
   recording: boolean;
-  examinerSpeaking: boolean;
   connected: boolean;
   connecting: boolean;
   canAdvance: boolean;
-  examinerStatus: string;
-  candidateStatus: string;
+  /** The part is armed and waiting for « Enregistrer ». */
+  awaitingStart: boolean;
   notes: string;
   notesOpen: boolean;
   onToggleNotes: () => void;
   /** The whole exam transcript. Only the débat's half of it is ever shown here. */
   transcript: readonly TranscriptEntry[];
-  /** Open by default, and only consulted during the débat. See the block above. */
+  /** Open by default, and only consulted during the débat. */
   transcriptOpen: boolean;
   onToggleTranscript: () => void;
+  /** « Enregistrer » — starts the clock, the recording and the session. */
+  onStart: () => void;
   onAdvance: () => void;
   onExit: () => void;
   /** The monologue was ended with no speech recorded — the advance was refused. */
   emptyTranscript?: boolean;
   onRetryTranscription?: () => void;
-  /** The recording and connection badges. See the strip below for why not the chrome. */
-  badges: ReactNode;
+  /** The consigne is still being given, so nothing has started yet (#37). */
+  awaitingConsigne?: boolean;
   /** Controller failures — a lost connection, a dead microphone. */
   notices?: ReactNode;
-  /**
-   * The examiner's spoken consigne for this phase (#37).
-   *
-   * Above the scene, under the notices, so it reads in the order it matters: what
-   * has gone wrong, then what you have been asked to do, then who is speaking.
-   * It stays for the whole phase, folded down to a line once it has been heard —
-   * see `AnnouncementCard` for why it does not disappear.
-   */
+  /** The examiner's spoken consigne for this part (#37). */
   announcement?: ReactNode;
-  /**
-   * The phase has not started: its consigne is still being spoken, or is waiting
-   * for a click (#37). The clock is at its full length and nothing is recorded, so
-   * the status card must not say either has begun.
-   */
-  awaitingConsigne?: boolean;
   /** Development-only diagnostics. Never rendered in production. */
   devPanel?: ReactNode;
 }) {
   const total = phaseDurationSeconds(phase);
-  const status = passationStatus(phase, connected, awaitingConsigne);
+  const status = passationStatus(phase, connected, awaitingConsigne || awaitingStart);
   const hasNotes = notes.trim().length > 0;
   const partTitle = phase === "monologue" ? MONOLOGUE_TITLE : DEBATE_TITLE;
   const showTranscript = phase === "debate" && transcriptOpen;
 
   return (
     <div className="bg-background relative flex h-full min-h-0 flex-col overflow-hidden">
+      {/* The full part title, not the short label. There is room for it here —
+          the stepper names the parts now, so the kicker no longer has to. */}
       <SimulatorTopBar
-        kicker={poKicker(shortPartLabel(partTitle))}
-        currentStep={2}
+        kicker={poKicker(partTitle)}
+        currentStep={topbarStep(phase, true)}
         onBack={onExit}
         right={
           <>
@@ -156,32 +145,23 @@ export function PassationScreen({
         }
       />
 
-      {/* The two badges get a strip of their own rather than a place in the
-          chrome's right slot. The reference has no analogue for either, so there
-          is no layout to copy — and the slot is the wrong home for them: it
-          already carries the clock and the exit, and « Reconnexion, l'épreuve
-          continue » is a sentence, not a chip. Hiding them below `lg` to make
-          them fit would hide the recording indicator on a phone, which is the
-          one screen where "you can check it" matters most. */}
-      <div className="border-border bg-card/60 flex shrink-0 flex-wrap items-center gap-2 border-b px-4 py-2 sm:px-5">
-        {badges}
-      </div>
-
       <main className="relative flex min-h-0 flex-1 flex-col">
-        <div className="mx-auto flex min-h-0 w-full max-w-[47.5rem] flex-1 flex-col justify-center gap-4 overflow-y-auto px-4 py-4 sm:px-6">
+        <div className="mx-auto flex min-h-0 w-full max-w-[47.5rem] flex-1 flex-col gap-4 overflow-y-auto px-4 py-5 sm:px-6">
           {notices}
-          {announcement}
 
-          <ConversationScene
-            phase={phase}
-            examinerSpeaking={examinerSpeaking}
-            examinerStatus={examinerStatus}
-            candidateRecording={recording && !examinerSpeaking}
-            candidateStatus={candidateStatus}
-            candidateStatusUrgent={remaining <= 60}
-            elapsed={elapsed}
-            total={total}
-          />
+          {/* The sujet, on the paper stock the préparation screen prints it on,
+              so the candidate recognises the same document rather than reading
+              what looks like a different one. */}
+          <section className="border-paper-border bg-paper rounded-lg border px-5 py-6 sm:px-7">
+            <Kicker>{partieKicker(phase)}</Kicker>
+            <h1 className="font-serif mt-1.5 text-[1.375rem] leading-[1.25] font-semibold text-balance">
+              {topic.title}
+            </h1>
+
+            {announcement && <div className="mt-4">{announcement}</div>}
+
+            <p className="document-text mt-4">{topic.document}</p>
+          </section>
 
           {showTranscript ? (
             <DebateTranscript
@@ -189,26 +169,32 @@ export function PassationScreen({
               hint={status.body}
               onHide={onToggleTranscript}
             />
+          ) : phase === "monologue" ? (
+            <ExposePlan />
           ) : (
             <div className="border-border bg-card rounded-lg border border-dashed p-6 text-center">
               <h2 className="text-[0.84375rem] font-semibold">{status.title}</h2>
               <p className="text-muted-foreground mx-auto mt-1.5 max-w-[46ch] text-xs leading-relaxed">
                 {status.body}
               </p>
-              {/* The way back, and only in the phase that has something to show.
-                  On the card rather than in the control bar: it is the control
-                  bar's job to end the phase, and a candidate who has just hidden
-                  the feed looks where the feed was. */}
-              {phase === "debate" && (
-                <button
-                  type="button"
-                  onClick={onToggleTranscript}
-                  className="border-border text-muted-foreground hover:text-foreground hover:bg-muted mt-3.5 rounded-md border px-3 py-1.5 text-[0.6875rem] font-semibold transition-colors"
-                >
-                  {DEBATE_TRANSCRIPT_COPY.show}
-                </button>
-              )}
+              {/* The way back to the feed, on the card that replaced it. */}
+              <button
+                type="button"
+                onClick={onToggleTranscript}
+                className="border-border text-muted-foreground hover:text-foreground hover:bg-muted mt-3.5 rounded-md border px-3 py-1.5 text-[0.6875rem] font-semibold transition-colors"
+              >
+                {DEBATE_TRANSCRIPT_COPY.show}
+              </button>
             </div>
+          )}
+
+          {/* The exposé's status line lives under the plan rather than replacing
+              it: the plan is the thing to be looking at, and this is one
+              sentence saying whether the examiner is there yet. */}
+          {phase === "monologue" && !awaitingStart && !awaitingConsigne && (
+            <p className="text-muted-foreground text-center text-xs leading-relaxed">
+              {status.body}
+            </p>
           )}
         </div>
 
@@ -217,17 +203,22 @@ export function PassationScreen({
           canAdvance={canAdvance}
           connecting={connecting}
           recording={recording}
+          awaitingStart={awaitingStart}
+          startDisabled={awaitingConsigne}
           elapsed={elapsed}
           hasNotes={hasNotes}
           notesOpen={notesOpen}
           onToggleNotes={onToggleNotes}
+          onStart={onStart}
           onAdvance={onAdvance}
           emptyTranscript={emptyTranscript}
           onRetryTranscription={onRetryTranscription}
-          // Handed down rather than rendered here: it belongs beside the
-          // empty-transcript notice, which lives inside the bar (#36).
           devPanel={devPanel}
         />
+
+        <footer className="border-border bg-card text-muted-foreground shrink-0 border-t px-4 py-2 text-center text-[0.6875rem]">
+          {SITE_FOOTER}
+        </footer>
 
         {hasNotes && (
           <NotesDrawer open={notesOpen} notes={notes} onClose={onToggleNotes} />
