@@ -24,7 +24,7 @@ import {
   ORAL_CRITERIA_LABELS,
   type OralCriterion,
 } from "@/lib/delf/criteria";
-import { scoreBand, type GrilleBand } from "@/lib/delf/grille";
+import { scoreTone, type GrilleBand } from "@/lib/delf/grille";
 import { meetsCompetencyFloor } from "@/lib/delf/orale-rubric";
 import { formatClock } from "@/lib/delf/phases";
 import { type TranscriptEntry } from "@/lib/delf/transcript";
@@ -213,12 +213,12 @@ export function ResultsClient({
    * not simply change colour.
    *
    * `passed` is the DELF's elimination rule and it is binary — 5/25 clears the
-   * floor. `band` is where the mark sits on the five-step scale, and 5/25 is in
+   * floor. `tone` is where the mark sits on the five-step scale, and 5/25 is in
    * the reddest band. « Au-dessus du seuil de 5/25 » in a rouge pill would read
    * as a contradiction, so the pill keeps the floor's own success/danger
    * treatment at full force and the band colours the numeral it describes (#50).
    */
-  const band = scoreBand(evaluation.score25);
+  const tone = scoreTone(evaluation.score25);
   const penalised =
     evaluation.durationPenalty !== undefined
       ? evaluation.durationPenalty > 0
@@ -301,7 +301,7 @@ export function ResultsClient({
               <p
                 className={cn(
                   "font-serif tabular text-[2.875rem] leading-none font-semibold",
-                  scoreInk(band.tone),
+                  scoreInk(tone),
                 )}
               >
                 {evaluation.score25}

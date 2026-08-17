@@ -147,7 +147,12 @@ export function scoreBand(score25: number): ScoreBand {
   return LOWEST_BAND;
 }
 
-/** The tone for a /25. */
+/**
+ * The tone for a /25 — what every surface that only paints a number asks for.
+ *
+ * `scoreBand` is for the one caller that carries the band itself: the dashboard's
+ * view model, which computes it from a number the component never sees.
+ */
 export function scoreTone(score25: number): ScoreTone {
   return scoreBand(score25).tone;
 }

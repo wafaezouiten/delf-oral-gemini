@@ -1,6 +1,6 @@
 import { tagShape } from "@/app/_components/po/tag";
 import { COMPETENCY_MAX } from "@/lib/delf/constants";
-import { scoreBand, type ScoreTone } from "@/lib/delf/grille";
+import { scoreTone, type ScoreTone } from "@/lib/delf/grille";
 import { cn } from "@/lib/ui/class-names";
 
 /**
@@ -13,7 +13,7 @@ import { cn } from "@/lib/ui/class-names";
  *
  * The three rules are `BandScale`'s, for the same reasons:
  *
- *  - **The colour comes from `grille.ts`.** `scoreBand` is the source of the
+ *  - **The colour comes from `grille.ts`.** `scoreTone` is the source of the
  *    tone; the only thing this file owns is which CSS token that tone maps to.
  *    `TONE_CLASSES` is keyed by `ScoreTone`, so a tone added to the scale fails
  *    the build here instead of quietly rendering grey.
@@ -83,7 +83,7 @@ export function ScoreTag({
   prefix?: string;
   className?: string;
 }) {
-  const tone = TONE_CLASSES[scoreBand(score25).tone];
+  const tone = TONE_CLASSES[scoreTone(score25)];
 
   return (
     <span className={cn(tagShape, tone.fill, tone.ink, tone.ring, className)}>
