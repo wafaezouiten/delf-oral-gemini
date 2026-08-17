@@ -148,6 +148,27 @@ describe("the dashboard view", () => {
     assert.equal(moyenne?.value, "15");
   });
 
+  it("bands the average on the /25 scale, and only the tile that is a /25", () => {
+    const view = buildDashboardView([sitting({ score25: 18 }), sitting({ score25: 14 })], today);
+    const moyenne = view.tiles.find((tile) => tile.key === "moyenne");
+    assert.equal(moyenne?.value, "16");
+    assert.equal(moyenne?.band?.tone, "yellow");
+
+    // A percentage, a duration and a day count are not marks: banding them would
+    // put a pass rate in the colour of a grade.
+    for (const key of ["reussite", "pratique", "serie"] as const) {
+      assert.equal(view.tiles.find((tile) => tile.key === key)?.band, undefined);
+    }
+  });
+
+  it("bands the fractional average off the number, not off the printed string", () => {
+    // 5.5 is not "nearly 6": the coral band starts at 6, so this is still red.
+    const view = buildDashboardView([sitting({ score25: 8 }), sitting({ score25: 3 })], today);
+    const moyenne = view.tiles.find((tile) => tile.key === "moyenne");
+    assert.equal(moyenne?.value, "5.5");
+    assert.equal(moyenne?.band?.tone, "red");
+  });
+
   it("reports the share above the floor, not the share of full marks", () => {
     const view = buildDashboardView(
       [

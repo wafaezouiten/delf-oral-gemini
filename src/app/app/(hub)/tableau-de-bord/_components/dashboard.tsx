@@ -3,6 +3,8 @@ import Link from "next/link";
 import { primaryButton, secondaryButton } from "@/app/_components/button-styles";
 import { ChartIcon, MicIcon } from "@/app/_components/po/icons";
 import { Kicker } from "@/app/_components/po/tag";
+import { scoreInk } from "@/app/_components/score-band";
+import { cn } from "@/lib/ui/class-names";
 import { COMPETENCY_MAX } from "@/lib/delf/constants";
 import { HUB_LINKS } from "@/lib/ui/epreuve-hub";
 import type { DashboardView } from "@/lib/ui/dashboard-view";
@@ -49,7 +51,16 @@ export function Dashboard({ view }: { view: DashboardView }) {
             <p className="text-muted-foreground text-[0.6875rem] font-semibold tracking-[0.16em] uppercase">
               {tile.label}
             </p>
-            <p className="font-serif tabular mt-2 text-3xl leading-none font-semibold">
+            {/* The one tile whose figure is a /25 is tinted on the /25 scale.
+                The other three are a percentage, a duration and a day count,
+                which are not marks and are left in the ink everything else is
+                set in — tinting them would claim a 40 % pass rate was orange. */}
+            <p
+              className={cn(
+                "font-serif tabular mt-2 text-3xl leading-none font-semibold",
+                tile.band && scoreInk(tile.band.tone),
+              )}
+            >
               {tile.value}
             </p>
             <p className="text-muted-foreground mt-2 text-xs leading-snug">{tile.caption}</p>

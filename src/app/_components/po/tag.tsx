@@ -31,6 +31,22 @@ const TONES: Record<TagTone, string> = {
   danger: "border-danger/40 bg-danger-subtle text-danger",
 };
 
+/**
+ * The pill's shape, without its colour — exported so `ScoreTag` is the same
+ * object as this one and not a lookalike.
+ *
+ * `ScoreTag` cannot be a fourth tone here: it is coloured on the five-step /25
+ * scale, which is a different family from these three (see the `--score-*`
+ * tokens), and widening `TagTone` with it would let a caller ask for
+ * « the coral pill » for something that is not a mark. It cannot pass its
+ * classes in through `className` either — `cn` joins, it does not merge, so a
+ * caller's `text-*` loses to `TONES[tone]` or wins by accident depending on
+ * Tailwind's own ordering. Sharing the geometry and nothing else is what keeps
+ * the two the same size, radius and weight while they disagree about colour.
+ */
+export const tagShape =
+  "tabular inline-flex items-center gap-1.5 rounded-md border px-2 py-0.5 text-[0.6875rem] font-semibold";
+
 export function Tag({
   tone = "neutral",
   className,
@@ -41,13 +57,7 @@ export function Tag({
   children: ReactNode;
 }) {
   return (
-    <span
-      className={cn(
-        "tabular inline-flex items-center gap-1.5 rounded-md border px-2 py-0.5 text-[0.6875rem] font-semibold",
-        TONES[tone],
-        className,
-      )}
-    >
+    <span className={cn(tagShape, TONES[tone], className)}>
       {children}
     </span>
   );
