@@ -6,6 +6,8 @@ import { ExitIcon } from "@/app/_components/po/icons";
 import { SimulatorTopBar } from "@/app/_components/po/topbar";
 import { TimerRing } from "@/app/_components/po/timer-ring";
 import { phaseDurationSeconds } from "@/lib/delf/phases";
+import type { TranscriptEntry } from "@/lib/delf/transcript";
+import { DEBATE_TRANSCRIPT_COPY } from "@/lib/ui/debate-transcript";
 import {
   MONOLOGUE_TITLE,
   DEBATE_TITLE,
@@ -16,6 +18,7 @@ import {
 } from "@/lib/ui/po-player-view";
 import { ConversationScene } from "./conversation-scene";
 import { ConversationControls } from "./conversation-controls";
+import { DebateTranscript } from "./debate-transcript";
 import { NotesDrawer } from "./notes-drawer";
 
 /**
@@ -28,19 +31,31 @@ import { NotesDrawer } from "./notes-drawer";
  * the session belongs to `ExamController`, which leaves this file with no state
  * of its own and nothing to own it for.
  *
- * **There is no transcript feed, and that is the reference's design decision
- * reproduced rather than a regression.** The exchange is spoken, not printed: a
- * candidate reading their own words as they say them is doing something the
- * épreuve never asks of them, and watching a transcript arrive is the fastest
- * way to stop listening to the examiner. What is on screen instead is one quiet
- * card saying where they are.
+ * **The débat prints its exchange; the monologue does not (#48).** The reference
+ * has no transcript feed anywhere, and this screen reproduced that: the exchange
+ * is spoken, not printed, and watching a transcript arrive is the fastest way to
+ * stop listening to the examiner. That argument was never wrong — it is now
+ * outweighed in one phase and left standing in the other, and the two halves
+ * come apart cleanly:
  *
- * That has a second, sharper justification here than in the reference. Verified
- * against the live service: during a monologue nothing is transcribed until the
- * floor is released, so the whole exposé arrives at once at the end — a
- * transcript panel would sit empty for seven minutes and look broken. The old
- * screen said so in a paragraph; this one does not need to, because it never
- * promises a feed.
+ *  - **The monologue keeps the quiet card.** Verified against the live service:
+ *    during a manual-VAD activity nothing is transcribed until the floor is
+ *    released, so the whole exposé arrives at once at the end. A feed there
+ *    would sit empty for seven minutes and then print everything at the moment
+ *    the phase is over — a panel that looks broken, then a panel that is too
+ *    late to read.
+ *  - **The débat runs on automatic VAD**, so both sides stream turn by turn, and
+ *    a candidate who missed what the examiner just objected to can read it.
+ *    This is a training simulator rather than the épreuve, and being able to see
+ *    the objection is worth more here than the fidelity of not seeing it. The
+ *    distraction risk is real and accepted, which is why « Masquer » exists: the
+ *    reference's behaviour is one click away and stays available all through the
+ *    phase.
+ *
+ * The feed takes the status card's place rather than stacking under it. Both at
+ * once costs the scene its room on a phone, and the card's sentence is guidance
+ * for before the exchange starts — so it is handed to the feed, which prints it
+ * until the first turn lands.
  */
 export function PassationScreen({
   phase,
@@ -56,6 +71,9 @@ export function PassationScreen({
   notes,
   notesOpen,
   onToggleNotes,
+  transcript,
+  transcriptOpen,
+  onToggleTranscript,
   onAdvance,
   onExit,
   emptyTranscript = false,
@@ -77,6 +95,11 @@ export function PassationScreen({
   notes: string;
   notesOpen: boolean;
   onToggleNotes: () => void;
+  /** The whole exam transcript. Only the débat's half of it is ever shown here. */
+  transcript: readonly TranscriptEntry[];
+  /** Open by default, and only consulted during the débat. See the block above. */
+  transcriptOpen: boolean;
+  onToggleTranscript: () => void;
   onAdvance: () => void;
   onExit: () => void;
   /** The monologue was ended with no speech recorded — the advance was refused. */
@@ -93,6 +116,7 @@ export function PassationScreen({
   const status = passationStatus(phase, connected);
   const hasNotes = notes.trim().length > 0;
   const partTitle = phase === "monologue" ? MONOLOGUE_TITLE : DEBATE_TITLE;
+  const showTranscript = phase === "debate" && transcriptOpen;
 
   return (
     <div className="bg-background relative flex h-full min-h-0 flex-col overflow-hidden">
@@ -141,12 +165,33 @@ export function PassationScreen({
             total={total}
           />
 
-          <div className="border-border bg-card rounded-lg border border-dashed p-6 text-center">
-            <h2 className="text-[0.84375rem] font-semibold">{status.title}</h2>
-            <p className="text-muted-foreground mx-auto mt-1.5 max-w-[46ch] text-xs leading-relaxed">
-              {status.body}
-            </p>
-          </div>
+          {showTranscript ? (
+            <DebateTranscript
+              transcript={transcript}
+              hint={status.body}
+              onHide={onToggleTranscript}
+            />
+          ) : (
+            <div className="border-border bg-card rounded-lg border border-dashed p-6 text-center">
+              <h2 className="text-[0.84375rem] font-semibold">{status.title}</h2>
+              <p className="text-muted-foreground mx-auto mt-1.5 max-w-[46ch] text-xs leading-relaxed">
+                {status.body}
+              </p>
+              {/* The way back, and only in the phase that has something to show.
+                  On the card rather than in the control bar: it is the control
+                  bar's job to end the phase, and a candidate who has just hidden
+                  the feed looks where the feed was. */}
+              {phase === "debate" && (
+                <button
+                  type="button"
+                  onClick={onToggleTranscript}
+                  className="border-border text-muted-foreground hover:text-foreground hover:bg-muted mt-3.5 rounded-md border px-3 py-1.5 text-[0.6875rem] font-semibold transition-colors"
+                >
+                  {DEBATE_TRANSCRIPT_COPY.show}
+                </button>
+              )}
+            </div>
+          )}
         </div>
 
         <ConversationControls
