@@ -153,10 +153,9 @@ describe("the dashboard view", () => {
     const moyenne = view.tiles.find((tile) => tile.key === "moyenne");
     assert.equal(moyenne?.value, "16");
     assert.equal(moyenne?.band?.tone, "yellow");
-    assert.equal(moyenne?.band?.label, "Bien");
 
     // A percentage, a duration and a day count are not marks: banding them would
-    // paint « Bien » on a pass rate.
+    // put a pass rate in the colour of a grade.
     for (const key of ["reussite", "pratique", "serie"] as const) {
       assert.equal(view.tiles.find((tile) => tile.key === key)?.band, undefined);
     }

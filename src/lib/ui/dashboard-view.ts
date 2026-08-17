@@ -102,12 +102,12 @@ export interface DashboardTile {
   /** The one-line gloss under the figure. Never a second copy of the label. */
   caption: string;
   /**
-   * Where the figure sits on the /25 scale — its tone and its name — when the
-   * figure IS a /25.
+   * Where the figure sits on the /25 scale, when the figure IS a /25.
    *
    * Absent on the other three, and that is the point of it being optional: a
    * percentage, a duration and a day count are not marks, and tinting them on
-   * the mark scale would claim a 40 % pass rate was « Bien ». Carried here
+   * the mark scale would put a 40 % pass rate in the colour of a bad grade.
+   * Carried here
    * rather than derived in the component because `value` is already a formatted
    * string by then, and a component parsing it back into a number to colour it
    * is the round trip that eventually disagrees with the figure it colours.

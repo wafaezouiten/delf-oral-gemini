@@ -73,9 +73,9 @@ export function SittingRow({
           candidate's French.
 
           Which is why the abandonment keeps its own pill rather than joining the
-          /25 scale. A walk-out scores 0/25 as a consequence, not as a grading —
-          « Très insuffisant » would be a verdict on French nobody read. It stays
-          the em dash, and the line above says the word. */}
+          /25 scale. A walk-out scores 0/25 as a consequence, not as a grading, so
+          it is not painted on the scale that grades one. It stays the em dash,
+          and the line above says the word. */}
       {abandoned ? (
         <Tag tone="danger">
           <span aria-hidden>—</span>

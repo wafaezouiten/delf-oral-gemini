@@ -51,25 +51,17 @@ export function Dashboard({ view }: { view: DashboardView }) {
             <p className="text-muted-foreground text-[0.6875rem] font-semibold tracking-[0.16em] uppercase">
               {tile.label}
             </p>
-            {/* The one tile whose figure is a /25 is tinted on the /25 scale,
-                and carries the band's name beside it — the tint is never the
-                only thing saying « Passable ». The other three are a
-                percentage, a duration and a day count, which are not marks and
-                are left in the ink everything else is set in. */}
-            <p className="mt-2 flex flex-wrap items-baseline gap-x-2 gap-y-1">
-              <span
-                className={cn(
-                  "font-serif tabular text-3xl leading-none font-semibold",
-                  tile.band && scoreInk(tile.band.tone),
-                )}
-              >
-                {tile.value}
-              </span>
-              {tile.band && (
-                <span className={cn("text-xs font-semibold", scoreInk(tile.band.tone))}>
-                  {tile.band.label}
-                </span>
+            {/* The one tile whose figure is a /25 is tinted on the /25 scale.
+                The other three are a percentage, a duration and a day count,
+                which are not marks and are left in the ink everything else is
+                set in — tinting them would claim a 40 % pass rate was orange. */}
+            <p
+              className={cn(
+                "font-serif tabular mt-2 text-3xl leading-none font-semibold",
+                tile.band && scoreInk(tile.band.tone),
               )}
+            >
+              {tile.value}
             </p>
             <p className="text-muted-foreground mt-2 text-xs leading-snug">{tile.caption}</p>
           </li>

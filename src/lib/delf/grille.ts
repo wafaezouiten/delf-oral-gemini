@@ -95,9 +95,13 @@ export function bandLabel(n: number): string {
  *    whether a sitting is éliminatoire, and 5/25 clears that floor while sitting
  *    in the red band. Both statements are true and the results page prints both.
  *
- * The labels are here rather than in a component for the same reason
- * `BAND_LABELS` is: the rule that colour never carries meaning alone only holds
- * if the word ships with the tone, from one place.
+ * There is no `BAND_LABELS` counterpart here, and that is the difference between
+ * this scale and the per-criterion one. A band on the grille needs a name because
+ * « 3 » on a scale of 0 · 1 · 3 · 5 means nothing to a candidate who has not read
+ * the grid; a /25 needs none because the mark is already the message. The tone is
+ * a redundant encoding of a number printed in full beside it, so nothing is lost
+ * in greyscale, on a mono printer, or under the print block's flattened fills —
+ * « 12/25 » says the same thing in every one of them.
  * ------------------------------------------------------------------------- */
 
 /** A coarse tone bucket for colouring a /25. Five steps, rouge → vert. */
@@ -107,8 +111,6 @@ export interface ScoreBand {
   /** The lowest /25 that falls in this band. */
   min: number;
   tone: ScoreTone;
-  /** What the band is called, in the candidate's language. */
-  label: string;
 }
 
 /**
@@ -116,11 +118,11 @@ export interface ScoreBand {
  * reads the way the lookup runs.
  */
 export const SCORE_BANDS: readonly ScoreBand[] = [
-  { min: 21, tone: "green", label: "Très bien" },
-  { min: 16, tone: "yellow", label: "Bien" },
-  { min: 11, tone: "orange", label: "Passable" },
-  { min: 6, tone: "coral", label: "Insuffisant" },
-  { min: 0, tone: "red", label: "Très insuffisant" },
+  { min: 21, tone: "green" },
+  { min: 16, tone: "yellow" },
+  { min: 11, tone: "orange" },
+  { min: 6, tone: "coral" },
+  { min: 0, tone: "red" },
 ];
 
 /** The reddest band, and the answer for anything that is not a mark. */
@@ -148,9 +150,4 @@ export function scoreBand(score25: number): ScoreBand {
 /** The tone for a /25. */
 export function scoreTone(score25: number): ScoreTone {
   return scoreBand(score25).tone;
-}
-
-/** The band's French name for a /25 — the word that ships with the tone. */
-export function scoreBandLabel(score25: number): string {
-  return scoreBand(score25).label;
 }

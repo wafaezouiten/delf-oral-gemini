@@ -192,9 +192,9 @@ export function HubSujets({
               <div className="flex items-center justify-between gap-2">
                 <Tag>{sujet.kind}</Tag>
                 {/* The ✓ that used to sit here is gone with the pass/fail
-                    colour it belonged to: a tick on a « Très insuffisant » pill
-                    reads as approval of the mark rather than as "already sat",
-                    and the footer below already says « Refaire » for that. */}
+                    colour it belonged to: a tick on a 6/25 in a red pill reads
+                    as approval of the mark rather than as "already sat", and the
+                    footer below already says « Refaire » for that. */}
                 {sujet.score !== null && <ScoreTag score25={sujet.score} />}
               </div>
 

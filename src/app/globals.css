@@ -113,8 +113,9 @@
    *                                        contrast
    *   green  #1c6b3f on #e7f2ea  5.67:1   (= --success, deliberately)
    *
-   * Colour is still never the message: `scoreBandLabel` ships the band's name
-   * with its tone, and every surface below prints both.
+   * Colour is still never the message: unlike a band on the grille, a /25 reads
+   * on its own, so every one of these tints sits on a figure that already says
+   * the whole thing. Lose the colour and « 12/25 » is unchanged.
    */
   --score-red: #a4132a;
   --score-red-subtle: #fbeaec;
@@ -356,11 +357,11 @@ body {
     --band-amber-subtle: #ffffff;
     --band-green-subtle: #ffffff;
     --band-emerald-subtle: #ffffff;
-    /* The /25 scale flattens for the same reason, and survives it for the same
-       reason: « Passable » is printed beside the mark, so a sheet with no fills
-       on it still says which band the total landed in. Five steps of grey would
-       be less distinguishable than two, which is exactly why the word is not
-       optional. */
+    /* The /25 scale flattens for the same reason, and survives it because the
+       mark is the message: the tint is a second encoding of a figure printed in
+       full, so a sheet with no fills on it has lost nothing. Five steps of grey
+       would be less distinguishable than two, which is exactly why nothing was
+       left for the colour alone to say. */
     --score-red-subtle: #ffffff;
     --score-coral-subtle: #ffffff;
     --score-orange-subtle: #ffffff;

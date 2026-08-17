@@ -209,8 +209,8 @@ function SujetCard({
           Sujet {position.toString().padStart(2, "0")}
         </span>
         {/* No ✓ beside it any more: the pill is coloured on the /25 scale now,
-            and a tick on a « Très insuffisant » mark reads as approval of the
-            mark rather than as "already sat". */}
+            and a tick on a 6/25 in a red pill reads as approval of the mark
+            rather than as "already sat". */}
         {sujet.score !== null && <ScoreTag score25={sujet.score} />}
       </div>
 

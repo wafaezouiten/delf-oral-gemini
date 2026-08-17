@@ -7,7 +7,6 @@ import {
   BAND_LABELS,
   SCORE_BANDS,
   scoreBand,
-  scoreBandLabel,
   scoreTone,
   snapToBand,
   bandLabel,
@@ -119,15 +118,11 @@ test("scoreBand takes a fractional average on the same scale, boundary included"
   assert.equal(scoreTone(12.5), "orange");
 });
 
-test("every band carries a word, and scoreBandLabel is that word", () => {
-  for (const band of SCORE_BANDS) {
-    assert.ok(band.label.length > 0, `band at ${band.min} has no label`);
-    assert.equal(scoreBandLabel(band.min), band.label);
-  }
-  // Five distinct tones and five distinct words — a scale of five steps that
-  // named two of them the same thing would be a scale of four.
+test("the five bands are five distinct tones", () => {
+  // A scale of five steps that painted two of them the same colour would be a
+  // scale of four, and the token family in globals.css has one pair per tone.
   assert.equal(new Set(SCORE_BANDS.map((band) => band.tone)).size, SCORE_BANDS.length);
-  assert.equal(new Set(SCORE_BANDS.map((band) => band.label)).size, SCORE_BANDS.length);
+  assert.equal(SCORE_BANDS.length, 5);
 });
 
 test("SCORE_BANDS covers 0–25 with no gap, descending, from zero", () => {

@@ -309,13 +309,6 @@ export function ResultsClient({
                   /{COMPETENCY_MAX}
                 </span>
               </p>
-              {/* The band in words, in its own ink, exactly as `BandScale`
-                  writes it beside a criterion. Without it the tint on the
-                  numeral is the only thing saying « Passable », and five steps
-                  of colour are less distinguishable in greyscale than two. */}
-              <p className={cn("text-[0.8125rem] font-semibold", scoreInk(band.tone))}>
-                {band.label}
-              </p>
               {/* The verdict in a word as well as a colour — a candidate who
                   cannot tell the green pill from the red one still reads it. */}
               <Tag tone={passed ? "success" : "danger"}>
