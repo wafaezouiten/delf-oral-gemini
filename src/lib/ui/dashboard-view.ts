@@ -107,10 +107,10 @@ export interface DashboardTile {
    * Absent on the other three, and that is the point of it being optional: a
    * percentage, a duration and a day count are not marks, and tinting them on
    * the mark scale would put a 40 % pass rate in the colour of a bad grade.
-   * Carried here
-   * rather than derived in the component because `value` is already a formatted
-   * string by then, and a component parsing it back into a number to colour it
-   * is the round trip that eventually disagrees with the figure it colours.
+   * Carried here rather than derived in the component because `value` is already
+   * a formatted string by then, and a component parsing it back into a number to
+   * colour it is the round trip that eventually disagrees with the figure it
+   * colours.
    */
   band?: ScoreBand;
 }
