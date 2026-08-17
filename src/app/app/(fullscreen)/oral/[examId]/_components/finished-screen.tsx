@@ -1,5 +1,7 @@
 "use client";
 
+import type { ReactNode } from "react";
+
 import { Notice } from "@/app/_components/notice";
 import { dangerButton, secondaryButton } from "@/app/_components/button-styles";
 import { AlertIcon, LoadingIcon } from "@/app/_components/po/icons";
@@ -34,12 +36,24 @@ export function FinishedScreen({
   droppedPhases,
   onRetry,
   onLeave,
+  announcement,
 }: {
   submitting: boolean;
   submitError: FinishFailure | null;
   droppedPhases: Array<"monologue" | "debate">;
   onRetry: () => void;
   onLeave: () => void;
+  /**
+   * The examiner's closing consigne (#37).
+   *
+   * Rendered here for two reasons beyond consistency with the other boundaries.
+   * The controller waits for this clip before handing the sitting over, so without
+   * the card there is no way to cut it short — fifteen seconds of unskippable
+   * audio between a candidate and their results. And it is the text equivalent:
+   * this screen says « Épreuve terminée » and « ne fermez pas cet onglet » on its
+   * own, but the consigne should be readable in the words it was spoken in.
+   */
+  announcement?: ReactNode;
 }) {
   return (
     <main className="bg-background flex h-full items-center justify-center overflow-y-auto p-6">
@@ -79,6 +93,8 @@ export function FinishedScreen({
                   "Préparation de votre enregistrement…"}
           </p>
         </div>
+
+        {announcement}
 
         {droppedPhases.length > 0 && (
           <Notice tone="warning" title="Un enregistrement n'a pas pu être envoyé">

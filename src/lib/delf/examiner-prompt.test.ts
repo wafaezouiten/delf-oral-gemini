@@ -26,7 +26,10 @@ describe("examiner prompt", () => {
     for (const phase of ["monologue", "debate"] as const) {
       const text = [
         buildExaminerInstruction(phase, TOPIC),
-        examinerOpeningLine(phase),
+        // Null for the monologue since #37 — the greeting it used to speak is now
+        // a recorded consigne, and `announcements.test.ts` holds it to the same
+        // no-dash rule.
+        examinerOpeningLine(phase) ?? "",
         closingInstruction(phase),
       ].join("\n");
       assert.ok(!text.includes("—"), `${phase} instruction contains an em dash`);

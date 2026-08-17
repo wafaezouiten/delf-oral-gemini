@@ -18,12 +18,14 @@ import { ArrowLeftIcon } from "./icons";
  * native means the keyboard behaviour is the browser's, and the focus ring comes
  * from the one `:focus-visible` rule in `globals.css` rather than from a prop.
  *
- * The three step labels are the reference's exactly (`Sujet · Préparation ·
- * Passage`), and they are deliberately NOT this project's four phase names.
- * They track the three *screens*: the monologue and the débat are one screen —
- * the passation — with their own inner stepper drawn by `SceneStepper`. Naming
- * the phases here instead would give the candidate two steppers disagreeing
- * about how many steps there are.
+ * The three step labels were the reference's exactly (`Sujet · Préparation ·
+ * Passage`), tracking this app's three *screens* rather than the épreuve's
+ * parts. That is no longer what they say, and the change is deliberate: folding
+ * the monologue and the débat into one « Passage » told a candidate halfway
+ * through the épreuve that they were on the last step, and it forced a second
+ * stepper inside the scene to say which half of it they were in. The parts are
+ * what the candidate is examined on, so the parts are what the stepper names —
+ * and the inner one is gone rather than disagreeing with this one.
  *
  * The stepper is a `<nav>` with an ordered list inside rather than the
  * reference's row of `<div>`s: it is a summary of where in a sequence the
@@ -31,7 +33,7 @@ import { ArrowLeftIcon } from "./icons";
  * screen reader that meets it as a list can count it.
  */
 
-const STEP_LABELS = ["Sujet", "Préparation", "Passage"] as const;
+const STEP_LABELS = ["Préparation", "Exposé", "Débat"] as const;
 
 export function SimulatorTopBar({
   kicker,
@@ -41,7 +43,7 @@ export function SimulatorTopBar({
 }: {
   /** Uppercase identity line, e.g. "Production orale · DELF B2 · Monologue suivi". */
   kicker: string;
-  /** 0 = Sujet, 1 = Préparation, 2 = Passage. */
+  /** 0 = Préparation, 1 = Exposé, 2 = Débat. See `topbarStep`. */
   currentStep: number;
   onBack: () => void;
   right?: ReactNode;

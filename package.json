@@ -13,6 +13,7 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:push": "drizzle-kit push",
+    "announcements": "tsx scripts/generate-announcements.ts",
     "exp:audio": "tsx experiments/audio-vs-text.ts",
     "smoke": "tsx scripts/smoke-gemini.ts",
     "verify:live": "tsx scripts/verify-live.ts",
