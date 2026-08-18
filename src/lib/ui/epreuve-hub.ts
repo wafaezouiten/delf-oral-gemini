@@ -46,6 +46,13 @@ export interface HubLinks {
   sujets: string;
   tableauDeBord: string;
   historique: string;
+  /**
+   * Mon compte (#69). In the map but not in the rail: it is reached from the
+   * avatar row, where an account is reached, and the four destinations stay
+   * four. It lives here anyway so the product has one list of its own routes
+   * rather than one list and a string typed into a sidebar.
+   */
+  compte: string;
 }
 
 /** The whole hub, ready to render. */
@@ -140,6 +147,7 @@ export const HUB_LINKS: HubLinks = {
   sujets: "/app/sujets",
   tableauDeBord: "/app/tableau-de-bord",
   historique: "/app/historique",
+  compte: "/app/compte",
 };
 
 /**

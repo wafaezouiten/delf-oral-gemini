@@ -97,9 +97,25 @@ export function AppSidebar() {
           </ul>
         </nav>
 
+        {/* « Mon compte » was a label beside the avatar and is now the link to
+            /app/compte (#69). The account screen is deliberately not a fifth
+            destination in the rail — it is not part of the épreuve — and this is
+            where somebody goes looking for their account anyway. The avatar
+            still opens Clerk's own menu; the words next to it open ours. */}
         <div className="border-border flex items-center gap-2.5 border-t px-4 py-3">
           <UserButton />
-          <span className="text-muted-foreground truncate text-xs">Mon compte</span>
+          <Link
+            href={HUB_LINKS.compte}
+            aria-current={isNavLinkActive(pathname, HUB_LINKS.compte) ? "page" : undefined}
+            className={cn(
+              "truncate text-xs transition-colors",
+              isNavLinkActive(pathname, HUB_LINKS.compte)
+                ? "text-primary font-semibold"
+                : "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            Mon compte
+          </Link>
         </div>
       </aside>
 
@@ -112,7 +128,25 @@ export function AppSidebar() {
             Production orale
           </span>
         </Link>
-        <UserButton />
+        {/* The same pairing as the rail's footer, and it has to be here rather
+            than only there: the phone has no footer to put it in, and the tab
+            bar has four slots for the four destinations. Without this link
+            /app/compte would be reachable on a desktop and nowhere else. */}
+        <div className="flex items-center gap-2.5">
+          <Link
+            href={HUB_LINKS.compte}
+            aria-current={isNavLinkActive(pathname, HUB_LINKS.compte) ? "page" : undefined}
+            className={cn(
+              "text-xs transition-colors",
+              isNavLinkActive(pathname, HUB_LINKS.compte)
+                ? "text-primary font-semibold"
+                : "text-muted-foreground",
+            )}
+          >
+            Compte
+          </Link>
+          <UserButton />
+        </div>
       </header>
     </>
   );
