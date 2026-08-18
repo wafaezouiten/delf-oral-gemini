@@ -287,6 +287,24 @@ bord shows a recent list and nothing more. It is a list and only a list: the
 dashboard answers "how am I doing?", this answers "what have I done?", and two
 pages that both open on a row of statistics would be the same page twice.
 
+**Starting over archives, it does not delete** (#69). The reference has a billing
+page where this product has an account screen, and the one thing that screen
+does is « Repartir de zéro »: the tableau de bord returns to its empty state and
+the sujet cards return to « Commencer », while every épreuve stays in the
+historique under *Archives*, correction and all. `oral_exams.archived_at` is the
+whole mechanism — a line drawn across the record rather than a tombstone — and it
+is stamped only on sittings already on the record, so an épreuve still in
+progress when the button is pressed belongs to the new record instead of
+vanishing into the old one.
+
+That is also why the confirm is the primary button and not the red one. Nothing
+is destroyed, so the dialog carries its weight in the count it names rather than
+in a colour that would claim a loss the product does not take.
+
+The screen is not a fifth destination in the rail. It is reached from « Mon
+compte » beside the avatar — which was already there as a label — because an
+account is not part of the épreuve, and the four destinations stay four.
+
 ## 4. Deliberate departures, collected
 
 Everything below is a decision, not an oversight:
