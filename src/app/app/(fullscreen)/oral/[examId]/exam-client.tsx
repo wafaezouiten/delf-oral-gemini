@@ -496,6 +496,7 @@ export function ExamClient({ examId, topic }: { examId: string; topic: OralTopic
         notes={notes}
         notesOpen={notesOpen}
         onToggleNotes={() => setNotesOpen((open) => !open)}
+        transcript={state.transcript}
         onAdvance={advance}
         onExit={() => setShowExitDialog(true)}
         emptyTranscript={state.monologueHeld}

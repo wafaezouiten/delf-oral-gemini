@@ -83,10 +83,11 @@ same rule, so the reproduction keeps it.
                                                         │
    ┌────────────────────────────────────────────────────▼──────────────────┐
    │ 2. PASSATION          steps 1–2 · timer ring + exit button            │
-   │    head: sujet on paper · « Passer » beside its title while the       │
+   │    head: sujet title on paper · « Passer » beside it while the        │
    │          consigne speaks (#59)                                        │
-   │    body:  exposé → « Votre plan » in a column beside the sujet        │
-   │           débat  → the two faces, a ring on whoever holds the floor   │
+   │    body:  exposé → document + « Votre plan » in a column beside it    │
+   │           débat  → the two faces, then the exchange in turns; no      │
+   │                    document (#60)                                     │
    │    foot:  [Mes notes]      (mic)      [Terminer l'épreuve]            │
    │    drawer: préparation notes, read-only                               │
    └────────────────────────────────────────────────────┬──────────────────┘
@@ -168,21 +169,29 @@ Two departures from the reference's rail, both #59:
   and nothing after it. A consigne the browser refuses to autoplay still gets
   its sentence and its two ways out, because that state holds the épreuve.
 
-**Passation.** The sujet on paper, the foot control bar and the notes drawer,
-with the two parts framed differently: the exposé sets « Votre plan » in a column
-beside the document (#59), and the débat carries the reference's scene — two
-faces, a ring pulsing around whoever holds the floor, the elapsed/total clock
-with its draining bar.
+**Passation.** The sujet's title on paper, the foot control bar and the notes
+drawer, with the two parts framed differently: the exposé prints the document
+with « Votre plan » in a column beside it (#59); the débat prints no document at
+all and gives the room to the reference's scene — two faces, a ring pulsing
+around whoever holds the floor, the elapsed/total clock with its draining bar —
+over the exchange, turn by turn.
 
-- *Reverted (#60), against #48:* the débat shows **who is speaking, not what was
-  said**. It printed the exchange as it was transcribed, in the status card's
-  place, with « Masquer » to put the card back; the reference has no transcript
-  feed anywhere, and the argument for adding one — being able to re-read the
-  objection you are answering — was always weighed against the cost of reading
-  along instead of listening. That cost wins: a débat is graded on interaction.
-  The scene answers the only question left, which is whose turn it is, and the
-  exchange is printed afterwards on the results page. The status card went with
-  the feed, because its two lines are the two under the faces.
+- *Added, against the reference (#48, #60):* the débat shows **who is speaking
+  and what was said**. The reference has no transcript feed anywhere, and this
+  screen has now been built all three ways: the exchange alone (#48), which left
+  no cue for whose turn it was and squeezed the turns into a 20rem box beside the
+  document; the faces alone (#60), which left a candidate no way to re-read the
+  objection they were answering; and this, which pays for both by dropping the
+  document. A candidate arguing a point is not reading the source, and the sujet
+  is still named by its title above the scene. The turns are chat-style — the
+  examiner left, « Vous » right — where the results page sets the same exchange
+  as a printed document: during the sitting it is a conversation, afterwards it
+  is a record. The speaker names are the same in both, because *who* said
+  something must not change between them.
+- *Dropped with it:* the quiet status card the feed could be hidden behind, and
+  its « Masquer » / « Afficher la transcription » pair. Its two sentences are the
+  two lines under the faces, and its guidance is what the conversation panel
+  prints while it is still empty.
 - *Added, against the reference (#55):* the **close is on screen**. Ending a part
   asks the examiner for a closing sentence and waits up to `CLOSING_SAFETY_MS`
   for it, so several seconds pass between the click and the next consigne. The

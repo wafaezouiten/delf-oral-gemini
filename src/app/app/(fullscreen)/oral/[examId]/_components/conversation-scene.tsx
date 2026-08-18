@@ -12,13 +12,12 @@ import { formatClock } from "@/lib/delf/phases";
  * in #34, deleted in #37 with the rest of the avatar layout, and is back here
  * for the débat alone — this is that file minus its beat stepper.
  *
- * **Why it came back.** The débat printed its exchange as it was transcribed
- * (#48), and reading your own words as you say them is the fastest way to stop
- * listening to the examiner. #48 named that cost and accepted it; this reverses
- * the trade. What a candidate needs from this screen is not the sentence they
- * just heard, it is knowing whose turn it is — so the screen says that and
- * nothing else, and the words are printed afterwards on the results page, where
- * reading them is the task.
+ * **Why it came back.** The débat printed its exchange and nothing else (#48):
+ * a candidate being argued with could re-read the objection, and had no cue at
+ * all for whose turn it was except text appearing. This answers that question
+ * and only that one — the exchange is under it (`DebateConversation`), and the
+ * two together are what the screen is. The room comes from the document, which
+ * the débat no longer prints.
  *
  * **The inner stepper did not come back with it.** `SceneStepper` named the two
  * beats — Exposé, Débat — between the two faces, and the topbar's stepper names
@@ -31,13 +30,14 @@ import { formatClock } from "@/lib/delf/phases";
  * different questions, which is why the reference keeps both, and why printing
  * *remaining* twice was the thing it had to remove.
  *
- * **Accessibility, and it is load-bearing again.** This screen carries no
- * transcript by design, so the only cue that the turn changed is a pulsing ring
- * and a line of status text — both invisible to a screen reader. One polite live
- * region says it once; the visible statuses are `aria-hidden` so it is not said
- * three times. Polite rather than assertive, because a turn change is worth
- * announcing at the next pause and never worth cutting the examiner off
- * mid-sentence.
+ * **Accessibility, and it is load-bearing.** A pulsing ring and a line of status
+ * text are both invisible to a screen reader, and the conversation below is
+ * deliberately *not* a live region — announcing every partial fragment would
+ * recite the examiner over the examiner. So this is the screen's one
+ * announcement of a turn change: a single polite region, with the visible
+ * statuses `aria-hidden` so it is not said three times. Polite rather than
+ * assertive, because a turn change is worth announcing at the next pause and
+ * never worth cutting the examiner off mid-sentence.
  */
 export function ConversationScene({
   examinerSpeaking,

@@ -9,6 +9,7 @@ import { TimerRing } from "@/app/_components/po/timer-ring";
 import { cn } from "@/lib/ui/class-names";
 import { phaseDurationSeconds } from "@/lib/delf/phases";
 import type { OralTopic } from "@/lib/delf/topics";
+import type { TranscriptEntry } from "@/lib/delf/transcript";
 import {
   MONOLOGUE_TITLE,
   DEBATE_TITLE,
@@ -23,6 +24,7 @@ import {
 } from "@/lib/ui/po-player-view";
 import { ConversationControls } from "./conversation-controls";
 import { ConversationScene } from "./conversation-scene";
+import { DebateConversation } from "./debate-conversation";
 import { ExposePlan } from "./expose-plan";
 import { NotesDrawer } from "./notes-drawer";
 
@@ -45,15 +47,20 @@ import { NotesDrawer } from "./notes-drawer";
  *    document, where re-reading the source scrolled the plan away during the
  *    one part whose whole task is following it. The frame widens to hold both,
  *    and collapses to one column below `lg`.
- *  - **The débat shows the two protagonists, and not a word of what they say
- *    (#60).** It printed the exchange as it was transcribed (#48), on the
- *    argument that re-reading the objection you are answering beats the fidelity
- *    of not seeing it. The cost #48 named is the one being taken seriously now:
- *    reading your own words as you say them is the fastest way to stop listening
- *    to the examiner, and a débat is graded on interaction. So the faces are
- *    back — a ring around whoever holds the floor, one status line each — and
- *    the exchange is printed afterwards, on the results page, where reading it
- *    is the task rather than a distraction from one.
+ *  - **The débat drops the document and keeps the conversation (#60).** It has
+ *    the two protagonists at the top — a ring around whoever holds the floor,
+ *    one status line each — and the exchange under them, turn by turn, as it is
+ *    transcribed. What it does not have is `topic.document`: during the débat
+ *    the candidate is answering the examiner rather than reading, and the
+ *    paragraphs would take a third of the viewport to be looked at by nobody.
+ *    The sujet's title stays, so what is being argued about is still named.
+ *
+ *    That panel has been added (#48), removed (#60) and put back in this shape,
+ *    and the two earlier arguments were each half right: the exchange competing
+ *    with the document and a status card left it in a 20rem box, and taking it
+ *    away left a candidate with no way to re-read the objection they are
+ *    answering. Given the room, both fit — knowing whose turn it is at a glance,
+ *    and what the turn was.
  *
  * **Nothing runs until « Enregistrer ».** The part opens armed: the consigne is
  * given, the sujet and the plan are readable, the timer shows the part's full
@@ -76,6 +83,7 @@ export function PassationScreen({
   notes,
   notesOpen,
   onToggleNotes,
+  transcript,
   onStart,
   onAdvance,
   onExit,
@@ -112,6 +120,11 @@ export function PassationScreen({
   notes: string;
   notesOpen: boolean;
   onToggleNotes: () => void;
+  /**
+   * The whole exam transcript. Only the débat's half of it is ever printed here,
+   * and only the débat's streams turn by turn — see `DebateConversation`.
+   */
+  transcript: readonly TranscriptEntry[];
   /** « Enregistrer » — starts the clock, the recording and the session. */
   onStart: () => void;
   onAdvance: () => void;
@@ -139,33 +152,24 @@ export function PassationScreen({
   const partTitle = phase === "monologue" ? MONOLOGUE_TITLE : DEBATE_TITLE;
 
   /**
-   * The sujet, on the paper stock the préparation screen prints it on, so the
-   * candidate recognises the same document rather than reading what looks like a
-   * different one.
+   * Which sujet this is, and the control for its spoken consigne.
    *
-   * Lifted out of the layout because the two parts frame it differently: the
-   * exposé sets « Votre plan » beside it in a second column, the débat gives the
-   * whole measure to the exchange.
+   * « Passer » beside the title, not under it (#59): the consigne is twenty-five
+   * seconds of the examiner talking about this sujet, and a control that pushed
+   * the document down the page for the length of a sentence would move the thing
+   * being read. The held state wraps to its own line — it is a paragraph, not a
+   * word.
    */
-  const sujet = (
-    <section className="border-paper-border bg-paper rounded-lg border px-5 py-6 sm:px-7">
-      {/* « Passer » beside the title, not under it (#59): the consigne is
-          twenty-five seconds of the examiner talking about this sujet, and a
-          control that pushed the document down the page for the length of a
-          sentence would move the thing being read. The held state wraps to its
-          own line — it is a paragraph, not a word. */}
-      <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-3">
-        <div className="min-w-0">
-          <Kicker>{partieKicker(phase)}</Kicker>
-          <h1 className="font-serif mt-1.5 text-[1.375rem] leading-[1.25] font-semibold text-balance">
-            {topic.title}
-          </h1>
-        </div>
-        {announcement}
+  const sujetHead = (
+    <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-3">
+      <div className="min-w-0">
+        <Kicker>{partieKicker(phase)}</Kicker>
+        <h1 className="font-serif mt-1.5 text-[1.375rem] leading-[1.25] font-semibold text-balance">
+          {topic.title}
+        </h1>
       </div>
-
-      <p className="document-text mt-4">{topic.document}</p>
-    </section>
+      {announcement}
+    </div>
   );
 
   return (
@@ -194,11 +198,15 @@ export function PassationScreen({
       <main className="relative flex min-h-0 flex-1 flex-col">
         <div
           className={cn(
-            "mx-auto flex min-h-0 w-full flex-1 flex-col gap-4 overflow-y-auto px-4 py-5 sm:px-6",
+            "mx-auto flex min-h-0 w-full flex-1 flex-col gap-4 px-4 py-5 sm:px-6",
             // The exposé carries two columns and needs the room for them; the
-            // débat is one column of paper, and a document set in a wider
-            // measure than this is harder to read, not easier.
+            // débat is one column, and a document set in a wider measure than
+            // this is harder to read, not easier.
             phase === "monologue" ? "max-w-[64rem]" : "max-w-[47.5rem]",
+            // The exposé's page scrolls as a page. The débat's does not: it is a
+            // fixed head over a conversation that scrolls inside itself, so a
+            // turn arriving can never push the faces off the top of the screen.
+            phase === "monologue" ? "overflow-y-auto" : "overflow-hidden",
           )}
         >
           {notices}
@@ -212,18 +220,26 @@ export function PassationScreen({
                column and the plan falls back under the sujet, which is the only
                order that fits a phone. */
             <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_19rem] lg:items-start">
-              {sujet}
+              <section className="border-paper-border bg-paper rounded-lg border px-5 py-6 sm:px-7">
+                {sujetHead}
+                <p className="document-text mt-4">{topic.document}</p>
+              </section>
               <ExposePlan />
             </div>
           ) : (
             <>
-              {sujet}
+              {/* The title, and not the document. During the débat the candidate
+                  is answering the examiner, not reading — the paragraphs would
+                  take a third of the viewport to be looked at by nobody, and the
+                  exchange is what needs that room. The line stays so the sujet
+                  being argued about is still named on screen. */}
+              <section className="border-paper-border bg-paper shrink-0 rounded-lg border px-5 py-4 sm:px-7">
+                {sujetHead}
+              </section>
 
-              {/* The débat's panel: who is speaking, and nothing they said
-                  (#60). It replaces the live transcript and the quiet card the
-                  transcript could be hidden behind — the two lines the card
-                  carried are the two under the faces, so the card was saying
-                  them a second time. */}
+              {/* Who is speaking, over what was said. The scene answers it at a
+                  glance and the exchange answers "what did they just ask me",
+                  which is the question a candidate actually has to answer. */}
               <ConversationScene
                 examinerSpeaking={examinerSpeaking}
                 examinerStatus={examinerStatus({
@@ -246,27 +262,30 @@ export function PassationScreen({
                 elapsed={elapsed}
                 total={total}
               />
+
+              <DebateConversation transcript={transcript} hint={status.body} />
             </>
           )}
 
-          {/* One sentence of guidance, under the panel rather than replacing it:
-              the plan (exposé) and the scene (débat) are the things to be
-              looking at, and this says whether the examiner is there yet and
-              what the part asks for. */}
-          {!awaitingStart && !awaitingConsigne && (
-            // A live region in the exposé, and permanently one: it carries the
-            // examiner's arrival and — since #55 — the close, and a region that
-            // only gets its role at the moment its text changes is a region a
-            // screen reader has no reason to have been watching. Its handful of
-            // states are all events worth hearing, unlike the countdown under
-            // the control below.
+          {/* The exposé's line of guidance, under the plan rather than replacing
+              it: the plan is the thing to be looking at, and this is one
+              sentence saying whether the examiner is there yet. The débat has no
+              room for it and no need of it — the same sentence is what its
+              conversation panel prints while it is still empty. */}
+          {phase === "monologue" && !awaitingStart && !awaitingConsigne && (
+            // A live region, and permanently one: it carries the examiner's
+            // arrival and — since #55 — the close, and a region that only gets
+            // its role at the moment its text changes is a region a screen
+            // reader has no reason to have been watching. Its handful of states
+            // are all events worth hearing, unlike the countdown under the
+            // control below.
             //
-            // Not in the débat, where the scene above is already announcing
-            // every turn change politely and says the same arrival and the same
-            // close in the examiner's own status line (#60). Two regions
-            // reporting one event is how a screen reader user hears it twice.
+            // The débat announces the same events through the scene's own polite
+            // region instead, which is why this is the exposé's line and not a
+            // shared one: two regions reporting one event is how a screen reader
+            // user hears it twice.
             <p
-              role={phase === "monologue" ? "status" : undefined}
+              role="status"
               className="text-muted-foreground text-center text-xs leading-relaxed"
             >
               {status.body}
