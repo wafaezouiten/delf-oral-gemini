@@ -34,6 +34,7 @@ import {
   parseEvaluationResponse,
 } from "./evaluation-response";
 import { readEvaluationUsage, type EvaluationUsage } from "./evaluation-usage";
+import { withTransientRetry } from "./transient";
 import {
   candidateWordCount,
   formatTranscript,
@@ -307,6 +308,11 @@ function mimeTypeOf(blob: Blob): string {
  *
  * Throws rather than returning a fallback score: a fabricated grade is worse
  * than a visible failure, and the caller can retry.
+ *
+ * A *transient* failure is ridden out here rather than handed up, because the
+ * caller's retry is a button in front of a candidate who has already finished
+ * (see `transient.ts`). What still reaches the caller is a correction that
+ * genuinely could not be produced.
  */
 export async function evaluateExam(params: EvaluateParams): Promise<EvaluationResult> {
   const apiKey = process.env.GEMINI_API_KEY;
@@ -357,17 +363,42 @@ export async function evaluateExam(params: EvaluateParams): Promise<EvaluationRe
     }
   }
 
-  const response = await ai.models.generateContent({
-    model: EVAL_MODEL,
-    contents: [{ role: "user", parts }],
-    config: {
-      responseMimeType: "application/json",
-      responseSchema,
-      // Grading must be as reproducible as the model allows; the experiment
-      // compares two modes and needs the difference to be the audio, not sampling.
-      temperature: 0.2,
+  /**
+   * Retried on a busy corrector, and only on a busy corrector.
+   *
+   * `gemini-3.6-flash` answers 503 « This model is currently experiencing high
+   * demand » under load, and the identical request goes through moments later.
+   * Without this the throw reaches the finish route, becomes a 502, and asks a
+   * candidate who has just sat a twenty-minute exam to press a button — or, if
+   * they close the tab instead, leaves a sitting marked finished with no
+   * correction attached.
+   *
+   * Which failures qualify, and why a 404 must not, is `transient.ts`'s;
+   * nothing about the decision is taken here. The prompt and the uploads are
+   * outside the retry deliberately: re-sending the audio is the expensive half
+   * and a failed upload leaves nothing to reuse.
+   */
+  const response = await withTransientRetry(
+    () =>
+      ai.models.generateContent({
+        model: EVAL_MODEL,
+        contents: [{ role: "user", parts }],
+        config: {
+          responseMimeType: "application/json",
+          responseSchema,
+          // Grading must be as reproducible as the model allows; the experiment
+          // compares two modes and needs the difference to be the audio, not sampling.
+          temperature: 0.2,
+        },
+      }),
+    {
+      onRetry: (error, attempt, delayMs) =>
+        console.warn(
+          `[evaluate] attempt ${attempt} failed (${(error as { status?: number }).status}), ` +
+            `retrying in ${delayMs}ms`,
+        ),
     },
-  });
+  );
 
   const text = response.text;
   if (!text) throw new Error("The evaluator returned no output");
