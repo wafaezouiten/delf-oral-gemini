@@ -70,6 +70,15 @@ disconnected is buffered, bounded at 50 chunks (~2 s), and flushed on reconnect;
 beyond that the audio is genuinely unrecoverable and an unbounded buffer would
 just leak.
 
+The buffer is for **reconnects only**. Before a session's first connect it holds
+nothing, and that is deliberate (#74): the socket is opened after the recording
+starts, so the microphone delivers a second or two of the room before there is
+anywhere to send it. Replaying that at connect handed the examiner a burst of
+noise at the moment it began the débat's opening question — automatic VAD read it
+as the candidate taking the floor, and the question was interrupted and dropped
+unheard while the transcript printed it. Nothing worth keeping is lost: a phase's
+first words are the examiner's, not the candidate's.
+
 The flush happens **after** `connect()` resolves, not only inside `onopen`. The
 SDK fires the open event *before* the connect promise settles, so a flush from
 `onopen` alone runs while the session's socket field is still null: every

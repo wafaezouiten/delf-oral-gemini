@@ -237,6 +237,18 @@ export class ExamLiveSession {
   private static readonly MAX_PENDING_CHUNKS = 50;
   /** Reported once per outage rather than once per dropped chunk. */
   private bufferOverflowed = false;
+  /**
+   * Whether this session has ever been connected.
+   *
+   * It separates the two silences the microphone can be sending into. A
+   * reconnect is one: the candidate is mid-sentence, and every chunk held is a
+   * chunk of the épreuve. The seconds before the FIRST connect are the other:
+   * nothing has been said into this phase yet, and what the room offers in the
+   * meantime is not worth replaying. See {@link sendAudio}.
+   */
+  private everConnected = false;
+  /** Reported once per session rather than once per dropped chunk. */
+  private preconnectAudioDropped = false;
 
   private readonly examId: string;
   private readonly phase: LivePhase;
@@ -347,6 +359,7 @@ export class ExamLiveSession {
             // which is what actually closes it.
             if (!isCurrent()) return;
             this.reconnectAttempts = 0;
+            this.everConnected = true;
             this.setState("connected");
             this.callbacks.onEvent(resuming ? "resumed" : "connected", {
               handle: this.resumptionHandle?.slice(0, 12),
@@ -584,6 +597,27 @@ export class ExamLiveSession {
   /** Stream one base64 PCM16 chunk of candidate audio. */
   sendAudio(base64: string): void {
     if (!this.socket || this.state !== "connected") {
+      // Dropped, not held, before the first connect (#74).
+      //
+      // Opening a session is a token mint and a handshake, a second or two in
+      // which the microphone is already running: the recording starts on the
+      // candidate's click and the socket is opened after it. Nothing said in
+      // that window is the épreuve, because the phase's first words are the
+      // examiner's. What the microphone has is the room, and flushing it at
+      // connect delivered that burst at the exact moment the examiner began
+      // the opening question. Automatic VAD read it as the candidate taking
+      // the floor, reported an interruption, and the question was thrown away
+      // unheard while the transcript printed it.
+      //
+      // A reconnect is the case this buffer exists for and is untouched: there
+      // the candidate IS mid-sentence, and those are the chunks worth saving.
+      if (!this.everConnected) {
+        if (!this.preconnectAudioDropped) {
+          this.preconnectAudioDropped = true;
+          this.callbacks.onEvent("preconnect-audio-dropped");
+        }
+        return;
+      }
       this.bufferAudio(base64);
       return;
     }
