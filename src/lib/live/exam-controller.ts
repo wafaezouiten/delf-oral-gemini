@@ -455,15 +455,6 @@ export class ExamController {
   private announcementHold: ((outcome: AnnouncementOutcome) => void) | null = null;
 
   private session: LiveSessionLike | null = null;
-  /**
-   * The current session while it is still opening, and null once it is not.
-   *
-   * `sendDirective` drops what it is given until the socket is up, so anything
-   * with something to say has to wait for this — see `submitTypedExpose`, which
-   * is the only thing that does and the only thing whose text would otherwise
-   * vanish (#53).
-   */
-  private sessionOpening: Promise<void> | null = null;
   private recorder: RecorderLike | null = null;
   private player: PlayerLike | null = null;
   /** In flight, so a second `prepareAudio()` joins it rather than opening a
@@ -1004,45 +995,19 @@ export class ExamController {
    * begun must not re-anchor its clock or open a second session.
    */
   startSpeaking(): void {
-    // Not awaited: this is a click handler, and the connection reports itself
-    // through `onStateChange` exactly as it does on every other path.
-    void this.beginSpeakingPhase();
-  }
-
-  /**
-   * Everything « Enregistrer » does, with the session's promise handed back.
-   *
-   * `null` means the part was not started, for one of the four reasons
-   * {@link ExamController.startSpeaking} documents. Otherwise the promise
-   * resolves once the socket is open — and that matters to anyone with
-   * something to say, because `sendDirective` drops what it is given while
-   * there is no socket. The button has nothing to say and does not wait;
-   * {@link submitTypedExpose} hands over a whole exposé and does, through
-   * `sessionOpening` rather than through this return value — the wait is owed
-   * whoever started the part, including the candidate's own click a moment ago.
-   */
-  private beginSpeakingPhase(): Promise<void> | null {
-    if (this.phase !== "monologue" && this.phase !== "debate") return null;
-    if (this.phaseStart !== null) return null;
-    if (this.announcementPlaying || this.announcementBlocked) return null;
-    if (this.destroyed) return null;
+    if (this.phase !== "monologue" && this.phase !== "debate") return;
+    if (this.phaseStart !== null) return;
+    if (this.announcementPlaying || this.announcementBlocked) return;
+    if (this.destroyed) return;
 
     const phase = this.phase;
     this.phaseStart = this.now();
     this.log("phase-started", phase);
     this.emit();
     this.beginRecording(phase);
-
-    const opening = this.openSession(phase);
-    this.sessionOpening = opening;
-    // Cleared however it settles, and only if it is still the current one: a
-    // connect that failed must not leave every later submission waiting on — and
-    // refused by — a promise belonging to a phase that is over.
-    const done = () => {
-      if (this.sessionOpening === opening) this.sessionOpening = null;
-    };
-    void opening.then(done, done);
-    return opening;
+    // Not awaited: this is a click handler, and the connection reports itself
+    // through `onStateChange` exactly as it does on every other path.
+    void this.openSession(phase);
   }
 
   /**
@@ -1218,10 +1183,10 @@ export class ExamController {
    * refuse while it did — silently, on the very flow the panel exists for:
    * arrive at the monologue, open the panel, paste, send. One press now means
    * the whole of what the button says, in the order the épreuve needs it —
-   * anchor the clock, open the session, deliver the exposé, close the phase.
-   * That is not a hole in the arm gate: `DEV_TOOLS_ENABLED` is the first line
-   * here, so no build where marks are real has this path at all, and
-   * `startSpeaking` is untouched for the builds that do.
+   * anchor the clock, write the exposé down, leave for the débat. That is not a
+   * hole in the arm gate: `DEV_TOOLS_ENABLED` is the first line here, so no
+   * build where marks are real has this path at all, and `startSpeaking` is
+   * untouched for the builds that do.
    *
    * The one refusal left is the consigne: while the examiner is speaking, the
    * candidate's turn has not been handed over, and starting underneath it would
@@ -1233,12 +1198,17 @@ export class ExamController {
    * saying it. The floor still governs every real candidate, because this method
    * cannot be reached in a build where the tooling is off.
    *
-   * **The closing handshake stays, for a typed exposé as for a spoken one.** It
-   * buys nothing here — there is no transcription in flight, the text was handed
-   * over whole — but it is how a monologue ends, and the examiner's last
-   * sentence is the transition the débat is seeded from. What was missing was
-   * anybody saying so: the caller is told the exposé was accepted, and the panel
-   * reports the closing rather than leaving several seconds of nothing on screen.
+   * **No closing handshake, and no session for the monologue at all.** A spoken
+   * monologue ends by asking the examiner for a closing sentence and waiting up
+   * to `CLOSING_SAFETY_MS` for it, because that wait is what lets Gemini's
+   * transcription of the candidate's last words arrive. A typed exposé has
+   * nothing in flight — the text was handed over whole — so the wait is several
+   * seconds of an épreuve that has already finished this part, with nothing on
+   * screen to explain them. The examiner is told all the same: the débat's
+   * session is seeded from the transcript by `monologueAsHistory`, which is
+   * where the typed text now is. For the same reason an armed monologue does not
+   * connect anybody — a socket opened here would be closed in the same act,
+   * having heard nothing and said nothing.
    *
    * @returns Whether the exposé counted as the monologue. `false` means nothing
    *   happened at all — no turn, no clock, no phase change — and the caller
@@ -1250,36 +1220,44 @@ export class ExamController {
     // Nothing typed is not a delivered exposé, so it must not end the phase —
     // otherwise the button becomes a way to skip the monologue entirely.
     if (!text.trim()) return false;
+    // A handshake somebody else started — the mic button, or the clock running
+    // out — already owns the end of this phase.
     if (this.closing) return false;
 
-    if (this.phaseAwaitingStart) {
-      // The consigne is still being given. Refused, and visibly: the panel
-      // disables the button and says which of the two of them is talking.
-      if (this.beginSpeakingPhase() === null) return false;
-    }
-
-    // Whoever started the part, wait for its socket before saying anything into
-    // it. This is the ordinary case as much as the one above: pressing
-    // « Enregistrer » and sending a pasted exposé a moment later is well inside
-    // the time a session takes to open, and a directive sent into that window is
-    // dropped where nobody can see it — the examiner would then argue in the
-    // débat with an exposé it was never told.
-    if (this.sessionOpening) {
-      try {
-        await this.sessionOpening;
-      } catch (error) {
-        this.log("dev-expose-start-failed", String(error));
-        return false;
-      }
-      // Re-read after the await. The clock has been running through it, so the
-      // phase may have timed out into its own handshake, and the tab may have
-      // been closed under us.
-      if (this.destroyed || this.phase !== "monologue" || this.closing) return false;
-    }
+    if (this.phaseAwaitingStart && !this.anchorTypedMonologue()) return false;
 
     this.injectCandidateSpeech(text, seconds);
     this.log("dev-expose-submitted", "ending the monologue");
-    this.beginClosingHandshake();
+    // Not awaited, and nothing is waited for: `advance()` sets the phase and
+    // emits before it does anything asynchronous, so the débat is on screen by
+    // the time this returns. What follows — the microphone handed back, the
+    // débat's own consigne — is the ordinary path, unchanged.
+    void this.advance();
+    return true;
+  }
+
+  /**
+   * DEVELOPMENT ONLY — anchor an armed monologue that is about to end anyway.
+   *
+   * Everything « Enregistrer » does except open a session, because
+   * {@link submitTypedExpose} ends the phase in the same act and a socket opened
+   * here would be closed before it had finished connecting. What is kept is what
+   * the rest of the sitting reads: the clock is anchored and the phase's artefact
+   * is opened and stamped, so the monologue reports itself as a phase that
+   * happened rather than one nothing can date.
+   *
+   * `false` while the consigne is being given — the same refusal `startSpeaking`
+   * makes, for the same reason.
+   */
+  private anchorTypedMonologue(): boolean {
+    if (this.phase !== "monologue" || this.phaseStart !== null) return false;
+    if (this.announcementPlaying || this.announcementBlocked) return false;
+    if (this.destroyed) return false;
+
+    this.phaseStart = this.now();
+    this.log("phase-started", "monologue");
+    this.beginRecording("monologue");
+    this.emit();
     return true;
   }
 

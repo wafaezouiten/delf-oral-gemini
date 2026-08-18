@@ -115,10 +115,12 @@ export const DEV_PANEL_COPY = {
  *  - `empty` — nothing typed. The one state that was already disabled.
  *  - `consigne` — the examiner is speaking. The controller refuses to start a
  *    part underneath its own instruction, so the exposé has nowhere to go yet.
- *  - `sending` — the part is being started and the socket opened. Short, and
- *    worth a word: it is the one moment the click is doing something invisible.
- *  - `closing` — the exposé counted, and the examiner is being given its
- *    closing sentence. Several seconds during which the épreuve looks stuck.
+ *  - `sending` — a press is in flight. Brief to the point of invisible now that
+ *    an accepted exposé waits for nothing, and kept for that reason: it is what
+ *    stops a second press landing on a phase the first one is already ending.
+ *  - `closing` — the monologue is being ended the spoken way, by the mic button
+ *    or by the clock, and the examiner has been asked for its closing sentence.
+ *    A typed exposé never produces this state: it leaves for the débat at once.
  *  - `ready` — press it.
  */
 export type DevSubmitState = "ready" | "empty" | "consigne" | "sending" | "closing";
@@ -132,9 +134,9 @@ export function devSubmitState(input: {
   /** The closing handshake is under way, whoever started it. */
   closing: boolean;
 }): DevSubmitState {
-  // Ordered by what is happening rather than by severity: `sending` outranks
-  // `closing` because the last thing a submission does is open the handshake,
-  // and until it returns it is still the submission that owns the button.
+  // `sending` outranks `closing`: a press in flight is this panel's own, and a
+  // button that switched mid-press to reporting somebody else's ending would be
+  // answering a question nobody asked. It resolves a tick later either way.
   if (input.sending) return "sending";
   if (input.closing) return "closing";
   if (input.awaitingConsigne) return "consigne";
@@ -156,8 +158,11 @@ export const DEV_SUBMIT_COPY: Record<DevSubmitState, { label: string; note: stri
     label: DEV_PANEL_COPY.submit,
     note: "L'examinateur donne la consigne. L'exposé partira dès qu'il aura fini.",
   },
-  sending: { label: "Envoi…", note: "La partie démarre et l'examinateur reçoit l'exposé." },
-  closing: { label: "Exposé envoyé", note: "L'examinateur conclut, puis le débat commence." },
+  sending: { label: "Envoi…", note: "La partie démarre et l'exposé est remis." },
+  closing: {
+    label: DEV_PANEL_COPY.submit,
+    note: "L'examinateur conclut la partie. Trop tard pour envoyer un exposé.",
+  },
 };
 
 /** Whether the button should refuse the press. Everything but `ready`. */

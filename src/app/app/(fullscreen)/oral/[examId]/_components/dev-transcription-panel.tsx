@@ -212,10 +212,10 @@ export function DevTranscriptionPanel({
             </button>
           </div>
 
-          {/* Why the button will not send, or what it is doing now that it has.
-              A press that ends the monologue is followed by several seconds of
-              closing handshake, and an épreuve that looks stuck is how the
-              working path came to read as the broken one. */}
+          {/* Why the button will not send. Both reasons are things happening
+              elsewhere in the épreuve — the consigne being spoken, the monologue
+              being ended by the mic button — and a disabled control that does not
+              name the reason reads exactly like the broken one this replaced. */}
           {submitCopy.note && (
             <p
               // Announced rather than merely printed: the state that matters

@@ -162,15 +162,17 @@ describe("what « Envoyer l'exposé » can do right now (#53)", () => {
     assert.equal(devSubmitDisabled("consigne"), true);
   });
 
-  it("names the two states in which the press is already working", () => {
-    // Both used to look identical to a press that did nothing at all.
+  it("names the press in flight, and the ending it did not start", () => {
+    // Both used to look identical to a press that did nothing at all. The
+    // second is the mic button's closing handshake: a typed exposé never waits
+    // through one, but the panel can be open while one runs.
     assert.equal(state({ sending: true }), "sending");
     assert.equal(state({ closing: true }), "closing");
   });
 
-  it("keeps the submission's own state while it finishes opening the phase", () => {
-    // The last thing a submission does is start the handshake, so the two
-    // overlap for a tick. The one that owns the button is the one still running.
+  it("keeps reporting its own press rather than somebody else's ending", () => {
+    // The mic button's handshake can start under a press that is still in
+    // flight. The panel finishes reporting the press: it is the one it owns.
     assert.equal(state({ sending: true, closing: true }), "sending");
   });
 
@@ -184,7 +186,7 @@ describe("what « Envoyer l'exposé » can do right now (#53)", () => {
     assert.equal(DEV_SUBMIT_COPY.ready.note, null);
     assert.equal(DEV_SUBMIT_COPY.empty.note, null);
     assert.match(DEV_SUBMIT_COPY.consigne.note ?? "", /consigne/);
-    assert.match(DEV_SUBMIT_COPY.closing.note ?? "", /débat/);
+    assert.match(DEV_SUBMIT_COPY.closing.note ?? "", /conclut/);
     assert.equal(DEV_SUBMIT_COPY.ready.label, DEV_PANEL_COPY.submit);
   });
 });
