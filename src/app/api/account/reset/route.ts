@@ -1,10 +1,11 @@
 /**
  * POST /api/account/reset — the candidate is starting over (#69).
  *
- * Sent from « Repartir de zéro » on /app/compte, after a dialog that names the
- * number of épreuves about to move. It archives everything on the record: the
- * tableau de bord goes back to its empty state, the sujet cards go back to
- * « Commencer », and the historique keeps every sitting under its archive.
+ * Sent from « Repartir de zéro », the page this product adds to Clerk's account
+ * screens at /app/compte, after an explicit confirmation. It archives everything
+ * currently on the record: the tableau de bord goes back to its empty state, the
+ * sujet cards go back to « Commencer », and the historique keeps every sitting
+ * under its archive.
  *
  * **It deletes nothing**, which is what makes it safe to expose as a button. No
  * sitting, correction or recording is removed, `/app/results/:id` on an archived

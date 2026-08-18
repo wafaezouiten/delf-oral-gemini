@@ -1,64 +1,45 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 
-import { primaryButton, secondaryButton } from "@/app/_components/button-styles";
-import { Notice } from "@/app/_components/notice";
-import { AlertIcon } from "@/app/_components/po/icons";
+import { secondaryButton } from "@/app/_components/button-styles";
 import { requestRecordReset } from "@/lib/account/reset";
 
 /**
- * « Repartir de zéro » — the reset, its confirmation, and what it says afterwards
+ * « Repartir de zéro » — the button, its confirmation and what it says after
  * (#69).
  *
- * The copy does the work that a red button would otherwise be asked to do, and
- * it has one job: say what moves and what stays. A candidate pressing this is
- * usually not trying to destroy anything — they want a tableau de bord that
- * describes the French they speak now rather than the fortnight they spent
- * learning the interface — and the product's answer is that nothing is
- * destroyed. Every épreuve keeps its correction and stays in the historique.
+ * Mounted as a page of Clerk's `<UserProfile>`, so it sits in the same card as
+ * *Profil* and *Sécurité* and inherits their chrome. This component draws its
+ * own body and nothing else: no card, no border, no heading furniture that would
+ * make it look like a panel bolted onto the side of Clerk's.
  *
- * So the confirm is the primary button and not the danger one. Red in this
- * product means "recover from a failure" (`button-styles.ts`) and, in the exit
- * dialog, a zero the candidate is about to take; borrowing it here would claim a
- * loss that does not happen. What carries the weight instead is the count in its
- * own framed block — the exit dialog's structure, for the same reason: the
- * number is the fact that must not be skimmed past.
+ * The confirmation is a second state of the panel rather than a `<dialog>`,
+ * which is a deliberate retreat from how the exit dialog does it. The exam
+ * screen owns its whole viewport; this is content inside somebody else's
+ * component, and a modal opened from in there puts two focus traps in one
+ * document to argue over the keyboard. Two states of one panel need no second
+ * trap, and the consequence is read in the same place either way.
  *
- * « Annuler » is autofocused all the same. The safe choice should be the one the
- * keyboard lands on, whatever the colours are doing.
+ * Neither button is the red one. Red in this product means recovering from a
+ * failure, and in the exit dialog a zero the candidate is about to take;
+ * borrowing it here would claim a loss that does not happen, since nothing is
+ * deleted — the épreuves go to the archive of the historique with their
+ * corrections and stay open there.
  *
- * `showModal()` from an effect rather than the `open` attribute, which produces
- * a *non-modal* dialog — no backdrop, no focus trap, no Escape — that looks
- * identical until somebody tries to tab out of it.
+ * No count is promised before the reset, and that is a saving rather than an
+ * omission: a number here would mean handing this client component the
+ * candidate's record every time the account screen mounts. The route reports
+ * what it archived, so the panel says the number *after*, where it is a fact.
  */
-export function ResetRecord({
-  /** Sittings on the record right now. The number the dialog names. */
-  current,
-  /** Sittings already archived by an earlier reset. */
-  archived,
-}: {
-  current: number;
-  archived: number;
-}) {
+export function ResetRecord() {
   const router = useRouter();
-  const dialogRef = useRef<HTMLDialogElement>(null);
 
-  const [open, setOpen] = useState(false);
+  const [confirming, setConfirming] = useState(false);
   const [pending, setPending] = useState(false);
   const [failed, setFailed] = useState<string | null>(null);
-  /** How many moved, once some have. Cleared when the dialog reopens. */
-  const [done, setDone] = useState<number | null>(null);
-
-  useEffect(() => {
-    const dialog = dialogRef.current;
-    if (!dialog) return;
-    if (open && !dialog.open) dialog.showModal();
-    if (!open && dialog.open) dialog.close();
-  }, [open]);
-
-  const empty = current === 0;
+  const [archived, setArchived] = useState<number | null>(null);
 
   async function confirm() {
     setPending(true);
@@ -78,126 +59,78 @@ export function ResetRecord({
       return;
     }
 
-    setOpen(false);
-    setDone(outcome.archived);
-    // The count on this page, the tableau de bord and the sujet cards are all
-    // server-rendered from the record that just changed. Without this the screen
-    // would go on printing the number it was built with.
+    setConfirming(false);
+    setArchived(outcome.archived);
+    // The tableau de bord, the sujet cards and the historique are all rendered
+    // from the record that just changed. Without this they would go on printing
+    // the numbers they were built with until the next full navigation.
     router.refresh();
   }
 
   return (
-    <section className="border-border bg-card mt-6 sheet border p-6">
-      <h2 className="text-sm font-semibold">Repartir de zéro</h2>
+    <div className="text-foreground space-y-4">
+      <h1 className="font-serif text-lg font-semibold">Repartir de zéro</h1>
 
-      <p className="text-muted-foreground mt-3 text-sm leading-relaxed">
+      <p className="text-muted-foreground text-sm leading-relaxed">
         Remet votre tableau de bord et vos cartes de sujets à leur état de départ.
         Vos épreuves ne sont pas supprimées : elles passent aux archives de
         l&apos;historique, avec leurs corrections, et restent consultables.
       </p>
 
-      <p className="mt-3 text-sm leading-relaxed">
-        {empty
-          ? "Vous n'avez aucune épreuve sur votre record actuel."
-          : `${current} épreuve${current > 1 ? "s" : ""} sur votre record actuel.`}
-        {archived > 0 && (
-          <span className="text-muted-foreground">
-            {" "}
-            {archived} déjà archivée{archived > 1 ? "s" : ""}.
-          </span>
-        )}
-      </p>
-
-      {/* Assertive enough to be heard, quiet enough not to look like a failure:
-          the reset worked, and the only thing worth saying is where the épreuves
-          went. */}
-      {done !== null && (
-        <div className="mt-4">
-          <Notice title="Record réinitialisé">
-            {done === 0
-              ? "Il n'y avait aucune épreuve à archiver."
-              : `${done} épreuve${done > 1 ? "s" : ""} ${done > 1 ? "sont passées" : "est passée"} aux archives. Vous les retrouvez dans l'historique.`}
-          </Notice>
-        </div>
+      {archived !== null && (
+        <p role="status" className="border-border bg-muted border p-3 text-sm leading-relaxed">
+          {archived === 0
+            ? "Il n'y avait aucune épreuve à archiver."
+            : `${archived} épreuve${archived > 1 ? "s" : ""} ${archived > 1 ? "sont passées" : "est passée"} aux archives. Vous ${archived > 1 ? "les" : "la"} retrouvez dans l'historique.`}
+        </p>
       )}
 
-      <div className="mt-5">
-        <button
-          type="button"
-          onClick={() => {
-            setDone(null);
-            setFailed(null);
-            setOpen(true);
-          }}
-          disabled={empty}
-          className={secondaryButton}
+      {failed && (
+        <p
+          role="alert"
+          className="border-danger/40 bg-danger-subtle text-danger border p-3 text-sm leading-relaxed"
         >
-          Repartir de zéro
-        </button>
-      </div>
+          {failed}
+        </p>
+      )}
 
-      <dialog
-        ref={dialogRef}
-        // Escape closes a modal dialog without going through the buttons, so the
-        // state behind it has to hear about that or it cannot be reopened.
-        onCancel={(event) => {
-          event.preventDefault();
-          if (!pending) setOpen(false);
-        }}
-        aria-labelledby="reset-dialog-title"
-        className="bg-card text-foreground border-border m-auto w-[min(32rem,92vw)] border p-0 backdrop:bg-black/50"
-      >
-        <div className="space-y-4 p-6">
-          <h2 id="reset-dialog-title" className="font-serif text-lg font-semibold">
-            Repartir de zéro ?
-          </h2>
-
-          {/* One fact, in one line, in its own frame — the exit dialog's shape,
-              because the number is what must not be skimmed past. */}
-          <div className="border-border bg-muted flex items-center gap-2.5 border p-3.5">
-            <AlertIcon className="size-4 shrink-0" />
-            <p className="text-sm font-semibold">
-              {current} épreuve{current > 1 ? "s" : ""} {current > 1 ? "quitteront" : "quittera"}{" "}
-              votre tableau de bord.
-            </p>
-          </div>
-
-          <p className="text-muted-foreground text-sm leading-relaxed">
-            Rien n&apos;est supprimé. Vos corrections restent consultables dans
-            l&apos;historique, sous « Archives ». Vos cartes de sujets réafficheront
-            « Commencer ».
+      {confirming ? (
+        <div className="border-border bg-muted space-y-3 border p-4">
+          <p className="text-sm font-semibold">
+            Vos épreuves quitteront votre tableau de bord.
           </p>
-
-          {failed && (
-            <p
-              role="alert"
-              className="border-danger/40 bg-danger-subtle text-danger border p-3 text-sm leading-relaxed"
-            >
-              {failed}
-            </p>
-          )}
-
-          <div className="flex flex-wrap justify-end gap-2 pt-1">
+          <p className="text-muted-foreground text-sm leading-relaxed">
+            Rien n&apos;est supprimé : vous les retrouverez dans l&apos;historique,
+            sous « Archives », et vos cartes de sujets réafficheront « Commencer ».
+          </p>
+          <div className="flex flex-wrap gap-2">
             <button
               type="button"
-              onClick={() => setOpen(false)}
-              className={secondaryButton}
+              onClick={() => setConfirming(false)}
               disabled={pending}
+              className={secondaryButton}
               autoFocus
             >
               Annuler
             </button>
-            <button
-              type="button"
-              onClick={confirm}
-              disabled={pending}
-              className={primaryButton}
-            >
-              {pending ? "Réinitialisation…" : failed ? "Réessayer" : "Repartir de zéro"}
+            <button type="button" onClick={confirm} disabled={pending} className={secondaryButton}>
+              {pending ? "Réinitialisation…" : failed ? "Réessayer" : "Confirmer"}
             </button>
           </div>
         </div>
-      </dialog>
-    </section>
+      ) : (
+        <button
+          type="button"
+          onClick={() => {
+            setArchived(null);
+            setFailed(null);
+            setConfirming(true);
+          }}
+          className={secondaryButton}
+        >
+          Repartir de zéro
+        </button>
+      )}
+    </div>
   );
 }

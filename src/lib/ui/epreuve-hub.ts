@@ -47,10 +47,9 @@ export interface HubLinks {
   tableauDeBord: string;
   historique: string;
   /**
-   * Mon compte (#69). In the map but not in the rail: it is reached from the
-   * avatar row, where an account is reached, and the four destinations stay
-   * four. It lives here anyway so the product has one list of its own routes
-   * rather than one list and a string typed into a sidebar.
+   * Mon compte (#69) — the account screens and « Repartir de zéro », in one
+   * page. In the map but not in the rail: it is reached by clicking the avatar,
+   * which is where an account is reached, and the four destinations stay four.
    */
   compte: string;
 }

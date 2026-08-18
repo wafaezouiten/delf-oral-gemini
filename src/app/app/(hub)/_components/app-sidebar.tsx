@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { UserButton } from "@clerk/nextjs";
+import { UserAvatar } from "@clerk/nextjs";
 
 import { ChartIcon, ClockIcon, DocumentIcon, MicIcon } from "@/app/_components/po/icons";
 import { cn } from "@/lib/ui/class-names";
@@ -97,26 +97,25 @@ export function AppSidebar() {
           </ul>
         </nav>
 
-        {/* « Mon compte » was a label beside the avatar and is now the link to
-            /app/compte (#69). The account screen is deliberately not a fifth
-            destination in the rail — it is not part of the épreuve — and this is
-            where somebody goes looking for their account anyway. The avatar
-            still opens Clerk's own menu; the words next to it open ours. */}
-        <div className="border-border flex items-center gap-2.5 border-t px-4 py-3">
-          <UserButton />
-          <Link
-            href={HUB_LINKS.compte}
-            aria-current={isNavLinkActive(pathname, HUB_LINKS.compte) ? "page" : undefined}
-            className={cn(
-              "truncate text-xs transition-colors",
-              isNavLinkActive(pathname, HUB_LINKS.compte)
-                ? "text-primary font-semibold"
-                : "text-muted-foreground hover:text-foreground",
-            )}
-          >
-            Mon compte
-          </Link>
-        </div>
+        {/* The avatar is a link to /app/compte, not a menu (#69). Clerk's
+            `<UserButton>` opened a popover offering a modal and a sign out, and
+            both now live on the account page itself — so the click that used to
+            open a dropdown goes straight where the dropdown was pointing. The
+            whole row is the target, avatar and words together, because a 32-pixel
+            circle is a poor thing to ask a thumb to find. */}
+        <Link
+          href={HUB_LINKS.compte}
+          aria-current={isNavLinkActive(pathname, HUB_LINKS.compte) ? "page" : undefined}
+          className={cn(
+            "border-border flex items-center gap-2.5 border-t px-4 py-3 transition-colors",
+            isNavLinkActive(pathname, HUB_LINKS.compte)
+              ? "bg-primary-subtle text-primary font-semibold"
+              : "text-muted-foreground hover:text-foreground hover:bg-muted",
+          )}
+        >
+          <UserAvatar />
+          <span className="truncate text-xs">Mon compte</span>
+        </Link>
       </aside>
 
       {/* Phone: a slim top bar for the brand and the account, because neither
@@ -128,25 +127,17 @@ export function AppSidebar() {
             Production orale
           </span>
         </Link>
-        {/* The same pairing as the rail's footer, and it has to be here rather
-            than only there: the phone has no footer to put it in, and the tab
-            bar has four slots for the four destinations. Without this link
-            /app/compte would be reachable on a desktop and nowhere else. */}
-        <div className="flex items-center gap-2.5">
-          <Link
-            href={HUB_LINKS.compte}
-            aria-current={isNavLinkActive(pathname, HUB_LINKS.compte) ? "page" : undefined}
-            className={cn(
-              "text-xs transition-colors",
-              isNavLinkActive(pathname, HUB_LINKS.compte)
-                ? "text-primary font-semibold"
-                : "text-muted-foreground",
-            )}
-          >
-            Compte
-          </Link>
-          <UserButton />
-        </div>
+        {/* Same destination as the rail's account row, since the phone has no
+            rail to hold one and the tab bar's four slots are the four
+            destinations. */}
+        <Link
+          href={HUB_LINKS.compte}
+          aria-label="Mon compte"
+          aria-current={isNavLinkActive(pathname, HUB_LINKS.compte) ? "page" : undefined}
+          className="flex items-center"
+        >
+          <UserAvatar />
+        </Link>
       </header>
     </>
   );

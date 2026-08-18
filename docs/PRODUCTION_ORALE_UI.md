@@ -297,13 +297,31 @@ is stamped only on sittings already on the record, so an épreuve still in
 progress when the button is pressed belongs to the new record instead of
 vanishing into the old one.
 
-That is also why the confirm is the primary button and not the red one. Nothing
-is destroyed, so the dialog carries its weight in the count it names rather than
-in a colour that would claim a loss the product does not take.
+**The avatar is a link, not a menu.** Clerk's `<UserButton>` opened a popover
+offering a modal and a sign out; `/app/compte` now holds both, so the click that
+opened a dropdown goes straight where the dropdown pointed. The account is one
+page with a left-hand nav — *Profil*, *Sécurité*, *Repartir de zéro* — reached by
+clicking yourself, which is where a candidate looks for it anyway. It is not a
+fifth destination in the rail: an account is not part of the épreuve, and the
+four destinations stay four.
 
-The screen is not a fifth destination in the rail. It is reached from « Mon
-compte » beside the avatar — which was already there as a label — because an
-account is not part of the épreuve, and the four destinations stay four.
+Clerk still draws the account screens. `<UserProfile>` is embedded rather than
+reproduced — name, e-mail, password and sessions change when the provider
+changes, and a hand-written copy would be a second place to change an e-mail with
+one of the two eventually wrong. What is ours is the palette it is drawn in:
+`lib/ui/clerk-appearance.ts` maps this product's tokens onto Clerk's variables,
+and the load-bearing one is `borderRadius: 2px` — the `.sheet` number, and the
+whole difference between a card from another application and a sheet of paper.
+The colours are duplicated as literals there on purpose, because Clerk derives a
+scale from each and cannot parse a `var(…)`.
+
+« Repartir de zéro » is a page of that card, and its confirmation is a second
+state of the panel rather than a `<dialog>` — a deliberate retreat from how the
+exit dialog does it, since content mounted inside somebody else's component
+cannot open a modal without putting two focus traps in one document to argue over
+the keyboard. Neither button is the red one, for the reason above: nothing is
+destroyed. The count is reported *after* the reset, from what the route says it
+archived, rather than promised before it.
 
 ## 4. Deliberate departures, collected
 
