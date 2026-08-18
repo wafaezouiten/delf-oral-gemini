@@ -2013,3 +2013,138 @@ describe("spoken consignes", () => {
     assert.equal(h.finished.length, 1, "and it is handed over once the voice has finished");
   });
 });
+
+/**
+ * A part that has ended must end, whatever the things being closed have to say
+ * about it (#65).
+ *
+ * Every step between one part finishing and the next one opening is some form
+ * of "tell a thing that is going away that it is going away" — the socket's
+ * activity marker, the socket, the recorder's open artefact, the development
+ * text mode. They all run BEFORE `advance()` changes the phase, and none of them
+ * used to be allowed to fail: one throw and the épreuve stayed on a part the
+ * candidate had finished, with no control on screen that could move it.
+ *
+ * It was found through the typed exposé, which made the failure loudest — the
+ * panel had already reported the exposé accepted, so the box emptied and the
+ * screen did not move — but nothing about it was development-only. The last two
+ * tests here are the candidate's own « Terminer » on a socket that has gone.
+ */
+describe("a teardown step that throws does not strand the épreuve", () => {
+  const settle = () => new Promise((resolve) => setImmediate(resolve));
+
+  /** Preparation → a monologue that has actually begun, with a live session. */
+  async function intoStartedMonologue(h: Harness): Promise<void> {
+    h.controller.start();
+    await h.controller.advanceEarly();
+    await pressRecord(h);
+    h.controller.startSpeaking();
+    await settle();
+  }
+
+  /** What a real socket does once it has gone: `endCandidateActivity` and
+   *  `close` reach the SDK, which throws rather than returning. */
+  const gone = () => {
+    throw new Error("WebSocket is not open");
+  };
+
+  it("leaves for the débat when the session throws on the way out", async () => {
+    const h = harness();
+    await intoStartedMonologue(h);
+    h.controller.setDevTextMode(true);
+    h.session().endCandidateActivity = gone;
+
+    const accepted = await h.controller.submitTypedExpose("Un exposé complet, tapé.", 330);
+
+    assert.equal(accepted, true);
+    assert.equal(
+      h.controller.getSnapshot().phase,
+      "debate",
+      "the exposé counted, so the part it ended is over",
+    );
+  });
+
+  it("leaves for the débat when closing the session throws", async () => {
+    const h = harness();
+    await intoStartedMonologue(h);
+    h.controller.setDevTextMode(true);
+    h.session().close = gone;
+
+    await h.controller.submitTypedExpose("Un exposé complet, tapé.", 330);
+
+    assert.equal(h.controller.getSnapshot().phase, "debate");
+  });
+
+  it("leaves for the débat when the recorder throws while closing the artefact", async () => {
+    const h = harness();
+    await intoStartedMonologue(h);
+    h.controller.setDevTextMode(true);
+    h.recorder.endPhase = () => {
+      throw new Error("the framer could not be flushed");
+    };
+
+    await h.controller.submitTypedExpose("Un exposé complet, tapé.", 330);
+
+    assert.equal(h.controller.getSnapshot().phase, "debate");
+  });
+
+  it("says which step failed, rather than swallowing it", async () => {
+    // The phase change surviving is not the same as nothing having gone wrong.
+    // A recording short by one phase has to have something to be explained by.
+    const h = harness();
+    await intoStartedMonologue(h);
+    h.controller.setDevTextMode(true);
+    h.session().endCandidateActivity = gone;
+
+    await h.controller.submitTypedExpose("Un exposé complet, tapé.", 330);
+
+    const failure = h.controller
+      .getSnapshot()
+      .events.find((event) => event.name === "teardown-failed");
+    assert.ok(failure, "the event log carries the failure");
+    assert.match(String(failure.detail), /end-candidate-activity/);
+    assert.match(String(failure.detail), /WebSocket is not open/);
+  });
+
+  it("ends a spoken monologue whose socket throws on « Terminer »", async () => {
+    // No development tooling in this one. The candidate presses the button, the
+    // examiner is asked for its closing sentence on a socket that has gone, and
+    // the épreuve must still be able to reach the débat.
+    const h = harness();
+    await intoStartedMonologue(h);
+    h.session().candidateSays("Le télétravail a transformé le rapport au bureau.");
+    h.advanceClock(MONOLOGUE_MIN_SECONDS + 10);
+    h.session().sendDirective = gone;
+    h.session().endCandidateActivity = gone;
+
+    await h.controller.advanceEarly();
+    assert.equal(h.controller.getSnapshot().closing, true, "the handshake opened all the same");
+
+    h.session().finishTurn();
+    await settle();
+
+    assert.equal(h.controller.getSnapshot().phase, "debate");
+  });
+
+  it("still times the handshake out when the closing directive throws", async () => {
+    // The safety timeout is what stops a silent examiner stranding the
+    // candidate. It is stamped after the directive goes out, so a directive that
+    // threw used to take the stamp with it — and the one guard against being
+    // stuck on a finished part was itself stuck.
+    const h = harness();
+    await intoStartedMonologue(h);
+    h.session().candidateSays("Le télétravail a transformé le rapport au bureau.");
+    h.advanceClock(MONOLOGUE_MIN_SECONDS + 10);
+    h.session().sendDirective = gone;
+
+    await h.controller.advanceEarly();
+    assert.equal(h.controller.getSnapshot().phase, "monologue", "waiting on the examiner");
+
+    // The examiner never speaks. The deadline is the only way out — twelve
+    // seconds, driven off the injected clock like the test above.
+    h.advanceClock(13);
+    await settle();
+
+    assert.equal(h.controller.getSnapshot().phase, "debate");
+  });
+});
