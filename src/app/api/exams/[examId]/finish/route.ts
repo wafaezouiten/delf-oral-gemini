@@ -37,6 +37,7 @@ import { authorizeExam } from "@/lib/auth/exam-guard";
 import type { OralSpeakingPhase } from "@/lib/db";
 import { neonSittingStore } from "@/lib/db/sittings";
 import { correctSitting, type CorrectionRow } from "@/lib/exams/sitting-persistence";
+import { PARTICIPATION_WORD_FLOOR } from "@/lib/delf/orale-rubric";
 import { findTopic } from "@/lib/delf/topics";
 import { candidateWordCount } from "@/lib/delf/transcript";
 // Lives outside this file so it can be unit-tested: nothing in a route that
@@ -194,7 +195,12 @@ export async function POST(
 
   // Refuse to invent a grade for an exam that never happened. A model handed an
   // empty transcript will still confidently return five scores.
-  if (candidateWordCount(payload.transcript) < 20) {
+  //
+  // The same floor the rubric now applies per part, imported rather than
+  // written twice: this gate and the halving are the same judgement about what
+  // counts as having spoken, asked at two scopes, and a bare 20 here would let
+  // them drift apart silently.
+  if (candidateWordCount(payload.transcript) < PARTICIPATION_WORD_FLOOR) {
     return NextResponse.json(
       {
         error:
