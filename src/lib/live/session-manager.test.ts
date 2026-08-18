@@ -555,6 +555,26 @@ describe("reconnection", () => {
     assert.equal(h.session.connectionState, "connected");
   });
 
+  it("drops what the microphone caught before the first connect", async () => {
+    // #74. The socket is opened after the recording starts, so the microphone
+    // delivers a second or two of the room before there is anywhere to send it.
+    // Flushed at connect, that burst reached the examiner's VAD at the exact
+    // moment it began the débat's opening question — which was then interrupted
+    // and thrown away, while the transcript printed it as if it had been heard.
+    const h = harness();
+    h.session.sendAudio("the room, before anyone said anything");
+    h.session.sendAudio("still the room");
+    await h.session.connect();
+    await flush();
+
+    assert.deepEqual(h.transport.socket.audioChunks, [], "the room is not the épreuve");
+    assert.equal(
+      h.log.events.filter((event) => event.name === "preconnect-audio-dropped").length,
+      1,
+      "reported once, not once per chunk",
+    );
+  });
+
   it("flushes audio buffered while the socket was down", async () => {
     const h = harness();
     await h.session.connect();
