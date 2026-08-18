@@ -7,8 +7,16 @@ import { Kicker } from "@/app/_components/po/tag";
 import { SimulatorTopBar } from "@/app/_components/po/topbar";
 import { TimerRing } from "@/app/_components/po/timer-ring";
 import { PHASE_DURATIONS } from "@/lib/delf/phases";
-import { poKicker, shortPartLabel, EXPOSE_PLAN, MONOLOGUE_TITLE } from "@/lib/ui/po-player-view";
+import {
+  buildDeroule,
+  poKicker,
+  shortPartLabel,
+  topbarStep,
+  EXPOSE_PLAN,
+  MONOLOGUE_TITLE,
+} from "@/lib/ui/po-player-view";
 import type { OralTopic } from "@/lib/delf/topics";
+import { PreflightCard } from "./preflight-card";
 
 /**
  * The préparation desk: the sujet to read on the left, a rail on the right that
@@ -30,6 +38,16 @@ import type { OralTopic } from "@/lib/delf/topics";
  *
  * The rail card keeps the job the clock was not doing anyway, which is
  * explaining what happens when the time runs out and offering the way on.
+ *
+ * **This is now the first screen of the épreuve (#55).** A briefing screen used
+ * to stand in front of it, carrying the déroulé, the pre-flight checks and a
+ * « Commencer la préparation » — so a candidate who had pressed « Commencer » on
+ * the sujet was asked to press it again, and the examiner's spoken consigne,
+ * which the controller fires on `start()`, could not be heard until they did.
+ * The screen is gone and its two useful cards moved into this rail: the checks
+ * (`PreflightCard`) under the passation card, and the déroulé at the foot. What
+ * is lost is nothing a candidate acted on — the déroulé's durations are already
+ * on the sujet's launch dialog, and this screen prints them again.
  */
 export function PreparationScreen({
   topic,
@@ -38,6 +56,8 @@ export function PreparationScreen({
   remaining,
   onStartExam,
   onExit,
+  canEncode,
+  checking,
   notices,
   announcement,
 }: {
@@ -47,6 +67,20 @@ export function PreparationScreen({
   remaining: number;
   onStartExam: () => void;
   onExit: () => void;
+  /** Whether this browser can compress the recording. Null while it is being
+   *  asked, and if it never answered. See `PreflightCard`. */
+  canEncode: boolean | null;
+  /**
+   * That question is still open, and the passation is held shut until it is
+   * answered.
+   *
+   * The gate came off the briefing's CTA with the briefing (#55) and had to land
+   * somewhere: a candidate who clicks straight through on a slow device would
+   * otherwise outrun the only warning there will ever be about a browser that
+   * cannot send the recording. `isConfigSupported` answers in milliseconds and
+   * this screen lasts thirty minutes, so in practice nobody meets it.
+   */
+  checking: boolean;
   /** Failures raised by the controller. Above the sujet, where they are read. */
   notices?: ReactNode;
   /**
@@ -63,7 +97,11 @@ export function PreparationScreen({
     <div className="bg-background flex h-full min-h-0 flex-col">
       <SimulatorTopBar
         kicker={poKicker(shortPartLabel(MONOLOGUE_TITLE))}
-        currentStep={1}
+        // Read off the phase rather than written here. It said 1 — « Exposé » —
+        // through the whole of the préparation, a leftover from when the stepper
+        // named this app's three screens (`Sujet · Préparation · Passage`)
+        // rather than the épreuve's three parts.
+        currentStep={topbarStep("preparation")}
         onBack={onExit}
         right={
           <TimerRing
@@ -116,9 +154,10 @@ export function PreparationScreen({
             <button
               type="button"
               onClick={onStartExam}
-              className="bg-primary text-primary-foreground mt-3 h-9.5 w-full rounded-md text-[0.8125rem] font-semibold transition-opacity hover:opacity-90"
+              disabled={checking}
+              className="bg-primary text-primary-foreground mt-3 h-9.5 w-full rounded-md text-[0.8125rem] font-semibold transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              Commencer la passation
+              {checking ? "Vérification…" : "Commencer la passation"}
             </button>
           </div>
 
@@ -165,11 +204,53 @@ export function PreparationScreen({
             </ol>
           </div>
 
+          {/* The checks sit BELOW the notes, which is not where a card headed
+              « Avant de commencer » wants to be. The rail is 632px of viewport
+              against 1786px of content on a laptop, and the order is therefore a
+              ranking: the consigne is arriving now, the CTA is the way out, and
+              the notes are what the next thirty minutes are spent in. A one-time
+              microphone test above them would push the writing surface a full
+              screen down for every candidate, to save a scroll for the one who
+              tests. What must not be missed is not in here anyway — the browser
+              that cannot send a recording is a danger notice over the sujet, and
+              it holds the passation button shut. */}
+          <PreflightCard canEncode={canEncode} checking={checking} />
+
+          {/* The déroulé, off the briefing screen it was written for (#55). It is
+              the only place the sitting's shape is laid out end to end, and it
+              is worth more here than it was there: a candidate deciding whether
+              to spend their remaining préparation is deciding against the 7:00
+              and the 13:00 below. */}
+          <div className="border-border bg-card shrink-0 rounded-lg border p-4">
+            <Kicker>Déroulé de la séance</Kicker>
+            <ol className="mt-1.5">
+              {buildDeroule().map((step) => (
+                <li key={step.n} className="border-border flex gap-3 border-t py-2.5 last:pb-0">
+                  <span className="text-primary tabular w-4 shrink-0 text-xs font-semibold">
+                    {step.n}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-baseline justify-between gap-2.5">
+                      <span className="text-xs font-semibold">{step.title}</span>
+                      <span className="text-muted-foreground tabular shrink-0 text-[0.6875rem] font-medium">
+                        {step.durationLabel}
+                      </span>
+                    </div>
+                    <p className="text-muted-foreground mt-0.5 text-[0.6875rem] leading-snug">
+                      {step.caption}
+                    </p>
+                  </div>
+                </li>
+              ))}
+            </ol>
+          </div>
+
           <div className="flex shrink-0 justify-center pb-1">
             <button
               type="button"
               onClick={onStartExam}
-              className="text-muted-foreground hover:text-foreground flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium transition-colors"
+              disabled={checking}
+              className="text-muted-foreground hover:text-foreground flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50"
             >
               <PlayIcon className="size-3.5" />
               Passer et commencer maintenant

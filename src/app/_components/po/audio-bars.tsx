@@ -2,7 +2,7 @@ import { cn } from "@/lib/ui/class-names";
 
 /**
  * Five bars breathing in a staggered wave — the "a mic is live" glyph, beside
- * the briefing's mic test.
+ * the préparation's pre-flight mic test.
  *
  * PORT NOTE: `components/po/po-audio-bars.tsx` in the reference, which runs it
  * on motion/react. Here it is one CSS class (`.po-bar` in globals.css) with a

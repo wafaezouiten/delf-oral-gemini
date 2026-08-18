@@ -795,9 +795,25 @@ export class ExamController {
    * re-anchoring its clock afterwards would show a timer jumping backwards from
    * 29:26 to 30:00. Half a minute out of thirty minutes is also not a duration
    * anything grades — unlike the monologue's, which is why that one waits.
+   *
+   * **Called when the épreuve opens, not from a button (#55).** A briefing screen
+   * used to stand between the sujet and the préparation and call this from its
+   * CTA, so a candidate who had already pressed « Commencer » was asked to press
+   * it again — and the consigne fired below, being the first thing that happens
+   * after this, could not be heard until they did. `ExamClient` calls it on mount
+   * now. The clip still plays on the ordinary path because entering the épreuve
+   * is a client-side navigation: the document keeps the sticky activation the
+   * candidate's click gave it. A hard load of the same URL has no activation, and
+   * `announce()` already answers for that — the phase is not held, the card
+   * carries the text, and « Écouter la consigne » is one click.
+   *
+   * Refused after `destroy()`, which is not hypothetical: this is now called from
+   * an effect rather than a click, and a controller torn down between the two
+   * would otherwise start a ticker counting a phase nobody is in and speak into
+   * a closed announcer.
    */
   start(): void {
-    if (this.started) return;
+    if (this.started || this.destroyed) return;
     this.started = true;
     this.examStart = this.now();
     this.phaseStart = this.now();

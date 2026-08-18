@@ -65,6 +65,7 @@ export function PassationScreen({
   connecting,
   canAdvance,
   awaitingStart,
+  closing,
   notes,
   notesOpen,
   onToggleNotes,
@@ -92,6 +93,12 @@ export function PassationScreen({
   canAdvance: boolean;
   /** The part is armed and waiting for « Enregistrer ». */
   awaitingStart: boolean;
+  /**
+   * The part has been ended and the examiner is giving its closing sentence
+   * (#55). Several seconds, during which the candidate's own click was the last
+   * thing that changed on this screen.
+   */
+  closing: boolean;
   notes: string;
   notesOpen: boolean;
   onToggleNotes: () => void;
@@ -117,7 +124,12 @@ export function PassationScreen({
   devPanel?: ReactNode;
 }) {
   const total = phaseDurationSeconds(phase);
-  const status = passationStatus(phase, connected, awaitingConsigne || awaitingStart);
+  const status = passationStatus(
+    phase,
+    connected,
+    awaitingConsigne || awaitingStart,
+    closing,
+  );
   const hasNotes = notes.trim().length > 0;
   const partTitle = phase === "monologue" ? MONOLOGUE_TITLE : DEBATE_TITLE;
   const showTranscript = phase === "debate" && transcriptOpen;
@@ -128,7 +140,7 @@ export function PassationScreen({
           the stepper names the parts now, so the kicker no longer has to. */}
       <SimulatorTopBar
         kicker={poKicker(partTitle)}
-        currentStep={topbarStep(phase, true)}
+        currentStep={topbarStep(phase)}
         onBack={onExit}
         right={
           <>
@@ -192,7 +204,16 @@ export function PassationScreen({
               it: the plan is the thing to be looking at, and this is one
               sentence saying whether the examiner is there yet. */}
           {phase === "monologue" && !awaitingStart && !awaitingConsigne && (
-            <p className="text-muted-foreground text-center text-xs leading-relaxed">
+            // A live region, and permanently one: it carries the examiner's
+            // arrival and — since #55 — the close, and a region that only gets
+            // its role at the moment its text changes is a region a screen
+            // reader has no reason to have been watching. Its handful of states
+            // are all events worth hearing, unlike the countdown under the
+            // control below.
+            <p
+              role="status"
+              className="text-muted-foreground text-center text-xs leading-relaxed"
+            >
               {status.body}
             </p>
           )}
@@ -205,6 +226,7 @@ export function PassationScreen({
           recording={recording}
           awaitingStart={awaitingStart}
           startDisabled={awaitingConsigne}
+          closing={closing}
           elapsed={elapsed}
           hasNotes={hasNotes}
           notesOpen={notesOpen}

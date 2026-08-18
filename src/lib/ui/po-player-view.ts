@@ -54,20 +54,17 @@ export function shortPartLabel(title: string): string {
   return title.split(/\s+[—–:-]\s+/)[0].trim();
 }
 
-/** The rest of the part's name, for the briefing's serif subtitle. */
-export function partSubtitle(title: string): string {
-  return title
-    .split(/\s+[—–:-]\s+/)
-    .slice(1)
-    .join(" · ")
-    .trim();
-}
+/*
+ * `partSubtitle` — the rest of a part's name, for a serif subtitle — went with
+ * the briefing screen (#55). Its only caller was that screen's headline, and the
+ * préparation prints the sujet's own title rather than the part's.
+ */
 
 // =====================================================
 // THE DÉROULÉ
 // =====================================================
 
-/** One phase of the épreuve, as the briefing's numbered rail prints it. */
+/** One phase of the épreuve, as the préparation rail's numbered list prints it. */
 export interface PoDerouleStep {
   /** 1-based position, printed in the numbered chip. */
   n: number;
@@ -78,7 +75,7 @@ export interface PoDerouleStep {
 }
 
 /**
- * The ordered phases of the épreuve, for the briefing rail.
+ * The ordered phases of the épreuve, for the préparation rail.
  *
  * Built from `PHASE_DURATIONS` rather than from an `OralPartSpec` the way the
  * reference does it, because the durations the candidate is about to live
@@ -194,7 +191,7 @@ export const EXPOSE_PLAN: readonly PlanStep[] = [
  * sujet and the plan are on screen, and no clock is running until the candidate
  * says they are ready. The other three are the part in progress.
  */
-export type MicState = "armed" | "recording" | "locked" | "connecting";
+export type MicState = "armed" | "recording" | "locked" | "connecting" | "closing";
 
 /**
  * The word on the record control, the hint printed under it, and its accessible
@@ -237,6 +234,22 @@ export function micCopy(
       button: "Connexion…",
       hint: "Connexion à l'examinateur…",
       label: `Terminer ${act}`,
+    };
+  }
+
+  // The click has been taken and the part is ending (#55). Said here because the
+  // control is where the candidate is looking when they press it, and what
+  // follows — the examiner's closing sentence, then the next consigne — takes
+  // several seconds during which nothing else on screen changes. « Terminé »
+  // rather than « Terminer »: the button is no longer an offer.
+  if (state === "closing") {
+    return {
+      button: "Terminé",
+      hint:
+        phase === "monologue"
+          ? "Fin de l'exposé. L'examinateur conclut, puis vous donne la consigne du débat."
+          : "Fin du débat. L'examinateur conclut, puis votre prestation part pour correction.",
+      label: phase === "monologue" ? "Exposé terminé" : "Débat terminé",
     };
   }
 
@@ -286,7 +299,27 @@ export function passationStatus(
    * speech, which is long enough to read a sentence and believe it.
    */
   awaitingConsigne = false,
+  /**
+   * The part has been ended and the examiner is delivering its closing sentence
+   * (#55). Several seconds pass before the next consigne is spoken, and until
+   * this was rendered nothing on screen acknowledged the click at all — so the
+   * candidate's own « Terminer » looked ignored, on the one screen where pressing
+   * it twice is exactly what should not happen.
+   */
+  closing = false,
 ): { title: string; body: string } {
+  if (closing) {
+    return phase === "monologue"
+      ? {
+          title: "Fin de l'exposé",
+          body: "L'examinateur termine la première partie. Il vous donnera la consigne du débat dans un instant.",
+        }
+      : {
+          title: "Fin du débat",
+          body: "L'examinateur conclut l'épreuve. Votre prestation part ensuite pour correction.",
+        };
+  }
+
   if (awaitingConsigne) {
     return {
       title: "Consigne de l'examinateur",
@@ -350,12 +383,14 @@ export function secondsToMonologueFloor(elapsedSeconds: number): number {
  * matches what the candidate is actually being examined on: a DELF B2 production
  * orale has a préparation, an exposé and a débat.
  *
- * The briefing maps to 0, because the sujet screen is where a candidate about to
- * prepare is standing; `finished` maps to the débat, because the finished screen
- * is the évaluation's loading state rather than a fourth part.
+ * `finished` maps to the débat, because the finished screen is the évaluation's
+ * loading state rather than a fourth part.
+ *
+ * It used to take a `started` flag as well, for the briefing screen that stood
+ * before the préparation. That screen is gone (#55) and the flag went with it —
+ * the épreuve now opens on the phase it is in, and the phase is the whole answer.
  */
-export function topbarStep(phase: OralPhase, started: boolean): number {
-  if (!started) return 0;
+export function topbarStep(phase: OralPhase): number {
   switch (phase) {
     case "preparation":
       return 0;
@@ -382,6 +417,6 @@ export function partieKicker(phase: SpeakingPhase): string {
 /** The passation's footer line. */
 export const SITE_FOOTER = "DELF Formation · Préparez le DELF B2";
 
-/** The two part titles, for the briefing's serif headline. */
+/** The two part titles, for the topbar's identity line and the sujet kickers. */
 export const MONOLOGUE_TITLE = ORAL_PARTS_B2[0].title;
 export const DEBATE_TITLE = ORAL_PARTS_B2[1].title;

@@ -75,9 +75,10 @@ const config = (sampleRate: number, bitrateMode?: BitrateMode): AudioEncoderConf
  */
 async function supportedConfig(sampleRate: number): Promise<AudioEncoderConfig | null> {
   // Both halves, because both are used: an encoder with nothing to feed it is
-  // not support. They ship together in practice, but the briefing screen and the
-  // encode itself must be answering the same question — a briefing that says yes
-  // where the encode says no is the warning arriving after the épreuve.
+  // not support. They ship together in practice, but the préparation's
+  // pre-flight row and the encode itself must be answering the same question — a
+  // check that says yes where the encode says no is the warning arriving after
+  // the épreuve.
   if (typeof AudioEncoder === "undefined" || typeof AudioData === "undefined") return null;
   for (const candidate of [config(sampleRate, "constant"), config(sampleRate)]) {
     try {
