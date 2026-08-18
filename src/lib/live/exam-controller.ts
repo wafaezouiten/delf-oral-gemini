@@ -1256,8 +1256,12 @@ export class ExamController {
 
     this.phaseStart = this.now();
     this.log("phase-started", "monologue");
-    this.beginRecording("monologue");
+    // `emit()` then `beginRecording()`, in that order, because `startSpeaking`
+    // does it in that order and this claims to be that method minus the session.
+    // Nothing observes the difference today; a claim of parity that is only
+    // nearly true is how the next reader ends up comparing the two line by line.
     this.emit();
+    this.beginRecording("monologue");
     return true;
   }
 

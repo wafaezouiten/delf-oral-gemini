@@ -89,6 +89,16 @@ export function DevTranscriptionPanel({
   const submitCopy = DEV_SUBMIT_COPY[submitState];
   const refused = devSubmitDisabled(submitState);
 
+  // An accepted exposé ends the monologue, and this panel belongs to the
+  // monologue — so the controller's own notification unmounts it from inside
+  // `onSubmit`, before the await below has even suspended. The state updates
+  // that follow therefore land on a component that is usually already gone.
+  //
+  // They stay, and are not conditional on that: what empties the field is the
+  // controller having accepted the exposé, which is a rule about this form and
+  // must not quietly become "the caller happened to unmount us". React has not
+  // warned about an update after unmount since 18, and there is nothing to
+  // clean up here — no subscription, no timer, nothing that outlives the panel.
   async function send() {
     setSending(true);
     try {
