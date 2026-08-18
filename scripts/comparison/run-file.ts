@@ -34,6 +34,22 @@ export type OurRecord =
       score25: number;
       durationPenalty: number;
       shortParts: string[];
+      /**
+       * What the halving took off for a part the candidate never produced, and
+       * which part that was.
+       *
+       * Recorded because it is the one thing that can move a score by 13 points
+       * without any of the bands moving. A walk-out run through this harness
+       * otherwise shows only a lower `score25`, and the obvious reading of that
+       * — the corrector graded it harder — is the wrong one.
+       *
+       * The incumbent has no counterpart: it corrects one task per correction
+       * and never sees a sitting with a missing half, so this column is ours
+       * alone and a comparison must not treat its absence over there as a
+       * disagreement.
+       */
+      absencePenalty: number;
+      absentParts: string[];
       /** Whether the rubric held « phonologie » down because there was no audio (#29). */
       phonologyCapped: boolean;
       meetsFloor: boolean;

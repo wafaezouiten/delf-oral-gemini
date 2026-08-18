@@ -16,6 +16,7 @@ import {
 import { Kicker, Tag } from "@/app/_components/po/tag";
 import { scoreInk } from "@/app/_components/score-band";
 import { cn } from "@/lib/ui/class-names";
+import { correctionNotices } from "@/lib/ui/correction-notices";
 import { COMPETENCY_FLOOR, COMPETENCY_MAX } from "@/lib/delf/constants";
 import {
   ORAL_CRITERIA,
@@ -227,46 +228,15 @@ export function ResultsClient({
    * treatment at full force and the band colours the numeral it describes (#50).
    */
   const tone = scoreTone(evaluation.score25);
-  const penalised =
-    evaluation.durationPenalty !== undefined
-      ? evaluation.durationPenalty > 0
-      : evaluation.score25 < evaluation.rawScore25;
 
   /**
-   * The part the candidate never produced, in their own words.
-   *
-   * Rendered above the duration notice and in its own sentence, because it is
-   * a different and much larger charge: −3 for speaking too briefly, half the
-   * mark for not sitting the part at all.
+   * The two paragraphs below the mark, and the figure each is measured
+   * against. Both live in `lib/ui/correction-notices.ts`, which is where the
+   * arithmetic can be tested — and it needs to be, because the duration
+   * paragraph's baseline is no longer the sum of the bands whenever the
+   * halving fired in front of it.
    */
-  const absentParts = evaluation.absentParts ?? [];
-  const halved = (evaluation.absencePenalty ?? 0) > 0;
-  const absentLabel =
-    absentParts.length === 2
-      ? "Vous n'avez pris la parole dans aucune des deux parties"
-      : absentParts[0] === "monologue"
-        ? "Vous n'avez pas présenté votre monologue"
-        : absentParts[0] === "debate"
-          ? "Vous n'avez pas participé au débat"
-          : "Une partie de l'épreuve n'a pas été réalisée";
-
-  /**
-   * Which half fell short, in the candidate's own words.
-   *
-   * Capitalised, because it opens a sentence. It used to be spliced in
-   * lowercase after "Note avant pénalité de durée : 15/25." and read as a typo
-   * on the one paragraph that has to be believed — the one explaining why the
-   * number above it is lower than the marking earned.
-   */
-  const shortParts = evaluation.shortParts ?? [];
-  const shortLabel =
-    shortParts.length === 2
-      ? "Vos deux prises de parole ont été"
-      : shortParts[0] === "monologue"
-        ? "Votre monologue a été"
-        : shortParts[0] === "debate"
-          ? "Votre débat a été"
-          : "Votre temps de parole a été";
+  const notices = correctionNotices(evaluation);
 
   const phonoNote = evaluation.feedback.phonologieNonEvaluable
     ? "La phonologie n'a pas pu être évaluée de façon fiable sur cette production."
@@ -345,22 +315,28 @@ export function ResultsClient({
               </Tag>
             </div>
 
-            {halved && (
+            {notices.absence && (
               <p className="text-muted-foreground mt-3 text-xs leading-relaxed">
-                {absentLabel}. L&apos;épreuve compte deux parties&nbsp;: la note
-                obtenue sur celle que vous avez réalisée ({evaluation.rawScore25}/
-                {COMPETENCY_MAX}) est donc divisée par deux.
+                {notices.absence.label}. L&apos;épreuve compte deux parties&nbsp;: la
+                note obtenue sur celle que vous avez réalisée (
+                {notices.absence.rawScore25}/{COMPETENCY_MAX}) est donc divisée par
+                deux.
               </p>
             )}
 
-            {penalised && (
+            {notices.duration && (
               <p className="text-muted-foreground mt-3 text-xs leading-relaxed">
-                Note avant pénalité de durée : {evaluation.rawScore25}/{COMPETENCY_MAX}.{" "}
+                {/* The halved score when a part was skipped, the sum of the
+                    bands otherwise — so this paragraph and the one above it
+                    reconcile to the mark instead of describing two different
+                    subtractions from the same 25. */}
+                Note avant pénalité de durée : {notices.duration.beforePenalty}/
+                {COMPETENCY_MAX}.{" "}
                 {/* Named, not merely announced: "vous avez été pénalisé" is an
                     assertion, "votre débat a duré 40 secondes" is something the
                     candidate can check against the clock beside it. */}
-                {shortLabel} nettement plus court que ce que demande l&apos;épreuve
-                réelle.
+                {notices.duration.label} nettement plus court que ce que demande
+                l&apos;épreuve réelle.
               </p>
             )}
 
