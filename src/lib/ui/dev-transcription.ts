@@ -104,6 +104,68 @@ export const DEV_PANEL_COPY = {
 } as const;
 
 /**
+ * What « Envoyer l'exposé » can do at this instant.
+ *
+ * There is one button and it means one thing — this text *is* the monologue —
+ * but four of the five states below are ones in which pressing it would do
+ * nothing. Before #53 all four were spelled the same way: an enabled button, a
+ * field that emptied itself, and no change on screen. So they are named here,
+ * with the copy that says which one you are in.
+ *
+ *  - `empty` — nothing typed. The one state that was already disabled.
+ *  - `consigne` — the examiner is speaking. The controller refuses to start a
+ *    part underneath its own instruction, so the exposé has nowhere to go yet.
+ *  - `sending` — the part is being started and the socket opened. Short, and
+ *    worth a word: it is the one moment the click is doing something invisible.
+ *  - `closing` — the exposé counted, and the examiner is being given its
+ *    closing sentence. Several seconds during which the épreuve looks stuck.
+ *  - `ready` — press it.
+ */
+export type DevSubmitState = "ready" | "empty" | "consigne" | "sending" | "closing";
+
+export function devSubmitState(input: {
+  text: string;
+  /** The examiner is giving this part's consigne (#37). */
+  awaitingConsigne: boolean;
+  /** A submission is in flight: the part is starting, the socket is opening. */
+  sending: boolean;
+  /** The closing handshake is under way, whoever started it. */
+  closing: boolean;
+}): DevSubmitState {
+  // Ordered by what is happening rather than by severity: `sending` outranks
+  // `closing` because the last thing a submission does is open the handshake,
+  // and until it returns it is still the submission that owns the button.
+  if (input.sending) return "sending";
+  if (input.closing) return "closing";
+  if (input.awaitingConsigne) return "consigne";
+  if (!input.text.trim()) return "empty";
+  return "ready";
+}
+
+/**
+ * The button's label and the line under it, per state.
+ *
+ * `note: null` for the two ordinary states — a panel that explains itself when
+ * there is nothing to explain trains you to stop reading it, which is exactly
+ * the habit the other three states need broken.
+ */
+export const DEV_SUBMIT_COPY: Record<DevSubmitState, { label: string; note: string | null }> = {
+  ready: { label: DEV_PANEL_COPY.submit, note: null },
+  empty: { label: DEV_PANEL_COPY.submit, note: null },
+  consigne: {
+    label: DEV_PANEL_COPY.submit,
+    note: "L'examinateur donne la consigne. L'exposé partira dès qu'il aura fini.",
+  },
+  sending: { label: "Envoi…", note: "La partie démarre et l'examinateur reçoit l'exposé." },
+  closing: { label: "Exposé envoyé", note: "L'examinateur conclut, puis le débat commence." },
+};
+
+/** Whether the button should refuse the press. Everything but `ready`. */
+export function devSubmitDisabled(state: DevSubmitState): boolean {
+  return state !== "ready";
+}
+
+/**
  * A sample exposé, for the « Exemple » button.
  *
  * Long enough that {@link SPOKEN_WORDS_PER_MINUTE} puts it clear of
