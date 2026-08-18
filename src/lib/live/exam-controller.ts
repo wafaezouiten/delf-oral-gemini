@@ -1228,7 +1228,13 @@ export class ExamController {
     // emits before it does anything asynchronous, so the débat is on screen by
     // the time this returns. What follows — the microphone handed back, the
     // débat's own consigne — is the ordinary path, unchanged.
-    void this.advance();
+    //
+    // That synchronous stretch is what makes the `true` below true, and it used
+    // to be reachable only if nothing in it threw: a socket that failed on the
+    // way out took the phase change with it and left this method still claiming
+    // the exposé had counted (#65). The steps in question are guarded now, and
+    // `advanceDetached` reports anything else that fails rather than dropping it.
+    this.advanceDetached();
     return true;
   }
 
@@ -1299,7 +1305,7 @@ export class ExamController {
    */
   private beginClosingHandshake(): void {
     if (this.phase !== "monologue" && this.phase !== "debate") {
-      void this.advance();
+      this.advanceDetached();
       return;
     }
     if (this.closing) return;
@@ -1308,7 +1314,13 @@ export class ExamController {
     this.log("closing-handshake");
 
     if (this.phase === "monologue") this.endMonologueActivity();
-    this.session?.sendDirective(closingInstruction(this.phase));
+    // Tolerated for the same reason as the teardown steps, and this one is the
+    // candidate's own « Terminer » rather than a development tool: a socket that
+    // threw here never reached the stamp below, so `closingHasTimedOut()` could
+    // never become true and the safety timeout — the whole reason a silent
+    // examiner cannot strand anybody — was itself stranded (#65).
+    const instruction = closingInstruction(this.phase);
+    this.tolerate("closing-directive", () => this.session?.sendDirective(instruction));
 
     // Stamped, not scheduled. The deadline is checked from `tick()` against the
     // injected clock, like every other timing decision here — this used to be a
@@ -1329,6 +1341,33 @@ export class ExamController {
     this.closingStartedAt = null;
   }
 
+  /**
+   * Advance without waiting for it, and without dropping the reason if it fails.
+   *
+   * Five callers hand the phase change off rather than awaiting it, and every
+   * one of them is right to: a turn completing, a clock running out and a typed
+   * exposé all have somewhere else to be, and `advance()` ends with a consigne
+   * that takes twenty-five seconds to speak.
+   *
+   * What they were not right to do was write it `void this.advance()`. That
+   * dropped the rejection: `submitTypedExpose` had already told the panel the
+   * exposé was accepted, so the box emptied, the screen stayed on the exposé,
+   * and the only trace anywhere was an unhandled rejection in a console nobody
+   * had open (#65). The teardown steps that produced it are guarded now — but a
+   * phase change that fails for some other reason must still say so, and this is
+   * where it says it.
+   */
+  private advanceDetached(): void {
+    // Read here, not in the catch. `advance()` flips the phase before the awaits
+    // that can still fail — `finish()`'s teardown among them — so by the time a
+    // rejection lands, `this.phase` is the part being entered and a log naming
+    // it `from` would point at the wrong transition entirely.
+    const from = this.phase;
+    void this.advance().catch((error: unknown) => {
+      this.log("advance-failed", { from, error: String(error) });
+    });
+  }
+
   /** Every phase transition runs through here, so ordering lives in one place. */
   private async advance(): Promise<void> {
     const current = this.phase;
@@ -1347,7 +1386,7 @@ export class ExamController {
         this.phaseSeconds[current] = Math.round((this.now() - this.phaseStart) / 1000);
       }
       this.phaseStamps[current].endedAt = this.now();
-      this.recorder?.endPhase();
+      this.tolerate("end-phase", () => this.recorder?.endPhase());
     }
 
     this.log("phase-transition", `${current} -> ${target}`);
@@ -1368,7 +1407,9 @@ export class ExamController {
     // Without this the mode would outlive the only screen that can use it: the
     // débat would be neither typeable nor recordable, and it would arrive at the
     // correction with an empty transcript and zero seconds.
-    if (this.devTextMode && current === "monologue") this.setDevTextMode(false);
+    if (this.devTextMode && current === "monologue") {
+      this.tolerate("dev-text-mode-off", () => this.setDevTextMode(false));
+    }
 
     this.phase = target;
     // Null, not `now()`: the phase is open but its clock has not started. The
@@ -1506,7 +1547,7 @@ export class ExamController {
         if (this.closing) {
           this.closing = false;
           this.clearClosingTimer();
-          void this.advance();
+          this.advanceDetached();
         }
       },
       onEvent: (name, detail) => this.log(name, detail),
@@ -1538,12 +1579,47 @@ export class ExamController {
   private endMonologueActivity(): void {
     if (this.activityEnded) return;
     this.activityEnded = true;
-    this.session?.endCandidateActivity();
+    this.tolerate("end-candidate-activity", () => this.session?.endCandidateActivity());
   }
 
   private closeSession(): void {
-    this.session?.close();
+    this.tolerate("close-session", () => this.session?.close());
+    // Dropped whether or not the close succeeded. A socket this controller can
+    // no longer talk to is not one it should keep a reference to — and holding
+    // it would hand the next phase a session belonging to the last one.
     this.session = null;
+  }
+
+  /**
+   * Run a step that ends something, and let the épreuve survive it failing.
+   *
+   * Every caller is a variation on telling a thing that is going away that it is
+   * going away: the socket's activity marker, the socket itself, the recorder's
+   * open artefact, the development text mode. None of them is a reason to keep
+   * the candidate on a part that has ended — and all of them sit in `advance()`
+   * BEFORE the phase changes, so before this existed, one throw left the épreuve
+   * on a finished part with no way forward (#65).
+   *
+   * The throw is real rather than theoretical: `endCandidateActivity` reaches
+   * `sendRealtimeInput` on a WebSocket the SDK still believes is open, which is
+   * exactly the state a dropped connection leaves behind.
+   *
+   * Not every site is one that throws *today* — `SessionManager.sendDirective`
+   * and `close` catch their own errors, so those two are the interface's contract
+   * being honoured rather than a live failure being caught. That is deliberate
+   * and is not dead code: this class holds `LiveSessionLike`, not that class, and
+   * the one time it assumed an implementation detail of the socket instead of the
+   * interface was this bug.
+   *
+   * Logged, not swallowed. The step failed and the event log says which one, so
+   * a recording that is short by one phase has something to be explained by.
+   */
+  private tolerate(step: string, run: () => void): void {
+    try {
+      run();
+    } catch (error) {
+      this.log("teardown-failed", { step, error: String(error) });
+    }
   }
 
   private async finish(): Promise<void> {
@@ -1695,7 +1771,7 @@ export class ExamController {
       this.closing = false;
       this.clearClosingTimer();
       this.log("closing-safety-timeout");
-      void this.advance();
+      this.advanceDetached();
       return;
     }
 
@@ -1709,7 +1785,7 @@ export class ExamController {
         return;
       }
       if (phaseUsesLiveSession(this.phase)) this.beginClosingHandshake();
-      else void this.advance();
+      else this.advanceDetached();
     }
   }
 
