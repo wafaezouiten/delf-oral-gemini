@@ -73,6 +73,14 @@ export interface StoredResult {
      */
     durationPenalty?: number;
     shortParts?: Array<"monologue" | "debate">;
+    /**
+     * What the halving cost, and which part never happened. Optional for the
+     * same reason as the two above, and the fallback matters more here: the
+     * old reading would attribute 13 points to a short épreuve, which is not
+     * what took them.
+     */
+    absencePenalty?: number;
+    absentParts?: Array<"monologue" | "debate">;
     model: string;
     /**
      * Nullable because `evaluations.latency_seconds` is, and this object is
@@ -225,6 +233,24 @@ export function ResultsClient({
       : evaluation.score25 < evaluation.rawScore25;
 
   /**
+   * The part the candidate never produced, in their own words.
+   *
+   * Rendered above the duration notice and in its own sentence, because it is
+   * a different and much larger charge: −3 for speaking too briefly, half the
+   * mark for not sitting the part at all.
+   */
+  const absentParts = evaluation.absentParts ?? [];
+  const halved = (evaluation.absencePenalty ?? 0) > 0;
+  const absentLabel =
+    absentParts.length === 2
+      ? "Vous n'avez pris la parole dans aucune des deux parties"
+      : absentParts[0] === "monologue"
+        ? "Vous n'avez pas présenté votre monologue"
+        : absentParts[0] === "debate"
+          ? "Vous n'avez pas participé au débat"
+          : "Une partie de l'épreuve n'a pas été réalisée";
+
+  /**
    * Which half fell short, in the candidate's own words.
    *
    * Capitalised, because it opens a sentence. It used to be spliced in
@@ -318,6 +344,14 @@ export function ResultsClient({
                   : `Sous le seuil de ${COMPETENCY_FLOOR}/${COMPETENCY_MAX}`}
               </Tag>
             </div>
+
+            {halved && (
+              <p className="text-muted-foreground mt-3 text-xs leading-relaxed">
+                {absentLabel}. L&apos;épreuve compte deux parties&nbsp;: la note
+                obtenue sur celle que vous avez réalisée ({evaluation.rawScore25}/
+                {COMPETENCY_MAX}) est donc divisée par deux.
+              </p>
+            )}
 
             {penalised && (
               <p className="text-muted-foreground mt-3 text-xs leading-relaxed">

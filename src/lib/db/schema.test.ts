@@ -66,16 +66,24 @@ test("no correction the rubric can produce violates the constraints on the row",
   // path by which a band reaches the column and therefore another path by which
   // an illegal one could (#29).
   const heard = [true, false];
+  // A sitting the candidate sat, and one they walked out of half-way — which is
+  // now a second penalty column and a rewritten `evaluations_score_25_check`.
+  const participation = [
+    { monologueWords: 400, debateWords: 300 },
+    { monologueWords: 400, debateWords: 0 },
+    { monologueWords: 0, debateWords: 0 },
+  ];
 
   for (const raw of scores) {
     for (const duration of durations) {
+      for (const present of participation) {
       for (const phonologyHeard of heard) {
       const scored = scoreSitting(
         Object.fromEntries(ORAL_CRITERIA.map((criterion) => [criterion, raw])) as Record<
           (typeof ORAL_CRITERIA)[number],
           number
         >,
-        { ...duration, phonologyHeard },
+        { ...duration, ...present, phonologyHeard },
       );
 
       for (const criterion of ORAL_CRITERIA) {
@@ -88,15 +96,18 @@ test("no correction the rubric can produce violates the constraints on the row",
       assert.ok(scored.rawScore25 >= 0 && scored.rawScore25 <= COMPETENCY_MAX);
       assert.ok(scored.score25 >= 0 && scored.score25 <= COMPETENCY_MAX);
       assert.ok(scored.durationPenalty >= 0);
-      // evaluations_score_25_check, written exactly as the SQL states it.
+      assert.ok(scored.absencePenalty >= 0);
+      // evaluations_score_25_check, written exactly as the SQL states it — as a
+      // sum of both penalties, where `scoreSitting` applies them in sequence.
       assert.equal(
         scored.score25,
-        Math.max(scored.rawScore25 - scored.durationPenalty, 0),
+        Math.max(scored.rawScore25 - scored.absencePenalty - scored.durationPenalty, 0),
         `evaluations_score_25_check with ${JSON.stringify(scored)}`,
       );
       // `meets_floor` has no constraint tying it back to `score_25`, so it is
       // pinned here instead — against the same constant the column documents.
       assert.equal(scored.meetsFloor, scored.score25 >= COMPETENCY_FLOOR);
+      }
       }
     }
   }

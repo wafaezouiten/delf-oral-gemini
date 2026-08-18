@@ -49,6 +49,7 @@ const correction: CorrectionRow = {
   mode: "audio",
   criteria: bands,
   rawScore25: 15,
+  absencePenalty: 0,
   durationPenalty: 0,
   score25: 15,
   meetsFloor: true,

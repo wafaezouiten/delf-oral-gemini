@@ -396,6 +396,10 @@ function toCorrectionRow(result: EvaluationResult): CorrectionRow {
     // neither: since #9 both numbers, and the floor verdict beside them, come
     // back from the one rubric.
     durationPenalty: result.durationPenalty,
+    // The other half of the arithmetic, and on a walk-out the larger half: what
+    // the halving took off for a part that never happened. Stored beside the
+    // duration penalty rather than folded into it — see `evaluations`.
+    absencePenalty: result.absencePenalty,
     score25: result.score25,
     meetsFloor: result.meetsFloor,
     feedback: result.feedback,

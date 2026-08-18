@@ -60,6 +60,7 @@ function correction(overrides: Partial<CorrectionRow> = {}): CorrectionRow {
     mode: "audio",
     criteria: BANDS,
     rawScore25: 15,
+    absencePenalty: 0,
     durationPenalty: 0,
     score25: 15,
     meetsFloor: true,

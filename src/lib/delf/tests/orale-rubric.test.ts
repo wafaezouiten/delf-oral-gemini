@@ -13,7 +13,10 @@ import {
   criteriaToScore25,
   meetsCompetencyFloor,
   normalizeCriteria,
+  applyAbsentPartPenalty,
+  partsAbsent,
   partsUnderFloor,
+  PARTICIPATION_WORD_FLOOR,
   scoreSitting,
   snapCriteria,
   UNHEARD_PHONOLOGY_CEILING,
@@ -172,6 +175,16 @@ test("exactly at a floor is not short", () => {
 
 // ------------------------------------------------------------ the whole rule
 
+/**
+ * A candidate who was present in both parts, in words.
+ *
+ * Spread into every `scoreSitting` case that is about something else, because
+ * participation is now a precondition of the ordinary scoring path: without it
+ * every one of these fixtures would silently become a walk-out and be halved,
+ * and the tests would still pass while measuring the wrong rule.
+ */
+const SPOKE = { monologueWords: 400, debateWords: 300 };
+
 const bands = (value: number) =>
   Object.fromEntries(ORAL_CRITERIA.map((criterion) => [criterion, value])) as Record<
     (typeof ORAL_CRITERIA)[number],
@@ -192,6 +205,7 @@ test("scoreSitting snaps before it sums", () => {
   const scored = scoreSitting(bands(2), {
     monologueSeconds: 400,
     debateSeconds: 700,
+    ...SPOKE,
     phonologyHeard: true,
   });
 
@@ -207,6 +221,7 @@ test("scoreSitting docks before it tests the floor", () => {
   const scored = scoreSitting(bands(1), {
     monologueSeconds: 400,
     debateSeconds: 10,
+    ...SPOKE,
     phonologyHeard: true,
   });
 
@@ -220,7 +235,7 @@ test("scoreSitting docks before it tests the floor", () => {
 test("scoreSitting keeps the nominal penalty when the score cannot absorb it", () => {
   const scored = scoreSitting(
     { ...bands(0), realisationTache: 1 },
-    { monologueSeconds: 0, debateSeconds: 0, phonologyHeard: true },
+    { monologueSeconds: 0, debateSeconds: 0, ...SPOKE, phonologyHeard: true },
   );
 
   assert.equal(scored.rawScore25, 1);
@@ -236,6 +251,7 @@ test("a correction that heard nothing cannot award the top phonologie band", () 
   const scored = scoreSitting(bands(5), {
     monologueSeconds: 400,
     debateSeconds: 700,
+    ...SPOKE,
     phonologyHeard: false,
   });
 
@@ -250,6 +266,7 @@ test("the ceiling touches phonologie and nothing else", () => {
   const scored = scoreSitting(bands(5), {
     monologueSeconds: 400,
     debateSeconds: 700,
+    ...SPOKE,
     phonologyHeard: false,
   });
 
@@ -263,6 +280,7 @@ test("a correction that heard the candidate may award the top band", () => {
   const scored = scoreSitting(bands(5), {
     monologueSeconds: 400,
     debateSeconds: 700,
+    ...SPOKE,
     phonologyHeard: true,
   });
 
@@ -278,7 +296,7 @@ test("a band already under the ceiling is left alone, and not reported as capped
   for (const band of [0, 1, 3] as const) {
     const scored = scoreSitting(
       { ...bands(5), phonologie: band },
-      { monologueSeconds: 400, debateSeconds: 700, phonologyHeard: false },
+      { monologueSeconds: 400, debateSeconds: 700, ...SPOKE, phonologyHeard: false },
     );
 
     assert.equal(scored.criteria.phonologie, band);
@@ -305,11 +323,13 @@ test("the ceiling is applied after snapping, so an illegal 4 becomes 3 either wa
   const heard = scoreSitting({ ...bands(3), phonologie: 4 }, {
     monologueSeconds: 400,
     debateSeconds: 700,
+    ...SPOKE,
     phonologyHeard: true,
   });
   const unheard = scoreSitting({ ...bands(3), phonologie: 4 }, {
     monologueSeconds: 400,
     debateSeconds: 700,
+    ...SPOKE,
     phonologyHeard: false,
   });
 
@@ -324,6 +344,7 @@ test("the duration penalty still applies on top of a capped phonologie", () => {
   const scored = scoreSitting(bands(5), {
     monologueSeconds: 400,
     debateSeconds: 10,
+    ...SPOKE,
     phonologyHeard: false,
   });
 
@@ -332,4 +353,165 @@ test("the duration penalty still applies on top of a capped phonologie", () => {
   assert.equal(scored.score25, 20);
   assert.deepEqual(scored.shortParts, ["debate"]);
   assert.equal(scored.phonologyCapped, true);
+});
+
+// ----------------------------------------------- a part that never happened
+
+test("partsAbsent reads the word floor, not silence", () => {
+  // « oui » is not a débat. The floor is what stops one syllable buying back
+  // half a mark, and it is the same 20 the finish route already applies to a
+  // whole transcript.
+  assert.deepEqual(partsAbsent({ monologueWords: 400, debateWords: 0 }), ["debate"]);
+  assert.deepEqual(partsAbsent({ monologueWords: 400, debateWords: 1 }), ["debate"]);
+  assert.deepEqual(
+    partsAbsent({ monologueWords: 400, debateWords: PARTICIPATION_WORD_FLOOR - 1 }),
+    ["debate"],
+  );
+  assert.deepEqual(
+    partsAbsent({ monologueWords: 400, debateWords: PARTICIPATION_WORD_FLOOR }),
+    [],
+    "at the floor the part happened",
+  );
+  assert.deepEqual(partsAbsent({ monologueWords: 0, debateWords: 300 }), ["monologue"]);
+});
+
+test("walking out of the débat halves the mark", () => {
+  // The case this rule exists for: a full monologue, then « Terminer » before
+  // answering a single question. Under the duration penalty alone this was 25 −
+  // 3 = 22/25 — a near-perfect mark for half an épreuve.
+  const scored = scoreSitting(bands(5), {
+    monologueSeconds: 400,
+    debateSeconds: 0,
+    monologueWords: 400,
+    debateWords: 0,
+    phonologyHeard: true,
+  });
+
+  assert.equal(scored.rawScore25, 25);
+  assert.equal(scored.absencePenalty, 13);
+  assert.deepEqual(scored.absentParts, ["debate"]);
+  assert.equal(scored.score25, 12);
+});
+
+test("the halving is proportional, so a weak walk-out is not spared", () => {
+  // What a cap at 12 would have missed entirely: every one of these is below it
+  // to begin with, and a cap would have left all three untouched.
+  const halved = (band: 0 | 1 | 3 | 5) =>
+    scoreSitting(bands(band), {
+      monologueSeconds: 400,
+      debateSeconds: 0,
+      monologueWords: 400,
+      debateWords: 0,
+      phonologyHeard: true,
+    });
+
+  assert.equal(halved(3).rawScore25, 15);
+  assert.equal(halved(3).score25, 7, "floor(15 / 2)");
+  assert.equal(halved(1).score25, 2, "floor(5 / 2) — and now under the floor");
+  assert.equal(halved(1).meetsFloor, false);
+  assert.equal(halved(0).score25, 0);
+  assert.equal(halved(0).absencePenalty, 0, "nothing to halve");
+});
+
+test("an absent part is not also docked for being short", () => {
+  // A part nobody produced is necessarily under its own floor. Charging the −3
+  // as well would be two prices for one absence, and `shortParts` would name
+  // the débat as the reason for a penalty the halving had already covered.
+  const scored = scoreSitting(bands(5), {
+    monologueSeconds: 400,
+    debateSeconds: 0,
+    monologueWords: 400,
+    debateWords: 0,
+    phonologyHeard: true,
+  });
+
+  assert.equal(scored.durationPenalty, 0);
+  assert.deepEqual(scored.shortParts, []);
+  assert.equal(scored.score25, 12, "12, not 9");
+});
+
+test("the other part is still docked for being short", () => {
+  // The two rules are independent and a sitting can earn both: a ninety-second
+  // monologue followed by an abandoned débat is halved *and* docked 3.
+  const scored = scoreSitting(bands(5), {
+    monologueSeconds: 90,
+    debateSeconds: 0,
+    monologueWords: 120,
+    debateWords: 0,
+    phonologyHeard: true,
+  });
+
+  assert.equal(scored.absencePenalty, 13);
+  assert.deepEqual(scored.absentParts, ["debate"]);
+  assert.equal(scored.durationPenalty, 3);
+  assert.deepEqual(scored.shortParts, ["monologue"]);
+  assert.equal(scored.score25, 9, "25 → 12 → 9");
+});
+
+test("halving happens before the duration penalty, not after", () => {
+  // The order is the rule. Docking first would give floor((25 − 3) / 2) = 11,
+  // which makes the flat −3 worth 1.5 points on exactly the sittings that
+  // earned it.
+  const scored = scoreSitting(bands(5), {
+    monologueSeconds: 90,
+    debateSeconds: 0,
+    monologueWords: 120,
+    debateWords: 0,
+    phonologyHeard: true,
+  });
+
+  assert.equal(scored.score25, 9);
+  assert.notEqual(scored.score25, 11);
+});
+
+test("a sitting where both parts happened is untouched by the rule", () => {
+  const scored = scoreSitting(bands(5), {
+    monologueSeconds: 400,
+    debateSeconds: 700,
+    ...SPOKE,
+    phonologyHeard: true,
+  });
+
+  assert.equal(scored.absencePenalty, 0);
+  assert.deepEqual(scored.absentParts, []);
+  assert.equal(scored.score25, 25);
+});
+
+test("the halving fires once, even when neither part happened", () => {
+  // A quarter of a mark is a magnitude no rule here produces, and the finish
+  // route refuses to grade this sitting at all — but the rubric is called
+  // directly by scripts and must not invent one if it ever sees this.
+  const { score25, penalty, absentParts } = applyAbsentPartPenalty(25, {
+    monologueWords: 0,
+    debateWords: 0,
+  });
+
+  assert.deepEqual(absentParts, ["monologue", "debate"]);
+  assert.equal(score25, 12);
+  assert.equal(penalty, 13);
+});
+
+test("the two penalties always reconstruct the score, as the CHECK constraint asserts", () => {
+  // `evaluations_score_25_check` is `score_25 = greatest(raw − absence −
+  // duration, 0)`. It is written as a sum, while `scoreSitting` applies the two
+  // in sequence; this is the sweep that says the two readings never disagree.
+  for (const band of [0, 1, 3, 5] as const) {
+    for (const debateWords of [0, 300]) {
+      for (const monologueSeconds of [90, 400]) {
+        const scored = scoreSitting(bands(band), {
+          monologueSeconds,
+          debateSeconds: debateWords === 0 ? 0 : 700,
+          monologueWords: 400,
+          debateWords,
+          phonologyHeard: true,
+        });
+
+        assert.equal(
+          scored.score25,
+          Math.max(scored.rawScore25 - scored.absencePenalty - scored.durationPenalty, 0),
+          `band ${band}, débat ${debateWords} words, monologue ${monologueSeconds}s`,
+        );
+      }
+    }
+  }
 });
