@@ -1604,6 +1604,13 @@ export class ExamController {
    * `sendRealtimeInput` on a WebSocket the SDK still believes is open, which is
    * exactly the state a dropped connection leaves behind.
    *
+   * Not every site is one that throws *today* — `SessionManager.sendDirective`
+   * and `close` catch their own errors, so those two are the interface's contract
+   * being honoured rather than a live failure being caught. That is deliberate
+   * and is not dead code: this class holds `LiveSessionLike`, not that class, and
+   * the one time it assumed an implementation detail of the socket instead of the
+   * interface was this bug.
+   *
    * Logged, not swallowed. The step failed and the event log says which one, so
    * a recording that is short by one phase has something to be explained by.
    */
