@@ -41,6 +41,7 @@ class FakeSession implements LiveSessionLike {
   connects = 0;
   reconnects = 0;
   closed = false;
+  open = false;
   directives: string[] = [];
   activityStarts = 0;
   activityEnds = 0;
@@ -54,11 +55,17 @@ class FakeSession implements LiveSessionLike {
 
   async connect(): Promise<void> {
     this.connects += 1;
+    // Open on a later turn, never in the caller's — a real socket cannot do
+    // otherwise, and everything said into that window is dropped by
+    // `sendDirective` below rather than silently counted here.
+    await Promise.resolve();
+    this.open = true;
     this.callbacks.onStateChange("connected");
   }
 
   close(): void {
     this.closed = true;
+    this.open = false;
   }
 
   /** Mirrors the real manager: a reconnect reports `reconnecting`, then
@@ -68,6 +75,7 @@ class FakeSession implements LiveSessionLike {
     this.reconnects += 1;
     this.callbacks.onStateChange("reconnecting");
     this.callbacks.onStateChange("resuming");
+    this.open = true;
     this.callbacks.onStateChange("connected");
   }
 
@@ -75,7 +83,10 @@ class FakeSession implements LiveSessionLike {
     this.audioChunks += 1;
   }
 
+  /** Mirrors the real manager: with no socket yet the text goes nowhere and
+   *  nobody is told, so a directive only counts once `connect()` has resolved. */
   sendDirective(text: string): void {
+    if (!this.open) return;
     this.directives.push(text);
   }
 
@@ -1320,20 +1331,81 @@ describe("recording the candidate", () => {
     });
 
     describe("« Envoyer l'exposé »", () => {
-      it("ends the monologue and carries the épreuve into the débat", async () => {
+      /**
+       * Preparation → an ARMED monologue: the consigne is over, « Enregistrer »
+       * has not been pressed, and nothing has started (#37).
+       *
+       * The state the natural flow lands in — arrive, open the panel, paste,
+       * send — and therefore the one #53 is about.
+       */
+      async function intoArmedMonologue(h: Harness): Promise<void> {
+        h.controller.start();
+        await h.controller.advanceEarly();
+      }
+
+      it("ends the monologue and lands in the débat, with nothing to wait out", async () => {
         // The typed text is not a fragment of the monologue, it is the whole
-        // thing — so sending it is the same act as finishing speaking.
+        // thing — so sending it is the same act as finishing speaking, and the
+        // épreuve is in the débat when the press returns. A spoken monologue
+        // waits up to twelve seconds here for the examiner's closing sentence;
+        // a typed one has nothing in flight to wait for.
         const h = harness();
         await intoMonologue(h);
         h.controller.setDevTextMode(true);
         h.advanceClock(20);
 
-        h.controller.submitTypedExpose("Un exposé complet, tapé.", 330);
-        assert.equal(h.controller.getSnapshot().closing, true, "the examiner was asked to close");
+        const accepted = await h.controller.submitTypedExpose("Un exposé complet, tapé.", 330);
 
-        await completeClosing(h);
-        assert.equal(h.controller.getSnapshot().phase, "debate");
-        assert.equal(h.recorder.paused, false, "and the microphone came back for it");
+        assert.equal(accepted, true, "and it says so, which is what empties the panel");
+        const state = h.controller.getSnapshot();
+        assert.equal(state.phase, "debate", "immediately: no handshake, no safety timeout");
+        assert.equal(state.closing, false, "nothing is being waited for");
+        assert.equal(h.recorder.paused, false, "and the microphone came back for the débat");
+      });
+
+      it("starts an armed part itself, so one press is the whole act (#53)", async () => {
+        const h = harness();
+        await intoArmedMonologue(h);
+
+        const armed = h.controller.getSnapshot();
+        assert.equal(armed.awaitingStart, true, "nobody has pressed « Enregistrer »");
+        assert.equal(armed.canAdvance, false, "and the ordinary way out is shut");
+
+        h.controller.setDevTextMode(true);
+        const accepted = await h.controller.submitTypedExpose("Un exposé complet, tapé.", 330);
+
+        assert.equal(accepted, true);
+        assert.equal(h.controller.getSnapshot().phase, "debate", "no other click required");
+        assert.deepEqual(
+          h.recorder.calls,
+          ["monologue", "end:monologue"],
+          "the phase's artefact was opened and closed, both in the one press",
+        );
+      });
+
+      it("connects nobody to a monologue it is ending in the same act", async () => {
+        // A session opened here would be closed before it finished connecting,
+        // having heard nothing and said nothing — and it costs an ephemeral
+        // token to mint. The examiner learns the exposé from the débat's own
+        // seeded history, asserted below.
+        const h = harness();
+        await intoArmedMonologue(h);
+        h.controller.setDevTextMode(true);
+
+        await h.controller.submitTypedExpose(
+          "Le télétravail a transformé le rapport au bureau.",
+          330,
+        );
+
+        assert.equal(h.sessions.length, 0, "the monologue connected nobody");
+
+        await pressRecord(h);
+        assert.equal(h.sessions.length, 1, "the débat is the first session of the sitting");
+        assert.equal(h.session().phase, "debate");
+        assert.ok(
+          h.session().history[0]?.parts[0]?.text.includes("le rapport au bureau"),
+          "and it was seeded with the typed exposé, so the examiner has been told it",
+        );
       });
 
       it("does not wait out the five-minute floor", async () => {
@@ -1346,16 +1418,18 @@ describe("recording the candidate", () => {
         h.advanceClock(5);
         assert.equal(h.controller.getSnapshot().canAdvance, false, "the floor is still on");
 
-        h.controller.submitTypedExpose("Bien avant les cinq minutes.", 330);
-        assert.equal(h.controller.getSnapshot().closing, true);
+        await h.controller.submitTypedExpose("Bien avant les cinq minutes.", 330);
+        assert.equal(h.controller.getSnapshot().phase, "debate");
       });
 
       it("carries the transcript and the claimed duration with it", async () => {
         const h = harness();
         await intoMonologue(h);
         h.controller.setDevTextMode(true);
-        h.controller.submitTypedExpose("Le télétravail a transformé le rapport au bureau.", 330);
-        await completeClosing(h);
+        await h.controller.submitTypedExpose(
+          "Le télétravail a transformé le rapport au bureau.",
+          330,
+        );
 
         const said = h.controller
           .getSnapshot()
@@ -1364,9 +1438,30 @@ describe("recording the candidate", () => {
           .join(" ");
         assert.match(said, /Le télétravail a transformé le rapport au bureau\./);
 
+        await pressRecord(h);
         h.advanceClock(PHASE_DURATIONS.debate);
         await completeClosing(h);
         assert.deepEqual(h.finished[0]?.devSeconds, { monologue: 330, debate: 0 });
+      });
+
+      it("reports the monologue as a phase that happened, not one nothing can date", async () => {
+        // `reportFinalisedPhase` needs both stamps, and an armed phase has
+        // neither. Without anchoring one here the exposé would reach the
+        // correction but the phase would never be persisted mid-sitting.
+        const h = harness();
+        await intoArmedMonologue(h);
+        h.controller.setDevTextMode(true);
+        await h.controller.submitTypedExpose("Un exposé complet, tapé.", 330);
+        // The phase flips before this settles — the transition's tail (the
+        // microphone, the débat's consigne, this report) is what runs after.
+        await new Promise((resolve) => setImmediate(resolve));
+
+        const report = h.progress.find((entry) => entry.phase === "monologue");
+        assert.ok(report, "the monologue was reported as it finalised");
+        assert.ok(
+          report.entries.some((entry) => /Un exposé complet, tapé\./.test(entry.text)),
+          "with the typed exposé on it",
+        );
       });
 
       it("refuses an empty exposé, which would be a way to skip the monologue", async () => {
@@ -1375,22 +1470,80 @@ describe("recording the candidate", () => {
         h.controller.setDevTextMode(true);
         h.advanceClock(20);
 
-        h.controller.submitTypedExpose("   ", 330);
+        const accepted = await h.controller.submitTypedExpose("   ", 330);
 
         const state = h.controller.getSnapshot();
-        assert.equal(state.closing, false, "the phase was not ended");
-        assert.equal(state.phase, "monologue");
+        assert.equal(accepted, false, "and the panel is told, so it keeps what it has");
+        assert.equal(state.phase, "monologue", "the phase was not ended");
       });
 
-      it("does nothing once the closing handshake is already under way", async () => {
+      it("refuses while the consigne is being given, and hands the text back", async () => {
+        // The one refusal left, and it is the same rule « Enregistrer » obeys:
+        // the examiner is talking and the candidate's turn has not been handed
+        // over. What must not happen is the old failure — a refusal that took
+        // the exposé with it.
+        const announcer = new FakeAnnouncer();
+        announcer.behaviour = "hold";
+        const h = harness({ announcer });
+        const idle = () => new Promise((resolve) => setImmediate(resolve));
+
+        h.controller.start();
+        await idle();
+        h.advanceClock(120);
+        const advancing = h.controller.advanceEarly();
+        await idle();
+
+        h.controller.setDevTextMode(true);
+        const accepted = await h.controller.submitTypedExpose("Envoyé trop tôt.", 330);
+
+        assert.equal(accepted, false, "so the panel keeps the exposé");
+        assert.equal(h.controller.getSnapshot().phase, "monologue", "nothing was started");
+        assert.deepEqual(h.recorder.calls, [], "and nothing was recorded of the consigne");
+        assert.equal(
+          h.controller.getSnapshot().transcript.length,
+          0,
+          "the turn was not written either",
+        );
+
+        // And it works the moment the examiner stops talking, with no
+        // « Enregistrer » in between.
+        announcer.reachEnd();
+        await advancing;
+        assert.equal(await h.controller.submitTypedExpose("Envoyé à temps.", 330), true);
+        assert.equal(h.controller.getSnapshot().phase, "debate");
+      });
+
+      it("does nothing once a handshake somebody else started is under way", async () => {
+        // The mic button ends the monologue the spoken way, and that closing
+        // belongs to the examiner: an exposé typed into it would be a turn
+        // arriving after the phase had been handed over.
         const h = harness();
         await intoMonologue(h);
         h.controller.setDevTextMode(true);
-        h.controller.submitTypedExpose("Premier envoi.", 330);
+        h.advanceClock(MONOLOGUE_MIN_SECONDS + 10);
+        await h.controller.advanceEarly();
         assert.equal(h.controller.getSnapshot().closing, true);
 
-        h.controller.submitTypedExpose("Second envoi, trop tard.", 90);
+        const accepted = await h.controller.submitTypedExpose("Trop tard.", 90);
 
+        assert.equal(accepted, false, "refused, and the exposé is handed back");
+        assert.equal(
+          h.controller.getSnapshot().transcript.some((e) => /Trop tard/.test(e.text)),
+          false,
+          "the turn is over; an exposé does not join it",
+        );
+      });
+
+      it("does nothing on a second press, the monologue being over", async () => {
+        const h = harness();
+        await intoMonologue(h);
+        h.controller.setDevTextMode(true);
+        await h.controller.submitTypedExpose("Premier envoi.", 330);
+        assert.equal(h.controller.getSnapshot().phase, "debate");
+
+        const accepted = await h.controller.submitTypedExpose("Second envoi, trop tard.", 90);
+
+        assert.equal(accepted, false, "refused, and the second exposé is handed back");
         assert.equal(
           h.controller.getSnapshot().transcript.some((e) => /trop tard/.test(e.text)),
           false,

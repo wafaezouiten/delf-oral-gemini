@@ -1178,32 +1178,87 @@ export class ExamController {
    * they had just delivered in full — waiting out a clock for a task that was
    * done — was the thing that made the panel feel like it had not worked.
    *
+   * **It starts the part when the part has not begun (#53).** Since #37 a
+   * speaking phase opens armed and waits for « Enregistrer », and this used to
+   * refuse while it did — silently, on the very flow the panel exists for:
+   * arrive at the monologue, open the panel, paste, send. One press now means
+   * the whole of what the button says, in the order the épreuve needs it —
+   * anchor the clock, write the exposé down, leave for the débat. That is not a
+   * hole in the arm gate: `DEV_TOOLS_ENABLED` is the first line here, so no
+   * build where marks are real has this path at all, and `startSpeaking` is
+   * untouched for the builds that do.
+   *
+   * The one refusal left is the consigne: while the examiner is speaking, the
+   * candidate's turn has not been handed over, and starting underneath it would
+   * record the instruction and charge the candidate for hearing it.
+   *
    * **The five-minute floor does not apply, and that is the point.** `canAdvanceEarly`
    * exists to stop a candidate skipping the task; here the task has been handed
    * over complete, and the whole reason to type it was not to spend five minutes
    * saying it. The floor still governs every real candidate, because this method
    * cannot be reached in a build where the tooling is off.
    *
-   * Everything after that is the ordinary path: the examiner is asked to close,
-   * its last sentence plays, the phase advances, and leaving the monologue hands
-   * the microphone back for the débat.
+   * **No closing handshake, and no session for the monologue at all.** A spoken
+   * monologue ends by asking the examiner for a closing sentence and waiting up
+   * to `CLOSING_SAFETY_MS` for it, because that wait is what lets Gemini's
+   * transcription of the candidate's last words arrive. A typed exposé has
+   * nothing in flight — the text was handed over whole — so the wait is several
+   * seconds of an épreuve that has already finished this part, with nothing on
+   * screen to explain them. The examiner is told all the same: the débat's
+   * session is seeded from the transcript by `monologueAsHistory`, which is
+   * where the typed text now is. For the same reason an armed monologue does not
+   * connect anybody — a socket opened here would be closed in the same act,
+   * having heard nothing and said nothing.
+   *
+   * @returns Whether the exposé counted as the monologue. `false` means nothing
+   *   happened at all — no turn, no clock, no phase change — and the caller
+   *   still holds the only copy of the text, so it must not throw it away.
    */
-  submitTypedExpose(text: string, seconds = 0): void {
-    if (!DEV_TOOLS_ENABLED) return;
-    if (this.phase !== "monologue") return;
+  async submitTypedExpose(text: string, seconds = 0): Promise<boolean> {
+    if (!DEV_TOOLS_ENABLED) return false;
+    if (this.phase !== "monologue") return false;
     // Nothing typed is not a delivered exposé, so it must not end the phase —
     // otherwise the button becomes a way to skip the monologue entirely.
-    if (!text.trim()) return;
-    if (this.closing) return;
-    // The part has not begun — the consigne is still being given, or nobody has
-    // pressed « Enregistrer » — so there is no session to hand the exposé to.
-    // Same rule as `canAdvance`, applied to the one other way out of a speaking
-    // phase (#37).
-    if (this.phaseAwaitingStart) return;
+    if (!text.trim()) return false;
+    // A handshake somebody else started — the mic button, or the clock running
+    // out — already owns the end of this phase.
+    if (this.closing) return false;
+
+    if (this.phaseAwaitingStart && !this.anchorTypedMonologue()) return false;
 
     this.injectCandidateSpeech(text, seconds);
     this.log("dev-expose-submitted", "ending the monologue");
-    this.beginClosingHandshake();
+    // Not awaited, and nothing is waited for: `advance()` sets the phase and
+    // emits before it does anything asynchronous, so the débat is on screen by
+    // the time this returns. What follows — the microphone handed back, the
+    // débat's own consigne — is the ordinary path, unchanged.
+    void this.advance();
+    return true;
+  }
+
+  /**
+   * DEVELOPMENT ONLY — anchor an armed monologue that is about to end anyway.
+   *
+   * Everything « Enregistrer » does except open a session, because
+   * {@link submitTypedExpose} ends the phase in the same act and a socket opened
+   * here would be closed before it had finished connecting. What is kept is what
+   * the rest of the sitting reads: the clock is anchored and the phase's artefact
+   * is opened and stamped, so the monologue reports itself as a phase that
+   * happened rather than one nothing can date.
+   *
+   * `false` while the consigne is being given — the same refusal `startSpeaking`
+   * makes, for the same reason.
+   */
+  private anchorTypedMonologue(): boolean {
+    if (this.phase !== "monologue" || this.phaseStart !== null) return false;
+    if (this.announcementPlaying || this.announcementBlocked) return false;
+    if (this.destroyed) return false;
+
+    this.phaseStart = this.now();
+    this.log("phase-started", "monologue");
+    this.beginRecording("monologue");
+    this.emit();
+    return true;
   }
 
   /**

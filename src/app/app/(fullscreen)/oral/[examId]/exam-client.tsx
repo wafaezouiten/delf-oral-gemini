@@ -491,8 +491,16 @@ export function ExamClient({ examId, topic }: { examId: string; topic: OralTopic
                   subject={topic.title}
                   active={state.devTextMode}
                   onActiveChange={(on) => controller.setDevTextMode(on)}
+                  // The two states in which the button cannot do what it says,
+                  // handed over so the panel can say which one it is in rather
+                  // than looking like it did nothing (#53).
+                  awaitingConsigne={awaitingConsigne}
+                  closing={state.closing}
                   // « Envoyer l'exposé » ends the monologue: the text is not a
-                  // fragment of it, it is the whole thing.
+                  // fragment of it, it is the whole thing — and it starts the
+                  // part first if « Enregistrer » has not been pressed, which is
+                  // the flow this panel exists for. It answers whether the
+                  // exposé counted; the panel keeps the text when it did not.
                   onSubmit={(text, seconds) => controller.submitTypedExpose(text, seconds)}
                 />
               )}
