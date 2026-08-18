@@ -4,6 +4,8 @@ import { describe, it } from "node:test";
 import { MONOLOGUE_MIN_SECONDS, PHASE_DURATIONS, formatClock } from "@/lib/delf/phases";
 import {
   buildDeroule,
+  candidateStatus,
+  examinerStatus,
   micCopy,
   passationStatus,
   poKicker,
@@ -146,6 +148,54 @@ describe("the floor", () => {
   it("never goes negative once the floor is passed", () => {
     assert.equal(secondsToMonologueFloor(MONOLOGUE_MIN_SECONDS), 0);
     assert.equal(secondsToMonologueFloor(MONOLOGUE_MIN_SECONDS + 999), 0);
+  });
+});
+
+describe("the status lines", () => {
+  it("distinguishes connecting from disconnected, which look the same otherwise", () => {
+    assert.match(
+      examinerStatus({ connected: false, connecting: true, speaking: false }),
+      /Connexion/,
+    );
+    assert.match(
+      examinerStatus({ connected: false, connecting: false, speaking: false }),
+      /pas en ligne/,
+    );
+  });
+
+  it("says the examiner is speaking when the consigne is playing, not that they are offline", () => {
+    // The one state where the examiner is audible with no session behind them
+    // (#37). This said « L'examinateur n'est pas en ligne » over the sound of the
+    // examiner talking.
+    assert.match(
+      examinerStatus({ connected: false, connecting: false, speaking: true, announcing: true }),
+      /consigne/,
+    );
+  });
+
+  it("says the examiner is finishing while the part is being closed", () => {
+    // The socket is being torn down while the voice is still audible (#55), so
+    // the connection's answer is the wrong one to give.
+    assert.match(
+      examinerStatus({ connected: false, connecting: false, speaking: false, closing: true }),
+      /conclut/,
+    );
+  });
+
+  it("puts listening above speaking: the examiner talking outranks the mic", () => {
+    // Both are true while the examiner interrupts, and « Vous avez la parole »
+    // next to a talking examiner is the one that misleads.
+    assert.equal(
+      candidateStatus({ connected: true, examinerSpeaking: true, recording: true }),
+      "En écoute…",
+    );
+  });
+
+  it("says the microphone is waiting when it is, rather than claiming the floor", () => {
+    assert.match(
+      candidateStatus({ connected: true, examinerSpeaking: false, recording: false }),
+      /Microphone/,
+    );
   });
 });
 

@@ -83,10 +83,11 @@ same rule, so the reproduction keeps it.
                                                         │
    ┌────────────────────────────────────────────────────▼──────────────────┐
    │ 2. PASSATION          steps 1–2 · timer ring + exit button            │
-   │    head: sujet on paper · « Passer » beside its title while the       │
+   │    head: sujet title on paper · « Passer » beside it while the        │
    │          consigne speaks (#59)                                        │
-   │    body:  exposé → « Votre plan » in a column beside the sujet        │
-   │           débat  → the live transcript, « Masquer » back to the card  │
+   │    body:  exposé → document + « Votre plan » in a column beside it    │
+   │           débat  → the two faces, then the exchange in turns; no      │
+   │                    document (#60)                                     │
    │    foot:  [Mes notes]      (mic)      [Terminer l'épreuve]            │
    │    drawer: préparation notes, read-only                               │
    └────────────────────────────────────────────────────┬──────────────────┘
@@ -168,21 +169,29 @@ Two departures from the reference's rail, both #59:
   and nothing after it. A consigne the browser refuses to autoplay still gets
   its sentence and its two ways out, because that state holds the épreuve.
 
-**Passation.** Reproduced whole: the scene with its two faces and pulsing rings,
-the beat stepper, the elapsed/total clock with its draining bar, the foot control
-bar, the notes drawer.
+**Passation.** The sujet's title on paper, the foot control bar and the notes
+drawer, with the two parts framed differently: the exposé prints the document
+with « Votre plan » in a column beside it (#59); the débat prints no document at
+all and gives the room to the reference's scene — two faces, a ring pulsing
+around whoever holds the floor, the elapsed/total clock with its draining bar —
+over the exchange, turn by turn.
 
-- *Added, against the reference (#48):* the **débat prints its exchange**, in the
-  status card's place, with « Masquer » to put the card back. The reference has
-  no transcript feed anywhere and this screen originally reproduced that — the
-  argument being that reading along is the fastest way to stop listening to the
-  examiner. It is outweighed in the débat and left standing in the monologue,
-  which is a split the transport forces as much as the design: manual VAD
-  transcribes nothing until the floor is released, so a monologue feed would sit
-  empty for seven minutes and then print the whole exposé at the moment the
-  phase ends. The débat's automatic VAD streams turn by turn. The turns are set
-  like the results page's transcript — speaker label over a paragraph, never chat
-  bubbles.
+- *Added, against the reference (#48, #60):* the débat shows **who is speaking
+  and what was said**. The reference has no transcript feed anywhere, and this
+  screen has now been built all three ways: the exchange alone (#48), which left
+  no cue for whose turn it was and squeezed the turns into a 20rem box beside the
+  document; the faces alone (#60), which left a candidate no way to re-read the
+  objection they were answering; and this, which pays for both by dropping the
+  document. A candidate arguing a point is not reading the source, and the sujet
+  is still named by its title above the scene. The turns are chat-style — the
+  examiner left, « Vous » right — where the results page sets the same exchange
+  as a printed document: during the sitting it is a conversation, afterwards it
+  is a record. The speaker names are the same in both, because *who* said
+  something must not change between them.
+- *Dropped with it:* the quiet status card the feed could be hidden behind, and
+  its « Masquer » / « Afficher la transcription » pair. Its two sentences are the
+  two lines under the faces, and its guidance is what the conversation panel
+  prints while it is still empty.
 - *Added, against the reference (#55):* the **close is on screen**. Ending a part
   asks the examiner for a closing sentence and waits up to `CLOSING_SAFETY_MS`
   for it, so several seconds pass between the click and the next consigne. The
@@ -190,9 +199,11 @@ bar, the notes drawer.
   what follows. Before, `canAdvance` went false and the control fell back to its
   locked copy: « Encore 0 min avant de pouvoir conclure », over a monologue that
   was concluding.
-- *Adapted:* the beats are `["Exposé", "Débat"]` driven by the actual phase, not
-  by `EXPOSE_SHARE`. This project knows which beat it is in; approximating it
-  would be worse data.
+- *Dropped:* the scene's inner beat stepper. The reference names the two beats
+  — Exposé, Débat — between the faces, and this project's topbar has named the
+  épreuve's three parts since #37; two steppers disagreeing about which step the
+  candidate is on is why the inner one went, and it did not come back with the
+  scene (#60).
 - *Adapted:* the mic button advances the épreuve rather than opening a socket —
   the socket is the controller's. During the monologue it is disabled until the
   5-minute DELF floor, which is `canAdvanceEarly`'s existing rule shown as a hint
@@ -201,7 +212,7 @@ bar, the notes drawer.
   notice with its reconnect button, and the microphone notice. The reference has
   no analogue for any of them; they are real states of this product and #11's
   requirement is that each has a visible, non-technical message. They sit in the
-  topbar (badges) and above the scene (notices).
+  topbar (badges) and above the sujet (notices).
 - *Dropped:* the reference's `alert()` calls on mic failure. This project routes
   every failure through `<Notice>`.
 

@@ -1,20 +1,26 @@
 /**
- * The copy and the arithmetic behind the débat's live transcript (#48).
+ * The copy and the arithmetic behind the débat's conversation (#48, #60).
  *
  * Here rather than in the component for the reason every other `lib/ui` module
  * is: the words a candidate reads mid-épreuve and the rule that decides whether
  * the feed follows the conversation are both testable, and neither needs a DOM
  * to be wrong in.
+ *
+ * **This panel has been added, removed and added back, and the shape it settled
+ * in is the reason it works now.** #48 printed the exchange in place of the
+ * screen's status card, beside the sujet, under a scene that had been deleted —
+ * three things competing for one viewport, so the exchange lived in a 20rem box.
+ * #60 removed it: what a candidate needs while being argued with is to know
+ * whose turn it is. Both were right about a part of it. The débat now shows the
+ * two protagonists **and** the exchange, and pays for the room by dropping the
+ * document — the sujet's title stays, its paragraphs go, because during the
+ * débat the candidate is answering the examiner rather than reading.
  */
 
 import type { TranscriptEntry, TranscriptSpeaker } from "@/lib/delf/transcript";
 
-export const DEBATE_TRANSCRIPT_COPY = {
-  title: "Transcription du débat",
-  /** On the panel, which is open by default. */
-  hide: "Masquer",
-  /** On the status card, which is what is on screen once it has been hidden. */
-  show: "Afficher la transcription",
+export const DEBATE_CONVERSATION_COPY = {
+  title: "Échange avec l'examinateur",
   empty: "L'échange s'affichera ici, au fil des interventions.",
   /**
    * Said once, under the feed. Gemini's transcription does not arrive in step
@@ -48,11 +54,13 @@ export function speakerLabel(speaker: TranscriptSpeaker): string {
 export const STICK_THRESHOLD_PX = 32;
 
 /**
- * Should the feed scroll itself to the newest turn?
+ * Should the page scroll itself to the newest turn?
  *
  * Asked of the scroll position *before* the new text lands, so a candidate who
  * has scrolled up to re-read an earlier objection is not yanked back down by the
- * examiner continuing to speak.
+ * examiner continuing to speak. The metrics are the screen's scroller rather
+ * than a box of the panel's own: the conversation has no scrollbar of its own,
+ * the whole column scrolls.
  */
 export function isNearBottom(
   metrics: { scrollTop: number; scrollHeight: number; clientHeight: number },

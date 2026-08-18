@@ -55,15 +55,6 @@ export function ExamClient({ examId, topic }: { examId: string; topic: OralTopic
   const router = useRouter();
   const [notes, setNotes] = useState("");
   const [notesOpen, setNotesOpen] = useState(false);
-  /**
-   * Whether the débat prints its exchange (#48). Open by default.
-   *
-   * Here rather than in `PassationScreen` for the same reason `notesOpen` is:
-   * that screen owns no state, which is what lets it stay a layout. It also has
-   * to survive the phase change — a candidate who hid the feed and then saw it
-   * come back because the screen re-rendered would have to hide it twice.
-   */
-  const [transcriptOpen, setTranscriptOpen] = useState(true);
   const [showExitDialog, setShowExitDialog] = useState(false);
   const [abandoning, setAbandoning] = useState(false);
   const [abandonFailed, setAbandonFailed] = useState(false);
@@ -495,6 +486,7 @@ export function ExamClient({ examId, topic }: { examId: string; topic: OralTopic
         elapsed={state.elapsed}
         remaining={state.remaining}
         recording={state.recording}
+        examinerSpeaking={state.examinerSpeaking}
         connected={state.connection === "connected"}
         connecting={state.connection === "connecting"}
         canAdvance={state.canAdvance}
@@ -505,8 +497,6 @@ export function ExamClient({ examId, topic }: { examId: string; topic: OralTopic
         notesOpen={notesOpen}
         onToggleNotes={() => setNotesOpen((open) => !open)}
         transcript={state.transcript}
-        transcriptOpen={transcriptOpen}
-        onToggleTranscript={() => setTranscriptOpen((open) => !open)}
         onAdvance={advance}
         onExit={() => setShowExitDialog(true)}
         emptyTranscript={state.monologueHeld}

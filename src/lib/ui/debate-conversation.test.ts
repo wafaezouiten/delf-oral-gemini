@@ -3,12 +3,12 @@ import { describe, it } from "node:test";
 
 import { appendFragment, entriesForPhase, type TranscriptEntry } from "@/lib/delf/transcript";
 import {
-  DEBATE_TRANSCRIPT_COPY,
+  DEBATE_CONVERSATION_COPY,
   STICK_THRESHOLD_PX,
   isNearBottom,
   speakerLabel,
   turnKey,
-} from "./debate-transcript";
+} from "./debate-conversation";
 
 describe("naming the two speakers", () => {
   it("addresses the candidate, and names the examiner", () => {
@@ -119,11 +119,12 @@ describe("the copy", () => {
   it("warns that the text can lag the voice", () => {
     // The one thing about this panel a candidate would otherwise read as a bug:
     // transcription does not arrive in step with the audio it transcribes.
-    assert.match(DEBATE_TRANSCRIPT_COPY.footnote, /décalage/);
+    assert.match(DEBATE_CONVERSATION_COPY.footnote, /décalage/);
   });
 
-  it("offers the way back in the same words the button carries", () => {
-    assert.match(DEBATE_TRANSCRIPT_COPY.show, /transcription/i);
-    assert.equal(DEBATE_TRANSCRIPT_COPY.hide, "Masquer");
+  it("names the panel for what it is, an exchange rather than a document", () => {
+    // There is no « Masquer » any more: the exchange is the débat's body, not a
+    // panel laid over a status card that could be put back (#48 → #60).
+    assert.match(DEBATE_CONVERSATION_COPY.title, /Échange/);
   });
 });
