@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 
 import { Kicker } from "@/app/_components/po/tag";
 import { cn } from "@/lib/ui/class-names";
@@ -24,6 +24,18 @@ import {
  * The names stay the results page's — « Vous » and « Examinateur » — because
  * *who* said something must not change between the two.
  *
+ * **It has no scrollbar of its own, and that is the point.** It was a boxed feed
+ * with its own scroller under a fixed head, which meant the screen had two
+ * scrollbars and the conversation was reading itself through a letterbox. The
+ * whole page scrolls instead: the sujet's title, the two faces and every turn
+ * are one column that grows, and a candidate scrolls back through it the way
+ * they would scroll back through anything else.
+ *
+ * That moves the autoscroll a level up. This panel does not own the scroller any
+ * more, so it finds the one it is inside and drives that — following the newest
+ * turn while the candidate is at the bottom, and holding still the moment they
+ * scroll up to re-read an objection.
+ *
  * **Why the débat and not the exposé.** The monologue runs on manual VAD: the
  * candidate's activity is opened and never closed, and during a manual-VAD
  * activity Gemini transcribes nothing — the whole exposé arrives in one fragment
@@ -35,8 +47,7 @@ import {
  * **It is not a live region, and that is not an oversight.** The scene above
  * announces turn changes politely and exists to. Marking this live as well would
  * recite every partial fragment over the examiner and double up with that
- * announcement. It is a named, focusable scroll region instead: reachable, and
- * silent until it is read.
+ * announcement.
  */
 export function DebateConversation({
   transcript,
@@ -55,16 +66,30 @@ export function DebateConversation({
   hint: string;
 }) {
   const turns = entriesForPhase(transcript, "debate");
-  const scroller = useRef<HTMLDivElement>(null);
+  const root = useRef<HTMLDivElement>(null);
   /**
-   * Whether the feed is still following the conversation.
+   * Whether the page is still following the conversation.
    *
    * A ref rather than state: it is written from a scroll handler on every frame
    * of a drag and read once per new fragment, and nothing renders differently
-   * for it. As state it would re-render the feed while the candidate scrolls,
+   * for it. As state it would re-render the panel while the candidate scrolls,
    * which is the one moment it should be doing nothing.
    */
   const following = useRef(true);
+
+  const scroller = useCallback(() => findScroller(root.current), []);
+
+  // The scroller belongs to the screen, not to this panel, so the listener has
+  // to be attached by hand rather than declared as an `onScroll` prop.
+  useEffect(() => {
+    const element = scroller();
+    if (!element) return;
+    const onScroll = () => {
+      following.current = isNearBottom(element);
+    };
+    element.addEventListener("scroll", onScroll, { passive: true });
+    return () => element.removeEventListener("scroll", onScroll);
+  }, [scroller]);
 
   // Deliberately keyed on the tail's *length* as well as the count of turns: a
   // fragment usually merges into the last entry rather than adding one
@@ -72,33 +97,18 @@ export function DebateConversation({
   // following in the middle of the examiner's sentence.
   const lastTurn = turns[turns.length - 1];
   useEffect(() => {
-    const element = scroller.current;
+    const element = scroller();
     if (!element || !following.current) return;
     element.scrollTop = element.scrollHeight;
-  }, [turns.length, lastTurn?.text.length]);
+  }, [scroller, turns.length, lastTurn?.text.length]);
 
   return (
-    // A plain box, not a `<section>`: the scroller inside is the named region,
-    // and a nameless landmark wrapped around a named one is two entries in the
-    // landmark list where the épreuve has one thing to offer.
-    <div className="border-border bg-card flex min-h-0 flex-1 flex-col rounded-lg border">
-      <div className="border-border shrink-0 border-b px-4 py-2">
+    <div ref={root} className="border-border bg-card rounded-lg border">
+      <div className="border-border border-b px-4 py-2">
         <Kicker>{DEBATE_CONVERSATION_COPY.title}</Kicker>
       </div>
 
-      <div
-        ref={scroller}
-        onScroll={(event) => {
-          following.current = isNearBottom(event.currentTarget);
-        }}
-        // Focusable and named because it scrolls: a region with its own
-        // scrollbar has to be reachable from the keyboard, and the name is what
-        // says which region was reached.
-        tabIndex={0}
-        role="region"
-        aria-label={DEBATE_CONVERSATION_COPY.title}
-        className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-3.5"
-      >
+      <div className="space-y-3 px-4 py-3.5">
         {turns.length === 0 ? (
           <div className="text-muted-foreground space-y-1.5 text-xs leading-relaxed">
             <p>{DEBATE_CONVERSATION_COPY.empty}</p>
@@ -114,8 +124,8 @@ export function DebateConversation({
               >
                 {/* Named as well as placed. Side and colour carry the speaker
                     for anyone who can see them; the label is what carries it
-                    into a screen reader reading this region, and into a
-                    screenshot of a conversation with one turn in it. */}
+                    into a screen reader, and into a screenshot of a
+                    conversation with one turn in it. */}
                 <span className="text-muted-foreground text-[0.625rem] font-semibold tracking-[0.16em] uppercase">
                   {speakerLabel(turn.speaker)}
                 </span>
@@ -135,9 +145,28 @@ export function DebateConversation({
         )}
       </div>
 
-      <p className="border-border text-muted-foreground shrink-0 border-t px-4 py-1.5 text-[0.625rem] leading-snug">
+      <p className="border-border text-muted-foreground border-t px-4 py-1.5 text-[0.625rem] leading-snug">
         {DEBATE_CONVERSATION_COPY.footnote}
       </p>
     </div>
   );
+}
+
+/**
+ * The scrolling ancestor this panel lives in, or null if nothing scrolls.
+ *
+ * Walked rather than passed down as a ref: the screen above owns the scroller
+ * and could reasonably move it — the exposé and the débat already lay out
+ * differently — and a panel that asks the DOM which box it is inside keeps
+ * working when it does. The check is `overflow-y`, not a class name, so it
+ * cannot go stale against Tailwind.
+ */
+function findScroller(from: HTMLElement | null): HTMLElement | null {
+  let node = from?.parentElement ?? null;
+  while (node) {
+    const overflow = getComputedStyle(node).overflowY;
+    if (overflow === "auto" || overflow === "scroll") return node;
+    node = node.parentElement;
+  }
+  return null;
 }

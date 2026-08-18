@@ -54,11 +54,13 @@ export function speakerLabel(speaker: TranscriptSpeaker): string {
 export const STICK_THRESHOLD_PX = 32;
 
 /**
- * Should the feed scroll itself to the newest turn?
+ * Should the page scroll itself to the newest turn?
  *
  * Asked of the scroll position *before* the new text lands, so a candidate who
  * has scrolled up to re-read an earlier objection is not yanked back down by the
- * examiner continuing to speak.
+ * examiner continuing to speak. The metrics are the screen's scroller rather
+ * than a box of the panel's own: the conversation has no scrollbar of its own,
+ * the whole column scrolls.
  */
 export function isNearBottom(
   metrics: { scrollTop: number; scrollHeight: number; clientHeight: number },

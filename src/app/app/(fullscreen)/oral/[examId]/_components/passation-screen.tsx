@@ -198,15 +198,11 @@ export function PassationScreen({
       <main className="relative flex min-h-0 flex-1 flex-col">
         <div
           className={cn(
-            "mx-auto flex min-h-0 w-full flex-1 flex-col gap-4 px-4 py-5 sm:px-6",
+            "mx-auto flex min-h-0 w-full flex-1 flex-col gap-4 overflow-y-auto px-4 py-5 sm:px-6",
             // The exposé carries two columns and needs the room for them; the
             // débat is one column, and a document set in a wider measure than
             // this is harder to read, not easier.
             phase === "monologue" ? "max-w-[64rem]" : "max-w-[47.5rem]",
-            // The exposé's page scrolls as a page. The débat's does not: it is a
-            // fixed head over a conversation that scrolls inside itself, so a
-            // turn arriving can never push the faces off the top of the screen.
-            phase === "monologue" ? "overflow-y-auto" : "overflow-hidden",
           )}
         >
           {notices}
