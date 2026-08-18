@@ -315,28 +315,20 @@ export function ResultsClient({
               </Tag>
             </div>
 
+            {/* Whole sentences, built and tested in `lib/ui/correction-notices.ts`.
+                The component chooses neither the wording nor the figure: both
+                depend on which rules fired, and the last version that decided
+                the wording here told a candidate who sat neither part about
+                « celle que vous avez réalisée ». */}
             {notices.absence && (
               <p className="text-muted-foreground mt-3 text-xs leading-relaxed">
-                {notices.absence.label}. L&apos;épreuve compte deux parties&nbsp;: la
-                note obtenue sur celle que vous avez réalisée (
-                {notices.absence.rawScore25}/{COMPETENCY_MAX}) est donc divisée par
-                deux.
+                {notices.absence}
               </p>
             )}
 
             {notices.duration && (
               <p className="text-muted-foreground mt-3 text-xs leading-relaxed">
-                {/* The halved score when a part was skipped, the sum of the
-                    bands otherwise — so this paragraph and the one above it
-                    reconcile to the mark instead of describing two different
-                    subtractions from the same 25. */}
-                Note avant pénalité de durée : {notices.duration.beforePenalty}/
-                {COMPETENCY_MAX}.{" "}
-                {/* Named, not merely announced: "vous avez été pénalisé" is an
-                    assertion, "votre débat a duré 40 secondes" is something the
-                    candidate can check against the clock beside it. */}
-                {notices.duration.label} nettement plus court que ce que demande
-                l&apos;épreuve réelle.
+                {notices.duration}
               </p>
             )}
 

@@ -478,9 +478,10 @@ test("a sitting where both parts happened is untouched by the rule", () => {
 });
 
 test("the halving fires once, even when neither part happened", () => {
-  // A quarter of a mark is a magnitude no rule here produces, and the finish
-  // route refuses to grade this sitting at all — but the rubric is called
-  // directly by scripts and must not invent one if it ever sees this.
+  // A quarter of a mark is a magnitude no rule here produces. And this is not
+  // a defensive case: the finish route's gate counts the WHOLE transcript, so
+  // 10 candidate words in the monologue and 15 in the débat clear it at 25 and
+  // fall under the per-part floor twice.
   const { score25, penalty, absentParts } = applyAbsentPartPenalty(25, {
     monologueWords: 0,
     debateWords: 0,

@@ -227,8 +227,12 @@ export interface AbsencePenalty extends DurationPenalty {
  *     candidate was in it. They are different questions and a microphone that
  *     dies answers only the first. See {@link PARTICIPATION_WORD_FLOOR}.
  *   - **It halves once, not per part.** Both parts absent would be a quarter of
- *     a mark for none of an épreuve, which is a magnitude no rule here produces
- *     and a sitting the finish route refuses to grade in the first place.
+ *     a mark for none of an épreuve, and a quarter is a magnitude no rule here
+ *     produces. Note that this branch is reachable in production rather than
+ *     merely defensive: the finish route's own gate counts the WHOLE transcript
+ *     against {@link PARTICIPATION_WORD_FLOOR}, so 10 candidate words in the
+ *     monologue and 15 in the débat total 25, clear that gate, and fall under
+ *     the per-part floor twice.
  *
  * `absentParts` comes back for the reason `shortParts` does: "halved" and
  * "halved because you answered nothing in the débat" are different records.

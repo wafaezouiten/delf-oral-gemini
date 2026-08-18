@@ -27,8 +27,8 @@ describe("the correction's penalty notices", () => {
     });
 
     assert.equal(notices.absence, null);
-    assert.equal(notices.duration?.beforePenalty, 20);
-    assert.equal(notices.duration?.label, "Votre débat a été");
+    assert.match(notices.duration!, /Note avant pénalité de durée.: 20\/25\./);
+    assert.match(notices.duration!, /Votre débat a été nettement plus court/);
   });
 
   it("explains a walk-out against the half that was marked", () => {
@@ -41,8 +41,8 @@ describe("the correction's penalty notices", () => {
       absentParts: ["debate"],
     });
 
-    assert.equal(notices.absence?.rawScore25, 25);
-    assert.equal(notices.absence?.label, "Vous n'avez pas participé au débat");
+    assert.match(notices.absence!, /^Vous n'avez pas participé au débat\./);
+    assert.match(notices.absence!, /sur celle que vous avez réalisée \(25\/25\)/);
     assert.equal(notices.duration, null, "the absent part is not also called short");
   });
 
@@ -60,40 +60,51 @@ describe("the correction's penalty notices", () => {
       absentParts: ["debate"],
     });
 
-    assert.equal(notices.absence?.rawScore25, 25, "the halving is explained from the full sum");
-    assert.equal(notices.duration?.beforePenalty, 12, "the dock is explained from the half");
-    assert.equal(notices.duration?.label, "Votre monologue a été");
-    // The two paragraphs and the mark now reconcile: 25 → 12, 12 − 3 = 9.
-    assert.equal(notices.duration!.beforePenalty - 3, 9);
+    assert.match(notices.absence!, /\(25\/25\)/, "the halving is explained from the full sum");
+    // 12, not 25 — and 12 − 3 is the 9 printed above both paragraphs.
+    assert.match(notices.duration!, /Note avant pénalité de durée.: 12\/25\./);
+    assert.match(notices.duration!, /Votre monologue a été/);
   });
 
-  it("names both parts when both fall short, and when neither happened", () => {
-    assert.equal(
+  it("does not offer a part the candidate completed when neither was completed", () => {
+    // Reachable in production, not merely defensive: the finish route counts
+    // the WHOLE transcript against the floor, so 10 candidate words in the
+    // monologue and 15 in the débat clear the gate at 25 and land under the
+    // per-part floor twice. « la note obtenue sur celle que vous avez
+    // réalisée » would name a part that does not exist.
+    const notices = correctionNotices({
+      rawScore25: 20,
+      score25: 10,
+      durationPenalty: 0,
+      absencePenalty: 10,
+      absentParts: ["monologue", "debate"],
+    });
+
+    assert.match(notices.absence!, /^Vous n'avez pris la parole dans aucune des deux parties/);
+    assert.match(notices.absence!, /La note obtenue \(20\/25\) est donc divisée par deux\./);
+    assert.doesNotMatch(
+      notices.absence!,
+      /que vous avez réalisée/,
+      "there is no part they realised",
+    );
+  });
+
+  it("names both parts when both ran short", () => {
+    assert.match(
       correctionNotices({
         rawScore25: 20,
         score25: 17,
         durationPenalty: 3,
         shortParts: ["monologue", "debate"],
-      }).duration?.label,
-      "Vos deux prises de parole ont été",
-    );
-
-    assert.equal(
-      correctionNotices({
-        rawScore25: 20,
-        score25: 10,
-        durationPenalty: 0,
-        absencePenalty: 10,
-        absentParts: ["monologue", "debate"],
-      }).absence?.label,
-      "Vous n'avez pris la parole dans aucune des deux parties",
+      }).duration!,
+      /Vos deux prises de parole ont été/,
     );
   });
 
   it("still explains the halving when the correction forgot which part", () => {
     // A second submission returns the stored row, which carries the penalty and
     // not the corrector's working — `absent_parts` has no column. The paragraph
-    // must still account for the missing points.
+    // must still account for the missing points, and must not guess.
     const notices = correctionNotices({
       rawScore25: 25,
       score25: 12,
@@ -101,8 +112,35 @@ describe("the correction's penalty notices", () => {
       absencePenalty: 13,
     });
 
-    assert.equal(notices.absence?.label, "Une partie de l'épreuve n'a pas été réalisée");
-    assert.equal(notices.absence?.rawScore25, 25);
+    assert.match(notices.absence!, /^Une partie de l'épreuve n'a pas été réalisée\./);
+    assert.match(notices.absence!, /La note obtenue \(25\/25\) est donc divisée par deux\./);
+    assert.doesNotMatch(notices.absence!, /que vous avez réalisée/);
+  });
+
+  it("never promises a completed part it cannot point at", () => {
+    // The sweep behind the two cases above: the phrase is allowed only when
+    // exactly one part is named, which is the only time there is another one.
+    for (const absentParts of [
+      undefined,
+      [] as const,
+      ["monologue"] as const,
+      ["debate"] as const,
+      ["monologue", "debate"] as const,
+    ]) {
+      const notice = correctionNotices({
+        rawScore25: 20,
+        score25: 10,
+        durationPenalty: 0,
+        absencePenalty: 10,
+        absentParts,
+      }).absence!;
+
+      assert.equal(
+        /que vous avez réalisée/.test(notice),
+        absentParts?.length === 1,
+        `with ${JSON.stringify(absentParts)}: ${notice}`,
+      );
+    }
   });
 
   it("falls back to the difference on a correction graded before the fields existed", () => {
@@ -113,8 +151,8 @@ describe("the correction's penalty notices", () => {
     const notices = correctionNotices({ rawScore25: 20, score25: 17 });
 
     assert.equal(notices.absence, null);
-    assert.equal(notices.duration?.beforePenalty, 20);
-    assert.equal(notices.duration?.label, "Votre temps de parole a été");
+    assert.match(notices.duration!, /Note avant pénalité de durée.: 20\/25\./);
+    assert.match(notices.duration!, /Votre temps de parole a été/);
   });
 
   it("does not invent a duration penalty out of the halving alone", () => {
@@ -129,7 +167,7 @@ describe("the correction's penalty notices", () => {
       absentParts: ["debate"],
     });
 
-    assert.equal(notices.absence?.label, "Vous n'avez pas participé au débat");
+    assert.match(notices.absence!, /Vous n'avez pas participé au débat/);
     assert.equal(notices.duration, null);
   });
 });
