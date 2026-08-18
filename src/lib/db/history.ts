@@ -1,6 +1,6 @@
 import "server-only";
 
-import { and, desc, eq, isNotNull, or, sql } from "drizzle-orm";
+import { and, desc, eq, isNotNull, isNull, or, sql } from "drizzle-orm";
 
 import { ORAL_CRITERIA, type OralCriterion } from "@/lib/delf/criteria";
 import { zeroCriteria, type DashboardSitting } from "@/lib/ui/dashboard-view";
@@ -39,6 +39,12 @@ import {
  *
  * The join on `evaluations` is therefore a `leftJoin` and no longer an inner
  * one: an abandoned sitting has no correction and must still be counted.
+ *
+ * A third question sits on top of those two since #69: whether the sitting is
+ * still on the **current** record, or was archived when the candidate started
+ * over. That is `includeArchived`, and it defaults to off — every screen that
+ * reports a standing wants the current record, and only the historique, which is
+ * the one screen that must not forget, asks for the rest.
  */
 
 /** The five band columns, read back into the shape the view model wants. */
@@ -74,6 +80,19 @@ const spokenSecondsByExam = (userId: string) =>
     .groupBy(oralExamPhases.examId)
     .as("phase_totals");
 
+/** What a caller can ask for beyond "this candidate's sittings". */
+export interface CandidateHistoryOptions {
+  /**
+   * Include the sittings archived by a reset (#69).
+   *
+   * Off by default, and the default is the safe one: a screen that reports a
+   * standing — an average, a streak, a « où j'en suis ? » on a sujet card —
+   * should have to *ask* for a record the candidate has explicitly put behind
+   * them. The historique asks; nothing else does.
+   */
+  includeArchived?: boolean;
+}
+
 /**
  * Every corrected sitting this candidate has, newest first.
  *
@@ -82,12 +101,19 @@ const spokenSecondsByExam = (userId: string) =>
  * another module (`@/lib/ui/epreuve-hub`) where the ordering cannot be seen. Any
  * change to the direction here changes which score the sujet cards print.
  *
+ * The ordering spans the archive too, so a historique that asks for everything
+ * gets one newest-first list and decides for itself where to draw the line —
+ * rather than two queries whose orderings could disagree.
+ *
  * Returns `[]` — never throws — when there is no database configured. Both
  * callers are landing pages: a hub that 500s because Neon is not wired up in a
  * developer's `.env.local` is a worse failure than a hub whose sujet cards all
  * read "Commencer", which is exactly what an empty history means anyway.
  */
-export async function readCandidateHistory(userId: string): Promise<DashboardSitting[]> {
+export async function readCandidateHistory(
+  userId: string,
+  { includeArchived = false }: CandidateHistoryOptions = {},
+): Promise<DashboardSitting[]> {
   if (!isDatabaseConfigured()) return [];
 
   const totals = spokenSecondsByExam(userId);
@@ -101,6 +127,7 @@ export async function readCandidateHistory(userId: string): Promise<DashboardSit
         phase: oralExams.phase,
         finishedAt: oralExams.finishedAt,
         abandonedAt: oralExams.abandonedAt,
+        archivedAt: oralExams.archivedAt,
         score25: evaluations.score25,
         meetsFloor: evaluations.meetsFloor,
         mode: evaluations.mode,
@@ -120,6 +147,10 @@ export async function readCandidateHistory(userId: string): Promise<DashboardSit
           eq(oralExams.userId, userId),
           // Graded, or walked out of. Anything else is still running.
           or(isNotNull(evaluations.id), isNotNull(oralExams.abandonedAt)),
+          // The current record, unless the caller wants the archive with it.
+          // `undefined` is how Drizzle's `and` is told to drop a condition, and
+          // it is the whole difference between the two callers.
+          includeArchived ? undefined : isNull(oralExams.archivedAt),
         ),
       )
       // Coalesced, because the two kinds are stamped in different columns and a
@@ -147,6 +178,10 @@ export async function readCandidateHistory(userId: string): Promise<DashboardSit
         // a row that somehow had neither sorts by when it began instead of
         // throwing on a page that is only reporting history.
         endedAt: row.abandonedAt ?? row.finishedAt ?? new Date(0),
+        // Always read, even when the query filtered the archive out — the flag
+        // is what lets the historique partition one list instead of running a
+        // second query whose ordering could disagree with this one.
+        archivedAt: row.archivedAt,
       };
     });
   } catch (error) {

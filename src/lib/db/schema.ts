@@ -6,7 +6,7 @@
  * serves billing, an admin console or a scraped catalogue, all of which the
  * reproduction audit marks "Drop" (§01).
  *
- * The four decisions worth recording, because each one is a departure from
+ * The five decisions worth recording, because each one is a departure from
  * something:
  *
  *  - **Corrections are their own table, keyed by `mode`.** The incumbent stores
@@ -30,6 +30,11 @@
  *    ends and read whole, and its entries already carry their own phase tag
  *    (`TranscriptEntry.phase`). A row-per-turn table would buy queries nobody
  *    runs, cost a join on every read, and store the phase twice.
+ *  - **Starting over is a stamp, not a delete.** A candidate who resets their
+ *    record (#69) archives it: `oral_exams.archived_at` takes the sittings out
+ *    of the figures and leaves every row, correction and recording exactly where
+ *    it was. Nothing in this schema deletes a sitting, and the one product
+ *    feature that sounds like it does not either.
  *
  * This schema deliberately did not decide which of the two rubric
  * implementations on `develop` won: it stores the five bands, the pre-penalty
@@ -170,6 +175,36 @@ export const oralExams = pgTable(
      * evaluation exists, so a sitting is graded or abandoned and never both.
      */
     abandonedAt: timestamp("abandoned_at", { withTimezone: true }),
+
+    /**
+     * When the candidate drew a line under their record and started over (#69).
+     *
+     * A line, not a delete. An archived sitting keeps its correction, its
+     * recording and its `/app/results/:id`; what it loses is its vote on what
+     * the tableau de bord averages and what the sujet cards print. So the reset
+     * is reversible in principle and destroys nothing in practice, which is what
+     * lets it be a single confirmed click rather than a typed-name ceremony.
+     *
+     * On the row rather than in a `candidate_resets` table keyed by reset
+     * instant, and the read is the reason: `readCandidateHistory` is the single
+     * query behind the hub, the tableau de bord and the historique, so this is
+     * one `is null` on a query that is already filtered by `user_id` — against a
+     * correlated subquery re-deriving the latest reset on every render of every
+     * one of those screens. It also puts the fact on the row that carries it,
+     * which leaves archiving a single sitting possible later without a second
+     * mechanism.
+     *
+     * Stamped only on sittings already **on** the record — graded, or walked out
+     * of. A sitting still in progress when the button is pressed belongs to the
+     * new record, and archiving it would file a correction that has not landed
+     * yet: the candidate would sit an épreuve *after* resetting and never see it
+     * counted. See `archiveCandidateRecord`.
+     *
+     * No index of its own: every read that filters on it also filters on
+     * `user_id`, and one candidate's sittings are already few enough that the
+     * index below does the work.
+     */
+    archivedAt: timestamp("archived_at", { withTimezone: true }),
   },
   (table) => [
     // Every read in the product is "this user's sittings" or "this sitting, if

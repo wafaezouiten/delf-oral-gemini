@@ -12,7 +12,7 @@
  * So this script runs the round trip for real:
  *
  *   create → append the monologue → append it again → append the débat
- *          → correct → correct again → read back → clean up
+ *          → correct → correct again → read back → start over → clean up
  *
  * It writes to whatever `DATABASE_URL` points at, under a synthetic user id, and
  * deletes everything it wrote in a `finally`. Point it at a development branch,
@@ -27,6 +27,8 @@ config({ path: ".env.local" });
 import { eq } from "drizzle-orm";
 
 import { getDb, isDatabaseConfigured } from "../src/lib/db";
+import { archiveCandidateRecord } from "../src/lib/db/account";
+import { readCandidateHistory } from "../src/lib/db/history";
 import { oralExams, oralTopics } from "../src/lib/db/schema";
 import { neonSittingStore } from "../src/lib/db/sittings";
 import { ORAL_CRITERIA } from "../src/lib/delf/criteria";
@@ -287,6 +289,68 @@ async function main(): Promise<number> {
 
     const after = await store.readSitting(ref);
     check("and nothing they did left a mark", after?.reconnectCount === 1 && after?.transcript.length === 2);
+
+    /**
+     * Starting over (#69).
+     *
+     * Here rather than in a unit test for the reason the whole script exists:
+     * what `archiveCandidateRecord` promises is a WHERE clause, and the clause
+     * IS the behaviour. In particular the one that is easy to get wrong and
+     * impossible to notice — "everything on the record" is not "every row of
+     * this candidate's", and a reset that archives a sitting still in progress
+     * loses the épreuve the candidate sits *after* pressing the button.
+     *
+     * So the record gets one more of each kind first: a walk-out, which must be
+     * archived, and an untouched sitting, which must not.
+     */
+    console.log("\nstarting over");
+    const [walkedOut] = await db
+      .insert(oralExams)
+      .values({ userId: USER, topicId, phase: "monologue", abandonedAt: new Date() })
+      .returning({ id: oralExams.id });
+    const [running] = await db
+      .insert(oralExams)
+      .values({ userId: USER, topicId, phase: "preparation" })
+      .returning({ id: oralExams.id });
+
+    const before = await readCandidateHistory(USER);
+    check("the record holds the corrected sitting and the walk-out", before.length === 2, {
+      sittings: before.length,
+    });
+
+    const moved = await archiveCandidateRecord(USER, new Date());
+    check("both of them are archived, and only them", moved === 2, { archived: moved });
+
+    const stillRunning = await db
+      .select({ archivedAt: oralExams.archivedAt })
+      .from(oralExams)
+      .where(eq(oralExams.id, running.id));
+    check(
+      "a sitting still in progress is left on the new record",
+      stillRunning[0]?.archivedAt === null,
+      { archivedAt: stillRunning[0]?.archivedAt },
+    );
+
+    check("the record now reads empty", (await readCandidateHistory(USER)).length === 0);
+
+    const archive = await readCandidateHistory(USER, { includeArchived: true });
+    check("and the archive still has both, stamped", archive.length === 2, {
+      sittings: archive.length,
+    });
+    check(
+      "including the walk-out, still scored zero",
+      archive.some((s) => s.examId === walkedOut.id && s.score25 === 0 && s.archivedAt !== null),
+    );
+    check(
+      "and the correction, which nothing deleted",
+      archive.some((s) => s.examId === ref.examId && s.score25 === scored.score25),
+    );
+
+    check("a second reset moves nothing", (await archiveCandidateRecord(USER, new Date())) === 0);
+    check(
+      "and a stranger's reset never reaches these rows",
+      (await archiveCandidateRecord("verify_intruder", new Date())) === 0,
+    );
   } finally {
     // Cascades to phases, recordings and evaluations (`onDelete: "cascade"`).
     await db.delete(oralExams).where(eq(oralExams.userId, USER));
