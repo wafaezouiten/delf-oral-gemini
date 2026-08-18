@@ -1925,24 +1925,35 @@ describe("spoken consignes", () => {
     assert.equal(h.controller.getSnapshot().recording, true);
   });
 
-  it("stays silent for the rest of the sitting once muted, and keeps the text", async () => {
+  it("silences one clip and still speaks at the next boundary", async () => {
+    // « Passer » is per-clip, and that is the whole of what it is (#59). The
+    // sticky « Couper les annonces » went with the card it lived on, so a
+    // candidate who skips the briefing still hears the monologue's consigne —
+    // and the phase it opens still waits for it.
     const { h, announcer } = speaking();
     h.controller.start();
     await settle();
 
-    h.controller.muteAnnouncements();
-    assert.equal(h.controller.getSnapshot().announcementsMuted, true);
+    h.controller.skipAnnouncement();
     assert.equal(h.controller.getSnapshot().announcementPlaying, false);
     assert.equal(announcer.stops, 1, "the briefing was silenced mid-sentence");
 
+    // The time-out path into the monologue, so nothing here awaits a consigne
+    // that is deliberately left mid-sentence.
     const playedByThen = announcer.played.length;
-    h.advanceClock(120);
-    await h.controller.advanceEarly();
+    h.advanceClock(PHASE_DURATIONS.preparation);
     await settle();
 
-    assert.equal(announcer.played.length, playedByThen, "the monologue's consigne never played");
-    // Straight to armed: a muted consigne cannot be refused, so no part can be
-    // held waiting for one. The « Enregistrer » press is still the candidate's.
+    assert.equal(
+      announcer.played.length,
+      playedByThen + 1,
+      "the monologue's consigne is a different clip and still plays",
+    );
+    assert.equal(h.controller.getSnapshot().announcementPlaying, true);
+    announcer.reachEnd();
+    await settle();
+    await settle();
+
     assert.equal(h.controller.getSnapshot().awaitingStart, true);
     await pressRecord(h);
     assert.deepEqual(h.recorder.calls, ["monologue"]);

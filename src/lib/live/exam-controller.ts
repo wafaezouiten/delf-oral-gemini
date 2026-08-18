@@ -177,11 +177,13 @@ export interface ExamState {
    * The examiner's consigne for the phase now open, or null before the first one
    * (#37).
    *
-   * It outlives its own playback on purpose. The clip is the *spoken* half of a
-   * consigne whose written half must stay readable for as long as it applies, so
-   * the card stays on screen for the rest of the phase, carrying the text and a
-   * « Réécouter ». A candidate whose browser refused to play it, or who muted it,
-   * loses nothing.
+   * It outlives its own playback, and since #59 nothing on screen does: the
+   * consigne's control is a « Passer » button that exists for as long as the
+   * voice does, and it reads the two flags below rather than this. What is left
+   * here is the snapshot's record of which consigne the phase opened with — the
+   * clip {@link ExamController.playAnnouncement} would play again out of a hold,
+   * and the one thing that says *which* boundary a held or playing state belongs
+   * to.
    */
   announcement: AnnouncementId | null;
   /**
@@ -204,8 +206,6 @@ export interface ExamState {
    * the recording and then playing the consigne into it. See {@link announce}.
    */
   announcementBlocked: boolean;
-  /** The candidate turned the consignes off for the rest of the sitting. */
-  announcementsMuted: boolean;
 }
 
 /**
@@ -445,7 +445,6 @@ export class ExamController {
   private announcementId: AnnouncementId | null = null;
   private announcementPlaying = false;
   private announcementBlocked = false;
-  private announcementsMuted = false;
   private announceToken = 0;
   /** The same guard for candidate-initiated playback. See {@link playAnnouncement}
    *  for why it cannot share `announceToken`. */
@@ -542,12 +541,11 @@ export class ExamController {
       devTextMode: this.devTextMode,
       announcement: this.announcementId,
       // Armed and waiting for the click — as distinct from waiting for the
-      // consigne to finish, which is the announcement card's business.
+      // consigne to finish, which is the consigne control's business.
       awaitingStart:
         this.phaseAwaitingStart && !this.announcementPlaying && !this.announcementBlocked,
       announcementPlaying: this.announcementPlaying,
       announcementBlocked: this.announcementBlocked,
-      announcementsMuted: this.announcementsMuted,
     };
   }
 
@@ -658,7 +656,7 @@ export class ExamController {
    */
   private async announce(id: AnnouncementId): Promise<AnnouncementOutcome> {
     const announcer = this.announcer;
-    if (!announcer || this.announcementsMuted) return "skipped";
+    if (!announcer) return "skipped";
 
     // A hold left over from an earlier consigne. Reachable because the
     // préparation's briefing is spoken without being awaited: if the browser
@@ -700,10 +698,10 @@ export class ExamController {
   /**
    * Play the phase's consigne now, on the candidate's own click.
    *
-   * Two buttons, one method. « Écouter la consigne » answers a browser that
-   * refused to autoplay, and « Réécouter » replays one that has already been
-   * heard; the difference between them is only whether a phase is waiting on the
-   * answer, which {@link releaseAnnouncementHold} sorts out on its own.
+   * One button since #59: « Écouter la consigne », which answers a browser that
+   * refused to autoplay. The « Réécouter » that shared this method went with the
+   * card, and with it every case where a phase was *not* waiting on the answer —
+   * which {@link releaseAnnouncementHold} handles either way.
    *
    * Being a click is what makes it work: the autoplay policy this exists to
    * survive is satisfied by the gesture that called it.
@@ -711,13 +709,13 @@ export class ExamController {
   playAnnouncement(): void {
     const id = this.announcementId;
     const announcer = this.announcer;
-    if (!id || !announcer || this.announcementsMuted) return;
+    if (!id || !announcer) return;
 
-    // Its own counter, not `announceToken`: a replay must not supersede the
-    // `announce()` that may be parked on a hold, only other replays. Without it a
-    // double-clicked « Réécouter » has the first click's playback report itself
-    // finished while the second one is still audible, and the card folds up over
-    // the sound of the examiner talking.
+    // Its own counter, not `announceToken`: this playback must not supersede the
+    // `announce()` parked on the hold it is answering, only another of its own.
+    // Without it a double-clicked « Écouter la consigne » has the first click's
+    // playback report itself finished while the second one is still audible, and
+    // the control disappears over the sound of the examiner talking.
     const token = (this.playbackToken += 1);
 
     this.announcementPlaying = true;
@@ -735,10 +733,16 @@ export class ExamController {
   /**
    * Silence the consigne that is playing, and let the phase get on with it.
    *
-   * Labelled « Passer l'annonce » rather than « Passer », because the préparation
-   * screen already has a « Passer et commencer maintenant » that ends a
-   * thirty-minute phase. Two controls both reading "Passer", one ending the
-   * préparation and one silencing a clip, would be genuinely ambiguous.
+   * Labelled « Passer » (#59). It could not be, while the préparation carried a
+   * ghost « Passer et commencer maintenant » that ended a thirty-minute phase —
+   * two controls both reading "Passer", one silencing a clip and one ending the
+   * préparation, would have been genuinely ambiguous. That ghost is gone and the
+   * only other way on is « Commencer » in the topbar, so the short label is the
+   * unambiguous one.
+   *
+   * This clip only. The sticky « Couper les annonces » was deleted with the card
+   * that carried it: nothing now silences a consigne the candidate has not
+   * reached yet.
    */
   skipAnnouncement(): void {
     this.announcer?.stop();
@@ -749,33 +753,9 @@ export class ExamController {
     this.releaseAnnouncementHold("skipped");
   }
 
-  /**
-   * Turn the consignes off for the rest of the sitting.
-   *
-   * Sticky, deliberately. Somebody practising their fourth épreuve knows the
-   * consigne by heart, and making them silence it again at every boundary is how
-   * a product teaches people to click without reading. It also disposes of the
-   * autoplay problem for anyone who has opted out: a muted consigne is never
-   * played, so it can never be refused, so no phase can ever be held waiting for
-   * one.
-   *
-   * The text stays on screen. This mutes the voice, it does not withdraw the
-   * instruction.
-   */
-  muteAnnouncements(): void {
-    if (this.announcementsMuted) return;
-    this.announcementsMuted = true;
-    this.announcer?.stop();
-    // Same reason as `skipAnnouncement`: the voice is already gone.
-    this.announcementPlaying = false;
-    this.log("announcements-muted");
-    this.releaseAnnouncementHold("skipped");
-    this.emit();
-  }
-
-  /** Let a held phase continue. Releases nothing when nothing is held, which is
-   *  the ordinary case for « Réécouter » — but still emits, because the caller has
-   *  just changed what the card should be drawing. */
+  /** Let a held phase continue. Releases nothing when nothing is held — a skip
+   *  landing after the clip finished on its own — but still emits, because the
+   *  caller has just changed what the control should be drawing. */
   private releaseAnnouncementHold(outcome: AnnouncementOutcome): void {
     const hold = this.announcementHold;
     this.announcementHold = null;

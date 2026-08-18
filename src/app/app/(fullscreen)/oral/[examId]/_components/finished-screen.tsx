@@ -44,14 +44,14 @@ export function FinishedScreen({
   onRetry: () => void;
   onLeave: () => void;
   /**
-   * The examiner's closing consigne (#37).
+   * The examiner's closing consigne (#37) — « Passer », while it plays (#59).
    *
-   * Rendered here for two reasons beyond consistency with the other boundaries.
-   * The controller waits for this clip before handing the sitting over, so without
-   * the card there is no way to cut it short — fifteen seconds of unskippable
-   * audio between a candidate and their results. And it is the text equivalent:
-   * this screen says « Épreuve terminée » and « ne fermez pas cet onglet » on its
-   * own, but the consigne should be readable in the words it was spoken in.
+   * Rendered here for one reason beyond consistency with the other boundaries:
+   * the controller waits for this clip before handing the sitting over, so
+   * without the button there is no way to cut it short — fifteen seconds of
+   * unskippable audio between a candidate and their results. The second reason
+   * is gone with the card: nothing prints the consigne any more, and this screen
+   * says « Épreuve terminée » and « ne fermez pas cet onglet » in its own words.
    */
   announcement?: ReactNode;
 }) {

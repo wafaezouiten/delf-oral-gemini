@@ -25,20 +25,19 @@ describe("spoken consignes", () => {
     for (const id of ANNOUNCEMENT_IDS) {
       const announcement = ANNOUNCEMENTS[id];
       assert.equal(announcement.id, id, "the record's key and the id must agree");
-      assert.ok(announcement.title.length > 0);
       assert.ok(announcement.text.length > 80, `${id} is too short to be a consigne`);
       assert.equal(announcement.src, `/announcements/${id}.wav`);
     }
   });
 
   it("never uses an em dash or en dash", () => {
-    // The same house rule the examiner's prompt follows, and for a stronger
-    // reason: this text is both spoken by a TTS voice, which reads a dash as a
-    // pause it was not given, and printed under the player.
+    // The same house rule the examiner's prompt follows. The reason narrowed with
+    // #59 and did not go away: this text is no longer printed anywhere, but it is
+    // still spoken by a TTS voice, which reads a dash as a pause it was not given.
     for (const id of ANNOUNCEMENT_IDS) {
-      const { text, title } = ANNOUNCEMENTS[id];
-      assert.ok(!`${text}${title}`.includes("—"), `${id} contains an em dash`);
-      assert.ok(!`${text}${title}`.includes("–"), `${id} contains an en dash`);
+      const { text } = ANNOUNCEMENTS[id];
+      assert.ok(!text.includes("—"), `${id} contains an em dash`);
+      assert.ok(!text.includes("–"), `${id} contains an en dash`);
     }
   });
 

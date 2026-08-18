@@ -6,6 +6,7 @@ import { ExitIcon } from "@/app/_components/po/icons";
 import { Kicker } from "@/app/_components/po/tag";
 import { SimulatorTopBar } from "@/app/_components/po/topbar";
 import { TimerRing } from "@/app/_components/po/timer-ring";
+import { cn } from "@/lib/ui/class-names";
 import { phaseDurationSeconds } from "@/lib/delf/phases";
 import type { OralTopic } from "@/lib/delf/topics";
 import type { TranscriptEntry } from "@/lib/delf/transcript";
@@ -38,11 +39,14 @@ import { NotesDrawer } from "./notes-drawer";
  * status line does not already say in words. The avatars are gone; the sujet, the
  * plan and the record control take the room they were using.
  *
- * The two parts share the frame and differ in one panel:
+ * The two parts share the frame and differ in what stands with the sujet:
  *
- *  - **The exposé keeps « Votre plan ».** Four beats, the same list the
- *    préparation rail gives thirty minutes to absorb, still on screen while the
- *    clock runs.
+ *  - **The exposé sets « Votre plan » beside it, in a second column (#59).**
+ *    Four beats, the same list the préparation rail gives thirty minutes to
+ *    absorb, still on screen while the clock runs — and no longer under the
+ *    document, where re-reading the source scrolled the plan away during the
+ *    one part whose whole task is following it. The frame widens to hold both,
+ *    and collapses to one column below `lg`.
  *  - **The débat prints the exchange instead (#48).** A plan is a script for a
  *    monologue; during the débat the candidate is answering objections, and being
  *    able to re-read the one they are answering is worth more than the fidelity
@@ -118,7 +122,7 @@ export function PassationScreen({
   awaitingConsigne?: boolean;
   /** Controller failures — a lost connection, a dead microphone. */
   notices?: ReactNode;
-  /** The examiner's spoken consigne for this part (#37). */
+  /** « Passer », for as long as this part's spoken consigne lasts (#37, #59). */
   announcement?: ReactNode;
   /** Development-only diagnostics. Never rendered in production. */
   devPanel?: ReactNode;
@@ -133,6 +137,36 @@ export function PassationScreen({
   const hasNotes = notes.trim().length > 0;
   const partTitle = phase === "monologue" ? MONOLOGUE_TITLE : DEBATE_TITLE;
   const showTranscript = phase === "debate" && transcriptOpen;
+
+  /**
+   * The sujet, on the paper stock the préparation screen prints it on, so the
+   * candidate recognises the same document rather than reading what looks like a
+   * different one.
+   *
+   * Lifted out of the layout because the two parts frame it differently: the
+   * exposé sets « Votre plan » beside it in a second column, the débat gives the
+   * whole measure to the exchange.
+   */
+  const sujet = (
+    <section className="border-paper-border bg-paper rounded-lg border px-5 py-6 sm:px-7">
+      {/* « Passer » beside the title, not under it (#59): the consigne is
+          twenty-five seconds of the examiner talking about this sujet, and a
+          control that pushed the document down the page for the length of a
+          sentence would move the thing being read. The held state wraps to its
+          own line — it is a paragraph, not a word. */}
+      <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-3">
+        <div className="min-w-0">
+          <Kicker>{partieKicker(phase)}</Kicker>
+          <h1 className="font-serif mt-1.5 text-[1.375rem] leading-[1.25] font-semibold text-balance">
+            {topic.title}
+          </h1>
+        </div>
+        {announcement}
+      </div>
+
+      <p className="document-text mt-4">{topic.document}</p>
+    </section>
+  );
 
   return (
     <div className="bg-background relative flex h-full min-h-0 flex-col overflow-hidden">
@@ -158,46 +192,56 @@ export function PassationScreen({
       />
 
       <main className="relative flex min-h-0 flex-1 flex-col">
-        <div className="mx-auto flex min-h-0 w-full max-w-[47.5rem] flex-1 flex-col gap-4 overflow-y-auto px-4 py-5 sm:px-6">
+        <div
+          className={cn(
+            "mx-auto flex min-h-0 w-full flex-1 flex-col gap-4 overflow-y-auto px-4 py-5 sm:px-6",
+            // The exposé carries two columns and needs the room for them; the
+            // débat is one column of paper, and a document set in a wider
+            // measure than this is harder to read, not easier.
+            phase === "monologue" ? "max-w-[64rem]" : "max-w-[47.5rem]",
+          )}
+        >
           {notices}
 
-          {/* The sujet, on the paper stock the préparation screen prints it on,
-              so the candidate recognises the same document rather than reading
-              what looks like a different one. */}
-          <section className="border-paper-border bg-paper rounded-lg border px-5 py-6 sm:px-7">
-            <Kicker>{partieKicker(phase)}</Kicker>
-            <h1 className="font-serif mt-1.5 text-[1.375rem] leading-[1.25] font-semibold text-balance">
-              {topic.title}
-            </h1>
-
-            {announcement && <div className="mt-4">{announcement}</div>}
-
-            <p className="document-text mt-4">{topic.document}</p>
-          </section>
-
-          {showTranscript ? (
-            <DebateTranscript
-              transcript={transcript}
-              hint={status.body}
-              onHide={onToggleTranscript}
-            />
-          ) : phase === "monologue" ? (
-            <ExposePlan />
-          ) : (
-            <div className="border-border bg-card rounded-lg border border-dashed p-6 text-center">
-              <h2 className="text-[0.84375rem] font-semibold">{status.title}</h2>
-              <p className="text-muted-foreground mx-auto mt-1.5 max-w-[46ch] text-xs leading-relaxed">
-                {status.body}
-              </p>
-              {/* The way back to the feed, on the card that replaced it. */}
-              <button
-                type="button"
-                onClick={onToggleTranscript}
-                className="border-border text-muted-foreground hover:text-foreground hover:bg-muted mt-3.5 rounded-md border px-3 py-1.5 text-[0.6875rem] font-semibold transition-colors"
-              >
-                {DEBATE_TRANSCRIPT_COPY.show}
-              </button>
+          {phase === "monologue" ? (
+            /* Sujet left, plan right. The four beats used to sit *under* the
+               document, which meant a candidate who scrolled to re-read their
+               source scrolled the plan off the screen — during the one part of
+               the épreuve where following it is the whole task. Side by side,
+               neither costs the other any height. Below `lg` the grid is one
+               column and the plan falls back under the sujet, which is the only
+               order that fits a phone. */
+            <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_19rem] lg:items-start">
+              {sujet}
+              <ExposePlan />
             </div>
+          ) : (
+            <>
+              {sujet}
+
+              {showTranscript ? (
+                <DebateTranscript
+                  transcript={transcript}
+                  hint={status.body}
+                  onHide={onToggleTranscript}
+                />
+              ) : (
+                <div className="border-border bg-card rounded-lg border border-dashed p-6 text-center">
+                  <h2 className="text-[0.84375rem] font-semibold">{status.title}</h2>
+                  <p className="text-muted-foreground mx-auto mt-1.5 max-w-[46ch] text-xs leading-relaxed">
+                    {status.body}
+                  </p>
+                  {/* The way back to the feed, on the card that replaced it. */}
+                  <button
+                    type="button"
+                    onClick={onToggleTranscript}
+                    className="border-border text-muted-foreground hover:text-foreground hover:bg-muted mt-3.5 rounded-md border px-3 py-1.5 text-[0.6875rem] font-semibold transition-colors"
+                  >
+                    {DEBATE_TRANSCRIPT_COPY.show}
+                  </button>
+                </div>
+              )}
+            </>
           )}
 
           {/* The exposé's status line lives under the plan rather than replacing
