@@ -21,6 +21,7 @@
 import { COMPETENCY_FLOOR, COMPETENCY_MAX, ORAL_PARTS_B2 } from "@/lib/delf/constants";
 import { ORAL_CRITERIA, ORAL_CRITERIA_LABELS } from "@/lib/delf/criteria";
 import { PHASE_DURATIONS } from "@/lib/delf/phases";
+import type { DashboardSitting } from "./dashboard-view";
 
 /** One row of « Le format de l'épreuve »: a partie, flattened for the card. */
 export interface HubFormatItem {
@@ -195,7 +196,7 @@ export interface HubSujet {
   teaser: string;
   /** "30 min de préparation · 20 min d'oral". */
   meta: string;
-  /** The candidate's best /25 on this sujet, or null if never sat. */
+  /** The candidate's most recent /25 on this sujet, or null if never sat. */
   score: number | null;
 }
 
@@ -228,7 +229,48 @@ export function sujetMeta(): string {
 }
 
 /**
- * The sujet cards, from the catalogue and whatever the candidate has scored.
+ * The candidate's most recent /25 per sujet — the number on the sujet cards.
+ *
+ * Latest rather than best (#64). The card answers « où j'en suis ? », and a
+ * personal best from three sittings ago does not answer it: score 12, sit it
+ * again for 10, and the card reads 10. The best is still recoverable — the
+ * historique lists every sitting and the tableau de bord averages them, and
+ * neither collapses per sujet, so neither is touched by this.
+ *
+ * **Requires `history` newest first.** "Latest per sujet" is implemented as
+ * "first row seen per slug", so the ordering *is* the correctness argument, and
+ * it is decided in a different module: `readCandidateHistory` orders by
+ * `coalesce(abandoned_at, finished_at)` descending and says so in its own doc
+ * block. Sorting again here would be a second opinion about which stamp ends a
+ * sitting, and the two could disagree.
+ *
+ * **An abandoned sitting's zero counts, like any other.** Under "best" that zero
+ * was harmless — it could only surface on a sujet every attempt of which was
+ * walked out of. Under "latest" it surfaces the moment a candidate opens a sujet
+ * they once scored 18 on and confirms the exit dialog, and the card drops to
+ * `0/25`. That is the honest reading and the consistent one: the exit dialog
+ * tells the candidate in so many words that walking out counts, the historique
+ * already lists it as the last sitting, and skipping it here would make the card
+ * and the historique disagree about what the last sitting was.
+ *
+ * Pure, and derived from the history the page already read rather than from a
+ * second query — six sujets is not worth a round trip.
+ */
+export function latestScoreBySujet(
+  history: readonly DashboardSitting[],
+): Map<string, number> {
+  const latest = new Map<string, number>();
+  for (const sitting of history) {
+    // Newest first, so the first row for a slug is that sujet's last sitting and
+    // every later one is older. No comparison: a re-sit that scored worse is
+    // still the answer to « où j'en suis ? ».
+    if (!latest.has(sitting.topicSlug)) latest.set(sitting.topicSlug, sitting.score25);
+  }
+  return latest;
+}
+
+/**
+ * The sujet cards, from the catalogue and whatever the candidate last scored.
  *
  * The scores are passed in rather than fetched, so this stays pure and the page
  * decides how much of the history it wants to pay for. A slug with no entry is
@@ -238,7 +280,7 @@ export function sujetMeta(): string {
  */
 export function buildHubSujets(
   topics: ReadonlyArray<{ slug: string; title: string; document: string }>,
-  bestScores: ReadonlyMap<string, number>,
+  latestScores: ReadonlyMap<string, number>,
 ): HubSujet[] {
   return topics.map((topic) => ({
     slug: topic.slug,
@@ -246,6 +288,6 @@ export function buildHubSujets(
     kind: "Monologue et débat",
     teaser: sujetTeaser(topic.document),
     meta: sujetMeta(),
-    score: bestScores.get(topic.slug) ?? null,
+    score: latestScores.get(topic.slug) ?? null,
   }));
 }

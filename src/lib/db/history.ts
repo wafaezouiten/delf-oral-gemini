@@ -77,6 +77,11 @@ const spokenSecondsByExam = (userId: string) =>
 /**
  * Every corrected sitting this candidate has, newest first.
  *
+ * **Newest first is a contract, not an incidental.** The ORDER BY below is the
+ * only thing that makes `latestScoreBySujet` correct, and that reducer lives in
+ * another module (`@/lib/ui/epreuve-hub`) where the ordering cannot be seen. Any
+ * change to the direction here changes which score the sujet cards print.
+ *
  * Returns `[]` — never throws — when there is no database configured. Both
  * callers are landing pages: a hub that 500s because Neon is not wired up in a
  * developer's `.env.local` is a worse failure than a hub whose sujet cards all
@@ -150,30 +155,4 @@ export async function readCandidateHistory(userId: string): Promise<DashboardSit
     console.error("[history] could not read the candidate's sittings", error);
     return [];
   }
-}
-
-/**
- * The candidate's best /25 per sujet, for the hub's cards.
- *
- * Best rather than latest, deliberately: the card's job is to say whether this
- * sujet has been beaten, and a candidate who scored 18 and then tried a risky
- * angle for 11 has not got worse at it. Derived from the same history read
- * rather than from a second query — six sujets is not worth a round trip.
- *
- * An abandoned sitting's zero is in here with the rest, and taking the maximum
- * is what makes that harmless: it can only surface on a sujet where every
- * attempt was walked out of, which is exactly when "0/25" is the true thing to
- * print on the card.
- */
-export function bestScoreBySujet(
-  history: readonly DashboardSitting[],
-): Map<string, number> {
-  const best = new Map<string, number>();
-  for (const sitting of history) {
-    const previous = best.get(sitting.topicSlug);
-    if (previous === undefined || sitting.score25 > previous) {
-      best.set(sitting.topicSlug, sitting.score25);
-    }
-  }
-  return best;
 }
