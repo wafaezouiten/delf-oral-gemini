@@ -13,6 +13,9 @@ import { EXPOSE_PLAN } from "@/lib/ui/po-player-view";
  *
  * The exposé only. During the débat the candidate is answering objections, not
  * following a script, and the screen gives that space to the exchange instead.
+ *
+ * It sits in a column beside the sujet rather than under it (#59), so scrolling
+ * back through the document does not take the plan off screen with it.
  */
 export function ExposePlan() {
   return (

@@ -83,8 +83,9 @@ same rule, so the reproduction keeps it.
                                                         │
    ┌────────────────────────────────────────────────────▼──────────────────┐
    │ 2. PASSATION          steps 1–2 · timer ring + exit button            │
-   │    scene: Examinateur (IA) ── beats + clock ── Vous                   │
-   │    body:  exposé → one quiet status card                              │
+   │    head: sujet on paper · « Passer » beside its title while the       │
+   │          consigne speaks (#59)                                        │
+   │    body:  exposé → « Votre plan » in a column beside the sujet        │
    │           débat  → the live transcript, « Masquer » back to the card  │
    │    foot:  [Mes notes]      (mic)      [Terminer l'épreuve]            │
    │    drawer: préparation notes, read-only                               │
