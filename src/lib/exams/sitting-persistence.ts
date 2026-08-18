@@ -97,6 +97,7 @@ export interface CorrectionRow {
   mode: EvaluationMode;
   criteria: Record<OralCriterion, GrilleBand>;
   rawScore25: number;
+  absencePenalty: number;
   durationPenalty: number;
   score25: number;
   meetsFloor: boolean;

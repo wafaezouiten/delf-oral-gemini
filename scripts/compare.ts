@@ -162,6 +162,8 @@ async function runOurs(
       score25: result.score25,
       durationPenalty: result.durationPenalty,
       shortParts: result.shortParts,
+      absencePenalty: result.absencePenalty,
+      absentParts: result.absentParts,
       phonologyCapped: result.phonologyCapped,
       meetsFloor: result.meetsFloor,
       phonologieNonEvaluable: result.feedback.phonologieNonEvaluable,

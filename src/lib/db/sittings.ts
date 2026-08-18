@@ -128,6 +128,7 @@ function toStoredCorrection(row: EvaluationRow): StoredCorrection {
     mode: row.mode,
     criteria: criteriaOf(row),
     rawScore25: row.rawScore25,
+    absencePenalty: row.absencePenalty,
     durationPenalty: row.durationPenalty,
     score25: row.score25,
     meetsFloor: row.meetsFloor,
@@ -280,6 +281,7 @@ export function neonSittingStore(): SittingStore {
             // criterion names, so it spreads straight in.
             ...write.correction.criteria,
             rawScore25: write.correction.rawScore25,
+            absencePenalty: write.correction.absencePenalty,
             durationPenalty: write.correction.durationPenalty,
             score25: write.correction.score25,
             meetsFloor: write.correction.meetsFloor,

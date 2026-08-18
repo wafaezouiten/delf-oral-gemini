@@ -348,8 +348,26 @@ export const evaluations = pgTable(
     // The five official grille criteria, each a 0/1/3/5 band.
     ...criterionColumns,
 
-    /** Sum of the five bands, before the duration penalty. */
+    /** Sum of the five bands, before either penalty. */
     rawScore25: integer("raw_score_25").notNull(),
+    /**
+     * Points lost because a part of the épreuve never happened — the candidate
+     * walked out of the débat, or sat through the monologue in silence. The
+     * mark is halved, so this is `raw_score_25 − floor(raw_score_25 / 2)`, and
+     * 0 for the ordinary sitting where both parts ran.
+     *
+     * A separate column rather than more `duration_penalty`, which is the shape
+     * that would need no migration: the two answer different questions ("spoke
+     * for less than the épreuve asks" versus "did not sit half of it"), they are
+     * charged from different evidence — seconds of recording versus words of
+     * transcript — and a row that records 13 points of "duration penalty" is a
+     * mark nobody can explain to the candidate who received it.
+     *
+     * `default(0)` because rows written before this column existed were scored
+     * under the old rule, which had no halving. That is a truthful backfill, not
+     * a convenience: those sittings really were docked nothing for it.
+     */
+    absencePenalty: integer("absence_penalty").notNull().default(0),
     /**
      * Points docked because the candidate spoke for less than the épreuve asks.
      *
@@ -363,7 +381,8 @@ export const evaluations = pgTable(
      * number on any score below the penalty. Only reachable under 3/25.
      */
     durationPenalty: integer("duration_penalty").notNull().default(0),
-    /** What the candidate is shown: `raw_score_25 − duration_penalty`, floored at 0. */
+    /** What the candidate is shown: `raw − absence_penalty − duration_penalty`,
+     *  floored at 0. */
     score25: integer("score_25").notNull(),
     /**
      * Whether this score clears the DELF per-competency floor (≥ 5/25). Derived
@@ -401,14 +420,32 @@ export const evaluations = pgTable(
     ),
     check(
       "evaluations_score_range_check",
-      sql`${table.rawScore25} between 0 and 25 and ${table.score25} between 0 and 25 and ${table.durationPenalty} >= 0`,
+      sql`${table.rawScore25} between 0 and 25 and ${table.score25} between 0 and 25
+        and ${table.durationPenalty} >= 0 and ${table.absencePenalty} >= 0`,
     ),
-    // Keeps the three score columns telling one story. Both rubric copies apply
+    // WARNING, learned the hard way: `drizzle-kit push` applies a new COLUMN and
+    // silently leaves these CHECK constraints at whatever the database already
+    // had. A pushed database therefore ends up with `absence_penalty` present
+    // and `evaluations_score_25_check` still reading `raw − duration`, which
+    // accepts every correction that took no absence penalty and refuses every
+    // one that did. That is not a theoretical drift — it strands a real
+    // candidate's correction, because the finish route logs the failed write
+    // and shows them « correction perdue ». Constraint changes must be applied
+    // from the generated migration; `pnpm verify:db` now writes a row with both
+    // penalties non-zero, which is the only shape that notices.
+    //
+    // Keeps the four score columns telling one story. Both rubric copies apply
     // the penalty the same way — subtract, floor at 0 — so this constraint is
     // neutral in the disagreement between them.
+    //
+    // The two penalties are summed rather than nested because the halving can
+    // never drive the score below 0 on its own: it takes at most half of a
+    // non-negative number. So `greatest(raw − absence − duration, 0)` and
+    // `greatest(greatest(raw − absence, 0) − duration, 0)` — which is the order
+    // `scoreSitting` actually applies — agree on every row.
     check(
       "evaluations_score_25_check",
-      sql`${table.score25} = greatest(${table.rawScore25} - ${table.durationPenalty}, 0)`,
+      sql`${table.score25} = greatest(${table.rawScore25} - ${table.absencePenalty} - ${table.durationPenalty}, 0)`,
     ),
   ],
 );

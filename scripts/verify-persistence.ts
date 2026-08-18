@@ -32,6 +32,7 @@ import { neonSittingStore } from "../src/lib/db/sittings";
 import { ORAL_CRITERIA } from "../src/lib/delf/criteria";
 import { ORAL_TOPICS } from "../src/lib/delf/topics";
 import { correctSitting, type CorrectionRow } from "../src/lib/exams/sitting-persistence";
+import { scoreSitting } from "../src/lib/delf/orale-rubric";
 import type { TranscriptEntry } from "../src/lib/delf/transcript";
 
 if (!isDatabaseConfigured()) {
@@ -45,13 +46,41 @@ const TOPIC = ORAL_TOPICS[0];
 
 const bands = Object.fromEntries(ORAL_CRITERIA.map((c) => [c, 3])) as CorrectionRow["criteria"];
 
+/**
+ * The row this script writes, and deliberately NOT the boring one.
+ *
+ * A 90-second monologue followed by an abandoned débat: halved for the part
+ * that never happened, then docked 3 for the part that ran short. 15 → 7 → 4 —
+ * an `absence_penalty` of 8 and a `duration_penalty` of 3, both non-zero at
+ * once, which is the only shape that exercises the constraint as a sum.
+ *
+ * The earlier fixture hard-coded a clean `15/15` with both penalties at 0, and
+ * that number is why this script once passed against a database whose
+ * `evaluations_score_25_check` was still the single-penalty version: a row with
+ * no penalties satisfies the old constraint and the new one identically, so the
+ * round trip could not tell them apart. It found out in production instead,
+ * when the first candidate to skip the débat had their correction refused by
+ * the constraint and lost.
+ *
+ * Produced by `scoreSitting` rather than written out by hand, so the numbers
+ * are ones the rubric can actually emit and cannot drift from it.
+ */
+const scored = scoreSitting(bands, {
+  monologueSeconds: 90,
+  debateSeconds: 0,
+  monologueWords: 120,
+  debateWords: 0,
+  phonologyHeard: true,
+});
+
 const correction: CorrectionRow = {
   mode: "audio",
-  criteria: bands,
-  rawScore25: 15,
-  durationPenalty: 0,
-  score25: 15,
-  meetsFloor: true,
+  criteria: scored.criteria,
+  rawScore25: scored.rawScore25,
+  absencePenalty: scored.absencePenalty,
+  durationPenalty: scored.durationPenalty,
+  score25: scored.score25,
+  meetsFloor: scored.meetsFloor,
   feedback: {
     justifications: Object.fromEntries(
       ORAL_CRITERIA.map((c) => [c, `${c} : vérification`]),
@@ -209,9 +238,24 @@ async function main(): Promise<number> {
       "recorded as disposed of, with no uri",
       stored?.recordings.every((r) => r.uri === null && r.deletedAt !== null) ?? false,
     );
-    check("the correction came back whole", stored?.correction?.score25 === 15, {
+    check("the correction came back whole", stored?.correction?.score25 === scored.score25, {
       score25: stored?.correction?.score25,
+      expected: scored.score25,
     });
+    // The two penalty columns, separately. Checking only `score_25` would pass
+    // a row that stored the whole 10 points as a duration penalty, which is a
+    // correction nobody can explain — and the reason `absence_penalty` is its
+    // own column rather than more of the other one.
+    check(
+      "with both penalties, each under its own name",
+      stored?.correction?.absencePenalty === scored.absencePenalty &&
+        stored?.correction?.durationPenalty === scored.durationPenalty,
+      {
+        absencePenalty: stored?.correction?.absencePenalty,
+        durationPenalty: stored?.correction?.durationPenalty,
+        expected: { absence: scored.absencePenalty, duration: scored.durationPenalty },
+      },
+    );
     check(
       "with its five bands intact",
       ORAL_CRITERIA.every((c) => stored?.correction?.criteria[c] === 3),

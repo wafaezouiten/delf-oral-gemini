@@ -4,7 +4,9 @@ import { Notice } from "@/app/_components/notice";
 import { secondaryButton } from "@/app/_components/button-styles";
 import { requireExamAccess, requireUserId } from "@/lib/auth/exam-guard";
 import { neonSittingStore } from "@/lib/db/sittings";
+import { partsAbsent } from "@/lib/delf/orale-rubric";
 import { findTopic } from "@/lib/delf/topics";
+import { candidateWordCount } from "@/lib/delf/transcript";
 import type { StoredSitting } from "@/lib/exams/sitting-persistence";
 import { ResultsClient, type StoredResult } from "./results-client";
 
@@ -75,6 +77,22 @@ export default async function ResultsPage({ params }: PageProps<"/app/results/[e
       // No `shortParts`: which half ran short is the corrector's working and has
       // no column. The client already treats it as optional, because a stored
       // correction was always going to be the other thing it renders.
+      absencePenalty: correction.absencePenalty,
+      // `absentParts` has no column either, but unlike `shortParts` it can be
+      // recovered exactly: it was read off the transcript, and the transcript
+      // is stored. This is the rubric's own `partsAbsent`, over the same input
+      // it saw at grading time — not a second copy of the rule.
+      //
+      // Guarded on the penalty so a row written before the halving existed
+      // (`absence_penalty` defaults to 0) is never labelled with a charge it
+      // did not take.
+      absentParts:
+        correction.absencePenalty > 0
+          ? partsAbsent({
+              monologueWords: candidateWordCount(sitting.transcript, "monologue"),
+              debateWords: candidateWordCount(sitting.transcript, "debate"),
+            })
+          : [],
       model: correction.model,
       latencySeconds: correction.latencySeconds,
       feedback: correction.feedback,

@@ -16,6 +16,7 @@ import {
 import { Kicker, Tag } from "@/app/_components/po/tag";
 import { scoreInk } from "@/app/_components/score-band";
 import { cn } from "@/lib/ui/class-names";
+import { correctionNotices } from "@/lib/ui/correction-notices";
 import { COMPETENCY_FLOOR, COMPETENCY_MAX } from "@/lib/delf/constants";
 import {
   ORAL_CRITERIA,
@@ -73,6 +74,14 @@ export interface StoredResult {
      */
     durationPenalty?: number;
     shortParts?: Array<"monologue" | "debate">;
+    /**
+     * What the halving cost, and which part never happened. Optional for the
+     * same reason as the two above, and the fallback matters more here: the
+     * old reading would attribute 13 points to a short épreuve, which is not
+     * what took them.
+     */
+    absencePenalty?: number;
+    absentParts?: Array<"monologue" | "debate">;
     model: string;
     /**
      * Nullable because `evaluations.latency_seconds` is, and this object is
@@ -219,28 +228,15 @@ export function ResultsClient({
    * treatment at full force and the band colours the numeral it describes (#50).
    */
   const tone = scoreTone(evaluation.score25);
-  const penalised =
-    evaluation.durationPenalty !== undefined
-      ? evaluation.durationPenalty > 0
-      : evaluation.score25 < evaluation.rawScore25;
 
   /**
-   * Which half fell short, in the candidate's own words.
-   *
-   * Capitalised, because it opens a sentence. It used to be spliced in
-   * lowercase after "Note avant pénalité de durée : 15/25." and read as a typo
-   * on the one paragraph that has to be believed — the one explaining why the
-   * number above it is lower than the marking earned.
+   * The two paragraphs below the mark, and the figure each is measured
+   * against. Both live in `lib/ui/correction-notices.ts`, which is where the
+   * arithmetic can be tested — and it needs to be, because the duration
+   * paragraph's baseline is no longer the sum of the bands whenever the
+   * halving fired in front of it.
    */
-  const shortParts = evaluation.shortParts ?? [];
-  const shortLabel =
-    shortParts.length === 2
-      ? "Vos deux prises de parole ont été"
-      : shortParts[0] === "monologue"
-        ? "Votre monologue a été"
-        : shortParts[0] === "debate"
-          ? "Votre débat a été"
-          : "Votre temps de parole a été";
+  const notices = correctionNotices(evaluation);
 
   const phonoNote = evaluation.feedback.phonologieNonEvaluable
     ? "La phonologie n'a pas pu être évaluée de façon fiable sur cette production."
@@ -319,14 +315,20 @@ export function ResultsClient({
               </Tag>
             </div>
 
-            {penalised && (
+            {/* Whole sentences, built and tested in `lib/ui/correction-notices.ts`.
+                The component chooses neither the wording nor the figure: both
+                depend on which rules fired, and the last version that decided
+                the wording here told a candidate who sat neither part about
+                « celle que vous avez réalisée ». */}
+            {notices.absence && (
               <p className="text-muted-foreground mt-3 text-xs leading-relaxed">
-                Note avant pénalité de durée : {evaluation.rawScore25}/{COMPETENCY_MAX}.{" "}
-                {/* Named, not merely announced: "vous avez été pénalisé" is an
-                    assertion, "votre débat a duré 40 secondes" is something the
-                    candidate can check against the clock beside it. */}
-                {shortLabel} nettement plus court que ce que demande l&apos;épreuve
-                réelle.
+                {notices.absence}
+              </p>
+            )}
+
+            {notices.duration && (
+              <p className="text-muted-foreground mt-3 text-xs leading-relaxed">
+                {notices.duration}
               </p>
             )}
 
