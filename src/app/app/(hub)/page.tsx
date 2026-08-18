@@ -1,9 +1,14 @@
 import { currentUser } from "@clerk/nextjs/server";
 
 import { requireUserId } from "@/lib/auth/exam-guard";
-import { bestScoreBySujet, readCandidateHistory } from "@/lib/db/history";
+import { readCandidateHistory } from "@/lib/db/history";
 import { ORAL_TOPICS } from "@/lib/delf/topics";
-import { buildHubSujets, buildHubView, HUB_LINKS } from "@/lib/ui/epreuve-hub";
+import {
+  buildHubSujets,
+  buildHubView,
+  HUB_LINKS,
+  latestScoreBySujet,
+} from "@/lib/ui/epreuve-hub";
 import {
   HubCapabilities,
   HubFormat,
@@ -41,7 +46,7 @@ export default async function ProductionOraleHub() {
   const [user, history] = await Promise.all([currentUser(), readCandidateHistory(userId)]);
 
   const view = buildHubView();
-  const sujets = buildHubSujets(ORAL_TOPICS, bestScoreBySujet(history));
+  const sujets = buildHubSujets(ORAL_TOPICS, latestScoreBySujet(history));
   const firstName = user?.firstName;
 
   return (

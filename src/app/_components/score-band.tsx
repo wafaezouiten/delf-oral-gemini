@@ -8,7 +8,7 @@ import { cn } from "@/lib/ui/class-names";
  *
  * Every /25 the product prints comes through here: the results verdict, the
  * dashboard's rows and its « Note moyenne » tile, the historique, and the two
- * catalogues' best score. Before #50 they were coloured pass/fail from
+ * catalogues' last score. Before #50 they were coloured pass/fail from
  * `meetsCompetencyFloor`, so a 6/25 and a 24/25 were the same green.
  *
  * The three rules are `BandScale`'s, for the same reasons:
