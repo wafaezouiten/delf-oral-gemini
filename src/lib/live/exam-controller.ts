@@ -102,6 +102,10 @@ export interface PlayerLike {
   enqueue(base64: string): void;
   interrupt(): void;
   close(): Promise<void>;
+  /** Audio scheduled but not yet heard. Logged when an interruption is about to
+   *  throw it away, so a question the candidate never heard leaves a record of
+   *  how much of it there was. See {@link ExamController.handleInterruption}. */
+  readonly bufferedSeconds: number;
 }
 
 /** Diagnostics from the audio layer, routed into the same session log the
@@ -412,6 +416,14 @@ export class ExamController {
    * the closing handshake and the phase transition coordinate through this.
    */
   private activityEnded = false;
+  /**
+   * The examiner's opening turn of this phase has been delivered.
+   *
+   * False from the moment a session opens until the examiner has finished its
+   * first turn on it, or the speaker has run out of that turn. While it is
+   * false an interruption is refused — see {@link handleInterruption}.
+   */
+  private openingTurnDelivered = false;
   private phaseSeconds = { monologue: 0, debate: 0 };
   /** Wall-clock stamps per speaking phase, for `oral_exam_phases`' audit trail.
    *  Null means the phase was never entered, which is the truth about an
@@ -824,21 +836,19 @@ export class ExamController {
   }
 
   private async openAudio(): Promise<boolean> {
-    // Held locally until BOTH devices are open. Assigning as we went meant a
-    // microphone failure — the common one; it is the half that needs
-    // permission — left the speaker's context open with nothing to close it
-    // until the exam ended.
-    let player: PlayerLike | null = null;
-    try {
-      player = this.deps.createPlayer({
-        onSpeakingChange: (speaking) => {
-          this.examinerSpeaking = speaking;
-          this.emit();
-        },
-        onEvent: (name, detail) => this.log(name, detail),
-      });
-      await player.resume();
+    // The speaker first, and on its own terms (#74).
+    //
+    // The two devices fail for different reasons and only one of them is the
+    // candidate's to fix, but they used to be installed together: the player
+    // was built, resumed, and then closed in the microphone's catch. A refused
+    // permission therefore also cost the examiner its voice on a sitting whose
+    // socket and transcript were both working — so the débat printed questions
+    // that were never spoken, the faces never moved, and the only notice on
+    // screen talked about the microphone. Nothing about the examiner speaking
+    // depends on the candidate being recorded, so nothing here makes it.
+    if (!(await this.openPlayer())) return false;
 
+    try {
       const recorder = this.deps.createRecorder({
         // The recording does not go through here and must not: `sendAudio` on a
         // torn-down session is a no-op, and a sitting has several of those.
@@ -850,20 +860,19 @@ export class ExamController {
 
       // `destroy()` can land while the permission prompt is up — which is the
       // very window this method was moved late in the exam to create. The
-      // devices are installed on the controller only at the lines below, so a
-      // teardown that ran meanwhile found both fields null and closed nothing;
-      // without this check they are then adopted by a controller that is
-      // already gone, and nothing will ever stop them again. The microphone
-      // and the speaker each guard their own version of this internally; this
-      // is the same race one layer up, where only the controller can see it.
+      // microphone is installed on the controller only at the line below, so a
+      // teardown that ran meanwhile found the field null and closed nothing;
+      // without this check the device is then adopted by a controller that is
+      // already gone, and nothing will ever stop it again. The speaker answers
+      // its half of the same race in `openPlayer`, and each device guards its
+      // own version internally; this is that race one layer up, where only the
+      // controller can see it.
       if (this.destroyed) {
         await recorder.stop().catch(() => {});
-        await player.close().catch(() => {});
-        this.log("audio-discarded", "the sitting ended while the devices were opening");
+        this.log("audio-discarded", "the sitting ended while the microphone was opening");
         return false;
       }
 
-      this.player = player;
       this.recorder = recorder;
       // The development text mode can be switched on during preparation, before
       // there is any microphone to turn off. The device has to arrive already
@@ -874,18 +883,76 @@ export class ExamController {
       this.log("audio-ready");
       return true;
     } catch (error) {
+      // The speaker opened above is deliberately left running. It is the half
+      // that still works, and it is not the candidate's recording: keeping it is
+      // the difference between an épreuve that goes unrecorded and one that is
+      // also silent, on which the examiner asks questions only the feed reports.
+      // `destroy()` closes it, as it does on every other path.
+      this.reportAudioFailure(error);
+      return false;
+    }
+  }
+
+  /**
+   * Open the speaker, and install it whether or not the microphone follows.
+   *
+   * Idempotent by reuse rather than by rebuilding: `prepareAudio()` retries
+   * while there is no microphone — from `advanceEarly()`, and again at every
+   * speaking boundary — and the speaker now survives those failures, so a retry
+   * arrives with a working one already installed. Building a second
+   * `AudioContext` there would abandon the first with nothing holding it, which
+   * is the leak the two devices were bundled together to avoid.
+   */
+  private async openPlayer(): Promise<boolean> {
+    if (this.player) return true;
+
+    let player: PlayerLike | null = null;
+    try {
+      player = this.deps.createPlayer({
+        onSpeakingChange: (speaking) => {
+          // The speaker running out of the examiner's turn is one of the two
+          // things that prove the opening question was delivered. See
+          // {@link handleInterruption}.
+          if (!speaking && this.examinerSpeaking) this.openingTurnDelivered = true;
+          this.examinerSpeaking = speaking;
+          this.emit();
+        },
+        onEvent: (name, detail) => this.log(name, detail),
+      });
+      await player.resume();
+
+      // The same teardown race the microphone answers below, one device earlier.
+      if (this.destroyed) {
+        await player.close().catch(() => {});
+        this.log("audio-discarded", "the sitting ended while the speaker was opening");
+        return false;
+      }
+
+      this.player = player;
+      return true;
+    } catch (error) {
       await player?.close().catch(() => {
         /* nothing left to report; the exam failure below is the story */
       });
-      const denied =
-        typeof DOMException !== "undefined" &&
-        error instanceof DOMException &&
-        (error.name === "NotAllowedError" || error.name === "SecurityError");
-      this.micError = denied ? MIC_MESSAGES.denied : MIC_MESSAGES.unavailable;
-      this.log("audio-failed", String(error));
-      this.emit();
+      // The microphone is not attempted after this, and the notice below is the
+      // one it would have raised anyway: a browser that cannot open an
+      // `AudioContext` for playback will not open a capture graph either.
+      this.reportAudioFailure(error);
       return false;
     }
+  }
+
+  /** One notice for either device. Both are refused by the same prompt and by
+   *  the same browser, and neither failure is worth a sentence that asks the
+   *  candidate for something different. */
+  private reportAudioFailure(error: unknown): void {
+    const denied =
+      typeof DOMException !== "undefined" &&
+      error instanceof DOMException &&
+      (error.name === "NotAllowedError" || error.name === "SecurityError");
+    this.micError = denied ? MIC_MESSAGES.denied : MIC_MESSAGES.unavailable;
+    this.log("audio-failed", String(error));
+    this.emit();
   }
 
   /**
@@ -1511,6 +1578,10 @@ export class ExamController {
     // machine. Without this the previous phase's terminal `closed` would show
     // as the new session's starting state until its first callback arrived.
     this.connection = "idle";
+    // Same lifetime, same reason: the opening turn this guards is this
+    // session's, not the one the previous phase finished. See
+    // {@link handleInterruption}.
+    this.openingTurnDelivered = false;
 
     const callbacks: SessionManagerCallbacks = {
       onStateChange: (state) => {
@@ -1535,8 +1606,11 @@ export class ExamController {
       onCandidateTranscript: (text) => this.addFragment("candidate", text),
       onExaminerTranscript: (text) => this.addFragment("examiner", text),
       onExaminerAudio: (base64) => this.player?.enqueue(base64),
-      onInterrupted: () => this.player?.interrupt(),
+      onInterrupted: () => this.handleInterruption(),
       onTurnComplete: () => {
+        // Whatever else this turn ending means below, it means the examiner has
+        // finished the first thing it said on this session.
+        this.openingTurnDelivered = true;
         // The ONLY thing Gemini is allowed to influence about the exam's flow,
         // and only inside a window the app opened: once the clock has run out
         // and the closing directive has gone out, the examiner's turn ending is
@@ -1573,6 +1647,36 @@ export class ExamController {
       // model has no turn boundary at which it could interrupt.
       session.beginCandidateActivity();
     }
+  }
+
+  /**
+   * Gemini reports that the candidate took the floor: drop the queued playback.
+   *
+   * Refused until the examiner's opening turn has been delivered (#74), because
+   * before that there is nothing to take the floor FROM. The débat opens with
+   * the examiner's question, and the candidate cannot be interrupting a question
+   * they have not been asked yet — so an interruption arriving in that window is
+   * automatic VAD reacting to the room, and honouring it threw away the whole
+   * question while the transcript went on printing it. The candidate then read
+   * an objection nobody had spoken.
+   *
+   * Two things release it, whichever comes first: the turn completing, and the
+   * speaker running out of it. The second matters because an interrupted
+   * generation is not guaranteed to be followed by a `turnComplete`, and a guard
+   * that could only be released by one of them could stay shut for a whole
+   * débat — leaving an examiner the candidate genuinely cannot talk over.
+   *
+   * After that, an interruption is exactly what it says: the candidate is
+   * speaking, and the examiner stops.
+   */
+  private handleInterruption(): void {
+    const buffered = this.player?.bufferedSeconds ?? 0;
+    if (!this.openingTurnDelivered) {
+      this.log("interruption-refused", { phase: this.phase, buffered });
+      return;
+    }
+    this.log("interruption", { buffered });
+    this.player?.interrupt();
   }
 
   /** Release the monologue floor exactly once. See `activityEnded`. */
