@@ -48,7 +48,9 @@ export function AnnouncementControl({
     return (
       <section
         aria-label={ANNOUNCEMENT_COPY.speaking}
-        className="border-primary/40 bg-primary-subtle/40 rounded-lg border p-4"
+        // `w-full`: this renders beside a heading, in a wrapping row, and a
+        // paragraph with two buttons under it does not belong on that line.
+        className="border-primary/40 bg-primary-subtle/40 w-full rounded-lg border p-4"
       >
         {/* A live status rather than a heading: there is no voice in this state,
             being told is the whole of what the branch does, and it is what says
@@ -71,7 +73,7 @@ export function AnnouncementControl({
   }
 
   return (
-    <div className="flex justify-end">
+    <div className="flex shrink-0 justify-end">
       {/* Politely, and once. The visible button says « Passer » and names no
           speaker; this is the whole of what the card's heading used to say, in
           the place the button appears. Polite rather than assertive because the

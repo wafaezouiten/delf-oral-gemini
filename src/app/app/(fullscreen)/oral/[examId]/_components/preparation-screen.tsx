@@ -93,10 +93,12 @@ export function PreparationScreen({
    * The examiner's spoken consigne (#37) — « Passer », for the twenty-five
    * seconds it is audible (#59).
    *
-   * At the head of the rail. The rail is the control column and this is a
-   * control; putting it over the sujet instead would push the document the
-   * candidate has thirty minutes to read below the fold on a laptop, to make
-   * room for a button about listening to an instruction to read it.
+   * On the « Document déclencheur » rule, at the right-hand end of it. The rail
+   * is the control column and this is a control, which is where it started —
+   * but it is a control about the sujet, it exists for twenty-five seconds, and
+   * on a laptop the rail's head is a scroll away from the document the consigne
+   * is telling the candidate to read. It costs the heading no height: the row it
+   * shares was already there.
    */
   announcement?: ReactNode;
 }) {
@@ -153,9 +155,17 @@ export function PreparationScreen({
             {topic.title}
           </h1>
 
-          <h2 className="text-muted-foreground border-border mt-6 border-b pb-2 text-[0.6875rem] font-semibold tracking-[0.16em] uppercase">
-            Document déclencheur
-          </h2>
+          {/* « Passer » rides on this heading rather than sitting in the rail
+              (#59): the consigne is being spoken about the document, the eye is
+              already here, and the rail is a scroll away on a laptop. It wraps
+              to its own line when the browser refused to autoplay, because that
+              state is a paragraph and two buttons rather than one word. */}
+          <div className="border-border mt-6 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-2 border-b pb-2">
+            <h2 className="text-muted-foreground text-[0.6875rem] font-semibold tracking-[0.16em] uppercase">
+              Document déclencheur
+            </h2>
+            {announcement}
+          </div>
           <p className="document-text mt-4">{topic.document}</p>
 
           <div className="border-border bg-muted/40 mt-6 rounded-lg border p-4">
@@ -168,8 +178,6 @@ export function PreparationScreen({
 
         {/* Rail */}
         <aside className="flex min-h-0 flex-col gap-3.5 lg:overflow-y-auto lg:pr-0.5">
-          {announcement && <div className="shrink-0">{announcement}</div>}
-
           <div className="border-border bg-card flex min-h-[13.75rem] flex-1 flex-col overflow-hidden rounded-lg border">
             <div className="border-border flex items-center gap-2 border-b px-4 py-3">
               <PencilIcon className="text-muted-foreground size-3.5" />

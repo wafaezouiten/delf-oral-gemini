@@ -165,12 +165,20 @@ export function PassationScreen({
               so the candidate recognises the same document rather than reading
               what looks like a different one. */}
           <section className="border-paper-border bg-paper rounded-lg border px-5 py-6 sm:px-7">
-            <Kicker>{partieKicker(phase)}</Kicker>
-            <h1 className="font-serif mt-1.5 text-[1.375rem] leading-[1.25] font-semibold text-balance">
-              {topic.title}
-            </h1>
-
-            {announcement && <div className="mt-4">{announcement}</div>}
+            {/* « Passer » beside the title, not under it (#59): the consigne is
+                twenty-five seconds of the examiner talking about this sujet, and
+                a control that pushed the document down the page for the length
+                of a sentence would move the thing being read. The held state
+                wraps to its own line — it is a paragraph, not a word. */}
+            <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-3">
+              <div className="min-w-0">
+                <Kicker>{partieKicker(phase)}</Kicker>
+                <h1 className="font-serif mt-1.5 text-[1.375rem] leading-[1.25] font-semibold text-balance">
+                  {topic.title}
+                </h1>
+              </div>
+              {announcement}
+            </div>
 
             <p className="document-text mt-4">{topic.document}</p>
           </section>

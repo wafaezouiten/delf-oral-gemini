@@ -73,10 +73,11 @@ same rule, so the reproduction keeps it.
    ┌────────────────────────────────────────────────────▼──────────────────┐
    │ 1. PRÉPARATION        step 0 · ring + « Commencer » in the topbar ·   │
    │                       starts on arrival, consigne spoken (#37, #55)   │
-   │    left: notices · sujet, justified, "Votre mission"                  │
-   │    right: « Passer » while the consigne plays (#59) · notes           │
-   │           textarea · structure attendue · "Avant de commencer"        │
-   │           (mic test, endroit calme, navigateur) · déroulé             │
+   │    left: notices · sujet, justified · « Passer » on the               │
+   │          « Document déclencheur » rule while it speaks (#59) ·        │
+   │          "Votre mission"                                              │
+   │    right: notes textarea · structure attendue · "Avant de             │
+   │           commencer" (mic test, endroit calme, navigateur) · déroulé  │
    │    exits: time-up  |  « Commencer » (topbar)  |  Retour → dialog      │
    └────────────────────────────────────────────────────┬──────────────────┘
                                                         │
@@ -161,9 +162,10 @@ Two departures from the reference's rail, both #59:
   It keeps the `checking` gate the card's button held.
 - *The consigne is a button, not a card.* It was a panel with the script, a
   replay and a sticky mute, and it outlived the clip by the length of the phase.
-  While the voice plays there is « Passer » at the head of the rail, and nothing
-  after it. A consigne the browser refuses to autoplay still gets its sentence
-  and its two ways out, because that state holds the épreuve.
+  While the voice plays there is « Passer » at the right-hand end of the
+  « Document déclencheur » rule — beside the document the consigne is about —
+  and nothing after it. A consigne the browser refuses to autoplay still gets
+  its sentence and its two ways out, because that state holds the épreuve.
 
 **Passation.** Reproduced whole: the scene with its two faces and pulsing rings,
 the beat stepper, the elapsed/total clock with its draining bar, the foot control
