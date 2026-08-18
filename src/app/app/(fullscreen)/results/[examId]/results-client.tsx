@@ -14,6 +14,7 @@ import {
   RefreshIcon,
 } from "@/app/_components/po/icons";
 import { Kicker, Tag } from "@/app/_components/po/tag";
+import { scoreInk } from "@/app/_components/score-band";
 import { cn } from "@/lib/ui/class-names";
 import { COMPETENCY_FLOOR, COMPETENCY_MAX } from "@/lib/delf/constants";
 import {
@@ -23,7 +24,7 @@ import {
   ORAL_CRITERIA_LABELS,
   type OralCriterion,
 } from "@/lib/delf/criteria";
-import { type GrilleBand } from "@/lib/delf/grille";
+import { scoreTone, type GrilleBand } from "@/lib/delf/grille";
 import { meetsCompetencyFloor } from "@/lib/delf/orale-rubric";
 import { formatClock } from "@/lib/delf/phases";
 import { type TranscriptEntry } from "@/lib/delf/transcript";
@@ -206,6 +207,18 @@ export function ResultsClient({
 
   const { evaluation, topic, transcript, monologueSeconds, debateSeconds } = result;
   const passed = meetsCompetencyFloor(evaluation.score25);
+
+  /**
+   * Two separate facts about the same number, and the reason the pill below did
+   * not simply change colour.
+   *
+   * `passed` is the DELF's elimination rule and it is binary — 5/25 clears the
+   * floor. `tone` is where the mark sits on the five-step scale, and 5/25 is in
+   * the reddest band. « Au-dessus du seuil de 5/25 » in a rouge pill would read
+   * as a contradiction, so the pill keeps the floor's own success/danger
+   * treatment at full force and the band colours the numeral it describes (#50).
+   */
+  const tone = scoreTone(evaluation.score25);
   const penalised =
     evaluation.durationPenalty !== undefined
       ? evaluation.durationPenalty > 0
@@ -285,7 +298,12 @@ export function ResultsClient({
           {/* Verdict */}
           <div className="border-border shrink-0 border-b px-6 pt-5 pb-4">
             <div className="flex flex-wrap items-baseline gap-x-3 gap-y-2">
-              <p className="font-serif tabular text-[2.875rem] leading-none font-semibold">
+              <p
+                className={cn(
+                  "font-serif tabular text-[2.875rem] leading-none font-semibold",
+                  scoreInk(tone),
+                )}
+              >
                 {evaluation.score25}
                 <span className="text-muted-foreground text-[1.375rem] font-semibold">
                   /{COMPETENCY_MAX}

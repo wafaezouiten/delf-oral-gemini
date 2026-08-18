@@ -5,7 +5,10 @@ import { useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/ui/class-names";
 import {
   DEV_PANEL_COPY,
+  DEV_SUBMIT_COPY,
   describeDraft,
+  devSubmitDisabled,
+  devSubmitState,
   exampleExpose,
   resolveDevSeconds,
 } from "@/lib/ui/dev-transcription";
@@ -44,21 +47,36 @@ import {
  * Amber throughout, and nothing else in the épreuve is amber: the panel writes
  * an exam transcript without anyone speaking, so it should never be mistakeable
  * for part of the sitting.
+ *
+ * **The field is emptied by the controller's answer, never by the press (#53).**
+ * `onSubmit` reports whether the text counted as the monologue, and only that
+ * clears the box. It used to clear unconditionally, so a submission the
+ * controller declined on its first line took the exposé with it and left nothing
+ * on screen to say so — the failure was one silent `return` and one hopeful
+ * `setText("")`.
  */
 export function DevTranscriptionPanel({
   subject,
   active,
+  awaitingConsigne = false,
+  closing = false,
   onActiveChange,
   onSubmit,
 }: {
   /** Seeds « Exemple », so the sample answers the sujet actually on screen. */
   subject: string;
   active: boolean;
+  /** The examiner is speaking this part's consigne, so nothing can be sent yet. */
+  awaitingConsigne?: boolean;
+  /** The monologue is ending: the examiner has been asked for its last sentence. */
+  closing?: boolean;
   onActiveChange: (on: boolean) => void;
-  onSubmit: (text: string, seconds: number) => void;
+  /** Resolves true when the exposé counted as the monologue. See the note above. */
+  onSubmit: (text: string, seconds: number) => boolean | Promise<boolean>;
 }) {
   const [text, setText] = useState("");
   const [duration, setDuration] = useState("");
+  const [sending, setSending] = useState(false);
   const field = useRef<HTMLTextAreaElement>(null);
 
   // Opening the panel is a decision to type, so the caret goes where the typing
@@ -67,7 +85,33 @@ export function DevTranscriptionPanel({
     if (active) field.current?.focus();
   }, [active]);
 
-  const ready = text.trim().length > 0;
+  const submitState = devSubmitState({ text, awaitingConsigne, sending, closing });
+  const submitCopy = DEV_SUBMIT_COPY[submitState];
+  const refused = devSubmitDisabled(submitState);
+
+  // An accepted exposé ends the monologue, and this panel belongs to the
+  // monologue — so the controller's own notification unmounts it from inside
+  // `onSubmit`, before the await below has even suspended. The state updates
+  // that follow therefore land on a component that is usually already gone.
+  //
+  // They stay, and are not conditional on that: what empties the field is the
+  // controller having accepted the exposé, which is a rule about this form and
+  // must not quietly become "the caller happened to unmount us". React has not
+  // warned about an update after unmount since 18, and there is nothing to
+  // clean up here — no subscription, no timer, nothing that outlives the panel.
+  async function send() {
+    setSending(true);
+    try {
+      const accepted = await onSubmit(text, resolveDevSeconds(text, duration));
+      // The one thing that empties the box. A refusal keeps the exposé exactly
+      // where the developer left it, which is the whole of #53's second half.
+      if (!accepted) return;
+      setText("");
+      setDuration("");
+    } finally {
+      setSending(false);
+    }
+  }
 
   return (
     // Deliberately NOT `relative`. The panel below is positioned against the
@@ -96,10 +140,8 @@ export function DevTranscriptionPanel({
         <form
           onSubmit={(event) => {
             event.preventDefault();
-            if (!ready) return;
-            onSubmit(text, resolveDevSeconds(text, duration));
-            setText("");
-            setDuration("");
+            if (refused) return;
+            void send();
           }}
           // Opens upward, so it never covers the mic or the notice it sits
           // beside. Below `xl` it spans the control bar between its own
@@ -173,12 +215,27 @@ export function DevTranscriptionPanel({
             </span>
             <button
               type="submit"
-              disabled={!ready}
+              disabled={refused}
               className="ml-auto shrink-0 rounded bg-amber-600 px-2.5 py-1 text-[0.6875rem] font-semibold text-white transition-colors hover:bg-amber-700 disabled:cursor-not-allowed disabled:bg-amber-600/40"
             >
-              {DEV_PANEL_COPY.submit}
+              {submitCopy.label}
             </button>
           </div>
+
+          {/* Why the button will not send. Both reasons are things happening
+              elsewhere in the épreuve — the consigne being spoken, the monologue
+              being ended by the mic button — and a disabled control that does not
+              name the reason reads exactly like the broken one this replaced. */}
+          {submitCopy.note && (
+            <p
+              // Announced rather than merely printed: the state that matters
+              // most here is the one where nothing visible changed.
+              role="status"
+              className="rounded border border-amber-300 bg-amber-100 px-1.5 py-1 text-[0.625rem] leading-snug text-amber-900"
+            >
+              {submitCopy.note}
+            </p>
+          )}
 
           {/* The reference this is modelled on says « Micro occupé. Arrêtez
               l'enregistrement avant d'envoyer un texte. » — a warning, because

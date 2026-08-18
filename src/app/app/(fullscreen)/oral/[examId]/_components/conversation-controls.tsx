@@ -4,7 +4,12 @@ import type { ReactNode } from "react";
 
 import { AlertIcon, LoadingIcon, MicIcon, PencilIcon, StopIcon } from "@/app/_components/po/icons";
 import { cn } from "@/lib/ui/class-names";
-import { micCopy, secondsToMonologueFloor, type SpeakingPhase } from "@/lib/ui/po-player-view";
+import {
+  micCopy,
+  secondsToMonologueFloor,
+  type MicState,
+  type SpeakingPhase,
+} from "@/lib/ui/po-player-view";
 
 /**
  * The passation control bar, docked at the foot: the notes toggle on the left,
@@ -37,10 +42,13 @@ export function ConversationControls({
   canAdvance,
   connecting,
   recording,
+  awaitingStart = false,
+  startDisabled = false,
   elapsed,
   hasNotes,
   notesOpen,
   onToggleNotes,
+  onStart,
   onAdvance,
   emptyTranscript = false,
   onRetryTranscription,
@@ -51,10 +59,23 @@ export function ConversationControls({
   canAdvance: boolean;
   connecting: boolean;
   recording: boolean;
+  /**
+   * The part has not begun: the button starts it rather than ending it.
+   *
+   * This is the one state in which the control's meaning is reversed, which is
+   * why it carries a visible word from here on — an icon that is a square in one
+   * state and a circle in another does not tell a candidate whether they are
+   * about to start speaking or stop.
+   */
+  awaitingStart?: boolean;
+  /** Armed, but not yet startable: the examiner is still giving the consigne. */
+  startDisabled?: boolean;
   elapsed: number;
   hasNotes: boolean;
   notesOpen: boolean;
   onToggleNotes: () => void;
+  /** « Enregistrer »: start the clock, the recording and the session. */
+  onStart: () => void;
   onAdvance: () => void;
   /** The monologue was ended with no speech on it, and the phase is held open. */
   emptyTranscript?: boolean;
@@ -63,8 +84,17 @@ export function ConversationControls({
    *  empty-transcript notice rather than under the conversation (#36). */
   devPanel?: ReactNode;
 }) {
-  const state = connecting ? "connecting" : canAdvance ? "recording" : "locked";
-  const { hint, label } = micCopy(phase, state, secondsToMonologueFloor(elapsed));
+  // Armed outranks everything: a part that has not begun is not connecting, and
+  // it is not locked behind a floor it has not started counting towards.
+  const state: MicState = awaitingStart
+    ? "armed"
+    : connecting
+      ? "connecting"
+      : canAdvance
+        ? "recording"
+        : "locked";
+  const { hint, label, button } = micCopy(phase, state, secondsToMonologueFloor(elapsed));
+  const armed = state === "armed";
   const locked = state === "locked";
 
   return (
@@ -101,25 +131,39 @@ export function ConversationControls({
         <div className="flex flex-1 flex-col items-center gap-1.5">
           <button
             type="button"
-            onClick={onAdvance}
-            disabled={locked || connecting}
+            onClick={armed ? onStart : onAdvance}
+            disabled={armed ? startDisabled : locked || connecting}
             aria-label={label}
             className={cn(
-              "relative flex size-14 items-center justify-center rounded-full transition-colors disabled:cursor-not-allowed",
-              recording && !locked
-                ? "bg-danger text-white hover:opacity-90"
-                : locked
-                  ? "bg-muted text-muted-foreground border-border border"
-                  : "bg-primary text-primary-foreground hover:opacity-90",
+              "relative flex items-center justify-center gap-2 transition-colors disabled:cursor-not-allowed disabled:opacity-50",
+              // Armed, the control is a pill with a word in it: it is starting
+              // something, and the round stop-button shape reads as ending one.
+              armed
+                ? "bg-danger h-11 rounded-full px-5 text-sm font-semibold text-white hover:opacity-90"
+                : "size-14 rounded-full",
+              !armed &&
+                (recording && !locked
+                  ? "bg-danger text-white hover:opacity-90"
+                  : locked
+                    ? "bg-muted text-muted-foreground border-border border"
+                    : "bg-primary text-primary-foreground hover:opacity-90"),
             )}
           >
             {/* The ring says "you are live", so it follows the microphone and
                 not the button's enabled state: it keeps pulsing through the
-                locked minutes, when the candidate is very much being recorded. */}
-            {recording && (
+                locked minutes, when the candidate is very much being recorded.
+                Never while armed — nothing is being captured yet, and a pulsing
+                ring over a part that has not started is the same false claim the
+                recording badge is written to avoid. */}
+            {recording && !armed && (
               <span className="po-ring border-danger absolute -inset-1 rounded-full border-2" aria-hidden />
             )}
-            {connecting ? (
+            {armed ? (
+              <>
+                <MicIcon className="size-4" aria-hidden />
+                {button}
+              </>
+            ) : connecting ? (
               <LoadingIcon className="size-6 animate-spin" />
             ) : locked ? (
               <MicIcon className="size-6" />

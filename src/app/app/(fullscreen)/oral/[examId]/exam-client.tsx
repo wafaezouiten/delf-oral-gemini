@@ -12,15 +12,10 @@ import { isOpusEncodingSupported } from "@/lib/audio/opus-encoder";
 import { selectDeliverable } from "@/lib/exams/uploaded-recording";
 import { requestAbandon } from "@/lib/exams/abandon";
 import { describeFinishFailure, type FinishFailure } from "@/lib/ui/finish-failure";
-import {
-  candidateStatus as candidateStatusLine,
-  examinerStatus as examinerStatusLine,
-} from "@/lib/ui/po-player-view";
 import type { OralTopic } from "@/lib/delf/topics";
-import { ConnectionBadge } from "./_components/connection-badge";
+import { AnnouncementCard } from "./_components/announcement-card";
 import { DEV_TOOLS_ENABLED } from "@/lib/dev-tools";
 import { DevTranscriptionPanel } from "./_components/dev-transcription-panel";
-import { RecordingBadge } from "./_components/recording-badge";
 import { BriefingScreen } from "./_components/briefing-screen";
 import { PreparationScreen } from "./_components/preparation-screen";
 import { PassationScreen } from "./_components/passation-screen";
@@ -57,6 +52,15 @@ export function ExamClient({ examId, topic }: { examId: string; topic: OralTopic
   const router = useRouter();
   const [notes, setNotes] = useState("");
   const [notesOpen, setNotesOpen] = useState(false);
+  /**
+   * Whether the débat prints its exchange (#48). Open by default.
+   *
+   * Here rather than in `PassationScreen` for the same reason `notesOpen` is:
+   * that screen owns no state, which is what lets it stay a layout. It also has
+   * to survive the phase change — a candidate who hid the feed and then saw it
+   * come back because the screen re-rendered would have to hide it twice.
+   */
+  const [transcriptOpen, setTranscriptOpen] = useState(true);
   const [showExitDialog, setShowExitDialog] = useState(false);
   const [abandoning, setAbandoning] = useState(false);
   const [abandonFailed, setAbandonFailed] = useState(false);
@@ -348,6 +352,37 @@ export function ExamClient({ examId, topic }: { examId: string; topic: OralTopic
 
   const hasNotices = state.status === "error" || Boolean(state.micError);
 
+  /**
+   * The examiner's spoken consigne, on both screens it can appear on (#37).
+   *
+   * One element handed to whichever screen is up, rather than each screen building
+   * its own: the card has to survive the préparation → monologue boundary looking
+   * like the same card, and the four controller calls behind it should not be
+   * written down twice.
+   */
+  /**
+   * The phase is open but has not begun: the consigne is playing, or is held
+   * waiting for a click the browser's autoplay policy made necessary (#37).
+   *
+   * Derived here rather than added to `ExamState`, because it is exactly the two
+   * flags below in the two phases this branch renders — and the screens it feeds
+   * need it to keep from printing "you are being recorded and your time has
+   * started" over a phase where neither is true yet.
+   */
+  const awaitingConsigne = state.announcementPlaying || state.announcementBlocked;
+
+  const announcement = (
+    <AnnouncementCard
+      announcement={state.announcement}
+      playing={state.announcementPlaying}
+      blocked={state.announcementBlocked}
+      muted={state.announcementsMuted}
+      onPlay={() => controller.playAnnouncement()}
+      onSkip={() => controller.skipAnnouncement()}
+      onMute={() => controller.muteAnnouncements()}
+    />
+  );
+
   // ------------------------------------------------------------------ screens
 
   if (!state.started) {
@@ -382,6 +417,7 @@ export function ExamClient({ examId, topic }: { examId: string; topic: OralTopic
           if (payload) void onFinished(payload);
         }}
         onLeave={leave}
+        announcement={announcement}
       />
     );
   }
@@ -411,6 +447,7 @@ export function ExamClient({ examId, topic }: { examId: string; topic: OralTopic
           onStartExam={() => void controller.advanceEarly()}
           onExit={() => setShowExitDialog(true)}
           notices={hasNotices ? notices : undefined}
+          announcement={announcement}
         />
         {exitDialog}
       </>
@@ -421,37 +458,28 @@ export function ExamClient({ examId, topic }: { examId: string; topic: OralTopic
     <>
       <PassationScreen
         phase={state.phase}
+        topic={topic}
         elapsed={state.elapsed}
         remaining={state.remaining}
         recording={state.recording}
-        examinerSpeaking={state.examinerSpeaking}
         connected={state.connection === "connected"}
         connecting={state.connection === "connecting"}
         canAdvance={state.canAdvance}
-        examinerStatus={examinerStatusLine({
-          connected: state.connection === "connected",
-          connecting: state.connection === "connecting",
-          speaking: state.examinerSpeaking,
-        })}
-        candidateStatus={candidateStatusLine({
-          connected: state.connection === "connected",
-          examinerSpeaking: state.examinerSpeaking,
-          recording: state.recording,
-        })}
+        awaitingStart={state.awaitingStart}
+        onStart={() => controller.startSpeaking()}
         notes={notes}
         notesOpen={notesOpen}
         onToggleNotes={() => setNotesOpen((open) => !open)}
+        transcript={state.transcript}
+        transcriptOpen={transcriptOpen}
+        onToggleTranscript={() => setTranscriptOpen((open) => !open)}
         onAdvance={advance}
         onExit={() => setShowExitDialog(true)}
         emptyTranscript={state.monologueHeld}
         onRetryTranscription={() => controller.restartMonologue()}
-        badges={
-          <>
-            <RecordingBadge recording={state.recording} />
-            <ConnectionBadge state={state.connection} />
-          </>
-        }
         notices={hasNotices ? notices : undefined}
+        announcement={announcement}
+        awaitingConsigne={awaitingConsigne}
         devPanel={
           DEV_TOOLS_ENABLED ? (
             <div className="space-y-2">
@@ -463,8 +491,16 @@ export function ExamClient({ examId, topic }: { examId: string; topic: OralTopic
                   subject={topic.title}
                   active={state.devTextMode}
                   onActiveChange={(on) => controller.setDevTextMode(on)}
+                  // The two states in which the button cannot do what it says,
+                  // handed over so the panel can say which one it is in rather
+                  // than looking like it did nothing (#53).
+                  awaitingConsigne={awaitingConsigne}
+                  closing={state.closing}
                   // « Envoyer l'exposé » ends the monologue: the text is not a
-                  // fragment of it, it is the whole thing.
+                  // fragment of it, it is the whole thing — and it starts the
+                  // part first if « Enregistrer » has not been pressed, which is
+                  // the flow this panel exists for. It answers whether the
+                  // exposé counted; the panel keeps the text when it did not.
                   onSubmit={(text, seconds) => controller.submitTypedExpose(text, seconds)}
                 />
               )}

@@ -130,75 +130,120 @@ function firstClause(text: string): string {
 // THE PRÉPARATION RAIL
 // =====================================================
 
+/** One beat of the exposé's plan: what to do, and how. */
+export interface PlanStep {
+  title: string;
+  detail: string;
+}
+
 /**
- * The plan the candidate is expected to follow while speaking, printed in the
- * préparation rail as « Structure attendue ».
+ * The plan the candidate is expected to follow while speaking.
+ *
+ * **One list, two screens.** It is « Structure attendue » in the préparation
+ * rail and « Votre plan » on the exposé, and it used to be two separate lists
+ * written in two different voices — the rail said "Introduire le thème et la
+ * problématique", the exposé screen had nothing at all. Now the plan the
+ * candidate reads while preparing is the same plan that stays in front of them
+ * while they speak, which is the only version of this that is any use: a
+ * structure you are shown once during préparation and never again is a structure
+ * you improvise from memory.
+ *
+ * Four beats, and the third is the one worth keeping distinct from the second.
+ * B2's « présenter et défendre un point de vue » is graded on the candidate
+ * taking a position, not on their surveying the arguments — so « Point de vue »
+ * is its own step, with the concession that makes it read as B2 rather than B1.
  *
  * The reference chooses between an argued arc and a conversational checklist
  * per `(level, type)`. B2's monologue suivi is argued and hands off to a débat,
- * so only the argued arc has a caller here — the checklist branch is dropped
- * rather than kept unreachable.
+ * so only the argued arc has a caller here.
  */
-export function structureSteps(): string[] {
-  return [
-    "Introduire le thème et la problématique",
-    "Développer 2 ou 3 arguments illustrés",
-    "Conclure par une position claire",
-    "Défendre son point de vue au débat",
-  ];
-}
+export const EXPOSE_PLAN: readonly PlanStep[] = [
+  {
+    title: "Introduction",
+    detail: "Présentez le document, puis dégagez une problématique.",
+  },
+  {
+    title: "Développement",
+    detail: "Deux parties au moins, chacune avec un exemple.",
+  },
+  {
+    title: "Point de vue",
+    detail: "Amenez votre avis par une concession (« Néanmoins… »).",
+  },
+  {
+    title: "Conclusion",
+    detail: "Faites le bilan, puis rendez la parole.",
+  },
+] as const;
 
 // =====================================================
 // THE PASSATION
 // =====================================================
 
-/**
- * The named beats of the passation, for the scene's inner stepper.
- *
- * Two, always, and that is the shape of the B2 épreuve: a prepared exposé, then
- * the examiner's challenge. This is NOT the top-level `Sujet / Préparation /
- * Passage` stepper in the topbar — that one tracks the three screens; this one
- * tracks the beats inside the passation.
+/*
+ * `PASSATION_BEATS` and `activeBeat` used to live here, feeding a second stepper
+ * drawn inside the conversation scene. Both are gone with that scene: the topbar
+ * names Préparation, Exposé and Débat now, so the beats are the steps and there
+ * is nothing left for an inner stepper to say that the outer one does not.
  */
-export const PASSATION_BEATS: readonly string[] = ["Exposé", "Débat"];
 
 /**
- * Which beat the candidate is in.
+ * What the record control is doing.
  *
- * Read off the phase, not estimated from the clock. The reference has to
- * approximate — one conversation, no boundary — and says so in a comment
- * apologising for the ratio. Here the boundary is a state transition, so the
- * stepper is exact and a candidate who finishes their monologue early sees the
- * pill move when they actually move.
+ * `armed` is the part that has not started: the consigne has been given, the
+ * sujet and the plan are on screen, and no clock is running until the candidate
+ * says they are ready. The other three are the part in progress.
  */
-export function activeBeat(phase: SpeakingPhase): number {
-  return phase === "monologue" ? 0 : 1;
-}
+export type MicState = "armed" | "recording" | "locked" | "connecting";
 
 /**
- * The hint printed under the mic, and the mic's accessible name.
+ * The word on the record control, the hint printed under it, and its accessible
+ * name.
  *
- * Both name the actual task, per the reference: a débat is not an "exposé", and
- * the label is the only name a screen-reader user gets for the control. The
- * `locked` state is this project's own — the mic ends the monologue, and the
- * monologue may not end before the DELF's five-minute floor (`canAdvanceEarly`).
- * The reference has no analogue because its mic ends the whole conversation and
- * a candidate may always do that.
+ * All three name the actual task, per the reference: a débat is not an "exposé",
+ * and the label is the only name a screen-reader user gets for the control. The
+ * `locked` state is this project's own — the control ends the monologue, and the
+ * monologue may not end before the DELF's floor (`canAdvanceEarly`). The
+ * reference has no analogue because its mic ends the whole conversation and a
+ * candidate may always do that.
+ *
+ * The visible `button` word is new with the sujet-on-screen layout. The control
+ * used to be an icon alone, which was legible while it only ever meant "stop":
+ * now that the same control also *starts* a part, an icon that is a square in
+ * one state and a circle in another is not enough to tell a candidate which of
+ * those is about to happen.
  */
 export function micCopy(
   phase: SpeakingPhase,
-  state: "recording" | "locked" | "connecting",
+  state: MicState,
   remainingToFloorSeconds = 0,
-): { hint: string; label: string } {
+): { hint: string; label: string; button: string } {
   const act = phase === "monologue" ? "votre exposé" : "le débat";
 
+  // The part has not begun. The candidate has read the sujet and the plan with
+  // no clock running, and this is the button that starts both the clock and the
+  // recording — so it is the one state where the control says what it *starts*
+  // rather than what it ends.
+  if (state === "armed") {
+    return {
+      button: "Enregistrer",
+      hint: `Cliquez pour commencer ${act}.`,
+      label: `Commencer ${act}`,
+    };
+  }
+
   if (state === "connecting") {
-    return { hint: "Connexion à l'examinateur…", label: `Terminer ${act}` };
+    return {
+      button: "Connexion…",
+      hint: "Connexion à l'examinateur…",
+      label: `Terminer ${act}`,
+    };
   }
 
   if (state === "locked") {
     const minutes = Math.ceil(remainingToFloorSeconds / 60);
     return {
+      button: "Terminer",
       // Said as time still to fill rather than as a refusal: the candidate is
       // not being blocked, they are being told the task is not done yet.
       hint: `Encore ${minutes} min avant de pouvoir conclure`,
@@ -212,6 +257,7 @@ export function micCopy(
   // instruction does — the badge and the pulsing ring say the same thing, and
   // this is the one place it is said in words next to the control itself.
   return {
+    button: "Terminer",
     hint: `Vous parlez. Cliquez pour terminer ${act}.`,
     label: `Terminer ${act}`,
   };
@@ -229,7 +275,25 @@ export function micCopy(
 export function passationStatus(
   phase: SpeakingPhase,
   connected: boolean,
+  /**
+   * The phase is open but has not started: its consigne is being spoken, or is
+   * waiting for a click because the browser refused to play it (#37).
+   *
+   * Checked before everything else because both of the claims below become false
+   * in that window, and they are the two the candidate is most entitled to rely
+   * on: nothing is being recorded yet, and the clock has not begun. The window
+   * used to be milliseconds wide and is now twenty-five seconds of audible
+   * speech, which is long enough to read a sentence and believe it.
+   */
+  awaitingConsigne = false,
 ): { title: string; body: string } {
+  if (awaitingConsigne) {
+    return {
+      title: "Consigne de l'examinateur",
+      body: "Écoutez la consigne. Rien n'est enregistré pour l'instant et le temps de cette partie n'a pas encore commencé à courir : il démarrera quand l'examinateur aura fini de parler.",
+    };
+  }
+
   if (!connected) {
     return {
       title: "Connexion à l'examinateur",
@@ -250,29 +314,14 @@ export function passationStatus(
   };
 }
 
-/** The examiner's status line, on the left of the scene. */
-export function examinerStatus(options: {
-  connected: boolean;
-  connecting: boolean;
-  speaking: boolean;
-}): string {
-  if (options.connecting) return "Connexion en cours…";
-  if (!options.connected) return "L'examinateur n'est pas en ligne.";
-  if (options.speaking) return "L'examinateur intervient…";
-  return "Vous écoute attentivement.";
-}
-
-/** The candidate's own status line, mirrored on the right of the scene. */
-export function candidateStatus(options: {
-  connected: boolean;
-  examinerSpeaking: boolean;
-  recording: boolean;
-}): string {
-  if (options.examinerSpeaking) return "En écoute…";
-  if (!options.recording) return "Microphone en attente";
-  if (!options.connected) return "Enregistrement en cours";
-  return "Vous avez la parole";
-}
+/*
+ * `examinerStatus` and `candidateStatus` were the two lines under the examiner
+ * and candidate faces, and they went with the faces. What they carried is not
+ * lost: whether the examiner is there is `passationStatus`'s sentence, and
+ * whether the microphone is live is said at the control itself by `micCopy` —
+ * which is the better place for it, since that is where a candidate wondering
+ * about it is already looking.
+ */
 
 // =====================================================
 // THE FLOOR
@@ -290,16 +339,48 @@ export function secondsToMonologueFloor(elapsedSeconds: number): number {
 }
 
 /**
- * The topbar's step index: 0 Sujet, 1 Préparation, 2 Passage.
+ * The topbar's step index: 0 Préparation, 1 Exposé, 2 Débat.
  *
- * `finished` maps to the passage rather than to a fourth step, because the
- * reference's stepper has three positions and the finished screen is the
- * évaluation's loading state rather than a step of the épreuve.
+ * **The stepper now names the épreuve's parts rather than this app's screens.**
+ * It used to read `Sujet · Préparation · Passage`, which tracked the three
+ * screens and folded the monologue and the débat into one — so a candidate
+ * halfway through the épreuve was told they were on the last step, and a second
+ * stepper inside the scene had to exist to say which half of it they were in.
+ * Naming the two parts here is what makes that inner stepper unnecessary, and it
+ * matches what the candidate is actually being examined on: a DELF B2 production
+ * orale has a préparation, an exposé and a débat.
+ *
+ * The briefing maps to 0, because the sujet screen is where a candidate about to
+ * prepare is standing; `finished` maps to the débat, because the finished screen
+ * is the évaluation's loading state rather than a fourth part.
  */
 export function topbarStep(phase: OralPhase, started: boolean): number {
   if (!started) return 0;
-  return phase === "preparation" ? 1 : 2;
+  switch (phase) {
+    case "preparation":
+      return 0;
+    case "monologue":
+      return 1;
+    default:
+      return 2;
+  }
 }
+
+/**
+ * The part heading over the sujet on the passation screen: « Partie 1 · Monologue
+ * suivi ».
+ *
+ * The number is the DELF's own `tache`, read off the part spec rather than
+ * written here, so it cannot disagree with the duration and the penalty floor
+ * that are keyed on the same number.
+ */
+export function partieKicker(phase: SpeakingPhase): string {
+  const spec = phase === "monologue" ? ORAL_PARTS_B2[0] : ORAL_PARTS_B2[1];
+  return `Partie ${spec.tache} · ${shortPartLabel(spec.title)}`;
+}
+
+/** The passation's footer line. */
+export const SITE_FOOTER = "DELF Formation · Préparez le DELF B2";
 
 /** The two part titles, for the briefing's serif headline. */
 export const MONOLOGUE_TITLE = ORAL_PARTS_B2[0].title;

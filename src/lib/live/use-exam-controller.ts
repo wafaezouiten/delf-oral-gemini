@@ -12,6 +12,7 @@
 
 import { useEffect, useMemo, useSyncExternalStore } from "react";
 
+import { ExaminerAnnouncer } from "@/lib/audio/announcer";
 import { MicRecorder } from "@/lib/audio/recorder";
 import { ExaminerAudioPlayer } from "@/lib/audio/player";
 import type { OralTopic } from "@/lib/delf/topics";
@@ -70,6 +71,7 @@ export function useExamController(options: {
           new ExamLiveSession({ examId, phase, topic: sessionTopic, callbacks, initialHistory }),
         createRecorder: (callbacks) => new MicRecorder(callbacks),
         createPlayer: (callbacks) => new ExaminerAudioPlayer(callbacks),
+        createAnnouncer: (callbacks) => new ExaminerAnnouncer(callbacks),
         onFinished,
         onPhaseFinalised: (report) => reportPhase(examId, report),
       }),

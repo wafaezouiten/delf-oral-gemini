@@ -7,7 +7,7 @@ import { Kicker } from "@/app/_components/po/tag";
 import { SimulatorTopBar } from "@/app/_components/po/topbar";
 import { TimerRing } from "@/app/_components/po/timer-ring";
 import { PHASE_DURATIONS } from "@/lib/delf/phases";
-import { poKicker, shortPartLabel, structureSteps, MONOLOGUE_TITLE } from "@/lib/ui/po-player-view";
+import { poKicker, shortPartLabel, EXPOSE_PLAN, MONOLOGUE_TITLE } from "@/lib/ui/po-player-view";
 import type { OralTopic } from "@/lib/delf/topics";
 
 /**
@@ -39,6 +39,7 @@ export function PreparationScreen({
   onStartExam,
   onExit,
   notices,
+  announcement,
 }: {
   topic: OralTopic;
   notes: string;
@@ -48,6 +49,15 @@ export function PreparationScreen({
   onExit: () => void;
   /** Failures raised by the controller. Above the sujet, where they are read. */
   notices?: ReactNode;
+  /**
+   * The examiner's spoken briefing (#37).
+   *
+   * First card in the rail, above « Passation ». The rail is the control column
+   * and this carries controls; putting it over the sujet instead would push the
+   * document the candidate has thirty minutes to read below the fold on a laptop,
+   * to make room for an instruction about reading it.
+   */
+  announcement?: ReactNode;
 }) {
   return (
     <div className="bg-background flex h-full min-h-0 flex-col">
@@ -95,6 +105,8 @@ export function PreparationScreen({
 
         {/* Rail */}
         <aside className="flex min-h-0 flex-col gap-3.5 lg:overflow-y-auto lg:pr-0.5">
+          {announcement && <div className="shrink-0">{announcement}</div>}
+
           <div className="border-border bg-card shrink-0 rounded-lg border p-5">
             <Kicker>Passation</Kicker>
             <p className="text-muted-foreground mt-2 text-xs leading-relaxed">
@@ -128,14 +140,26 @@ export function PreparationScreen({
           </div>
 
           <div className="border-border bg-card shrink-0 rounded-lg border p-4">
+            {/* The same list the exposé screen prints as « Votre plan », so the
+                structure a candidate is given thirty minutes to absorb is the
+                one still in front of them while they speak. It used to be a
+                separate four-line list written in a different voice. */}
             <Kicker>Structure attendue</Kicker>
-            <ol className="mt-2.5 flex flex-col gap-2">
-              {structureSteps().map((line, index) => (
-                <li key={line} className="text-foreground/85 flex items-center gap-2.5 text-xs">
-                  <span className="bg-primary-subtle text-primary tabular flex size-4.5 shrink-0 items-center justify-center rounded-md text-[0.625rem] font-semibold">
+            <ol className="mt-2.5 flex flex-col gap-2.5">
+              {EXPOSE_PLAN.map((step, index) => (
+                <li key={step.title} className="flex items-start gap-2.5">
+                  <span
+                    className="bg-primary-subtle text-primary tabular mt-px flex size-4.5 shrink-0 items-center justify-center rounded-md text-[0.625rem] font-semibold"
+                    aria-hidden
+                  >
                     {index + 1}
                   </span>
-                  {line}
+                  <div className="min-w-0">
+                    <p className="text-foreground/85 text-xs font-semibold">{step.title}</p>
+                    <p className="text-muted-foreground mt-0.5 text-[0.6875rem] leading-relaxed">
+                      {step.detail}
+                    </p>
+                  </div>
                 </li>
               ))}
             </ol>

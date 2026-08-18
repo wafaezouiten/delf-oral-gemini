@@ -17,7 +17,7 @@ import type { OralTopic } from "./topics";
 
 /** Bumped whenever the wording changes, and stored on every evaluation so an
  *  old result can be traced back to the examiner that produced it. */
-export const EXAMINER_PROMPT_VERSION = "2026-08-11.1";
+export const EXAMINER_PROMPT_VERSION = "2026-08-17.1";
 
 /**
  * Shared framing. Every phase gets this, so the examiner's identity, language
@@ -115,14 +115,23 @@ export function buildExaminerInstruction(
 
 /**
  * The examiner's opening line for a phase, spoken as soon as the session opens.
+ * Null when the phase opens without the model saying anything.
  *
- * The monologue's greeting is sent BEFORE voice-activity detection is turned
- * off, so the examiner can hand over the floor and then fall silent for the rest
- * of the phase.
+ * **The monologue no longer has one (#37).** It used to be a fixed script the
+ * model was told to read verbatim — "Bonjour. Vous avez préparé votre sujet, je
+ * vous écoute." — and a recorded consigne does that job better on three counts:
+ * the wording is identical at every sitting instead of merely requested; it does
+ * not depend on the socket being up at the moment the phase turns over; and it is
+ * spoken before the microphone starts recording, so the handover no longer lands
+ * inside the performance being graded. See `lib/delf/announcements.ts`.
+ *
+ * The débat keeps its opening, and the asymmetry is the reason why: it cannot be
+ * a recording. Its whole job is to quote an argument the candidate actually made,
+ * which is not known until they have made it.
  */
-export function examinerOpeningLine(phase: "monologue" | "debate"): string {
+export function examinerOpeningLine(phase: "monologue" | "debate"): string | null {
   return phase === "monologue"
-    ? "Dis exactement ceci, puis tais-toi complètement : « Bonjour. Vous avez préparé votre sujet, je vous écoute. Présentez-moi votre point de vue. »"
+    ? null
     : "Ouvre le débat maintenant, en une ou deux phrases, en citant un argument précis de l'exposé du candidat et en lui opposant le point de vue contraire.";
 }
 
@@ -133,9 +142,20 @@ export function examinerOpeningLine(phase: "monologue" | "debate"): string {
  * genuinely good idea: cutting the audio dead at 0:00 is jarring, and the last
  * seconds of the candidate's speech are still in flight. Giving the examiner one
  * spoken sentence to close covers both.
+ *
+ * Both phases keep theirs, and unlike the opening lines these are NOT replaced by
+ * a recorded consigne (#37). They are improvised for a reason — a closing sentence
+ * responds to the exchange that just happened — and the handshake is load-bearing
+ * beyond politeness: the controller waits for this turn to complete, and that wait
+ * is what gives Gemini time to deliver the candidate's transcription before the
+ * session is torn down.
+ *
+ * What the monologue's no longer does is announce the débat. The consigne that
+ * follows it says so, in fixed words, and having both say it meant the handover
+ * was narrated twice.
  */
 export function closingInstruction(phase: "monologue" | "debate"): string {
   return phase === "monologue"
-    ? "[Le temps du monologue est écoulé. Remercie brièvement le candidat en une phrase et annonce que vous passez au débat. N'évalue pas.]"
+    ? "[Le temps du monologue est écoulé. Remercie brièvement le candidat en une seule phrase. N'annonce pas la suite de l'épreuve, la consigne suivante s'en charge. N'évalue pas.]"
     : "[Le temps de l'épreuve est écoulé. Conclus en une phrase, remercie le candidat et mets fin à l'entretien. N'évalue pas, ne donne aucune note.]";
 }

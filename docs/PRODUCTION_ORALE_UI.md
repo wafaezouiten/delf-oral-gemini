@@ -88,7 +88,8 @@ same rule, so the reproduction keeps it.
    ┌────────────────────────────────────────────────────▼──────────────────┐
    │ 3. PASSATION          step 2 · timer ring + exit button               │
    │    scene: Examinateur (IA) ── beats + clock ── Vous                   │
-   │    body:  one quiet status card (no transcript feed)                  │
+   │    body:  exposé → one quiet status card                              │
+   │           débat  → the live transcript, « Masquer » back to the card  │
    │    foot:  [Mes notes]      (mic)      [Terminer l'épreuve]            │
    │    drawer: préparation notes, read-only                               │
    └────────────────────────────────────────────────────┬──────────────────┘
@@ -148,6 +149,17 @@ at the rail's foot.
 the beat stepper, the elapsed/total clock with its draining bar, the foot control
 bar, the notes drawer.
 
+- *Added, against the reference (#48):* the **débat prints its exchange**, in the
+  status card's place, with « Masquer » to put the card back. The reference has
+  no transcript feed anywhere and this screen originally reproduced that — the
+  argument being that reading along is the fastest way to stop listening to the
+  examiner. It is outweighed in the débat and left standing in the monologue,
+  which is a split the transport forces as much as the design: manual VAD
+  transcribes nothing until the floor is released, so a monologue feed would sit
+  empty for seven minutes and then print the whole exposé at the moment the
+  phase ends. The débat's automatic VAD streams turn by turn. The turns are set
+  like the results page's transcript — speaker label over a paragraph, never chat
+  bubbles.
 - *Adapted:* the beats are `["Exposé", "Débat"]` driven by the actual phase, not
   by `EXPOSE_SHARE`. This project knows which beat it is in; approximating it
   would be worse data.

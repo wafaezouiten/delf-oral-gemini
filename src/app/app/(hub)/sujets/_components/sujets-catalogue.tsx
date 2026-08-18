@@ -4,6 +4,7 @@ import { useEffect, useId, useMemo, useRef, useState } from "react";
 
 import { ArrowRightIcon, CheckCircleIcon, ClockIcon, CloseIcon, SearchIcon } from "@/app/_components/po/icons";
 import { Kicker, Tag } from "@/app/_components/po/tag";
+import { ScoreTag } from "@/app/_components/score-band";
 import { StartExamButton } from "@/app/app/(hub)/_components/start-exam-button";
 import { COMPETENCY_MAX } from "@/lib/delf/constants";
 import { PHASE_DURATIONS } from "@/lib/delf/phases";
@@ -207,12 +208,10 @@ function SujetCard({
         <span className="text-muted-foreground tabular text-[0.65625rem] font-medium tracking-[0.06em]">
           Sujet {position.toString().padStart(2, "0")}
         </span>
-        {sujet.score !== null && (
-          <Tag tone="success">
-            <CheckCircleIcon className="size-3" />
-            {sujet.score}/{COMPETENCY_MAX}
-          </Tag>
-        )}
+        {/* No ✓ beside it any more: the pill is coloured on the /25 scale now,
+            and a tick on a 6/25 in a red pill reads as approval of the mark
+            rather than as "already sat". */}
+        {sujet.score !== null && <ScoreTag score25={sujet.score} />}
       </div>
 
       {/* Sans, not the serif: the serif is spent on the masthead and on the
@@ -297,10 +296,7 @@ function SujetSheet({
               <Tag>{sujet.kind}</Tag>
               <Tag>{sujet.meta}</Tag>
               {sujet.score !== null && (
-                <Tag tone="success">
-                  <CheckCircleIcon className="size-3" />
-                  Déjà passé · {sujet.score}/{COMPETENCY_MAX}
-                </Tag>
+                <ScoreTag score25={sujet.score} prefix="Déjà passé" />
               )}
             </div>
 

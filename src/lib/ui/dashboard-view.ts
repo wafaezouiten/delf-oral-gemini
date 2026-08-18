@@ -27,17 +27,18 @@
  */
 
 import { COMPETENCY_FLOOR, COMPETENCY_MAX } from "@/lib/delf/constants";
-import { GRILLE_BANDS } from "@/lib/delf/grille";
+import { GRILLE_BANDS, scoreBand, type ScoreBand } from "@/lib/delf/grille";
 import { ORAL_CRITERIA, ORAL_CRITERIA_LABELS, type OralCriterion } from "@/lib/delf/criteria";
 
 /**
  * The top of the grille's scale, for the bars' full width.
  *
- * Derived here rather than added to `grille.ts`: that file is a byte-for-byte
- * port of the reference's own grille and carries an explicit instruction not to
- * grow it. Reading the last band off `GRILLE_BANDS` is the same single source of
- * truth without editing the file — and it is still not the literal `5`, so a
- * grille whose top band ever moved would move this with it.
+ * Derived here rather than added to `grille.ts`: the per-criterion half of that
+ * file is a byte-for-byte port of the reference's own grille and carries an
+ * explicit instruction not to change it. Reading the last band off
+ * `GRILLE_BANDS` is the same single source of truth without touching it — and it
+ * is still not the literal `5`, so a grille whose top band ever moved would move
+ * this with it.
  */
 const GRILLE_MAX_BAND = GRILLE_BANDS[GRILLE_BANDS.length - 1];
 
@@ -100,6 +101,18 @@ export interface DashboardTile {
   value: string;
   /** The one-line gloss under the figure. Never a second copy of the label. */
   caption: string;
+  /**
+   * Where the figure sits on the /25 scale, when the figure IS a /25.
+   *
+   * Absent on the other three, and that is the point of it being optional: a
+   * percentage, a duration and a day count are not marks, and tinting them on
+   * the mark scale would put a 40 % pass rate in the colour of a bad grade.
+   * Carried here rather than derived in the component because `value` is already
+   * a formatted string by then, and a component parsing it back into a number to
+   * colour it is the round trip that eventually disagrees with the figure it
+   * colours.
+   */
+  band?: ScoreBand;
 }
 
 export interface CriterionAverage {
@@ -213,11 +226,17 @@ function buildTiles(sittings: readonly DashboardSitting[], today: Date): Dashboa
   const abandoned = sittings.filter((sitting) => sitting.outcome === "abandoned").length;
   const plural = sittings.length > 1 ? "s" : "";
 
+  // The average is a /25, so it is on the /25 scale — including its fractions.
+  // `mean` is computed once and the band read off the number, not off the string
+  // the tile prints.
+  const average = mean(scores);
+
   return [
     {
       key: "moyenne",
       label: "Note moyenne",
-      value: `${mean(scores)}`,
+      value: `${average}`,
+      band: scoreBand(average),
       caption:
         abandoned > 0
           ? `sur ${COMPETENCY_MAX}, ${sittings.length} épreuve${plural} dont ${abandoned} abandonnée${abandoned > 1 ? "s" : ""}`

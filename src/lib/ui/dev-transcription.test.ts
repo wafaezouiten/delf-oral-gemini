@@ -4,10 +4,13 @@ import { describe, it } from "node:test";
 import { DEBATE_FLOOR_SECONDS, MONOLOGUE_FLOOR_SECONDS } from "@/lib/delf/orale-rubric";
 import {
   DEV_PANEL_COPY,
+  DEV_SUBMIT_COPY,
   MAX_DEV_SECONDS,
   SPOKEN_WORDS_PER_MINUTE,
   countWords,
   describeDraft,
+  devSubmitDisabled,
+  devSubmitState,
   estimateSpokenSeconds,
   exampleExpose,
   parseDurationInput,
@@ -129,5 +132,61 @@ describe("the example exposé", () => {
     // exposé, send nothing for the débat, and the flat −3 still fires.
     const estimate = estimateSpokenSeconds(countWords(exampleExpose("un sujet")));
     assert.ok(estimate < DEBATE_FLOOR_SECONDS, "the débat still has to be claimed");
+  });
+});
+
+describe("what « Envoyer l'exposé » can do right now (#53)", () => {
+  const state = (over: Partial<Parameters<typeof devSubmitState>[0]> = {}) =>
+    devSubmitState({
+      text: "Un exposé complet, tapé.",
+      awaitingConsigne: false,
+      sending: false,
+      closing: false,
+      ...over,
+    });
+
+  it("is ready when there is an exposé and nothing in the way", () => {
+    assert.equal(state(), "ready");
+    assert.equal(devSubmitDisabled("ready"), false);
+  });
+
+  it("has nothing to send for an empty field, or one holding only spaces", () => {
+    assert.equal(state({ text: "" }), "empty");
+    assert.equal(state({ text: "   \n\t" }), "empty");
+  });
+
+  it("waits out the consigne rather than looking pressable", () => {
+    // The controller refuses here too — this is the button agreeing with it in
+    // advance, which is the difference between a refusal and a no-op.
+    assert.equal(state({ awaitingConsigne: true }), "consigne");
+    assert.equal(devSubmitDisabled("consigne"), true);
+  });
+
+  it("names the press in flight, and the ending it did not start", () => {
+    // Both used to look identical to a press that did nothing at all. The
+    // second is the mic button's closing handshake: a typed exposé never waits
+    // through one, but the panel can be open while one runs.
+    assert.equal(state({ sending: true }), "sending");
+    assert.equal(state({ closing: true }), "closing");
+  });
+
+  it("keeps reporting its own press rather than somebody else's ending", () => {
+    // The mic button's handshake can start under a press that is still in
+    // flight. The panel finishes reporting the press: it is the one it owns.
+    assert.equal(state({ sending: true, closing: true }), "sending");
+  });
+
+  it("still refuses an empty field while the examiner talks, without saying so twice", () => {
+    // Order matters only in that the more specific reason wins: there is no
+    // point telling someone their empty field cannot be sent yet.
+    assert.equal(state({ text: "", awaitingConsigne: true }), "consigne");
+  });
+
+  it("explains itself exactly where explaining is worth something", () => {
+    assert.equal(DEV_SUBMIT_COPY.ready.note, null);
+    assert.equal(DEV_SUBMIT_COPY.empty.note, null);
+    assert.match(DEV_SUBMIT_COPY.consigne.note ?? "", /consigne/);
+    assert.match(DEV_SUBMIT_COPY.closing.note ?? "", /conclut/);
+    assert.equal(DEV_SUBMIT_COPY.ready.label, DEV_PANEL_COPY.submit);
   });
 });

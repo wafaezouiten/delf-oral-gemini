@@ -30,8 +30,10 @@
  * either.
  */
 
+import type { AnnouncementOutcome, AnnouncerLike } from "@/lib/audio/announcer";
 import type { PhaseRecording, RecordedPhase } from "@/lib/audio/archive";
 import { DEV_TOOLS_ENABLED } from "@/lib/dev-tools";
+import { ANNOUNCEMENTS, type AnnouncementId } from "@/lib/delf/announcements";
 import {
   canAdvanceEarly,
   isPhaseTimeUp,
@@ -171,6 +173,39 @@ export interface ExamState {
    * disagree with the microphone.
    */
   devTextMode: boolean;
+  /**
+   * The examiner's consigne for the phase now open, or null before the first one
+   * (#37).
+   *
+   * It outlives its own playback on purpose. The clip is the *spoken* half of a
+   * consigne whose written half must stay readable for as long as it applies, so
+   * the card stays on screen for the rest of the phase, carrying the text and a
+   * « Réécouter ». A candidate whose browser refused to play it, or who muted it,
+   * loses nothing.
+   */
+  announcement: AnnouncementId | null;
+  /**
+   * The part is open, its consigne has been given, and it is waiting for the
+   * candidate to press « Enregistrer ».
+   *
+   * Nothing is running while this is true: the timer shows the part's full
+   * length, no artefact is open, and the examiner is not connected. It is the
+   * state the sujet and the plan are read in. See {@link ExamController.startSpeaking}.
+   */
+  awaitingStart: boolean;
+  /** A consigne is audible right now. */
+  announcementPlaying: boolean;
+  /**
+   * The browser refused to play the consigne and a gesture would fix it.
+   *
+   * Distinct from "not playing", and the distinction decides whether the exam
+   * moves: while this is true a speaking phase is **held** — its clock has not
+   * started and nothing is being recorded — because the alternative is starting
+   * the recording and then playing the consigne into it. See {@link announce}.
+   */
+  announcementBlocked: boolean;
+  /** The candidate turned the consignes off for the rest of the sitting. */
+  announcementsMuted: boolean;
 }
 
 /**
@@ -254,6 +289,16 @@ export interface ExamControllerDeps {
     onSpeakingChange: (speaking: boolean) => void;
     onEvent: AudioEventSink;
   }) => PlayerLike;
+  /**
+   * The examiner's spoken consignes (#37).
+   *
+   * Optional, and absent means silent: every announcement resolves as though it
+   * had been skipped, and the épreuve runs exactly as it did before this existed.
+   * That is what keeps the phase-machine tests free of an audio fake they have
+   * nothing to say about — and it is also the honest behaviour for a browser that
+   * cannot play the clips, since every word of them is on screen as well.
+   */
+  createAnnouncer?: (callbacks: { onEvent: AudioEventSink }) => AnnouncerLike;
   onFinished: (payload: ExamFinishedPayload) => void;
   /**
    * A speaking phase has ended and the exam continues.
@@ -386,6 +431,29 @@ export class ExamController {
    *  watchdog stands down rather than reporting the same silence twice. */
   private captureLost = false;
 
+  /**
+   * The consigne being spoken, and everything the candidate can do about it (#37).
+   *
+   * `announcementId` is the phase's consigne and is NOT cleared when the clip
+   * ends — see `ExamState.announcement`. `announceToken` is the same
+   * supersession guard the announcer and the player keep: a consigne that has
+   * been replaced at a phase boundary must not write its own outcome over the
+   * one that replaced it, and a candidate skipping the préparation while its
+   * briefing is still playing reaches exactly that ordering.
+   */
+  private announcer: AnnouncerLike | null = null;
+  private announcementId: AnnouncementId | null = null;
+  private announcementPlaying = false;
+  private announcementBlocked = false;
+  private announcementsMuted = false;
+  private announceToken = 0;
+  /** The same guard for candidate-initiated playback. See {@link playAnnouncement}
+   *  for why it cannot share `announceToken`. */
+  private playbackToken = 0;
+  /** Resolves the hold a blocked consigne puts on a phase, when the candidate
+   *  either plays it or gives up on it. Null when nothing is held. */
+  private announcementHold: ((outcome: AnnouncementOutcome) => void) | null = null;
+
   private session: LiveSessionLike | null = null;
   private recorder: RecorderLike | null = null;
   private player: PlayerLike | null = null;
@@ -404,6 +472,12 @@ export class ExamController {
 
   constructor(private readonly deps: ExamControllerDeps) {
     this.now = deps.now ?? (() => Date.now());
+    // Built here rather than in `prepareAudio`, because the first consigne is
+    // spoken during preparation and that method is deliberately not called until
+    // the monologue. Nothing is opened by constructing it: the clip element is
+    // created on the first `play`.
+    this.announcer =
+      deps.createAnnouncer?.({ onEvent: (name, detail) => this.log(name, detail) }) ?? null;
     this.snapshot = this.buildSnapshot();
   }
 
@@ -424,11 +498,21 @@ export class ExamController {
       remaining: remainingSeconds(this.phase, this.elapsed),
       connection: this.connection,
       status: examStatus(this.phase, this.connection),
-      examinerSpeaking: this.examinerSpeaking,
+      // A consigne is the examiner talking, so the scene animates for it exactly
+      // as it does for a streamed turn. It also keeps the candidate's own
+      // "recording" indicator down while it plays, which is true twice over
+      // here: nothing is being captured yet either.
+      examinerSpeaking: this.examinerSpeaking || this.announcementPlaying,
       transcript: this.transcript,
       events: this.events,
       reconnectCount: this.reconnectCount,
-      canAdvance: canAdvanceEarly(this.phase, this.elapsed) && !this.closing,
+      // A phase cannot be ended before it has begun (#37). Until it does, its
+      // clock has not started and no session is open, so `beginClosingHandshake`
+      // would ask an examiner that is not there for a closing sentence — then
+      // wait for a turn that can never complete, on a frozen clock that never
+      // reaches the safety timeout.
+      canAdvance:
+        canAdvanceEarly(this.phase, this.elapsed) && !this.closing && !this.phaseAwaitingStart,
       closing: this.closing,
       micError: this.micError,
       // False during a stall too, not only after a lost device. The point of the
@@ -438,8 +522,14 @@ export class ExamController {
       // False in the development text mode too, for the same reason: the
       // recorder is paused, so the badge would be describing a capture that is
       // not happening.
+      // False until the phase's clock is anchored, too. The microphone opens
+      // before the consigne is spoken and the phase's artefact opens after it, so
+      // between the two there is a window where a recorder exists and this phase
+      // is recording nothing — and a lit indicator there would be the one claim
+      // the badge exists to make checkable, made falsely (#37).
       recording:
         this.recorder !== null &&
+        this.phaseStart !== null &&
         !this.captureLost &&
         !this.captureStalled &&
         !this.devTextMode &&
@@ -450,7 +540,30 @@ export class ExamController {
       monologueSilent: this.isMonologueSilent(),
       monologueHeld: this.monologueHeld,
       devTextMode: this.devTextMode,
+      announcement: this.announcementId,
+      // Armed and waiting for the click — as distinct from waiting for the
+      // consigne to finish, which is the announcement card's business.
+      awaitingStart:
+        this.phaseAwaitingStart && !this.announcementPlaying && !this.announcementBlocked,
+      announcementPlaying: this.announcementPlaying,
+      announcementBlocked: this.announcementBlocked,
+      announcementsMuted: this.announcementsMuted,
     };
+  }
+
+  /**
+   * A speaking phase that is open but has not begun: its consigne is being
+   * given, or it is armed and waiting for « Enregistrer ».
+   *
+   * One question, one answer, read off `phaseStart` — the field that already
+   * means "this phase's clock is running" everywhere else. See `canAdvance`
+   * below for what it costs to get this wrong, and why preparation is not
+   * included: preparation leaves without a closing handshake, and « Passer et
+   * commencer maintenant » must keep working while the briefing plays.
+   */
+  private get phaseAwaitingStart(): boolean {
+    if (this.phase !== "monologue" && this.phase !== "debate") return false;
+    return this.phaseStart === null;
   }
 
   /**
@@ -515,9 +628,174 @@ export class ExamController {
     this.emit();
   }
 
+  // ------------------------------------------------------------- announcements
+
+  /**
+   * Speak the consigne for a phase, and do not return until it has been heard,
+   * skipped, or given up on (#37).
+   *
+   * The await is the whole point of the method. Every caller is at a phase
+   * boundary, and what they must not do is start the candidate's clock or their
+   * recording while the examiner is still talking:
+   *
+   *  - **The recording.** The monologue records the microphone. A consigne played
+   *    through the speakers while capture was running would be captured, land in
+   *    the transcript, and pollute the very performance being graded. The briefing
+   *    already asks for a headset for this reason and that cannot be relied on, so
+   *    the ordering is enforced here instead of hoped for.
+   *  - **The clock.** Twenty-five seconds of consigne is four per cent of a
+   *    monologue, and the DELF's duration floor is graded. The phase's clock is
+   *    anchored by the caller *after* this resolves.
+   *
+   * A `blocked` outcome is the one that does not resolve straight through.
+   * Browsers refuse to autoplay without a recent gesture, and while the two
+   * click-driven boundaries are safe, preparation's clock simply running out is
+   * not: nothing has been clicked for thirty minutes. Returning there would start
+   * a recording and leave a consigne that plays into it the moment the candidate
+   * finds the button, so instead the phase is held and the screen offers the
+   * choice. Both ways out are one click, nothing is being spent while it waits,
+   * and `destroy()` releases it.
+   */
+  private async announce(id: AnnouncementId): Promise<AnnouncementOutcome> {
+    const announcer = this.announcer;
+    if (!announcer || this.announcementsMuted) return "skipped";
+
+    // A hold left over from an earlier consigne. Reachable because the
+    // préparation's briefing is spoken without being awaited: if the browser
+    // refused it and the candidate then pressed « Passer et commencer
+    // maintenant », that hold has no reader and this consigne is about to
+    // overwrite its resolver. Released rather than dropped, so no promise is left
+    // pending forever with a listener attached to it.
+    this.releaseAnnouncementHold("skipped");
+
+    const token = (this.announceToken += 1);
+    this.announcementId = id;
+    this.announcementPlaying = true;
+    this.announcementBlocked = false;
+    this.emit();
+
+    let outcome = await announcer.play(ANNOUNCEMENTS[id].src);
+
+    // Superseded — a later boundary is already speaking. Its state is the state.
+    if (token !== this.announceToken) return outcome;
+
+    if (outcome === "blocked") {
+      this.announcementPlaying = false;
+      this.announcementBlocked = true;
+      this.log("announcement-held", id);
+      this.emit();
+      outcome = await new Promise<AnnouncementOutcome>((resolve) => {
+        this.announcementHold = resolve;
+      });
+      if (token !== this.announceToken) return outcome;
+    }
+
+    this.announcementPlaying = false;
+    this.announcementBlocked = false;
+    this.log("announcement", { id, outcome });
+    this.emit();
+    return outcome;
+  }
+
+  /**
+   * Play the phase's consigne now, on the candidate's own click.
+   *
+   * Two buttons, one method. « Écouter la consigne » answers a browser that
+   * refused to autoplay, and « Réécouter » replays one that has already been
+   * heard; the difference between them is only whether a phase is waiting on the
+   * answer, which {@link releaseAnnouncementHold} sorts out on its own.
+   *
+   * Being a click is what makes it work: the autoplay policy this exists to
+   * survive is satisfied by the gesture that called it.
+   */
+  playAnnouncement(): void {
+    const id = this.announcementId;
+    const announcer = this.announcer;
+    if (!id || !announcer || this.announcementsMuted) return;
+
+    // Its own counter, not `announceToken`: a replay must not supersede the
+    // `announce()` that may be parked on a hold, only other replays. Without it a
+    // double-clicked « Réécouter » has the first click's playback report itself
+    // finished while the second one is still audible, and the card folds up over
+    // the sound of the examiner talking.
+    const token = (this.playbackToken += 1);
+
+    this.announcementPlaying = true;
+    this.announcementBlocked = false;
+    this.emit();
+
+    void announcer.play(ANNOUNCEMENTS[id].src).then((outcome) => {
+      if (token !== this.playbackToken) return;
+      this.announcementPlaying = false;
+      this.emit();
+      this.releaseAnnouncementHold(outcome);
+    });
+  }
+
+  /**
+   * Silence the consigne that is playing, and let the phase get on with it.
+   *
+   * Labelled « Passer l'annonce » rather than « Passer », because the préparation
+   * screen already has a « Passer et commencer maintenant » that ends a
+   * thirty-minute phase. Two controls both reading "Passer", one ending the
+   * préparation and one silencing a clip, would be genuinely ambiguous.
+   */
+  skipAnnouncement(): void {
+    this.announcer?.stop();
+    // Cleared here rather than left to `announce()` on the far side of its await.
+    // The clip stops synchronously, so a snapshot taken in the same tick that
+    // still said "playing" would be describing a silence.
+    this.announcementPlaying = false;
+    this.releaseAnnouncementHold("skipped");
+  }
+
+  /**
+   * Turn the consignes off for the rest of the sitting.
+   *
+   * Sticky, deliberately. Somebody practising their fourth épreuve knows the
+   * consigne by heart, and making them silence it again at every boundary is how
+   * a product teaches people to click without reading. It also disposes of the
+   * autoplay problem for anyone who has opted out: a muted consigne is never
+   * played, so it can never be refused, so no phase can ever be held waiting for
+   * one.
+   *
+   * The text stays on screen. This mutes the voice, it does not withdraw the
+   * instruction.
+   */
+  muteAnnouncements(): void {
+    if (this.announcementsMuted) return;
+    this.announcementsMuted = true;
+    this.announcer?.stop();
+    // Same reason as `skipAnnouncement`: the voice is already gone.
+    this.announcementPlaying = false;
+    this.log("announcements-muted");
+    this.releaseAnnouncementHold("skipped");
+    this.emit();
+  }
+
+  /** Let a held phase continue. Releases nothing when nothing is held, which is
+   *  the ordinary case for « Réécouter » — but still emits, because the caller has
+   *  just changed what the card should be drawing. */
+  private releaseAnnouncementHold(outcome: AnnouncementOutcome): void {
+    const hold = this.announcementHold;
+    this.announcementHold = null;
+    hold?.(outcome);
+    this.emit();
+  }
+
   // ---------------------------------------------------------------- lifecycle
 
-  /** Begin the exam. Preparation's clock starts now. */
+  /**
+   * Begin the exam. Preparation's clock starts now.
+   *
+   * The briefing is spoken but **not** awaited, which is the one place a consigne
+   * runs alongside a clock rather than in front of it. Preparation is thirty
+   * minutes of reading and note-taking that the candidate can start on
+   * immediately; holding the phase shut for half a minute would buy nothing, and
+   * re-anchoring its clock afterwards would show a timer jumping backwards from
+   * 29:26 to 30:00. Half a minute out of thirty minutes is also not a duration
+   * anything grades — unlike the monologue's, which is why that one waits.
+   */
   start(): void {
     if (this.started) return;
     this.started = true;
@@ -525,6 +803,7 @@ export class ExamController {
     this.phaseStart = this.now();
     this.startTicker();
     this.log("exam-started", this.deps.topic.slug);
+    void this.announce("preparation");
   }
 
   /**
@@ -691,6 +970,44 @@ export class ExamController {
       return;
     }
     this.beginClosingHandshake();
+  }
+
+  /**
+   * Start the part the candidate is looking at: « Enregistrer ».
+   *
+   * This is the moment the épreuve begins for that part. The clock is anchored,
+   * the phase's artefact opens, and the examiner's session connects — in that
+   * order, and all three from one click.
+   *
+   * **Why a click rather than automatically.** The passation screen now carries
+   * the sujet and the plan, and a candidate arrives at it having heard a consigne
+   * telling them to present a document they are about to re-read. Starting the
+   * clock underneath that reading would charge them for it, and the DELF grades
+   * how long they spoke. So the part waits. Nothing is spent while it does: the
+   * timer shows the part's full length and the microphone, though open, belongs
+   * to no phase, so `PhaseArchive` discards whatever it hears.
+   *
+   * Refused while the consigne is still being given, which is not a special case
+   * so much as the same rule the button's own disabled state applies — the
+   * examiner is talking, and the candidate's turn has not been handed over.
+   *
+   * Idempotent, because it is a button: a second click on a part that has already
+   * begun must not re-anchor its clock or open a second session.
+   */
+  startSpeaking(): void {
+    if (this.phase !== "monologue" && this.phase !== "debate") return;
+    if (this.phaseStart !== null) return;
+    if (this.announcementPlaying || this.announcementBlocked) return;
+    if (this.destroyed) return;
+
+    const phase = this.phase;
+    this.phaseStart = this.now();
+    this.log("phase-started", phase);
+    this.emit();
+    this.beginRecording(phase);
+    // Not awaited: this is a click handler, and the connection reports itself
+    // through `onStateChange` exactly as it does on every other path.
+    void this.openSession(phase);
   }
 
   /**
@@ -861,27 +1178,91 @@ export class ExamController {
    * they had just delivered in full — waiting out a clock for a task that was
    * done — was the thing that made the panel feel like it had not worked.
    *
+   * **It starts the part when the part has not begun (#53).** Since #37 a
+   * speaking phase opens armed and waits for « Enregistrer », and this used to
+   * refuse while it did — silently, on the very flow the panel exists for:
+   * arrive at the monologue, open the panel, paste, send. One press now means
+   * the whole of what the button says, in the order the épreuve needs it —
+   * anchor the clock, write the exposé down, leave for the débat. That is not a
+   * hole in the arm gate: `DEV_TOOLS_ENABLED` is the first line here, so no
+   * build where marks are real has this path at all, and `startSpeaking` is
+   * untouched for the builds that do.
+   *
+   * The one refusal left is the consigne: while the examiner is speaking, the
+   * candidate's turn has not been handed over, and starting underneath it would
+   * record the instruction and charge the candidate for hearing it.
+   *
    * **The five-minute floor does not apply, and that is the point.** `canAdvanceEarly`
    * exists to stop a candidate skipping the task; here the task has been handed
    * over complete, and the whole reason to type it was not to spend five minutes
    * saying it. The floor still governs every real candidate, because this method
    * cannot be reached in a build where the tooling is off.
    *
-   * Everything after that is the ordinary path: the examiner is asked to close,
-   * its last sentence plays, the phase advances, and leaving the monologue hands
-   * the microphone back for the débat.
+   * **No closing handshake, and no session for the monologue at all.** A spoken
+   * monologue ends by asking the examiner for a closing sentence and waiting up
+   * to `CLOSING_SAFETY_MS` for it, because that wait is what lets Gemini's
+   * transcription of the candidate's last words arrive. A typed exposé has
+   * nothing in flight — the text was handed over whole — so the wait is several
+   * seconds of an épreuve that has already finished this part, with nothing on
+   * screen to explain them. The examiner is told all the same: the débat's
+   * session is seeded from the transcript by `monologueAsHistory`, which is
+   * where the typed text now is. For the same reason an armed monologue does not
+   * connect anybody — a socket opened here would be closed in the same act,
+   * having heard nothing and said nothing.
+   *
+   * @returns Whether the exposé counted as the monologue. `false` means nothing
+   *   happened at all — no turn, no clock, no phase change — and the caller
+   *   still holds the only copy of the text, so it must not throw it away.
    */
-  submitTypedExpose(text: string, seconds = 0): void {
-    if (!DEV_TOOLS_ENABLED) return;
-    if (this.phase !== "monologue") return;
+  async submitTypedExpose(text: string, seconds = 0): Promise<boolean> {
+    if (!DEV_TOOLS_ENABLED) return false;
+    if (this.phase !== "monologue") return false;
     // Nothing typed is not a delivered exposé, so it must not end the phase —
     // otherwise the button becomes a way to skip the monologue entirely.
-    if (!text.trim()) return;
-    if (this.closing) return;
+    if (!text.trim()) return false;
+    // A handshake somebody else started — the mic button, or the clock running
+    // out — already owns the end of this phase.
+    if (this.closing) return false;
+
+    if (this.phaseAwaitingStart && !this.anchorTypedMonologue()) return false;
 
     this.injectCandidateSpeech(text, seconds);
     this.log("dev-expose-submitted", "ending the monologue");
-    this.beginClosingHandshake();
+    // Not awaited, and nothing is waited for: `advance()` sets the phase and
+    // emits before it does anything asynchronous, so the débat is on screen by
+    // the time this returns. What follows — the microphone handed back, the
+    // débat's own consigne — is the ordinary path, unchanged.
+    void this.advance();
+    return true;
+  }
+
+  /**
+   * DEVELOPMENT ONLY — anchor an armed monologue that is about to end anyway.
+   *
+   * Everything « Enregistrer » does except open a session, because
+   * {@link submitTypedExpose} ends the phase in the same act and a socket opened
+   * here would be closed before it had finished connecting. What is kept is what
+   * the rest of the sitting reads: the clock is anchored and the phase's artefact
+   * is opened and stamped, so the monologue reports itself as a phase that
+   * happened rather than one nothing can date.
+   *
+   * `false` while the consigne is being given — the same refusal `startSpeaking`
+   * makes, for the same reason.
+   */
+  private anchorTypedMonologue(): boolean {
+    if (this.phase !== "monologue" || this.phaseStart !== null) return false;
+    if (this.announcementPlaying || this.announcementBlocked) return false;
+    if (this.destroyed) return false;
+
+    this.phaseStart = this.now();
+    this.log("phase-started", "monologue");
+    // `emit()` then `beginRecording()`, in that order, because `startSpeaking`
+    // does it in that order and this claims to be that method minus the session.
+    // Nothing observes the difference today; a claim of parity that is only
+    // nearly true is how the next reader ends up comparing the two line by line.
+    this.emit();
+    this.beginRecording("monologue");
+    return true;
   }
 
   /**
@@ -994,7 +1375,14 @@ export class ExamController {
     if (this.devTextMode && current === "monologue") this.setDevTextMode(false);
 
     this.phase = target;
-    this.phaseStart = this.now();
+    // Null, not `now()`: the phase is open but its clock has not started. The
+    // examiner's consigne is spoken first, and the seconds it takes belong to
+    // neither the phase that ended nor the one about to begin (#37). Anchored
+    // below, once the consigne has been heard, skipped or refused. A null
+    // `phaseStart` already means "no clock" everywhere that reads it — `tick()`
+    // returns early, the recording indicator stays dark, and `remaining` shows
+    // the phase's full length rather than a countdown that has begun.
+    this.phaseStart = null;
     this.elapsed = 0;
     this.emit();
 
@@ -1007,8 +1395,25 @@ export class ExamController {
       // and no message saying why. A failure here is not fatal: the micError is
       // already on screen and the épreuve is still worth sitting.
       await this.prepareAudio();
-      this.beginRecording(target);
-      await this.openSession(target);
+
+      // The consigne, then the candidate's own go-ahead, then the clock, the
+      // microphone and the examiner. None of that order commutes: the consigne
+      // must not be recorded, so it goes before capture opens; it must not be
+      // charged to the candidate, so it goes before the clock; and the session
+      // opens last so the examiner is not left holding a turn while an
+      // instruction it did not give is being read out.
+      await this.announce(target);
+      // A sitting that ended while the consigne was playing — the tab closed,
+      // the candidate walked out. There is no phase left to start.
+      if (this.destroyed) return;
+
+      // ARMED, not started. `phaseStart` stays null and `startSpeaking()` is
+      // what anchors it, from the candidate's own click on « Enregistrer ». The
+      // part is now the sujet, the plan and a button, with no clock running: a
+      // candidate reading the document they are about to speak about is not
+      // spending the seven minutes they have to speak in.
+      this.log("phase-armed", target);
+      this.emit();
     }
 
     // Deliberately last, and deliberately not on the way into `finished`.
@@ -1119,7 +1524,12 @@ export class ExamController {
     this.session = session;
     await session.connect();
 
-    session.sendDirective(examinerOpeningLine(target));
+    // Null for the monologue since #37: the greeting it used to speak is now the
+    // spoken consigne, which has already played by the time this runs. The débat
+    // still has one, because its opening cannot be a fixed clip — it has to quote
+    // an argument the candidate actually made.
+    const opening = examinerOpeningLine(target);
+    if (opening) session.sendDirective(opening);
 
     if (target === "monologue") {
       // Manual VAD: open the candidate's activity and never close it, so the
@@ -1146,6 +1556,24 @@ export class ExamController {
     this.stopTicker();
 
     this.player?.interrupt();
+
+    /**
+     * The closing consigne, started here and awaited at the bottom (#37).
+     *
+     * Started early because the seconds after this are already spent
+     * compressing a twenty-minute sitting into an upload, and a candidate who
+     * has just stopped speaking should be told the épreuve is over while that
+     * happens rather than a beat afterwards. The recording was closed by
+     * `advance()` before this ran, so there is nothing left for the clip to
+     * pollute.
+     *
+     * Awaited before `onFinished` because that is what navigates to the results
+     * page. Letting it run past the navigation would leave the examiner's voice
+     * talking over a screen that has moved on, from an element belonging to a
+     * page that has been replaced. The finished screen says "Préparation de
+     * votre enregistrement…" throughout, which is exactly what is happening.
+     */
+    const closing = this.announce("finished");
 
     // Stopped BEFORE the artefacts are taken, not after. `stop()` is what
     // flushes the partial frame still in the framer, so cutting the blobs first
@@ -1175,6 +1603,9 @@ export class ExamController {
       })),
       reconnects: this.reconnectCount,
     });
+
+    // See the top of the method: the voice must not outlive the screen.
+    await closing;
 
     this.deps.onFinished({
       transcript: this.transcript,
@@ -1294,6 +1725,14 @@ export class ExamController {
     this.destroyed = true;
     this.stopTicker();
     this.clearClosingTimer();
+    // Before anything is awaited. A phase held open by a consigne the browser
+    // refused to play is waiting on a promise only a click resolves, and the
+    // click cannot arrive on a page that is going away — `advance()` would keep
+    // this controller, its microphone and its socket alive forever waiting for
+    // one. Released as skipped, and `advance()` checks `destroyed` on the far
+    // side rather than starting a phase nobody is in.
+    this.announcer?.close();
+    this.releaseAnnouncementHold("skipped");
     this.closeSession();
     const recorder = this.recorder;
     this.recorder = null;
