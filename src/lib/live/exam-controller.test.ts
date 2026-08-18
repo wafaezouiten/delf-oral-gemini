@@ -2126,6 +2126,39 @@ describe("a teardown step that throws does not strand the épreuve", () => {
     assert.equal(h.controller.getSnapshot().phase, "debate");
   });
 
+  it("names the part it was leaving when the transition itself fails", async () => {
+    // `finish()` is not a teardown step this guards — it is the whole of the
+    // sitting being handed over — but it runs inside `advance()` and can still
+    // throw, and that is the case `advanceDetached` exists to report. The phase
+    // has already flipped by then, so the label has to have been read before.
+    const h = harness();
+    await intoStartedMonologue(h);
+    h.advanceClock(MONOLOGUE_MIN_SECONDS + 10);
+    await h.controller.advanceEarly();
+    h.session().finishTurn();
+    await settle();
+    await pressRecord(h);
+    assert.equal(h.controller.getSnapshot().phase, "debate");
+
+    h.players[h.players.length - 1].interrupt = () => {
+      throw new Error("the speaker is gone");
+    };
+    // The débat ends the way it always does: its clock runs out, the examiner is
+    // asked for a closing sentence, and its turn completing is what releases the
+    // phase into `finished`.
+    h.advanceClock(PHASE_DURATIONS.debate);
+    h.session().finishTurn();
+    await settle();
+    await settle();
+
+    const failure = h.controller
+      .getSnapshot()
+      .events.find((event) => event.name === "advance-failed");
+    assert.ok(failure, "the rejection reached the event log rather than the void");
+    assert.match(String(failure.detail), /"from":"debate"/, "the part it was leaving");
+    assert.match(String(failure.detail), /the speaker is gone/);
+  });
+
   it("still times the handshake out when the closing directive throws", async () => {
     // The safety timeout is what stops a silent examiner stranding the
     // candidate. It is stamped after the directive goes out, so a directive that

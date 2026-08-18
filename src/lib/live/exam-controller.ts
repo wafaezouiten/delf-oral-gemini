@@ -1358,8 +1358,13 @@ export class ExamController {
    * where it says it.
    */
   private advanceDetached(): void {
+    // Read here, not in the catch. `advance()` flips the phase before the awaits
+    // that can still fail — `finish()`'s teardown among them — so by the time a
+    // rejection lands, `this.phase` is the part being entered and a log naming
+    // it `from` would point at the wrong transition entirely.
+    const from = this.phase;
     void this.advance().catch((error: unknown) => {
-      this.log("advance-failed", { from: this.phase, error: String(error) });
+      this.log("advance-failed", { from, error: String(error) });
     });
   }
 
