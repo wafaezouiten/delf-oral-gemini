@@ -13,7 +13,7 @@ import { selectDeliverable } from "@/lib/exams/uploaded-recording";
 import { requestAbandon } from "@/lib/exams/abandon";
 import { describeFinishFailure, type FinishFailure } from "@/lib/ui/finish-failure";
 import type { OralTopic } from "@/lib/delf/topics";
-import { AnnouncementCard } from "./_components/announcement-card";
+import { AnnouncementControl } from "./_components/announcement-control";
 import { DEV_TOOLS_ENABLED } from "@/lib/dev-tools";
 import { DevTranscriptionPanel } from "./_components/dev-transcription-panel";
 import { PreparationScreen } from "./_components/preparation-screen";
@@ -408,14 +408,6 @@ export function ExamClient({ examId, topic }: { examId: string; topic: OralTopic
   );
 
   /**
-   * The examiner's spoken consigne, on both screens it can appear on (#37).
-   *
-   * One element handed to whichever screen is up, rather than each screen building
-   * its own: the card has to survive the préparation → monologue boundary looking
-   * like the same card, and the four controller calls behind it should not be
-   * written down twice.
-   */
-  /**
    * The phase is open but has not begun: the consigne is playing, or is held
    * waiting for a click the browser's autoplay policy made necessary (#37).
    *
@@ -426,15 +418,20 @@ export function ExamClient({ examId, topic }: { examId: string; topic: OralTopic
    */
   const awaitingConsigne = state.announcementPlaying || state.announcementBlocked;
 
+  /**
+   * The examiner's spoken consigne, on every screen it can appear on (#37, #59).
+   *
+   * One element handed to whichever screen is up, rather than each screen
+   * building its own: the control has to survive the préparation → monologue
+   * boundary looking like the same control, and the two controller calls behind
+   * it should not be written down twice.
+   */
   const announcement = (
-    <AnnouncementCard
-      announcement={state.announcement}
+    <AnnouncementControl
       playing={state.announcementPlaying}
       blocked={state.announcementBlocked}
-      muted={state.announcementsMuted}
       onPlay={() => controller.playAnnouncement()}
       onSkip={() => controller.skipAnnouncement()}
-      onMute={() => controller.muteAnnouncements()}
     />
   );
 

@@ -118,7 +118,7 @@ export function PassationScreen({
   awaitingConsigne?: boolean;
   /** Controller failures — a lost connection, a dead microphone. */
   notices?: ReactNode;
-  /** The examiner's spoken consigne for this part (#37). */
+  /** « Passer », for as long as this part's spoken consigne lasts (#37, #59). */
   announcement?: ReactNode;
   /** Development-only diagnostics. Never rendered in production. */
   devPanel?: ReactNode;

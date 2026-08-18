@@ -71,13 +71,13 @@ same rule, so the reproduction keeps it.
                     └───────────────────────────────────┘
                                                         │
    ┌────────────────────────────────────────────────────▼──────────────────┐
-   │ 1. PRÉPARATION        step 0 · timer ring in the topbar · starts on   │
-   │                       arrival, consigne spoken (#37, #55)             │
+   │ 1. PRÉPARATION        step 0 · ring + « Commencer » in the topbar ·   │
+   │                       starts on arrival, consigne spoken (#37, #55)   │
    │    left: notices · sujet, justified, "Votre mission"                  │
-   │    right: consigne card · passation card + CTA · "Avant de commencer" │
-   │           (mic test, endroit calme, navigateur) · notes textarea ·    │
-   │           structure attendue · déroulé de la séance                   │
-   │    exits: time-up  |  "Commencer la passation"  |  Retour → dialog    │
+   │    right: « Passer » while the consigne plays (#59) · notes           │
+   │           textarea · structure attendue · "Avant de commencer"        │
+   │           (mic test, endroit calme, navigateur) · déroulé             │
+   │    exits: time-up  |  « Commencer » (topbar)  |  Retour → dialog      │
    └────────────────────────────────────────────────────┬──────────────────┘
                                                         │
    ┌────────────────────────────────────────────────────▼──────────────────┐
@@ -139,20 +139,31 @@ What it carried was not dropped with it:
 - *Moved:* the WebCodecs danger notice, over the préparation's sujet. The
   reference has no equivalent because it never uploads audio; here a browser that
   cannot encode loses the whole audio correction, and the préparation is now the
-  last moment the candidate can do anything about it. « Commencer la passation »
+  last moment the candidate can do anything about it. The topbar's « Commencer »
   is what waits for the answer.
 - *Dropped with the screen:* the transport toggle row — admin-gated in the
   reference (`connectionLabel` returns `undefined` for candidates), and this
   project has no admin role, so it never rendered for anyone — and the serif
   part headline, whose `partSubtitle` helper went with its only caller.
 
-**Préparation.** Reproduced whole: the sujet on the left, the rail on the right
-carrying the passation card, the notes textarea and « Structure attendue », the
-single clock in the topbar and the "Passer et commencer maintenant" ghost button
-at the rail's foot. It is now the épreuve's first screen, so the rail also
-carries the consigne card, the pre-flight checks and the déroulé, and the topbar
-stepper stands on « Préparation » rather than on « Exposé » — it was written as a
-literal `1` when the stepper still counted screens.
+**Préparation.** The sujet on the left, the rail on the right, one clock in the
+topbar. It is now the épreuve's first screen, so the rail also carries the
+pre-flight checks and the déroulé, and the topbar stepper stands on
+« Préparation » rather than on « Exposé » — it was written as a literal `1` when
+the stepper still counted screens.
+
+Two departures from the reference's rail, both #59:
+
+- *The way on moved into the topbar.* The reference has a passation card with the
+  primary CTA and a "Passer et commencer maintenant" ghost at the rail's foot —
+  the same action twice, three cards below the clock that tells a candidate
+  whether to press it. There is one « Commencer » now and it is beside the ring.
+  It keeps the `checking` gate the card's button held.
+- *The consigne is a button, not a card.* It was a panel with the script, a
+  replay and a sticky mute, and it outlived the clip by the length of the phase.
+  While the voice plays there is « Passer » at the head of the rail, and nothing
+  after it. A consigne the browser refuses to autoplay still gets its sentence
+  and its two ways out, because that state holds the épreuve.
 
 **Passation.** Reproduced whole: the scene with its two faces and pulsing rings,
 the beat stepper, the elapsed/total clock with its draining bar, the foot control
