@@ -277,6 +277,62 @@ export function micCopy(
 }
 
 /**
+ * The examiner's status line, under their name in the scene (#60).
+ *
+ * Restored with the scene it belongs to. It was deleted in #37, when the two
+ * faces came off the passation and their status lines went with them; the débat
+ * has them back, because a screen that prints nothing of what is said needs
+ * *something* that says who is talking.
+ *
+ * The order of the branches is the whole of it. Each one outranks the ones below
+ * because it describes a state in which the lower answer is a lie, not merely a
+ * less interesting truth.
+ */
+export function examinerStatus(options: {
+  connected: boolean;
+  connecting: boolean;
+  speaking: boolean;
+  /**
+   * A recorded consigne is playing (#37).
+   *
+   * First, because it is the one state where the examiner is audible with no
+   * session behind them: without it this said « L'examinateur n'est pas en ligne »
+   * over the sound of the examiner talking.
+   */
+  announcing?: boolean;
+  /**
+   * The part has been ended and the examiner is finishing their turn (#55).
+   *
+   * Above the connection for the same reason as `announcing`: the socket is being
+   * torn down while the voice is still audible, so the honest answer is that they
+   * are speaking, not that they have gone.
+   */
+  closing?: boolean;
+}): string {
+  if (options.announcing) return "L'examinateur donne la consigne…";
+  if (options.closing) return "L'examinateur conclut…";
+  if (options.connecting) return "Connexion en cours…";
+  if (!options.connected) return "L'examinateur n'est pas en ligne.";
+  if (options.speaking) return "L'examinateur intervient…";
+  return "Vous écoute attentivement.";
+}
+
+/** The candidate's own status line, mirrored on the right of the scene (#60). */
+export function candidateStatus(options: {
+  connected: boolean;
+  examinerSpeaking: boolean;
+  recording: boolean;
+}): string {
+  // Listening outranks the microphone: both are true while the examiner
+  // interrupts, and « Vous avez la parole » beside a talking examiner is the one
+  // that misleads.
+  if (options.examinerSpeaking) return "En écoute…";
+  if (!options.recording) return "Microphone en attente";
+  if (!options.connected) return "Enregistrement en cours";
+  return "Vous avez la parole";
+}
+
+/**
  * The body of the passation's quiet status card.
  *
  * The reference prints an "en attente" hint until the candidate opens the

@@ -9,12 +9,12 @@ import { TimerRing } from "@/app/_components/po/timer-ring";
 import { cn } from "@/lib/ui/class-names";
 import { phaseDurationSeconds } from "@/lib/delf/phases";
 import type { OralTopic } from "@/lib/delf/topics";
-import type { TranscriptEntry } from "@/lib/delf/transcript";
-import { DEBATE_TRANSCRIPT_COPY } from "@/lib/ui/debate-transcript";
 import {
   MONOLOGUE_TITLE,
   DEBATE_TITLE,
   SITE_FOOTER,
+  candidateStatus,
+  examinerStatus,
   partieKicker,
   passationStatus,
   poKicker,
@@ -22,7 +22,7 @@ import {
   type SpeakingPhase,
 } from "@/lib/ui/po-player-view";
 import { ConversationControls } from "./conversation-controls";
-import { DebateTranscript } from "./debate-transcript";
+import { ConversationScene } from "./conversation-scene";
 import { ExposePlan } from "./expose-plan";
 import { NotesDrawer } from "./notes-drawer";
 
@@ -30,14 +30,12 @@ import { NotesDrawer } from "./notes-drawer";
  * The passation: the sujet the candidate is speaking about, in front of them
  * while they speak about it.
  *
- * **What this screen used to be, and why it changed.** It was a pair of examiner
- * and candidate avatars with a status card underneath, and the sujet was left
- * behind on the préparation screen. That reproduced the reference faithfully and
- * it was the wrong thing to reproduce: a candidate delivering a seven-minute
- * argued exposé about a document cannot see the document, cannot see the plan
- * they were told to follow, and is watching two faces that convey nothing the
- * status line does not already say in words. The avatars are gone; the sujet, the
- * plan and the record control take the room they were using.
+ * **The sujet is on screen throughout, and that is what changed in #37.** This
+ * screen was two avatar faces over a status card, with the document left behind
+ * on the préparation: a candidate delivering a seven-minute argued exposé about
+ * a text could not see the text, and could not see the plan they had been told
+ * to follow. The sujet, the plan and the record control took that room and keep
+ * it.
  *
  * The two parts share the frame and differ in what stands with the sujet:
  *
@@ -47,11 +45,15 @@ import { NotesDrawer } from "./notes-drawer";
  *    document, where re-reading the source scrolled the plan away during the
  *    one part whose whole task is following it. The frame widens to hold both,
  *    and collapses to one column below `lg`.
- *  - **The débat prints the exchange instead (#48).** A plan is a script for a
- *    monologue; during the débat the candidate is answering objections, and being
- *    able to re-read the one they are answering is worth more than the fidelity
- *    of not seeing it. « Masquer » still puts the reference's behaviour one click
- *    away, and hiding it falls back to the status card.
+ *  - **The débat shows the two protagonists, and not a word of what they say
+ *    (#60).** It printed the exchange as it was transcribed (#48), on the
+ *    argument that re-reading the objection you are answering beats the fidelity
+ *    of not seeing it. The cost #48 named is the one being taken seriously now:
+ *    reading your own words as you say them is the fastest way to stop listening
+ *    to the examiner, and a débat is graded on interaction. So the faces are
+ *    back — a ring around whoever holds the floor, one status line each — and
+ *    the exchange is printed afterwards, on the results page, where reading it
+ *    is the task rather than a distraction from one.
  *
  * **Nothing runs until « Enregistrer ».** The part opens armed: the consigne is
  * given, the sujet and the plan are readable, the timer shows the part's full
@@ -65,6 +67,7 @@ export function PassationScreen({
   elapsed,
   remaining,
   recording,
+  examinerSpeaking,
   connected,
   connecting,
   canAdvance,
@@ -73,9 +76,6 @@ export function PassationScreen({
   notes,
   notesOpen,
   onToggleNotes,
-  transcript,
-  transcriptOpen,
-  onToggleTranscript,
   onStart,
   onAdvance,
   onExit,
@@ -92,6 +92,12 @@ export function PassationScreen({
   elapsed: number;
   remaining: number;
   recording: boolean;
+  /**
+   * The examiner holds the floor: their voice is streaming, or a consigne is
+   * playing (`ExamController` counts both). The débat's scene reads it, and it is
+   * the only thing on that screen that says whose turn it is (#60).
+   */
+  examinerSpeaking: boolean;
   connected: boolean;
   connecting: boolean;
   canAdvance: boolean;
@@ -106,11 +112,6 @@ export function PassationScreen({
   notes: string;
   notesOpen: boolean;
   onToggleNotes: () => void;
-  /** The whole exam transcript. Only the débat's half of it is ever shown here. */
-  transcript: readonly TranscriptEntry[];
-  /** Open by default, and only consulted during the débat. */
-  transcriptOpen: boolean;
-  onToggleTranscript: () => void;
   /** « Enregistrer » — starts the clock, the recording and the session. */
   onStart: () => void;
   onAdvance: () => void;
@@ -136,7 +137,6 @@ export function PassationScreen({
   );
   const hasNotes = notes.trim().length > 0;
   const partTitle = phase === "monologue" ? MONOLOGUE_TITLE : DEBATE_TITLE;
-  const showTranscript = phase === "debate" && transcriptOpen;
 
   /**
    * The sujet, on the paper stock the préparation screen prints it on, so the
@@ -219,43 +219,54 @@ export function PassationScreen({
             <>
               {sujet}
 
-              {showTranscript ? (
-                <DebateTranscript
-                  transcript={transcript}
-                  hint={status.body}
-                  onHide={onToggleTranscript}
-                />
-              ) : (
-                <div className="border-border bg-card rounded-lg border border-dashed p-6 text-center">
-                  <h2 className="text-[0.84375rem] font-semibold">{status.title}</h2>
-                  <p className="text-muted-foreground mx-auto mt-1.5 max-w-[46ch] text-xs leading-relaxed">
-                    {status.body}
-                  </p>
-                  {/* The way back to the feed, on the card that replaced it. */}
-                  <button
-                    type="button"
-                    onClick={onToggleTranscript}
-                    className="border-border text-muted-foreground hover:text-foreground hover:bg-muted mt-3.5 rounded-md border px-3 py-1.5 text-[0.6875rem] font-semibold transition-colors"
-                  >
-                    {DEBATE_TRANSCRIPT_COPY.show}
-                  </button>
-                </div>
-              )}
+              {/* The débat's panel: who is speaking, and nothing they said
+                  (#60). It replaces the live transcript and the quiet card the
+                  transcript could be hidden behind — the two lines the card
+                  carried are the two under the faces, so the card was saying
+                  them a second time. */}
+              <ConversationScene
+                examinerSpeaking={examinerSpeaking}
+                examinerStatus={examinerStatus({
+                  connected,
+                  connecting,
+                  speaking: examinerSpeaking,
+                  announcing: awaitingConsigne,
+                  closing,
+                })}
+                // Not simply `recording`: the microphone stays open while the
+                // examiner interrupts, and two rings pulsing at once says the
+                // one thing this screen exists to answer is "both of you".
+                candidateRecording={recording && !examinerSpeaking}
+                candidateStatus={candidateStatus({
+                  connected,
+                  examinerSpeaking,
+                  recording,
+                })}
+                candidateStatusUrgent={remaining <= 60}
+                elapsed={elapsed}
+                total={total}
+              />
             </>
           )}
 
-          {/* The exposé's status line lives under the plan rather than replacing
-              it: the plan is the thing to be looking at, and this is one
-              sentence saying whether the examiner is there yet. */}
-          {phase === "monologue" && !awaitingStart && !awaitingConsigne && (
-            // A live region, and permanently one: it carries the examiner's
-            // arrival and — since #55 — the close, and a region that only gets
-            // its role at the moment its text changes is a region a screen
-            // reader has no reason to have been watching. Its handful of states
-            // are all events worth hearing, unlike the countdown under the
-            // control below.
+          {/* One sentence of guidance, under the panel rather than replacing it:
+              the plan (exposé) and the scene (débat) are the things to be
+              looking at, and this says whether the examiner is there yet and
+              what the part asks for. */}
+          {!awaitingStart && !awaitingConsigne && (
+            // A live region in the exposé, and permanently one: it carries the
+            // examiner's arrival and — since #55 — the close, and a region that
+            // only gets its role at the moment its text changes is a region a
+            // screen reader has no reason to have been watching. Its handful of
+            // states are all events worth hearing, unlike the countdown under
+            // the control below.
+            //
+            // Not in the débat, where the scene above is already announcing
+            // every turn change politely and says the same arrival and the same
+            // close in the examiner's own status line (#60). Two regions
+            // reporting one event is how a screen reader user hears it twice.
             <p
-              role="status"
+              role={phase === "monologue" ? "status" : undefined}
               className="text-muted-foreground text-center text-xs leading-relaxed"
             >
               {status.body}

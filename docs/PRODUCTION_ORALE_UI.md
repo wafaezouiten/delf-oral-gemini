@@ -86,7 +86,7 @@ same rule, so the reproduction keeps it.
    │    head: sujet on paper · « Passer » beside its title while the       │
    │          consigne speaks (#59)                                        │
    │    body:  exposé → « Votre plan » in a column beside the sujet        │
-   │           débat  → the live transcript, « Masquer » back to the card  │
+   │           débat  → the two faces, a ring on whoever holds the floor   │
    │    foot:  [Mes notes]      (mic)      [Terminer l'épreuve]            │
    │    drawer: préparation notes, read-only                               │
    └────────────────────────────────────────────────────┬──────────────────┘
@@ -168,21 +168,21 @@ Two departures from the reference's rail, both #59:
   and nothing after it. A consigne the browser refuses to autoplay still gets
   its sentence and its two ways out, because that state holds the épreuve.
 
-**Passation.** Reproduced whole: the scene with its two faces and pulsing rings,
-the beat stepper, the elapsed/total clock with its draining bar, the foot control
-bar, the notes drawer.
+**Passation.** The sujet on paper, the foot control bar and the notes drawer,
+with the two parts framed differently: the exposé sets « Votre plan » in a column
+beside the document (#59), and the débat carries the reference's scene — two
+faces, a ring pulsing around whoever holds the floor, the elapsed/total clock
+with its draining bar.
 
-- *Added, against the reference (#48):* the **débat prints its exchange**, in the
-  status card's place, with « Masquer » to put the card back. The reference has
-  no transcript feed anywhere and this screen originally reproduced that — the
-  argument being that reading along is the fastest way to stop listening to the
-  examiner. It is outweighed in the débat and left standing in the monologue,
-  which is a split the transport forces as much as the design: manual VAD
-  transcribes nothing until the floor is released, so a monologue feed would sit
-  empty for seven minutes and then print the whole exposé at the moment the
-  phase ends. The débat's automatic VAD streams turn by turn. The turns are set
-  like the results page's transcript — speaker label over a paragraph, never chat
-  bubbles.
+- *Reverted (#60), against #48:* the débat shows **who is speaking, not what was
+  said**. It printed the exchange as it was transcribed, in the status card's
+  place, with « Masquer » to put the card back; the reference has no transcript
+  feed anywhere, and the argument for adding one — being able to re-read the
+  objection you are answering — was always weighed against the cost of reading
+  along instead of listening. That cost wins: a débat is graded on interaction.
+  The scene answers the only question left, which is whose turn it is, and the
+  exchange is printed afterwards on the results page. The status card went with
+  the feed, because its two lines are the two under the faces.
 - *Added, against the reference (#55):* the **close is on screen**. Ending a part
   asks the examiner for a closing sentence and waits up to `CLOSING_SAFETY_MS`
   for it, so several seconds pass between the click and the next consigne. The
@@ -190,9 +190,11 @@ bar, the notes drawer.
   what follows. Before, `canAdvance` went false and the control fell back to its
   locked copy: « Encore 0 min avant de pouvoir conclure », over a monologue that
   was concluding.
-- *Adapted:* the beats are `["Exposé", "Débat"]` driven by the actual phase, not
-  by `EXPOSE_SHARE`. This project knows which beat it is in; approximating it
-  would be worse data.
+- *Dropped:* the scene's inner beat stepper. The reference names the two beats
+  — Exposé, Débat — between the faces, and this project's topbar has named the
+  épreuve's three parts since #37; two steppers disagreeing about which step the
+  candidate is on is why the inner one went, and it did not come back with the
+  scene (#60).
 - *Adapted:* the mic button advances the épreuve rather than opening a socket —
   the socket is the controller's. During the monologue it is disabled until the
   5-minute DELF floor, which is `canAdvanceEarly`'s existing rule shown as a hint
@@ -201,7 +203,7 @@ bar, the notes drawer.
   notice with its reconnect button, and the microphone notice. The reference has
   no analogue for any of them; they are real states of this product and #11's
   requirement is that each has a visible, non-technical message. They sit in the
-  topbar (badges) and above the scene (notices).
+  topbar (badges) and above the sujet (notices).
 - *Dropped:* the reference's `alert()` calls on mic failure. This project routes
   every failure through `<Notice>`.
 
