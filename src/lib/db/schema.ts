@@ -423,6 +423,17 @@ export const evaluations = pgTable(
       sql`${table.rawScore25} between 0 and 25 and ${table.score25} between 0 and 25
         and ${table.durationPenalty} >= 0 and ${table.absencePenalty} >= 0`,
     ),
+    // WARNING, learned the hard way: `drizzle-kit push` applies a new COLUMN and
+    // silently leaves these CHECK constraints at whatever the database already
+    // had. A pushed database therefore ends up with `absence_penalty` present
+    // and `evaluations_score_25_check` still reading `raw − duration`, which
+    // accepts every correction that took no absence penalty and refuses every
+    // one that did. That is not a theoretical drift — it strands a real
+    // candidate's correction, because the finish route logs the failed write
+    // and shows them « correction perdue ». Constraint changes must be applied
+    // from the generated migration; `pnpm verify:db` now writes a row with both
+    // penalties non-zero, which is the only shape that notices.
+    //
     // Keeps the four score columns telling one story. Both rubric copies apply
     // the penalty the same way — subtract, floor at 0 — so this constraint is
     // neutral in the disagreement between them.
