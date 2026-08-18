@@ -1668,11 +1668,23 @@ export class ExamController {
    *
    * After that, an interruption is exactly what it says: the candidate is
    * speaking, and the examiner stops.
+   *
+   * **What refusing it can and cannot do.** `interrupted` reports a decision the
+   * server has already taken: generation stopped, and no client can ask for the
+   * rest of a turn that was never produced. What this keeps is everything
+   * already delivered — which is usually the whole question, because Gemini
+   * streams a turn faster than real time and the candidate is hearing its first
+   * second while the remaining four sit queued in the player. That queue is
+   * exactly what the flush threw away, and it is the failure that was reported:
+   * a question printed in full and never heard. A turn genuinely cut short
+   * server-side arrives short in the transcript too, and nothing here can make
+   * it longer.
    */
   private handleInterruption(): void {
+    // Redundant to name the phase: `log` stamps every event with it.
     const buffered = this.player?.bufferedSeconds ?? 0;
     if (!this.openingTurnDelivered) {
-      this.log("interruption-refused", { phase: this.phase, buffered });
+      this.log("interruption-refused", { buffered });
       return;
     }
     this.log("interruption", { buffered });

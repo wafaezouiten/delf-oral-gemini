@@ -290,10 +290,14 @@ class FakePlayer implements PlayerLike {
   resumed = false;
   closed = false;
   interrupts = 0;
-  bufferedSeconds = 0;
   /** The examiner's voice, as far as it has reached the speaker: what an
    *  interruption drops, and therefore what the candidate does not hear. */
   chunks: string[] = [];
+  /** One chunk stands for one second. Derived rather than hardcoded so the
+   *  figure the controller logs is a figure a test can hold it to. */
+  get bufferedSeconds(): number {
+    return this.chunks.length;
+  }
   constructor(
     private readonly options: DeviceOptions = {},
     private readonly callbacks: { onSpeakingChange?: (speaking: boolean) => void } = {},
@@ -2265,9 +2269,14 @@ describe("the examiner's opening question", () => {
 
     assert.equal(player.interrupts, 0, "the speaker was not told to drop the turn");
     assert.deepEqual(player.chunks, ["the opening question"], "so it is still there to hear");
-    assert.ok(
-      h.controller.getSnapshot().events.some((event) => event.name === "interruption-refused"),
-      "and the refusal is in the session log rather than silent",
+    const refused = h.controller
+      .getSnapshot()
+      .events.find((event) => event.name === "interruption-refused");
+    assert.ok(refused, "and the refusal is in the session log rather than silent");
+    assert.match(
+      String(refused.detail),
+      /"buffered":1/,
+      "carrying how much playback it kept, which is what makes the log worth reading",
     );
   });
 
