@@ -17,7 +17,12 @@
  * débat the candidate is answering the examiner rather than reading.
  */
 
-import type { TranscriptEntry, TranscriptSpeaker } from "@/lib/delf/transcript";
+import { formatTurnOffset } from "@/lib/delf/phases";
+import {
+  entriesForPhase,
+  type TranscriptEntry,
+  type TranscriptSpeaker,
+} from "@/lib/delf/transcript";
 
 export const DEBATE_CONVERSATION_COPY = {
   title: "Échange avec l'examinateur",
@@ -81,4 +86,45 @@ export function isNearBottom(
  */
 export function turnKey(entry: TranscriptEntry, index: number): string {
   return `${entry.timestamp}-${index}`;
+}
+
+export interface DebateTurn {
+  entry: TranscriptEntry;
+  /**
+   * `m:ss` into the débat — the same count the scene's clock is showing.
+   *
+   * **Anchored on the phase clock, not on the first turn, and that is where this
+   * differs from the correction's stamps** (`correction-transcript.ts`). There,
+   * nothing on the page says when the part began, so the first turn is the only
+   * honest zero. Here the candidate is looking at `1:12 / 5:00` in the scene
+   * directly above this feed, and a stamp that disagrees with the clock a
+   * centimetre above it reads as a bug in one of them. Anchoring on the first
+   * turn would leave every stamp permanently behind that clock by however long
+   * the examiner took to ask the opening question.
+   */
+  timeLabel: string;
+}
+
+/**
+ * The débat's turns, each stamped with when it was said.
+ *
+ * `phaseStartedAt` is the débat's start in the transcript's own time base — ms
+ * since the exam began, the same origin `TranscriptEntry.timestamp` counts from
+ * — or null while the phase has not started its clock. It is null for a real
+ * window: the consigne is spoken before the clock starts (#37), and the
+ * examiner's opening question can land inside it. Falling back to the first
+ * turn's own timestamp there means those turns read `0:00` and upward rather
+ * than being measured against an exam-length origin, which would stamp the
+ * débat's opening question with a quarter of an hour.
+ */
+export function debateTurns(
+  transcript: readonly TranscriptEntry[],
+  phaseStartedAt: number | null,
+): DebateTurn[] {
+  const entries = entriesForPhase(transcript, "debate");
+  const anchor = phaseStartedAt ?? entries[0]?.timestamp ?? 0;
+  return entries.map((entry) => ({
+    entry,
+    timeLabel: formatTurnOffset(entry.timestamp - anchor),
+  }));
 }

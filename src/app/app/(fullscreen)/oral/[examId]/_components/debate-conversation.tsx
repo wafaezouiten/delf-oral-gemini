@@ -4,9 +4,10 @@ import { useCallback, useEffect, useRef } from "react";
 
 import { Kicker } from "@/app/_components/po/tag";
 import { cn } from "@/lib/ui/class-names";
-import { entriesForPhase, type TranscriptEntry } from "@/lib/delf/transcript";
+import { type TranscriptEntry } from "@/lib/delf/transcript";
 import {
   DEBATE_CONVERSATION_COPY,
+  debateTurns,
   isNearBottom,
   speakerLabel,
   turnKey,
@@ -23,6 +24,12 @@ import {
  * examiner's turns sit left and the candidate's right, each in its own bubble.
  * The names stay the results page's — « Vous » and « Examinateur » — because
  * *who* said something must not change between the two.
+ *
+ * **The stamps do change between the two, and that is the exception that proves
+ * it.** *When* a turn was said is measured against whatever the reader can see:
+ * here, the scene's clock directly above this feed, so the anchor is the phase
+ * clock; on the correction, the section's own first turn, because nothing there
+ * says when the part opened. The reasoning is in `debateTurns`.
  *
  * **It has no scrollbar of its own, and that is the point.** It was a boxed feed
  * with its own scroller under a fixed head, which meant the screen had two
@@ -51,10 +58,18 @@ import {
  */
 export function DebateConversation({
   transcript,
+  phaseStartedAt,
   hint,
 }: {
   /** The whole exam transcript; the débat's turns are filtered out of it here. */
   transcript: readonly TranscriptEntry[];
+  /**
+   * The débat's start in the transcript's own time base, so each turn can be
+   * stamped with the count the scene's clock above is showing. Null until the
+   * phase's clock starts — see `debateTurns`, which falls back rather than
+   * printing an exam-length figure.
+   */
+  phaseStartedAt: number | null;
   /**
    * What the status card would have said, shown until the first turn arrives.
    *
@@ -65,7 +80,7 @@ export function DebateConversation({
    */
   hint: string;
 }) {
-  const turns = entriesForPhase(transcript, "debate");
+  const turns = debateTurns(transcript, phaseStartedAt);
   const root = useRef<HTMLDivElement>(null);
   /**
    * Whether the page is still following the conversation.
@@ -95,7 +110,7 @@ export function DebateConversation({
   // fragment usually merges into the last entry rather than adding one
   // (`appendFragment`), so a dependency on `turns.length` alone would stop
   // following in the middle of the examiner's sentence.
-  const lastTurn = turns[turns.length - 1];
+  const lastTurn = turns[turns.length - 1]?.entry;
   useEffect(() => {
     const element = scroller();
     if (!element || !following.current) return;
@@ -115,19 +130,32 @@ export function DebateConversation({
             <p>{hint}</p>
           </div>
         ) : (
-          turns.map((turn, index) => {
-            const mine = turn.speaker === "candidate";
+          turns.map(({ entry, timeLabel }, index) => {
+            const mine = entry.speaker === "candidate";
             return (
               <div
-                key={turnKey(turn, index)}
+                key={turnKey(entry, index)}
                 className={cn("flex flex-col gap-1", mine ? "items-end" : "items-start")}
               >
                 {/* Named as well as placed. Side and colour carry the speaker
                     for anyone who can see them; the label is what carries it
                     into a screen reader, and into a screenshot of a
-                    conversation with one turn in it. */}
-                <span className="text-muted-foreground text-[0.625rem] font-semibold tracking-[0.16em] uppercase">
-                  {speakerLabel(turn.speaker)}
+                    conversation with one turn in it.
+
+                    The stamp joins that line rather than taking one of its own,
+                    and sits on the outside of the label — away from the bubble
+                    on both sides, so the two columns of stamps run down the
+                    outer edges instead of meeting in the middle. */}
+                <span
+                  className={cn(
+                    "flex items-baseline gap-2 text-[0.625rem] font-semibold tracking-[0.16em] uppercase",
+                    mine && "flex-row-reverse",
+                  )}
+                >
+                  <span className="text-muted-foreground">{speakerLabel(entry.speaker)}</span>
+                  <span className="text-muted-foreground/70 tabular tracking-normal">
+                    {timeLabel}
+                  </span>
                 </span>
                 <p
                   className={cn(
@@ -137,7 +165,7 @@ export function DebateConversation({
                       : "border-border bg-muted/50 text-foreground/90 rounded-bl-sm border",
                   )}
                 >
-                  {turn.text}
+                  {entry.text}
                 </p>
               </div>
             );

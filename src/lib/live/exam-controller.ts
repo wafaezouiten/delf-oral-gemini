@@ -124,6 +124,21 @@ export interface ExamState {
   phase: OralPhase;
   elapsed: number;
   remaining: number;
+  /**
+   * When the current phase's clock started, in the transcript's own time base —
+   * ms since the exam began, the same origin `TranscriptEntry.timestamp` counts
+   * from. Null while the phase has not started its clock, which is a real window
+   * rather than a transient: the consigne is spoken first and the clock starts
+   * after it (#37).
+   *
+   * Exposed so the débat's feed can stamp each turn with the count the scene's
+   * clock is already showing, instead of one anchored somewhere else. In the
+   * transcript's base rather than the controller's so that no reader has to hold
+   * two origins at once — `elapsed` answers "how long has this phase run", this
+   * answers "where in the transcript did it start", and they are not
+   * interchangeable.
+   */
+  phaseStartedAt: number | null;
   connection: ConnectionState;
   /**
    * The two machines flattened into one value (`lib/live/state-machine.ts`).
@@ -507,6 +522,7 @@ export class ExamController {
       phase: this.phase,
       elapsed: this.elapsed,
       remaining: remainingSeconds(this.phase, this.elapsed),
+      phaseStartedAt: this.phaseStart === null ? null : this.phaseStart - this.examStart,
       connection: this.connection,
       status: examStatus(this.phase, this.connection),
       // A consigne is the examiner talking, so the scene animates for it exactly

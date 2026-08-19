@@ -9,6 +9,7 @@ import {
   PHASE_DURATIONS,
   canAdvanceEarly,
   formatClock,
+  formatTurnOffset,
   isPhaseTimeUp,
   nextPhase,
   phaseDurationSeconds,
@@ -107,5 +108,28 @@ describe("a silent monologue", () => {
   it("treats a nonsense capture the same as none", () => {
     assert.equal(monologueWasSilent(Number.NaN, 0), false);
     assert.equal(monologueWasSilent(-1, 0), false);
+  });
+});
+
+describe("stamping a turn with when it was said", () => {
+  it("reads milliseconds, because that is what the transcript counts in", () => {
+    assert.equal(formatTurnOffset(0), "0:00");
+    assert.equal(formatTurnOffset(31_000), "0:31");
+    assert.equal(formatTurnOffset(65_000), "1:05");
+  });
+
+  it("floors, because the stamp marks when a turn started", () => {
+    // 1.9 s in is a turn that began during the second second, not the third.
+    assert.equal(formatTurnOffset(1_900), "0:01");
+  });
+
+  it("never prints a negative stamp", () => {
+    // Both callers subtract an anchor from an entry, and « -0:01 » beside a turn
+    // reads as a defect in the recording rather than in the arithmetic.
+    assert.equal(formatTurnOffset(-5_000), "0:00");
+  });
+
+  it("survives a timestamp that is not a number", () => {
+    assert.equal(formatTurnOffset(Number.NaN), "0:00");
   });
 });
