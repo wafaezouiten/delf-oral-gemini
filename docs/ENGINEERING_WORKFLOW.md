@@ -9,41 +9,69 @@ same gates before anything reaches production.
 
 ```text
 main        production
- ↑          promoted from staging, by pull request only
-staging     pre-production
  ↑          promoted from develop, by pull request only
-develop     integration — the default branch, where phases land
+develop     integration — the default branch, where issues land
  ↑
-feature/*   one per issue, cut from develop
+<type>/*    one per issue, cut from develop
 ```
+
+Two long-lived branches, not three. `main` is production; `develop` is staging.
 
 Rules:
 
-- Cut every feature branch from `develop`. Name it `feature/<phase>-<slug>`, e.g.
-  `feature/2-db-schema`.
-- Merge feature branches into `develop` through a pull request. Never push to
+- Cut every issue branch from `develop`. Name it `<type>/<issue>-<slug>`, e.g.
+  `fix/84-silence-relance`, where `<type>` is `feat`, `fix`, `chore` or `docs`.
+- Merge issue branches into `develop` through a pull request. Never push to
   `develop` directly.
-- Promote `develop` → `staging` and `staging` → `main` with a pull request each.
-  A promotion carries no new commits of its own.
+- Once the change is verified on the staging deployment, promote `develop` →
+  `main` with its own pull request. A promotion carries no new commits.
 - `develop` is the repository's default branch, so new pull requests target it
   without anyone having to remember to retarget.
+- **Exception.** Changes that only touch documentation or other non-code files
+  (`.gitignore`, `README.md`, `docs/`, `CLAUDE.md`, `AGENTS.md`) may be committed
+  and pushed directly, without a branch or a pull request.
 
 Cutting a branch:
 
 ```bash
-git fetch origin && git switch -c feature/4-gemini-session origin/develop
+git fetch origin && git switch -c fix/84-silence-relance origin/develop
 ```
 
-Promoting:
+Opening the pull request — `develop` is the default base, so no `--base`:
 
 ```bash
-gh pr create --base staging --head develop --title "chore: promote develop to staging"
+git push -u origin HEAD && gh pr create --fill
 ```
 
-> **Naming note.** This repository originally called the integration branch `dev`.
-> It was renamed to `develop` to match the company repository; GitHub retargeted
-> the open pull request automatically. If you have a stale local clone:
-> `git branch -m dev develop && git fetch --prune && git branch -u origin/develop develop`.
+Promoting to production:
+
+```bash
+gh pr create --base main --head develop --title "chore: promote develop to main"
+```
+
+### `staging` is an environment, not a branch
+
+This is the distinction the model turns on, and the one this repository got
+wrong for a while.
+
+**Staging is a deployment.** In the company repository it is the domain
+`staging.delf-preps.bendev.ai`, served from `develop`. Pushing to `develop`
+deploys to staging; that is what "verified in staging" in the promotion rule
+above means. There is no Git branch called `staging` in the company repository —
+166 remote branches, and not one of them.
+
+**A deployment target sharing a name with a branch is a coincidence, not a
+requirement.** An issue branch is therefore never opened against `staging`, and
+nothing is "promoted to staging": you promote to `main`, and staging is where
+`develop` already lives.
+
+> **History.** The integration branch was originally `dev`, renamed to `develop`
+> to match the company repository. This repository then grew a literal `staging`
+> branch, and for a period `develop` → `staging` → `main` was the documented
+> model, with `staging` briefly the default branch. That was a misreading of the
+> company's environment name as a branch name. The `staging` branch and the six
+> promotions into it (#32, #43, #45, #47, #63, #81) are left in the history as
+> they were; the branch is inert and nothing targets it.
 
 ## Issues, branches, pull requests
 
@@ -195,11 +223,13 @@ Two things about this check look like bugs and are not:
   again, or `gh run rerun <id>`, and check the new run.
 - **`claude-code-action` refuses to run until the workflow file is on the default
   branch.** It exchanges an OIDC token for an app token and validates that the
-  workflow file is identical to the version on `develop`; on the pull request
+  workflow file is identical to the version on the default branch (`develop`, at
+  the time of writing); on the pull request
   that *introduces* the workflow there is no such version, so it logs
   `Skipping action due to workflow validation` and exits successfully. The check
   is green and no review is posted. It starts reviewing on the first pull request
-  opened after this workflow lands on `develop`. Note the same rule bites any
+  opened after this workflow lands on the default branch. Note the same rule
+  bites any
   pull request that *edits* `claude-review.yml`.
 
 Reviews are posted by `claude[bot]`, a GitHub App identity obtained through that
@@ -251,8 +281,13 @@ What the script applies:
 | Branch    | Pull request required | Required checks                                                      | Extra                                           |
 | --------- | --------------------- | -------------------------------------------------------------------- | ----------------------------------------------- |
 | `develop` | yes                   | `Lint, typecheck, unit tests & build` + `GitGuardian Security Checks` | conversations resolved; no force push or delete |
-| `staging` | yes                   | same                                                                 | branch must be up to date before merging        |
 | `main`    | yes                   | same                                                                 | up to date, **and admins included** — nobody pushes directly |
+
+The script still writes a rule for a `staging` branch. That branch is inert
+under the current model, so the rule is harmless but pointless — drop it when the
+script is next touched. Note also that the company repository configures no
+branch protection at all, for the same Free-plan reason, and enforces the
+typecheck through a Husky pre-push hook instead.
 
 Claude review and Fallow are deliberately not required: one is a comment, the
 other is report-only. `GitGuardian Security Checks` only starts reporting once
@@ -261,14 +296,14 @@ on a check that cannot arrive.
 
 `required_approving_review_count` is 0: GitHub does not let you approve your own
 pull request, so a non-zero count deadlocks a solo repository. Raise it to 1 for
-`staging` and `main` as soon as there is a second reviewer.
+`develop` and `main` as soon as there is a second reviewer.
 
 ## Status of this setup
 
 - [x] Pull request template configured
 - [x] `Build / Lint, typecheck, unit tests & build` — one workflow, one job, green
-- [x] `Claude Code Review / claude-review` — secret added and read; the action self-skips until the workflow file is on `develop`, then reviews every pull request
+- [x] `Claude Code Review / claude-review` — secret added and read; the action self-skips until the workflow file is on the default branch, then reviews every pull request
 - [x] `Fallow / Codebase Intelligence` — running, report-only
-- [ ] `GitGuardian Security Checks` — **pending** the GitGuardian GitHub App install, which only a human can do; nothing in this repository can make this check appear
+- [x] `GitGuardian Security Checks` — the GitGuardian GitHub App is installed and the check reports on every pull request
 - [x] `Vercel` and `Vercel Preview Comments` — confirmed live on a pull request
 - [ ] Branch protection rules — written and ready, **blocked** by the Free-plan private repository
