@@ -301,11 +301,14 @@ vanishing into the old one.
 offers « Gérer le compte » and « Se déconnecter », as it always did — what
 changed is that the first of those lands on `/app/compte`
 (`userProfileMode="navigation"`) instead of opening Clerk's dialog over the app.
-The account is therefore a page with one frame on it: Clerk's screens at the top
-and « Réinitialiser ma progression » closing it at the bottom, under a rule.
-Clerk's card gives up its own border and shadow to make that possible — two
-nested frames a pixel apart is the tell that something has been embedded rather
-than built in. The reset is deliberately **not** a third tab in Clerk's
+The account is therefore a page: « Réinitialiser ma progression » in the header
+opposite the title, and Clerk's card below it. The reset is not inside that card
+and not a page of its nav — it touches nothing Clerk owns — and the header is the
+only place on a page this tall that is visible the moment it loads, which matters
+for the one control a candidate might arrive looking for. The explanation travels
+with the confirmation rather than sitting on screen permanently: a candidate who
+is not pressing it does not need the paragraph, and one who is needs it right
+then. The reset is deliberately **not** a third tab in Clerk's
 nav — it touches nothing Clerk owns, and filing it beside *Profil* and *Sécurité*
 claimed it was an account setting. Signing out stays in the menu, so the page
 carries no sign-out control of its own. It is not a fifth destination in the rail: an

@@ -66,27 +66,22 @@ export const clerkAppearance: NonNullable<ComponentProps<typeof UserProfile>["ap
     fontFamily: "var(--font-inter), system-ui, sans-serif",
   },
   /**
-   * Layout, not palette — the only three overrides in the product, and each one
-   * exists so Clerk's card can be *part of* a sheet this product draws rather
-   * than a second container sitting inside the first.
+   * Layout, not palette, and the only two overrides in the product: Clerk's card
+   * sizes itself and sits wherever that leaves it, which on a page that is a
+   * column of a fixed measure reads as a widget dropped in off-line. Both boxes
+   * take the width they are given instead, and the column places them the way it
+   * places the heading above.
    *
-   *  - `rootBox` / `cardBox` take the width they are given, so the card fills
-   *    the page's column instead of sizing itself and sitting off-centre in it.
-   *  - the border and the shadow come off, because the page has already drawn
-   *    them: two nested frames one pixel apart is the tell that something has
-   *    been embedded rather than built in, and « Réinitialiser ma progression »
-   *    sits inside the same frame at the bottom.
+   * The card keeps its own border and shadow. Nothing of this product's sits
+   * inside it — « Réinitialiser ma progression » is up in the page header — so
+   * there are no nested frames to flatten, and Clerk's own edges are the right
+   * ones for Clerk's own screens.
    *
-   * The trailing `!` is Tailwind v4's important modifier, and it is not
-   * decoration: Clerk ships its own baseline for these two properties, and a
-   * plain utility loses to it depending on which stylesheet lands last.
-   *
-   * Anything beyond this is redrawing Clerk's card by hand, which is the thing
+   * Anything beyond this is redrawing that card by hand, which is the thing
    * embedding it was meant to avoid.
    */
   elements: {
     rootBox: "w-full",
-    cardBox: "w-full border-0! shadow-none!",
-    card: "border-0! shadow-none!",
+    cardBox: "w-full",
   },
 };

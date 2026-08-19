@@ -8,15 +8,15 @@ import { ResetRecord } from "../_components/reset-record";
 /**
  * Mon compte — one page, two blocks, one column.
  *
- * One frame, two halves. Clerk's screens on top — name, e-mail, password,
- * sessions, all of it Clerk's to draw — and « Réinitialiser ma progression »
- * closing the frame at the bottom, under a rule. Clerk's card gives up its own
- * border and shadow for it (`clerk-appearance.ts`), so the page draws one
- * container rather than nesting two a pixel apart.
+ * « Réinitialiser ma progression » in the header, opposite the title, and
+ * Clerk's card below it — name, e-mail, password, sessions, all of it Clerk's to
+ * draw.
  *
- * The reset is a section of that frame and not a page of Clerk's nav. It is not
- * an account setting — it does not touch the identity Clerk owns — and filing it
- * as a third tab beside *Profil* and *Sécurité* claimed it was one.
+ * The reset is not in that card and not a page of its nav, and the reason is
+ * what it is rather than where it fits: it touches nothing Clerk owns. It is
+ * also the one control on this screen a candidate might arrive looking for, and
+ * the header is the only place on a page this tall that is visible the moment it
+ * loads.
  *
  * The catch-all segment is Clerk's requirement, not a route this product
  * invented: `<UserProfile routing="path">` gives each of its tabs a real URL
@@ -52,26 +52,25 @@ export default async function ComptePage() {
   // there is nowhere else to be.
   return (
     <main className="mx-auto flex w-full max-w-2xl flex-col px-6 py-8 lg:mx-0 lg:ml-20">
-      <header className="w-full">
-        <Kicker>DELF B2 · Production orale</Kicker>
-        <h1 className="font-serif mt-1 text-2xl leading-tight font-semibold">Mon compte</h1>
-        <p className="text-muted-foreground mt-2 text-sm leading-relaxed">
-          Votre profil, votre sécurité, et votre record d&apos;épreuves.
-        </p>
+      {/* The title on the left, the reset on the right, stacked on a phone.
+          `items-start` rather than a baseline: the left side is three lines and
+          the right is a button, and aligning them on anything but their tops
+          drops the button into the middle of the paragraph. */}
+      <header className="flex w-full flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <Kicker>DELF B2 · Production orale</Kicker>
+          <h1 className="font-serif mt-1 text-2xl leading-tight font-semibold">Mon compte</h1>
+          <p className="text-muted-foreground mt-2 text-sm leading-relaxed">
+            Votre profil, votre sécurité, et votre record d&apos;épreuves.
+          </p>
+        </div>
+
+        <ResetRecord />
       </header>
 
-      {/* One frame around both. Clerk's card gives up its own border and shadow
-          (`clerk-appearance.ts`) so this is the only container on the screen,
-          and the reset closes it at the bottom — under a rule rather than in a
-          box of its own, because it belongs to the account rather than sitting
-          beside it. */}
-      <section className="border-border bg-card sheet mt-6 w-full border">
+      <div className="mt-6 w-full">
         <AccountProfile />
-
-        <div className="border-border border-t p-6">
-          <ResetRecord />
-        </div>
-      </section>
+      </div>
     </main>
   );
 }

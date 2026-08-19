@@ -7,25 +7,24 @@ import { secondaryButton } from "@/app/_components/button-styles";
 import { requestRecordReset } from "@/lib/account/reset";
 
 /**
- * « Réinitialiser ma progression » — the button, its confirmation and what it
+ * « Réinitialiser ma progression » — the control, its confirmation and what it
  * says after (#69).
  *
- * The foot of the account's own frame on /app/compte: Clerk's screens above,
- * this under a rule, one container around both. Not a page of Clerk's nav —
- * this touches nothing Clerk owns, and filing it beside *Profil* and *Sécurité*
- * claimed it was an account setting.
+ * It sits in the page header, opposite the title, rather than anywhere in the
+ * account card below it. Two reasons, and the second is the one that decided it:
+ * it is not an account setting — it touches nothing Clerk owns — and Clerk's
+ * card is tall enough that a control under it opens below the fold, where nobody
+ * scrolls to find it.
  *
- * The copy is the candidate's own wording, with two claims taken out because
- * they are not true of this product: it names one épreuve rather than four, and
- * it says nothing about passes, which do not exist here. Everything else — what
- * is archived, what stays readable, what is untouched — is theirs.
+ * So the header shows a button and nothing else, and the explanation arrives
+ * with the confirmation instead of sitting on the screen permanently. That is
+ * the right way round for a control whose copy is entirely about consequences: a
+ * candidate who is not pressing it does not need the paragraph, and one who is
+ * needs it right then.
  *
- * The confirmation is a second state of the block rather than a `<dialog>`,
- * which is a deliberate retreat from how the exit dialog does it. That dialog
- * interrupts an épreuve in progress and has to; this interrupts nothing, and a
- * modal for a control the candidate came to this page on purpose to use is a
- * ceremony rather than a safeguard. Two states of one block also keep the
- * consequence in the place the button is.
+ * A panel rather than a `<dialog>`. The exit dialog interrupts an épreuve in
+ * progress and has to; this interrupts nothing, and a modal for a control the
+ * candidate came to this page to use is a ceremony rather than a safeguard.
  *
  * Neither button is the red one. Red in this product means recovering from a
  * failure, and in the exit dialog a zero the candidate is about to take;
@@ -33,10 +32,10 @@ import { requestRecordReset } from "@/lib/account/reset";
  * deleted — the épreuves go to the archive of the historique with their
  * corrections and stay open there.
  *
- * No count is promised before the reset, and that is a saving rather than an
- * omission: a number here would mean handing this client component the
- * candidate's record every time the account screen mounts. The route reports
- * what it archived, so the panel says the number *after*, where it is a fact.
+ * No count is promised beforehand: a number would mean handing this client
+ * component the candidate's record every time the account page mounts. The route
+ * reports what it archived, so the panel says the number *after*, where it is a
+ * fact rather than a promise.
  */
 export function ResetRecord() {
   const router = useRouter();
@@ -73,41 +72,28 @@ export function ResetRecord() {
   }
 
   return (
-    <div className="text-foreground space-y-4">
-      <h2 className="font-serif text-lg font-semibold">Réinitialiser ma progression</h2>
-
-      <p className="text-muted-foreground text-sm leading-relaxed">
-        Vos scores et vos épreuves corrigées sont archivés : ils restent
-        consultables dans votre historique, mais vos tableaux de bord repartent de
-        zéro. Votre compte et vos accès ne sont pas touchés.
-      </p>
-
-      {archived !== null && (
-        <p role="status" className="border-border bg-muted border p-3 text-sm leading-relaxed">
-          {archived === 0
-            ? "Il n'y avait aucune épreuve à archiver."
-            : `${archived} épreuve${archived > 1 ? "s" : ""} ${archived > 1 ? "sont passées" : "est passée"} aux archives. Vous ${archived > 1 ? "les" : "la"} retrouvez dans l'historique.`}
-        </p>
-      )}
-
-      {failed && (
-        <p
-          role="alert"
-          className="border-danger/40 bg-danger-subtle text-danger border p-3 text-sm leading-relaxed"
-        >
-          {failed}
-        </p>
-      )}
-
+    // Full width on a phone, where the header stacks; a column of its own beside
+    // the title from `sm` up, wide enough for the confirmation to be read in
+    // sentences rather than in two-word lines.
+    <div className="w-full sm:w-80 sm:shrink-0">
       {confirming ? (
         <div className="border-border bg-muted space-y-3 border p-4">
-          <p className="text-sm font-semibold">
-            Vos épreuves quitteront vos tableaux de bord.
-          </p>
+          <p className="text-sm font-semibold">Réinitialiser ma progression ?</p>
           <p className="text-muted-foreground text-sm leading-relaxed">
-            Rien n&apos;est supprimé : vous les retrouverez dans l&apos;historique,
-            sous « Archives », et vos cartes de sujets réafficheront « Commencer ».
+            Vos scores et vos épreuves corrigées sont archivés : ils restent
+            consultables dans votre historique, mais vos tableaux de bord
+            repartent de zéro. Votre compte et vos accès ne sont pas touchés.
           </p>
+
+          {failed && (
+            <p
+              role="alert"
+              className="border-danger/40 bg-danger-subtle text-danger border p-3 text-sm leading-relaxed"
+            >
+              {failed}
+            </p>
+          )}
+
           <div className="flex flex-wrap gap-2">
             <button
               type="button"
@@ -131,10 +117,21 @@ export function ResetRecord() {
             setFailed(null);
             setConfirming(true);
           }}
-          className={secondaryButton}
+          className={`${secondaryButton} w-full`}
         >
           Réinitialiser ma progression
         </button>
+      )}
+
+      {archived !== null && !confirming && (
+        <p
+          role="status"
+          className="border-border bg-muted mt-3 border p-3 text-sm leading-relaxed"
+        >
+          {archived === 0
+            ? "Il n'y avait aucune épreuve à archiver."
+            : `${archived} épreuve${archived > 1 ? "s" : ""} ${archived > 1 ? "sont passées" : "est passée"} aux archives. Vous ${archived > 1 ? "les" : "la"} retrouvez dans l'historique.`}
+        </p>
       )}
     </div>
   );
