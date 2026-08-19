@@ -58,8 +58,12 @@ The flow runs the other way. `develop` catches up *from* `staging` whenever you
 want to start sandbox work:
 
 ```bash
-git switch develop && git merge --ff-only origin/staging && git push origin develop
+git fetch origin && git switch develop && git merge --ff-only origin/staging && git push origin develop
 ```
+
+The leading `git fetch origin` is not decoration: without it `--ff-only` compares
+against whatever `origin/staging` your clone last saw, and the push can be
+rejected — or land somewhere you did not mean.
 
 `--ff-only` is the whole discipline. It succeeds only while `develop` carries no
 commits of its own, which is exactly the condition that keeps `develop` from
@@ -112,7 +116,7 @@ against the checks on its PR #429:
 | 1 | `Build / Lint, typecheck, unit tests & build` | `.github/workflows/build.yml`              | **yes** — the one gate                      |
 | 2 | `Claude Code Review / claude-review`          | `.github/workflows/claude-review.yml`      | advisory — a comment, not a pass/fail       |
 | 3 | `Fallow / Codebase Intelligence`              | `.github/workflows/fallow.yml`             | report-only, by design                      |
-| 4 | `GitGuardian Security Checks`                 | the GitGuardian GitHub App                 | yes, once installed                         |
+| 4 | `GitGuardian Security Checks`                 | the GitGuardian GitHub App                 | yes, when protection is applied             |
 | 5 | `Vercel`                                      | the Vercel GitHub integration              | reports the deployment                      |
 | 6 | `Vercel Preview Comments`                     | the Vercel GitHub integration              | reports the preview comment                 |
 
@@ -224,12 +228,13 @@ Two things about this check look like bugs and are not:
   again, or `gh run rerun <id>`, and check the new run.
 - **`claude-code-action` refuses to run until the workflow file is on the default
   branch.** It exchanges an OIDC token for an app token and validates that the
-  workflow file is identical to the version on `staging`; on the pull request
-  that *introduces* the workflow there is no such version, so it logs
-  `Skipping action due to workflow validation` and exits successfully. The check
-  is green and no review is posted. It starts reviewing on the first pull request
-  opened after this workflow lands on `staging`. Note the same rule bites any
-  pull request that *edits* `claude-review.yml`.
+  workflow file is identical to the version on the default branch (`staging`, at
+  the time of writing); on the pull request that *introduces* the workflow there
+  is no such version, so it logs `Skipping action due to workflow validation` and
+  exits successfully. The check is green and no review is posted. It starts
+  reviewing on the first pull request opened after this workflow lands on the
+  default branch. Note the same rule bites any pull request that *edits*
+  `claude-review.yml`.
 
 Reviews are posted by `claude[bot]`, a GitHub App identity obtained through that
 OIDC exchange — which is why `pull-requests: read` is enough here, in both this
@@ -294,7 +299,7 @@ refreshing an issue branch whenever another one merges first.
 Claude review and Fallow are deliberately not required: one is a comment, the
 other is report-only. `GitGuardian Security Checks` only starts reporting once
 the app is installed — requiring it before then leaves every pull request waiting
-on a check that cannot arrive.
+on a check that cannot arrive. The app is now installed, so requiring it is safe.
 
 `required_approving_review_count` is 0: GitHub does not let you approve your own
 pull request, so a non-zero count deadlocks a solo repository. Raise it to 1 for
@@ -306,6 +311,6 @@ pull request, so a non-zero count deadlocks a solo repository. Raise it to 1 for
 - [x] `Build / Lint, typecheck, unit tests & build` — one workflow, one job, green
 - [x] `Claude Code Review / claude-review` — secret added and read; the action self-skips until the workflow file is on the default branch, then reviews every pull request
 - [x] `Fallow / Codebase Intelligence` — running, report-only
-- [ ] `GitGuardian Security Checks` — **pending** the GitGuardian GitHub App install, which only a human can do; nothing in this repository can make this check appear
+- [x] `GitGuardian Security Checks` — the GitGuardian GitHub App is installed and the check reports on every pull request
 - [x] `Vercel` and `Vercel Preview Comments` — confirmed live on a pull request
 - [ ] Branch protection rules — written and ready, **blocked** by the Free-plan private repository
