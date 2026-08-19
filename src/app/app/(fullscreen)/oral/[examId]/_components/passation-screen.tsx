@@ -199,6 +199,14 @@ export function PassationScreen({
       />
 
       <main className="relative flex min-h-0 flex-1 flex-col">
+        {/* One column for both phases, and it still scrolls — but during the
+            débat there is normally nothing in it to scroll (#88). The sujet's
+            line and the two protagonists are `shrink-0`, the exchange takes
+            what is left and scrolls inside itself, and the head stays where the
+            candidate can see whose turn it is. The outer scroller is what
+            happens when even that does not fit: under the feed's `min-h` this
+            column overflows and goes back to being one document, which is the
+            #48 arrangement and the right one at that height. */}
         <div
           className={cn(
             "mx-auto flex min-h-0 w-full flex-1 flex-col gap-4 overflow-y-auto px-4 py-5 sm:px-6",
@@ -208,7 +216,10 @@ export function PassationScreen({
             phase === "monologue" ? "max-w-[64rem]" : "max-w-[47.5rem]",
           )}
         >
-          {notices}
+          {/* `shrink-0` because the débat's column no longer grows to fit its
+              children: a notice that gave up height under pressure would be a
+              notice the candidate reads half of. */}
+          {notices && <div className="shrink-0">{notices}</div>}
 
           {phase === "monologue" ? (
             /* Sujet left, plan right. The four beats used to sit *under* the

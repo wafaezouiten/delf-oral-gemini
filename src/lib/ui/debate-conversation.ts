@@ -1,5 +1,5 @@
 /**
- * The copy and the arithmetic behind the débat's conversation (#48, #60).
+ * The copy and the arithmetic behind the débat's conversation (#48, #60, #88).
  *
  * Here rather than in the component for the reason every other `lib/ui` module
  * is: the words a candidate reads mid-épreuve and the rule that decides whether
@@ -14,7 +14,9 @@
  * whose turn it is. Both were right about a part of it. The débat now shows the
  * two protagonists **and** the exchange, and pays for the room by dropping the
  * document — the sujet's title stays, its paragraphs go, because during the
- * débat the candidate is answering the examiner rather than reading.
+ * débat the candidate is answering the examiner rather than reading. #88 pinned
+ * those two protagonists in place and put the exchange on its own scroller
+ * underneath, which is the arrangement the two of them had been arguing towards.
  */
 
 import { formatTurnOffset } from "@/lib/delf/phases";
@@ -35,6 +37,19 @@ export const DEBATE_CONVERSATION_COPY = {
    */
   footnote:
     "Transcription automatique : elle peut arriver avec un léger décalage sur la voix.",
+  /**
+   * Offered only while the feed has stopped following the conversation (#88).
+   *
+   * The hold is deliberate — a candidate re-reading an objection is not dragged
+   * back down by the examiner continuing to speak — but it used to be silent and
+   * could afford to be: the whole column scrolled, so scrolling back down was
+   * the same gesture as scrolling anywhere. Now the exchange scrolls inside a
+   * box under a pinned head, and a candidate who has scrolled up in it has no
+   * cue that the box is no longer showing the newest turn. « le fil » rather
+   * than « en bas » because what they want back is the conversation, not a
+   * position in a scrollbar.
+   */
+  resume: "Reprendre le fil",
 } as const;
 
 /**
@@ -63,9 +78,14 @@ export const STICK_THRESHOLD_PX = 32;
  *
  * Asked of the scroll position *before* the new text lands, so a candidate who
  * has scrolled up to re-read an earlier objection is not yanked back down by the
- * examiner continuing to speak. The metrics are the screen's scroller rather
- * than a box of the panel's own: the conversation has no scrollbar of its own,
- * the whole column scrolls.
+ * examiner continuing to speak.
+ *
+ * The rule is unchanged since #48; the box it is asked about is not. It used to
+ * be the screen's own scroller, because the conversation had no scrollbar of its
+ * own and the whole column scrolled. Since #88 it is the feed's own — the two
+ * protagonists stay pinned above it — which changes nothing here and is worth
+ * saying anyway: these are three numbers off some element, and the reason they
+ * are the right three moved.
  */
 export function isNearBottom(
   metrics: { scrollTop: number; scrollHeight: number; clientHeight: number },

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Kicker } from "@/app/_components/po/tag";
 import { cn } from "@/lib/ui/class-names";
@@ -14,7 +14,7 @@ import {
 } from "@/lib/ui/debate-conversation";
 
 /**
- * The débat's exchange, as a conversation (#48, #60).
+ * The débat's exchange, as a conversation (#48, #60, #88).
  *
  * **Turns, not a document.** The exchange used to be set like the results page's
  * transcript — speaker label in small caps over a paragraph — on the argument
@@ -31,17 +31,27 @@ import {
  * clock; on the correction, the section's own first turn, because nothing there
  * says when the part opened. The reasoning is in `debateTurns`.
  *
- * **It has no scrollbar of its own, and that is the point.** It was a boxed feed
- * with its own scroller under a fixed head, which meant the screen had two
- * scrollbars and the conversation was reading itself through a letterbox. The
- * whole page scrolls instead: the sujet's title, the two faces and every turn
- * are one column that grows, and a candidate scrolls back through it the way
- * they would scroll back through anything else.
+ * **It owns a scroller again (#88), and the argument that took the last one away
+ * is still true.** The panel had no scrollbar of its own on purpose: a boxed
+ * feed under a fixed head meant the screen had two scrollbars and the
+ * conversation read itself through a letterbox, so the whole column was made to
+ * scroll as one document instead. What that traded away only shows up a few
+ * turns in — the two faces are the one thing on this screen answering « whose
+ * turn is it », and they scrolled off the top exactly when the exchange got long
+ * enough to need them. A second scrollbar is the smaller loss, so the head is
+ * pinned and the exchange scrolls under it.
  *
- * That moves the autoscroll a level up. This panel does not own the scroller any
- * more, so it finds the one it is inside and drives that — following the newest
- * turn while the candidate is at the bottom, and holding still the moment they
- * scroll up to re-read an objection.
+ * The letterbox is answered by height rather than by refusing the box: the feed
+ * takes every pixel the screen has left (`flex-1`) instead of the 20rem the #48
+ * version was given, and stops shrinking at `min-h`, under which the column
+ * above starts scrolling again and the head unpins itself — a head pinned over
+ * three lines of exchange is not worth its room.
+ *
+ * That brings the autoscroll back down here: the panel drives its own box —
+ * following the newest turn while the candidate is at the bottom, and holding
+ * still the moment they scroll up to re-read an objection. The hold now says so
+ * (« Reprendre le fil »), which it did not have to while scrolling back down was
+ * the same gesture as scrolling the page.
  *
  * **Why the débat and not the exposé.** The monologue runs on manual VAD: the
  * candidate's activity is opened and never closed, and during a manual-VAD
@@ -81,30 +91,45 @@ export function DebateConversation({
   hint: string;
 }) {
   const turns = debateTurns(transcript, phaseStartedAt);
-  const root = useRef<HTMLDivElement>(null);
+  const feed = useRef<HTMLDivElement>(null);
   /**
-   * Whether the page is still following the conversation.
+   * Whether the feed is still following the conversation.
    *
    * A ref rather than state: it is written from a scroll handler on every frame
-   * of a drag and read once per new fragment, and nothing renders differently
-   * for it. As state it would re-render the panel while the candidate scrolls,
-   * which is the one moment it should be doing nothing.
+   * of a drag and read once per new fragment, and no turn renders differently
+   * for it. As state it would re-render the whole exchange while the candidate
+   * scrolls, which is the one moment it should be doing nothing.
    */
   const following = useRef(true);
+  /**
+   * The same fact a second time, because one thing does render for it.
+   *
+   * « Reprendre le fil » exists only while the feed is held, so it needs a
+   * render. Set from the boolean rather than from the raw position on purpose:
+   * that changes twice across a scroll up and back, not once a frame, and React
+   * drops a `setState` to the value already held.
+   */
+  const [held, setHeld] = useState(false);
 
-  const scroller = useCallback(() => findScroller(root.current), []);
+  const stickToBottom = useCallback(() => {
+    const element = feed.current;
+    if (!element) return;
+    element.scrollTop = element.scrollHeight;
+    following.current = true;
+    setHeld(false);
+  }, []);
 
-  // The scroller belongs to the screen, not to this panel, so the listener has
-  // to be attached by hand rather than declared as an `onScroll` prop.
   useEffect(() => {
-    const element = scroller();
+    const element = feed.current;
     if (!element) return;
     const onScroll = () => {
-      following.current = isNearBottom(element);
+      const near = isNearBottom(element);
+      following.current = near;
+      setHeld(!near);
     };
     element.addEventListener("scroll", onScroll, { passive: true });
     return () => element.removeEventListener("scroll", onScroll);
-  }, [scroller]);
+  }, []);
 
   // Deliberately keyed on the tail's *length* as well as the count of turns: a
   // fragment usually merges into the last entry rather than adding one
@@ -112,89 +137,114 @@ export function DebateConversation({
   // following in the middle of the examiner's sentence.
   const lastTurn = turns[turns.length - 1]?.entry;
   useEffect(() => {
-    const element = scroller();
+    const element = feed.current;
     if (!element || !following.current) return;
     element.scrollTop = element.scrollHeight;
-  }, [scroller, turns.length, lastTurn?.text.length]);
+  }, [turns.length, lastTurn?.text.length]);
 
   return (
-    <div ref={root} className="border-border bg-card rounded-lg border">
-      <div className="border-border border-b px-4 py-2">
+    // `min-h-0` is what lets a flex child be shorter than its content, and every
+    // ancestor from `<main>` down carries it — without it the box grows to fit
+    // the exchange instead of scrolling it, the failure this project has already
+    // paid for once (#35). Leaving it off here does not work either, and it is
+    // worth saying why it was tried: a scroller's intrinsic height is still its
+    // content, so a panel left on `min-height: auto` asks for the height of every
+    // turn said so far and takes the column with it.
+    //
+    // Hence the floor as a number on this element rather than on the feed. It is
+    // the head, the footnote and about five lines of exchange, and it is what
+    // decides which of the two scrollers is in charge: while the screen can
+    // afford it the head above stays put and only the exchange moves; when it
+    // cannot, this panel refuses to shrink, the column above overflows and goes
+    // back to scrolling as one document — which is the #48 arrangement, and the
+    // right one at a height where a pinned head would leave three lines to read.
+    <div className="border-border bg-card flex min-h-[15rem] flex-1 flex-col rounded-lg border">
+      <div className="border-border shrink-0 border-b px-4 py-2">
         <Kicker>{DEBATE_CONVERSATION_COPY.title}</Kicker>
       </div>
 
-      <div className="space-y-3 px-4 py-3.5">
-        {turns.length === 0 ? (
-          <div className="text-muted-foreground space-y-1.5 text-xs leading-relaxed">
-            <p>{DEBATE_CONVERSATION_COPY.empty}</p>
-            <p>{hint}</p>
-          </div>
-        ) : (
-          turns.map(({ entry, timeLabel }, index) => {
-            const mine = entry.speaker === "candidate";
-            return (
-              <div
-                key={turnKey(entry, index)}
-                className={cn("flex flex-col gap-1", mine ? "items-end" : "items-start")}
-              >
-                {/* Named as well as placed. Side and colour carry the speaker
-                    for anyone who can see them; the label is what carries it
-                    into a screen reader, and into a screenshot of a
-                    conversation with one turn in it.
+      <div className="relative flex min-h-0 flex-1 flex-col">
+        {/* Focusable, and named because it is. A box that scrolls and cannot be
+            reached from the keyboard is content a keyboard user cannot read at
+            all — which the panel got away with while the page was the scroller
+            and the page keeps its own key bindings. `region` and the name give
+            the tab stop something to announce itself as, rather than landing a
+            screen reader on an unlabelled group mid-épreuve. */}
+        <div
+          ref={feed}
+          role="region"
+          aria-label={DEBATE_CONVERSATION_COPY.title}
+          tabIndex={0}
+          className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-3.5"
+        >
+          {turns.length === 0 ? (
+            <div className="text-muted-foreground space-y-1.5 text-xs leading-relaxed">
+              <p>{DEBATE_CONVERSATION_COPY.empty}</p>
+              <p>{hint}</p>
+            </div>
+          ) : (
+            turns.map(({ entry, timeLabel }, index) => {
+              const mine = entry.speaker === "candidate";
+              return (
+                <div
+                  key={turnKey(entry, index)}
+                  className={cn("flex flex-col gap-1", mine ? "items-end" : "items-start")}
+                >
+                  {/* Named as well as placed. Side and colour carry the speaker
+                      for anyone who can see them; the label is what carries it
+                      into a screen reader, and into a screenshot of a
+                      conversation with one turn in it.
 
-                    The stamp joins that line rather than taking one of its own,
-                    and sits on the outside of the label — away from the bubble
-                    on both sides, so the two columns of stamps run down the
-                    outer edges instead of meeting in the middle. */}
-                <span
-                  className={cn(
-                    "flex items-baseline gap-2 text-[0.625rem] font-semibold tracking-[0.16em] uppercase",
-                    mine && "flex-row-reverse",
-                  )}
-                >
-                  <span className="text-muted-foreground">{speakerLabel(entry.speaker)}</span>
-                  <span className="text-muted-foreground/70 tabular tracking-normal">
-                    {timeLabel}
+                      The stamp joins that line rather than taking one of its own,
+                      and sits on the outside of the label — away from the bubble
+                      on both sides, so the two columns of stamps run down the
+                      outer edges instead of meeting in the middle. */}
+                  <span
+                    className={cn(
+                      "flex items-baseline gap-2 text-[0.625rem] font-semibold tracking-[0.16em] uppercase",
+                      mine && "flex-row-reverse",
+                    )}
+                  >
+                    <span className="text-muted-foreground">{speakerLabel(entry.speaker)}</span>
+                    <span className="text-muted-foreground/70 tabular tracking-normal">
+                      {timeLabel}
+                    </span>
                   </span>
-                </span>
-                <p
-                  className={cn(
-                    "max-w-[85%] rounded-2xl px-3.5 py-2 text-[0.8125rem] leading-relaxed",
-                    mine
-                      ? "bg-primary-subtle text-foreground rounded-br-sm"
-                      : "border-border bg-muted/50 text-foreground/90 rounded-bl-sm border",
-                  )}
-                >
-                  {entry.text}
-                </p>
-              </div>
-            );
-          })
+                  <p
+                    className={cn(
+                      "max-w-[85%] rounded-2xl px-3.5 py-2 text-[0.8125rem] leading-relaxed",
+                      mine
+                        ? "bg-primary-subtle text-foreground rounded-br-sm"
+                        : "border-border bg-muted/50 text-foreground/90 rounded-bl-sm border",
+                    )}
+                  >
+                    {entry.text}
+                  </p>
+                </div>
+              );
+            })
+          )}
+        </div>
+
+        {/* Over the newest turn rather than after it: it belongs to the feed's
+            bottom edge, and a button inside the scroller would be one more thing
+            to have to scroll to. It exists only while the feed is held — it is
+            not a control the candidate is looking for, it is the way back to the
+            one thing they stopped being shown. */}
+        {held && (
+          <button
+            type="button"
+            onClick={stickToBottom}
+            className="border-border bg-card text-foreground hover:bg-muted absolute inset-x-0 bottom-2.5 mx-auto flex w-max items-center gap-1.5 rounded-full border px-3 py-1 text-[0.6875rem] font-semibold shadow-sm transition-colors"
+          >
+            <span aria-hidden>↓</span>
+            {DEBATE_CONVERSATION_COPY.resume}
+          </button>
         )}
       </div>
-
-      <p className="border-border text-muted-foreground border-t px-4 py-1.5 text-[0.625rem] leading-snug">
+      <p className="border-border text-muted-foreground shrink-0 border-t px-4 py-1.5 text-[0.625rem] leading-snug">
         {DEBATE_CONVERSATION_COPY.footnote}
       </p>
     </div>
   );
-}
-
-/**
- * The scrolling ancestor this panel lives in, or null if nothing scrolls.
- *
- * Walked rather than passed down as a ref: the screen above owns the scroller
- * and could reasonably move it — the exposé and the débat already lay out
- * differently — and a panel that asks the DOM which box it is inside keeps
- * working when it does. The check is `overflow-y`, not a class name, so it
- * cannot go stale against Tailwind.
- */
-function findScroller(from: HTMLElement | null): HTMLElement | null {
-  let node = from?.parentElement ?? null;
-  while (node) {
-    const overflow = getComputedStyle(node).overflowY;
-    if (overflow === "auto" || overflow === "scroll") return node;
-    node = node.parentElement;
-  }
-  return null;
 }
