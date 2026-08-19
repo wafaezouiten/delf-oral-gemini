@@ -34,7 +34,7 @@ Closes #
 
 ## Checklist
 
-- [ ] Branch cut from `develop` and targets `develop` (or is a documented `develop` → `staging` / `staging` → `main` promotion)
+- [ ] Branch cut from `develop` and targets `develop` (or is a documented `develop` → `main` promotion)
 - [ ] Linked to its issue with `Closes #N`
 - [ ] Scope matches the issue — no unrelated changes ride along
 - [ ] No secrets, API keys, tokens or `.env` values in the diff

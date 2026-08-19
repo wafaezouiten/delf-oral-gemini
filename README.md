@@ -211,8 +211,9 @@ written up in [`docs/GEMINI_LIVE_FINDINGS.md`](docs/GEMINI_LIVE_FINDINGS.md) and
 
 ## Working on it
 
-`feature/*` → `develop` → `staging` → `main`, one issue and one pull request per
-phase. Every pull request shows the same six checks as the company's DELF
+`<type>/*` → `develop` → `main`, one issue and one pull request each. `main` is
+production and `develop` is staging — staging being a deployment target, not a
+branch. Every pull request shows the same six checks as the company's DELF
 repository: `Build / Lint, typecheck, unit tests & build`, `Claude Code Review /
 claude-review`, `Fallow / Codebase Intelligence`, `GitGuardian Security Checks`,
 `Vercel` and `Vercel Preview Comments`. The process — branch model, the
