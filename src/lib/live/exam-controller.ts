@@ -2109,11 +2109,6 @@ export class ExamController {
     // that has stopped growing is exactly the kind of fact it should notice.
     this.checkCaptureAlive();
 
-    // The other watchdog on this heartbeat, and the same argument for it: a
-    // question that has gone unanswered for eight seconds is a fact the exam's
-    // one clock should notice (#84).
-    this.checkCandidateSilence();
-
     // The examiner was asked for one closing sentence and never delivered it.
     // Advancing anyway is what stops a silent model stranding the candidate on
     // a frozen clock — the failure the reference implementation hit in
@@ -2138,6 +2133,21 @@ export class ExamController {
       if (phaseUsesLiveSession(this.phase)) this.beginClosingHandshake();
       else this.advanceDetached();
     }
+
+    // The other watchdog on this heartbeat, and the same argument for it: a
+    // question that has gone unanswered for eight seconds is a fact the exam's
+    // one clock should notice (#84).
+    //
+    // LAST, and the order is the guard. A relance is the only thing `tick()`
+    // says out loud, and the branch above is where the phase's clock running out
+    // asks for the closing sentence. Run earlier, the one tick that crosses both
+    // deadlines would send a relance and the closing directive back to back with
+    // no turn boundary between them — two `sendRealtimeInput` texts, a blended
+    // sentence, and the blend landing on the one turn the controller waits for to
+    // let the candidate's last transcription arrive. A candidate who freezes in
+    // the closing seconds is exactly who reaches it. From here `this.closing` is
+    // already true and {@link checkCandidateSilence} stands down on it.
+    this.checkCandidateSilence();
   }
 
   /** Release everything. Safe to call twice. */

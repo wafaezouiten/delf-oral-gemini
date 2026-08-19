@@ -15,8 +15,20 @@
 
 import type { OralTopic } from "./topics";
 
-/** Bumped whenever the wording changes, and stored on every evaluation so an
- *  old result can be traced back to the examiner that produced it. */
+/**
+ * Bumped whenever the wording below changes.
+ *
+ * **Nothing reads it yet, and the comment here used to claim otherwise.** It
+ * said the version was "stored on every evaluation so an old result can be
+ * traced back to the examiner that produced it", which is not true and never
+ * was: the `prompt_version` column on a correction is written from
+ * `EVAL_PROMPT_VERSION` in `lib/gemini/evaluate.ts`, a different constant
+ * describing the CORRECTOR's prompt. A sitting therefore records which rubric
+ * graded it and not which examiner conducted it, so a change to the wording here
+ * cannot be told apart from a change to the topic list when an old result reads
+ * oddly. Corrected rather than deleted, because the gap is worth closing and a
+ * constant that quietly lied about being persisted is how it stayed open.
+ */
 export const EXAMINER_PROMPT_VERSION = "2026-08-19.1";
 
 /**

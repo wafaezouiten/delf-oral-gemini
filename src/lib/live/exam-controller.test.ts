@@ -2500,6 +2500,24 @@ describe("breaking a silence in the débat (#84)", () => {
     );
   });
 
+  it("gives way to the closing handshake on the tick that crosses both deadlines", async () => {
+    // The one tick where the 8 s silence window and the part's own time-up land
+    // together. Both would speak, and two directives with no turn boundary
+    // between them blend into one sentence — on the very turn the controller
+    // waits for to let the candidate's last transcription arrive.
+    const h = harness();
+    await intoSilentDebate(h);
+
+    h.advanceClock(PHASE_DURATIONS.debate);
+
+    assert.deepEqual(relances(h), [], "the part is ending; this is no moment to relance");
+    assert.match(
+      h.session().directives[h.session().directives.length - 1],
+      /Le temps de l'épreuve est écoulé/,
+      "the closing sentence is the last thing asked for, and asked for alone",
+    );
+  });
+
   it("says nothing over a microphone that has stopped delivering", async () => {
     // No voiced audio, but the reason is on screen already and the candidate
     // could not answer over that device anyway.
