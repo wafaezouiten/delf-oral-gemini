@@ -470,6 +470,20 @@ export function ResultsClient({
  * consecutive rules of the same colour close up into one long line and the
  * turns stop being separate.
  *
+ * The examiner's rule takes `--muted-foreground` at full strength, the same
+ * value its name does, and is not darkened to compensate for being the quiet
+ * one: its label was quiet because 10 px capitals are quiet, whereas a 2 px
+ * solid rule of that grey on the paper stock is 6.2:1, twice the 3:1 a non-text
+ * mark needs. Both rules survive Ctrl+P, measured rather than assumed — they
+ * are borders, not the background fills the print block flattens to white
+ * (`globals.css`), so on paper the accent is 10.9:1 and print's darkened
+ * `--muted-foreground` 9.7:1. A mono printer is the one place the *colours*
+ * stop working and the rules do not: #1b3a7a and #444444 come out as greys 56
+ * and 68 of 255, two firmly visible lines that are no longer two different
+ * ones. Nothing is lost, because nothing was left to the colour — the speaker
+ * is named in words above every turn, and on a greyscale sheet the rule's job
+ * is to bound the turn rather than to name it.
+ *
  * The head no longer carries « Monologue 7:02 · Débat 4:38 ». Each section now
  * prints its own duration beside its own heading, and leaving the combined line
  * up top would print both numbers twice.
@@ -535,35 +549,10 @@ function TranscriptColumn({
                 <div className="mt-4 space-y-5">
                   {section.turns.map(({ entry, timeLabel }, index) => {
                     const isCandidate = entry.speaker !== "examiner";
-                    /* The rule and the name are one decision taken once (#87).
-                       Both classes come out of the same ternary so that
-                       repainting a speaker cannot leave its rule behind on the
-                       old colour — the line down the left edge *is* the label,
-                       drawn at the height of the turn instead of the width of
-                       four small words.
-
-                       The examiner's rule takes `--muted-foreground` at full
-                       strength, the same value its name does, and is not
-                       darkened to compensate for being the quiet one. The
-                       label was quiet because 10 px capitals are quiet; a 2 px
-                       solid rule of #5b6069 on the paper stock is about 6:1,
-                       twice the 3:1 a non-text mark needs. It reads as a line,
-                       not as an absent one.
-
-                       Both survive Ctrl+P, measured rather than assumed. These
-                       are borders, not the background fills the print block
-                       flattens to white (`globals.css`), so neither is
-                       dropped; on paper the accent is 10.9:1 and print's
-                       darkened `--muted-foreground` 9.7:1 against white.
-
-                       A mono printer is where the *colours* stop working and
-                       the rules do not: #1b3a7a and #444444 come out as greys
-                       56 and 68 of 255 — two firmly visible lines that are no
-                       longer two different ones. Nothing is lost, because
-                       nothing was left to the colour: « Vous » and
-                       « Examinateur » are written above every turn, and the
-                       rule's job on a greyscale sheet is to bound the turn,
-                       not to name it. */
+                    /* One ternary for both classes: the rule and the name are
+                       one decision, so repainting a speaker cannot leave its
+                       rule behind on the old colour. Why these two colours, and
+                       what they do on paper, is in the doc above. */
                     const tone = isCandidate
                       ? { rule: "border-primary", name: "text-primary" }
                       : { rule: "border-muted-foreground", name: "text-muted-foreground" };
@@ -582,12 +571,12 @@ function TranscriptColumn({
                             of two reads as a log. `tabular` so the column of
                             stamps lines up down the page.
 
-                            The name grows to `text-base` — above the turn it
-                            names rather than below it — and loses the capitals
-                            and the wide tracking on the way up: small caps at
-                            10 px read as a label, the same capitals at 16 px
-                            read as shouting. Only the name grows; the stamp
-                            stays exactly the size it was. */}
+                            The name loses the capitals and the wide tracking on
+                            its way up to `text-base`: small caps at 10 px read
+                            as a label, the same capitals at 16 px read as
+                            shouting. Only the name grows — the stamp keeps the
+                            size it had, because it locates a turn rather than
+                            introducing one. */}
                         <div className="flex items-baseline gap-2">
                           <span className={cn("text-base leading-tight font-medium", tone.name)}>
                             {speakerLabel(entry.speaker)}
