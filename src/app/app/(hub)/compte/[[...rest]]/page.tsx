@@ -43,15 +43,18 @@ export default async function ComptePage() {
   // transition and does not decide whether this segment renders.
   await requireUserId();
 
-  // Narrower than the other reading screens, and left of the column they centre
-  // in. The account is a form to work through rather than a document to read:
-  // the sujets and the tableau de bord earn a wide centred measure because they
-  // are full of prose and figures, and this is a list of fields that only looks
-  // emptier the more room it is given. `lg:mx-0 lg:ml-20` rather than a
+  // Left of the column the other reading screens centre in, and two widths wide:
+  // the header runs to `4xl` so « Réinitialiser » sits well out to the right,
+  // while the card below keeps the `2xl` measure it wants — a Clerk card
+  // stretched to the header's width is a login form the width of a desk.
+  //
+  // The account is a form to work through rather than a document to read, which
+  // is why it is not the sujets' wide centred measure: a list of fields only
+  // looks emptier the more room it is given. `lg:mx-0 lg:ml-20` rather than a
   // translate, so it stays in normal flow — and centred on the phone, where
   // there is nowhere else to be.
   return (
-    <main className="mx-auto flex w-full max-w-2xl flex-col px-6 py-8 lg:mx-0 lg:ml-20">
+    <main className="mx-auto flex w-full max-w-2xl flex-col px-6 py-8 lg:mx-0 lg:ml-20 lg:max-w-4xl">
       {/* The title on the left, the reset on the right, stacked on a phone.
           `items-start` rather than a baseline: the left side is three lines and
           the right is a button, and aligning them on anything but their tops
@@ -68,7 +71,9 @@ export default async function ComptePage() {
         <ResetRecord />
       </header>
 
-      <div className="mt-6 w-full">
+      {/* The card keeps the narrow measure; only the header takes the wider one.
+          A Clerk card stretched to 4xl is a login form the width of a desk. */}
+      <div className="mt-6 w-full lg:max-w-2xl">
         <AccountProfile />
       </div>
     </main>
