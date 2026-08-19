@@ -1186,6 +1186,20 @@ export class ExamController {
       return;
     }
 
+    // A step spent into a socket that is not up is spent unheard. Worse than it
+    // looks from `sendSilenceDirective`'s catch: `SessionManager.sendDirective`
+    // opens with `if (!this.socket) return`, so a directive during a reconnect
+    // is dropped WITHOUT throwing, and nothing downstream could tell the
+    // difference. Since the check is rationed, a candidate who froze just as the
+    // connection dropped could have both of theirs burnt in silence and never be
+    // asked anything at all. Re-anchored rather than merely skipped: when the
+    // socket comes back the eight seconds start again, because a relance should
+    // follow a question the candidate actually heard.
+    if (this.connection !== "connected") {
+      this.silenceSince = now;
+      return;
+    }
+
     const voiced = recorder.voicedSeconds("debate");
     if (voiced > this.lastVoicedSeconds) {
       this.lastVoicedSeconds = voiced;
@@ -1200,6 +1214,12 @@ export class ExamController {
       // Re-anchored rather than closed: a directive is not a promise that the
       // model will speak, and if it says nothing either, the next step is due
       // eight seconds from the attempt rather than on the very next tick.
+      //
+      // This is the second site that anchors the window, and the two are not
+      // redundant: {@link armSilenceWatch} covers the model ANSWERING the
+      // relance, this covers it saying nothing back. Whichever happens first
+      // anchors, and they agree only because both mean "now" — so a future
+      // change to either has to keep meaning that.
       this.silenceSince = now;
       this.log("silence-relance");
       this.sendSilenceDirective("silence-relance", silenceRelanceInstruction());

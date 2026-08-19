@@ -2518,6 +2518,27 @@ describe("breaking a silence in the débat (#84)", () => {
     );
   });
 
+  it("does not spend a step into a socket that is not up", async () => {
+    // `SessionManager.sendDirective` drops a directive on a down socket without
+    // throwing, so a step spent mid-reconnect is spent unheard — and the check is
+    // rationed. A candidate who froze exactly as the connection dropped would
+    // have both of theirs burnt in silence.
+    const h = harness();
+    await intoSilentDebate(h);
+
+    h.session().emitStates("reconnecting");
+    h.advanceClock(30);
+    assert.deepEqual(relances(h), [], "nothing was said, so nothing was spent");
+
+    h.session().emitStates("connected");
+    h.advanceClock(9);
+    assert.equal(relances(h).length, 1, "and the candidate gets it once they can hear it");
+
+    h.session().finishTurn();
+    h.advanceClock(9);
+    assert.equal(presenceChecks(h).length, 1, "with the whole escalation still intact");
+  });
+
   it("says nothing over a microphone that has stopped delivering", async () => {
     // No voiced audio, but the reason is on screen already and the candidate
     // could not answer over that device anyway.
