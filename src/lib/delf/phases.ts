@@ -203,3 +203,24 @@ export function formatClock(seconds: number): string {
   const secs = safe % 60;
   return `${mins}:${secs.toString().padStart(2, "0")}`;
 }
+
+/**
+ * A `TranscriptEntry` offset as `m:ss` — the stamp printed beside a turn.
+ *
+ * Milliseconds rather than seconds because that is what the transcript counts
+ * in, and floored rather than rounded because the stamp marks when a turn
+ * *started*: rounding up prints a turn as beginning a second after the word that
+ * begins it. Clamped at zero because both callers subtract an anchor from an
+ * entry, and nothing downstream guarantees the difference is positive — a
+ * « -0:01 » beside a turn reads as a defect in the recording rather than in the
+ * arithmetic.
+ *
+ * Here beside `formatClock` rather than in either caller because there are two,
+ * on opposite sides of the épreuve — the live débat panel and the correction —
+ * and a turn stamped one way while it is said and another way once it is a
+ * record is the same drift `speakerLabel` exists to prevent.
+ */
+export function formatTurnOffset(offsetMs: number): string {
+  if (!Number.isFinite(offsetMs)) return formatClock(0);
+  return formatClock(Math.max(0, Math.floor(offsetMs / 1000)));
+}

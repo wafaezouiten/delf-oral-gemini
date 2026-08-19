@@ -4,6 +4,7 @@ import { describe, it } from "node:test";
 import { appendFragment, entriesForPhase, type TranscriptEntry } from "@/lib/delf/transcript";
 import {
   DEBATE_CONVERSATION_COPY,
+  debateTurns,
   STICK_THRESHOLD_PX,
   isNearBottom,
   speakerLabel,
@@ -126,5 +127,56 @@ describe("the copy", () => {
     // There is no « Masquer » any more: the exchange is the débat's body, not a
     // panel laid over a status card that could be put back (#48 → #60).
     assert.match(DEBATE_CONVERSATION_COPY.title, /Échange/);
+  });
+});
+
+describe("stamping each turn with when it was said", () => {
+  const OPENING = 900_000;
+  const TRANSCRIPT: TranscriptEntry[] = [
+    { phase: "monologue", speaker: "candidate", timestamp: 12_000, text: "Mon exposé…" },
+    { phase: "debate", speaker: "examiner", timestamp: OPENING, text: "Vraiment ?" },
+    { phase: "debate", speaker: "candidate", timestamp: OPENING + 31_400, text: "Oui, et…" },
+  ];
+
+  it("counts from the phase clock, so the stamps agree with the scene above", () => {
+    // The candidate is looking at `1:12 / 5:00` in the scene a centimetre above
+    // this feed. A stamp anchored anywhere else disagrees with it on screen.
+    const turns = debateTurns(TRANSCRIPT, OPENING - 8_000);
+
+    assert.deepEqual(
+      turns.map((t) => t.timeLabel),
+      ["0:08", "0:39"],
+    );
+  });
+
+  it("shows only the débat", () => {
+    const turns = debateTurns(TRANSCRIPT, OPENING);
+
+    assert.deepEqual(
+      turns.map((t) => t.entry.text),
+      ["Vraiment ?", "Oui, et…"],
+    );
+  });
+
+  it("falls back to the first turn while the phase clock has not started", () => {
+    // A real window, not a transient: the consigne is spoken before the clock
+    // starts (#37) and the opening question can land inside it. Measuring
+    // against the exam's origin there would stamp it with a quarter of an hour.
+    const turns = debateTurns(TRANSCRIPT, null);
+
+    assert.deepEqual(
+      turns.map((t) => t.timeLabel),
+      ["0:00", "0:31"],
+    );
+  });
+
+  it("holds at 0:00 for a turn that beat the clock's start", () => {
+    const turns = debateTurns(TRANSCRIPT, OPENING + 5_000);
+
+    assert.equal(turns[0].timeLabel, "0:00");
+  });
+
+  it("has nothing to stamp before the débat begins", () => {
+    assert.deepEqual(debateTurns(TRANSCRIPT.slice(0, 1), null), []);
   });
 });

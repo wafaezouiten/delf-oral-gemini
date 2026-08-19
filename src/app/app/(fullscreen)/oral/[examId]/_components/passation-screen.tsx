@@ -72,6 +72,7 @@ export function PassationScreen({
   phase,
   topic,
   elapsed,
+  phaseStartedAt,
   remaining,
   recording,
   examinerSpeaking,
@@ -98,6 +99,8 @@ export function PassationScreen({
   /** The sujet, on screen throughout. The reason this screen exists. */
   topic: OralTopic;
   elapsed: number;
+  /** The current phase's start, in the transcript's time base — see `ExamState`. */
+  phaseStartedAt: number | null;
   remaining: number;
   recording: boolean;
   /**
@@ -259,7 +262,11 @@ export function PassationScreen({
                 total={total}
               />
 
-              <DebateConversation transcript={transcript} hint={status.body} />
+              <DebateConversation
+                transcript={transcript}
+                phaseStartedAt={phaseStartedAt}
+                hint={status.body}
+              />
             </>
           )}
 

@@ -2341,3 +2341,64 @@ describe("the examiner's opening question", () => {
     assert.equal(player.interrupts, 1, "the speaker was emptied by the finish");
   });
 });
+
+describe("where a phase started, in the transcript's own time base (#70)", () => {
+  /** Preparation → monologue, clock running. */
+  async function intoMonologue(h: Harness): Promise<void> {
+    h.controller.start();
+    await h.controller.advanceEarly();
+    await pressRecord(h);
+    h.controller.startSpeaking();
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+
+  async function intoDebate(h: Harness): Promise<void> {
+    await intoMonologue(h);
+    h.session().candidateSays("Le télétravail a transformé le rapport au bureau.");
+    h.advanceClock(MONOLOGUE_MIN_SECONDS + 10);
+    await h.controller.advanceEarly();
+    await completeClosing(h);
+  }
+
+  it("is null before any clock has started", () => {
+    const h = harness();
+    assert.equal(h.controller.getSnapshot().phaseStartedAt, null);
+  });
+
+  it("subtracting it from a turn's timestamp gives the phase clock", async () => {
+    // The whole reason it is exposed. `elapsed` answers "how long has this phase
+    // run" and `TranscriptEntry.timestamp` counts from the exam; this is the one
+    // number that converts between them, so the débat's feed can stamp a turn
+    // with the count the scene's clock is already showing.
+    const h = harness();
+    await intoDebate(h);
+
+    h.advanceClock(45);
+    h.session().examinerSays("Vous dites que c'est un progrès. Vraiment ?");
+
+    const state = h.controller.getSnapshot();
+    const turn = state.transcript[state.transcript.length - 1];
+    assert.equal(turn.phase, "debate");
+    assert.notEqual(state.phaseStartedAt, null);
+    assert.equal(
+      Math.floor((turn.timestamp - state.phaseStartedAt!) / 1000),
+      state.elapsed,
+      "the stamp and the clock the candidate is looking at are the same count",
+    );
+  });
+
+  it("re-anchors on each phase, so the débat does not inherit the monologue's", async () => {
+    const h = harness();
+    await intoMonologue(h);
+    const monologue = h.controller.getSnapshot().phaseStartedAt;
+
+    h.session().candidateSays("Le télétravail a transformé le rapport au bureau.");
+    h.advanceClock(MONOLOGUE_MIN_SECONDS + 10);
+    await h.controller.advanceEarly();
+    await completeClosing(h);
+
+    const debate = h.controller.getSnapshot().phaseStartedAt;
+    assert.notEqual(debate, null);
+    assert.ok(debate! > monologue!, "the débat starts after the monologue did");
+  });
+});

@@ -484,6 +484,7 @@ export function ExamClient({ examId, topic }: { examId: string; topic: OralTopic
         phase={state.phase}
         topic={topic}
         elapsed={state.elapsed}
+        phaseStartedAt={state.phaseStartedAt}
         remaining={state.remaining}
         recording={state.recording}
         examinerSpeaking={state.examinerSpeaking}

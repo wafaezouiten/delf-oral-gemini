@@ -24,7 +24,7 @@
  * gets the heading, the `0:00` and a quiet line saying nothing was recorded.
  */
 
-import { formatClock } from "@/lib/delf/phases";
+import { formatClock, formatTurnOffset } from "@/lib/delf/phases";
 import {
   entriesForPhase,
   type TranscriptEntry,
@@ -141,7 +141,7 @@ export function correctionTranscriptView(
       durationLabel: formatClock(seconds[phase]),
       turns: entries.map((entry) => ({
         entry,
-        timeLabel: elapsedLabel(entry.timestamp - anchor),
+        timeLabel: formatTurnOffset(entry.timestamp - anchor),
       })),
       emptyNote:
         entries.length === 0 && spoke ? CORRECTION_TRANSCRIPT_COPY.emptySection : null,
@@ -159,17 +159,3 @@ export function correctionTranscriptView(
   };
 }
 
-/**
- * A turn's offset into its part, as `m:ss`.
- *
- * Floored, not rounded: the stamp marks when a turn *started*, and rounding up
- * would print a turn as beginning a second after the word that begins it. Clamped
- * at zero because `appendFragment` keeps a turn's opening timestamp while merging
- * later fragments into it, so nothing downstream guarantees a transcript that was
- * reordered or spliced still runs forwards — and a negative `-0:01` beside a turn
- * would be read as a defect in the recording rather than in the arithmetic.
- */
-function elapsedLabel(offsetMs: number): string {
-  if (!Number.isFinite(offsetMs)) return formatClock(0);
-  return formatClock(Math.max(0, Math.floor(offsetMs / 1000)));
-}
