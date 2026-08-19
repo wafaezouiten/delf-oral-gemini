@@ -65,4 +65,20 @@ export const clerkAppearance: NonNullable<ComponentProps<typeof UserProfile>["ap
     borderRadius: "2px",
     fontFamily: "var(--font-inter), system-ui, sans-serif",
   },
+  /**
+   * Clerk's card sizes itself and sits wherever its own width leaves it. On a
+   * page that is a centred column of a fixed measure, that reads as a widget
+   * dropped in off-centre — so the two boxes it draws are told to take the width
+   * they are given, and the column centres them the way it centres everything
+   * else on the screen.
+   *
+   * Class names rather than `variables`, because this is layout and Clerk's
+   * variables are a palette. These are the only two element overrides in the
+   * product; anything more would be redrawing Clerk's card by hand, which is the
+   * thing embedding it was meant to avoid.
+   */
+  elements: {
+    rootBox: "w-full",
+    cardBox: "w-full",
+  },
 };

@@ -3,9 +3,19 @@ import type { Metadata } from "next";
 import { Kicker } from "@/app/_components/po/tag";
 import { requireUserId } from "@/lib/auth/exam-guard";
 import { AccountProfile } from "../_components/account-profile";
+import { ResetRecord } from "../_components/reset-record";
 
 /**
- * Mon compte — one page for the account and for the record.
+ * Mon compte — one page, two blocks, one column.
+ *
+ * Clerk's card on top: name, e-mail, password, sessions, all of it Clerk's to
+ * draw. This product's own block underneath: « Repartir de zéro ». They are the
+ * same width and share the page's centred column, so the account reads as one
+ * screen rather than as a widget with something bolted beside it.
+ *
+ * The reset is a section here and not a page of Clerk's nav. It is not an
+ * account setting — it does not touch the identity Clerk owns — and filing it as
+ * a third tab beside *Profil* and *Sécurité* claimed it was one.
  *
  * The catch-all segment is Clerk's requirement, not a route this product
  * invented: `<UserProfile routing="path">` gives each of its tabs a real URL
@@ -24,7 +34,7 @@ export const metadata: Metadata = {
     "Votre compte DELF B2 : profil, sécurité, et repartir de zéro sans rien supprimer.",
 };
 
-// Per-user, and one of its tabs writes to the candidate's record.
+// Per-user, and one of its controls writes to the candidate's record.
 export const dynamic = "force-dynamic";
 
 export default async function ComptePage() {
@@ -33,16 +43,22 @@ export default async function ComptePage() {
   await requireUserId();
 
   return (
-    <main className="mx-auto w-full max-w-3xl px-6 py-10">
-      <Kicker>DELF B2 · Production orale</Kicker>
-      <h1 className="font-serif mt-1 text-2xl leading-tight font-semibold">Mon compte</h1>
-      <p className="text-muted-foreground mt-2 text-sm leading-relaxed">
-        Votre profil, votre sécurité, et votre record d&apos;épreuves.
-      </p>
+    <main className="mx-auto flex w-full max-w-3xl flex-col items-center px-6 py-10">
+      <header className="w-full">
+        <Kicker>DELF B2 · Production orale</Kicker>
+        <h1 className="font-serif mt-1 text-2xl leading-tight font-semibold">Mon compte</h1>
+        <p className="text-muted-foreground mt-2 text-sm leading-relaxed">
+          Votre profil, votre sécurité, et votre record d&apos;épreuves.
+        </p>
+      </header>
 
-      <div className="mt-6">
+      <div className="mt-6 w-full">
         <AccountProfile />
       </div>
+
+      <section className="border-border bg-card sheet mt-8 w-full border p-6">
+        <ResetRecord />
+      </section>
     </main>
   );
 }

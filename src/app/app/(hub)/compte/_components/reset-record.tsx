@@ -10,17 +10,17 @@ import { requestRecordReset } from "@/lib/account/reset";
  * « Repartir de zéro » — the button, its confirmation and what it says after
  * (#69).
  *
- * Mounted as a page of Clerk's `<UserProfile>`, so it sits in the same card as
- * *Profil* and *Sécurité* and inherits their chrome. This component draws its
- * own body and nothing else: no card, no border, no heading furniture that would
- * make it look like a panel bolted onto the side of Clerk's.
+ * A block on /app/compte, under Clerk's card and the same width as it. Not a
+ * page of Clerk's own nav: this touches nothing Clerk owns, and filing it beside
+ * *Profil* and *Sécurité* claimed it was an account setting. It draws its body
+ * and nothing else — the page supplies the sheet around it.
  *
- * The confirmation is a second state of the panel rather than a `<dialog>`,
- * which is a deliberate retreat from how the exit dialog does it. The exam
- * screen owns its whole viewport; this is content inside somebody else's
- * component, and a modal opened from in there puts two focus traps in one
- * document to argue over the keyboard. Two states of one panel need no second
- * trap, and the consequence is read in the same place either way.
+ * The confirmation is a second state of the block rather than a `<dialog>`,
+ * which is a deliberate retreat from how the exit dialog does it. That dialog
+ * interrupts an épreuve in progress and has to; this interrupts nothing, and a
+ * modal for a control the candidate came to this page on purpose to use is a
+ * ceremony rather than a safeguard. Two states of one block also keep the
+ * consequence in the place the button is.
  *
  * Neither button is the red one. Red in this product means recovering from a
  * failure, and in the exit dialog a zero the candidate is about to take;
@@ -69,7 +69,7 @@ export function ResetRecord() {
 
   return (
     <div className="text-foreground space-y-4">
-      <h1 className="font-serif text-lg font-semibold">Repartir de zéro</h1>
+      <h2 className="font-serif text-lg font-semibold">Repartir de zéro</h2>
 
       <p className="text-muted-foreground text-sm leading-relaxed">
         Remet votre tableau de bord et vos cartes de sujets à leur état de départ.

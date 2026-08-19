@@ -301,9 +301,12 @@ vanishing into the old one.
 offers « Gérer le compte » and « Se déconnecter », as it always did — what
 changed is that the first of those lands on `/app/compte`
 (`userProfileMode="navigation"`) instead of opening Clerk's dialog over the app.
-The account is therefore a page with a left-hand nav — *Profil*, *Sécurité*,
-*Repartir de zéro* — and signing out stays in the menu, so the page carries no
-sign-out control of its own. It is not a fifth destination in the rail: an
+The account is therefore a page: Clerk's card on top with its own tabs, and this
+product's « Repartir de zéro » as a block underneath it, the same width and in
+the same centred column. The reset is deliberately **not** a third tab in Clerk's
+nav — it touches nothing Clerk owns, and filing it beside *Profil* and *Sécurité*
+claimed it was an account setting. Signing out stays in the menu, so the page
+carries no sign-out control of its own. It is not a fifth destination in the rail: an
 account is not part of the épreuve, and the four destinations stay four.
 
 Clerk still draws the account screens. `<UserProfile>` is embedded rather than
@@ -316,13 +319,20 @@ whole difference between a card from another application and a sheet of paper.
 The colours are duplicated as literals there on purpose, because Clerk derives a
 scale from each and cannot parse a `var(…)`.
 
-« Repartir de zéro » is a page of that card, and its confirmation is a second
-state of the panel rather than a `<dialog>` — a deliberate retreat from how the
-exit dialog does it, since content mounted inside somebody else's component
-cannot open a modal without putting two focus traps in one document to argue over
-the keyboard. Neither button is the red one, for the reason above: nothing is
+The reset's confirmation is a second state of its block rather than a `<dialog>`
+— a deliberate retreat from how the exit dialog does it. That dialog interrupts
+an épreuve in progress and has to; this interrupts nothing, and a modal for a
+control the candidate opened this page to use is a ceremony rather than a
+safeguard. Neither button is the red one, for the reason above: nothing is
 destroyed. The count is reported *after* the reset, from what the route says it
 archived, rather than promised before it.
+
+**Changing a password is a Clerk setting, not code.** The *Sécurité* tab shows a
+password section only when the password strategy is enabled on the instance
+(Clerk Dashboard → User & authentication → Password) — #36 §3 recommended turning
+it **off** so the e-mail path is `email → code → in`, and with it off there is
+nothing for the tab to show. Turning it back on makes « Mot de passe » appear
+with no change here.
 
 ## 4. Deliberate departures, collected
 
