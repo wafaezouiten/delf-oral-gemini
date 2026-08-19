@@ -1,26 +1,37 @@
 /**
- * Microphone capture worklet: Float32 frames -> 16-bit PCM.
+ * Microphone capture worklet: batch the audio thread's 128-sample quanta and
+ * hand them to the main thread.
  *
- * Gemini Live wants raw little-endian PCM16 at 16 kHz. The Web Audio API gives
- * us Float32 in [-1, 1], and MediaRecorder cannot produce raw PCM at all (it
- * only emits container formats like webm/opus), which is why this has to be an
- * AudioWorklet rather than something simpler.
+ * That is deliberately ALL it does. Conversion to PCM16, framing to the Live
+ * API's 40 ms, and rate conversion all used to live here, where nothing could
+ * import them and therefore nothing could test them — and the two properties
+ * that matter about them (no sample lost at a block boundary, no fractional
+ * resampling phase reset per block) are precisely the sort that look fine and
+ * drift over twenty minutes. They now live in `src/lib/audio/framing.ts` with
+ * assertions on them, and at 16 kHz the arithmetic is free wherever it runs.
  *
- * Resampling is deliberately NOT done here: the AudioContext is constructed with
- * `sampleRate: 16000`, so the browser's own resampler has already done the work
- * by the time frames reach this node. Hand-rolling a resampler in the audio
- * thread is a good way to add aliasing to a pronunciation exam.
+ * This still has to be an AudioWorklet rather than something simpler:
+ * MediaRecorder cannot produce raw PCM at all — it only emits container formats
+ * like webm/opus — and 128-sample quanta are far too small to send as individual
+ * WebSocket messages.
  *
- * Frames arrive in 128-sample quanta, which is far too small to send as
- * individual WebSocket messages, so they are buffered to ~40 ms before posting.
+ * Resampling is deliberately NOT done here either. The AudioContext is
+ * constructed at 16 kHz, so the browser's own resampler has usually already done
+ * the work by the time frames reach this node; when it refuses, the fallback is
+ * on the main thread where it can be tested.
  */
 
-const TARGET_SAMPLES = 640; // 40 ms at 16 kHz
+/** ~40 ms at 16 kHz. The real size arrives from the main thread, computed from
+ *  the rate the context actually got. */
+const DEFAULT_FRAME_SAMPLES = 640;
 
 class PcmCaptureProcessor extends AudioWorkletProcessor {
-  constructor() {
+  constructor(options) {
     super();
-    this._buffer = new Int16Array(TARGET_SAMPLES);
+    const requested = options && options.processorOptions && options.processorOptions.frameSamples;
+    this._size =
+      Number.isInteger(requested) && requested > 0 ? requested : DEFAULT_FRAME_SAMPLES;
+    this._buffer = new Float32Array(this._size);
     this._offset = 0;
   }
 
@@ -34,15 +45,12 @@ class PcmCaptureProcessor extends AudioWorkletProcessor {
     if (!channel) return true;
 
     for (let i = 0; i < channel.length; i++) {
-      // Clamp before scaling: a sample slightly outside [-1, 1] would wrap
-      // around to the opposite polarity as an int16 and click audibly.
-      const sample = Math.max(-1, Math.min(1, channel[i]));
-      this._buffer[this._offset++] = sample < 0 ? sample * 0x8000 : sample * 0x7fff;
+      this._buffer[this._offset++] = channel[i];
 
-      if (this._offset === TARGET_SAMPLES) {
-        // Transfer a copy: the underlying buffer is reused for the next chunk.
-        const chunk = this._buffer.slice();
-        this.port.postMessage(chunk.buffer, [chunk.buffer]);
+      if (this._offset === this._size) {
+        // Transfer a copy: the underlying buffer is reused for the next block.
+        const block = this._buffer.slice();
+        this.port.postMessage(block.buffer, [block.buffer]);
         this._offset = 0;
       }
     }

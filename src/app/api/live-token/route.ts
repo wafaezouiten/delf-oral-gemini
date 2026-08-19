@@ -21,18 +21,26 @@
  * the server accept the socket and then kill it with code 1011 "Internal error
  * encountered" — no useful diagnostic. The constraint must carry the config too.
  *
- * The client chooses only the phase, the topic slug and (on a reconnect) its
- * resumption handle. All three are validated here; the prompt is assembled from
- * server-owned source, so a client cannot inject examiner instructions.
+ * **Scope**, which is what Phase 4 added. Being signed in used to be the whole
+ * check, and the browser named its own subject. Now the request carries the
+ * `examId`, the same ownership module every other exam route uses answers for
+ * it, and the subject is read off the sitting. So a token is bound to a phase,
+ * a subject, a caller AND a sitting that caller owns — and a candidate can no
+ * longer sit subject A on a row that says subject B.
+ *
+ * The route stays a binding: validation and the mint/deny decision are pure
+ * functions in `lib/gemini/live-token-request.ts`, where they can be tested.
+ * This file cannot be — it transitively imports `server-only`.
  */
 
-import { auth } from "@clerk/nextjs/server";
 import { GoogleGenAI } from "@google/genai";
 import { NextResponse } from "next/server";
 
+import { authorizeExam } from "@/lib/auth/exam-guard";
+import { findTopic } from "@/lib/delf/topics";
 import { LIVE_MODEL } from "@/lib/gemini/constants";
 import { liveConfigForPhase } from "@/lib/gemini/live-config";
-import { findTopic } from "@/lib/delf/topics";
+import { gateLiveToken, parseLiveTokenRequest } from "@/lib/gemini/live-token-request";
 
 export const runtime = "nodejs";
 /** Tokens are per-request secrets; nothing here may be cached. */
@@ -43,18 +51,10 @@ const TOKEN_TTL_MINUTES = 15;
 /** How long the client has to actually open a session with it. */
 const NEW_SESSION_WINDOW_MINUTES = 2;
 
-interface TokenRequest {
-  phase?: unknown;
-  topicSlug?: unknown;
-  resumptionHandle?: unknown;
-}
-
 export async function POST(request: Request) {
-  const { userId } = await auth();
-  if (!userId) {
-    return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
-  }
-
+  // Before anything that costs a round trip. A misconfigured environment would
+  // otherwise query `oral_exams` on every request — including every reconnect —
+  // only to fail at the end for a reason that was knowable at the start.
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
     console.error("[live-token] GEMINI_API_KEY is not set");
@@ -64,24 +64,45 @@ export async function POST(request: Request) {
     );
   }
 
-  const body = (await request.json().catch(() => ({}))) as TokenRequest;
+  const parsed = parseLiveTokenRequest(await request.json().catch(() => null));
+  if (!parsed.ok) {
+    return NextResponse.json({ error: parsed.error }, { status: parsed.status });
+  }
+  const { phase, examId, requestedTopicSlug, resumptionHandle } = parsed.request;
 
-  const phase = body.phase;
-  if (phase !== "monologue" && phase !== "debate") {
-    return NextResponse.json({ error: "Phase invalide" }, { status: 400 });
+  // One query, and it answers both halves: who owns the sitting, and what it is
+  // about. It used to be two sequential round trips to the same row — see
+  // `findExamOwner` — which a bad-network episode multiplied by five.
+  const access = await authorizeExam(examId);
+
+  const gate = gateLiveToken({ access, requestedTopicSlug });
+  if (gate.decision === "deny") {
+    return NextResponse.json({ error: gate.error }, { status: gate.status });
   }
 
-  const topic = typeof body.topicSlug === "string" ? findTopic(body.topicSlug) : undefined;
+  // The gate hands back a slug, never a topic: it is pure, and the catalogue
+  // lookup belongs on this side of the seam. A sitting could in principle name a
+  // subject that has since left the catalogue, which is a 404 rather than a
+  // silent fallback to something the candidate did not prepare.
+  const topic = findTopic(gate.topicSlug);
   if (!topic) {
-    return NextResponse.json({ error: "Sujet inconnu" }, { status: 400 });
+    console.error("[live-token] sitting names an unknown subject:", gate.topicSlug);
+    return NextResponse.json({ error: "Sujet inconnu" }, { status: 404 });
   }
-
-  // A handle is opaque to us, but it is client-supplied, so bound its size
-  // rather than forwarding an arbitrary string to Google.
-  const resumptionHandle =
-    typeof body.resumptionHandle === "string" && body.resumptionHandle.length <= 4096
-      ? body.resumptionHandle
-      : undefined;
+  if (gate.source === "request") {
+    // The subject is whatever the browser said. Two very different reasons land
+    // here and the log has to tell them apart, because one is routine and the
+    // other is an incident: no sitting at all is expected in local development
+    // and on the degraded `local-…` ids, whereas an OWNED row whose subject
+    // could not be joined means a persisted sitting is broken. Reading
+    // "minting for the requested subject" and having to guess which is not a
+    // position to put an on-call in.
+    const why =
+      access.status === "owned"
+        ? "owned sitting has no readable subject"
+        : `no sitting to read (${access.reason})`;
+    console.warn(`[live-token] minting for the requested subject, ${why}:`, examId);
+  }
 
   try {
     const client = new GoogleGenAI({ apiKey });

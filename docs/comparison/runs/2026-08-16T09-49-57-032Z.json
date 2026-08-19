@@ -1,0 +1,1581 @@
+{
+  "startedAt": "2026-08-16T09:49:57.032Z",
+  "finishedAt": "2026-08-16T09:57:50.491Z",
+  "gitCommit": "dce121b880a58deefa391369f139823546f088f1",
+  "repeats": 2,
+  "criteria": [
+    "realisationTache",
+    "interaction",
+    "lexique",
+    "morphosyntaxe",
+    "phonologie"
+  ],
+  "sittings": [
+    {
+      "id": "b2-solide",
+      "label": "B2 solide",
+      "topicSlug": "teletravail",
+      "design": "Prestation B2 franche : position claire, exposé structuré, objections rencontrées de front et nuancées. Rien n'est saboté ; c'est le témoin qui donne un sens à l'écart des autres.",
+      "weakCriterion": null,
+      "monologueSeconds": 400,
+      "debateSeconds": 700
+    },
+    {
+      "id": "morphosyntaxe-faible",
+      "label": "Morphosyntaxe faible",
+      "topicSlug": "teletravail",
+      "design": "Idées solides et position défendue, portées par une grammaire manifestement fautive (accords sujet-verbe, reprises pronominales). Un correcteur qui forme une impression globale notera l'ensemble uniformément ; un correcteur qui applique la grille séparera réalisation et morphosyntaxe.",
+      "weakCriterion": "morphosyntaxe",
+      "monologueSeconds": 400,
+      "debateSeconds": 700
+    },
+    {
+      "id": "interaction-faible",
+      "label": "Interaction faible",
+      "topicSlug": "ia-education",
+      "design": "Monologue préparé et remarquable, puis effondrement au débat : le candidat concède chaque objection, répète son exposé et n'apporte aucun exemple nouveau. Le profil n'existe QUE sur les deux tâches réunies : corrigées séparément, la première est excellente et la seconde médiocre, et rien ne dit qu'il s'agit du même candidat.",
+      "weakCriterion": "interaction",
+      "monologueSeconds": 410,
+      "debateSeconds": 680
+    },
+    {
+      "id": "lexique-pauvre",
+      "label": "Lexique pauvre",
+      "topicSlug": "villes-sans-voiture",
+      "design": "Position claire, plan tenu, débat réellement disputé, mais un vocabulaire d'une pauvreté systématique : « bien », « truc », « chose », « les gens » reviennent partout et le candidat contourne chaque mot qui lui manque. Étend la conception de la fixture `weak-lexique` de l'implémentation de référence à une épreuve entière.",
+      "weakCriterion": "lexique",
+      "monologueSeconds": 390,
+      "debateSeconds": 660
+    },
+    {
+      "id": "hors-sujet",
+      "label": "Hors sujet",
+      "topicSlug": "tourisme-de-masse",
+      "design": "Langue riche, correcte et fluide, mais aucune prise de position : le candidat dérive en anecdotes et en digressions culturelles, et refuse de conclure même relancé. La tâche n'est pas réalisée alors que tous les indices de surface disent « bon candidat ». Étend la conception de la fixture `weak-realisation-tache` de l'implémentation de référence.",
+      "weakCriterion": "realisationTache",
+      "monologueSeconds": 395,
+      "debateSeconds": 640
+    },
+    {
+      "id": "candidat-quasi-muet",
+      "label": "Candidat quasi muet",
+      "topicSlug": "reseaux-sociaux-mineurs",
+      "design": "Le cas dégradé : quelques secondes de parole par tâche, aucun contenu évaluable, et les deux parties sous leur plancher de durée. Sert à comparer le bas de l'échelle, la pénalité de durée et le plancher de compétence à 5/25 — c'est-à-dire les endroits où les deux systèmes calculent au lieu de juger.",
+      "weakCriterion": null,
+      "monologueSeconds": 45,
+      "debateSeconds": 60
+    }
+  ],
+  "ours": [
+    {
+      "ok": true,
+      "sittingId": "b2-solide",
+      "repeat": 1,
+      "model": "gemini-3.6-flash",
+      "promptVersion": "2026-08-15.0",
+      "criteria": {
+        "realisationTache": 5,
+        "interaction": 5,
+        "lexique": 5,
+        "morphosyntaxe": 5,
+        "phonologie": 5
+      },
+      "rawCriteria": {
+        "realisationTache": 5,
+        "interaction": 5,
+        "lexique": 5,
+        "morphosyntaxe": 5,
+        "phonologie": 5
+      },
+      "modelTotal25": 25,
+      "rawScore25": 25,
+      "score25": 25,
+      "durationPenalty": 0,
+      "shortParts": [],
+      "meetsFloor": true,
+      "phonologieNonEvaluable": false,
+      "justifications": {
+        "realisationTache": "Le candidat présente un exposé parfaitement structuré, nuancé et étayé d'exemples précis (modèle hybride, isolement des jeunes). La prise de position est claire et le niveau correspond à la bande B2+.",
+        "interaction": "Excellente gestion du débat au niveau B2+. Le candidat répond spontanément aux objections, nuance ses propos et apporte des arguments et exemples inédits très pertinents (loi portugaise de 2021, baux immobiliers).",
+        "lexique": "Le vocabulaire est étendu, précis et parfaitement adapté au sujet (culture managériale, droit à la déconnexion, arbitrage immobilier). La prestation se situe au niveau B2+.",
+        "morphosyntaxe": "Maîtrise remarquable de la morphosyntaxe complexe (structures hypotaxiques, formules de concession et de restriction). Aucune erreur n'est à déplorer, ce qui relève du niveau B2+.",
+        "phonologie": "La transcription montre une fluidité exemplaire, sans hésitation ni amorce manquée, ce qui témoigne d'un débit fluide et naturel correspondant au niveau B2+."
+      },
+      "appreciationGlobale": "Prestation exceptionnelle de niveau B2+. Le candidat maîtrise parfaitement l'argumentation, l'interaction, le vocabulaire spécialisé ainsi que les structures syntaxiques complexes.",
+      "latencySeconds": 11.438,
+      "usage": {
+        "promptTokens": 2209,
+        "responseTokens": 447,
+        "thoughtsTokens": 1354,
+        "totalTokens": 4010,
+        "audioPromptTokens": null
+      }
+    },
+    {
+      "ok": true,
+      "sittingId": "morphosyntaxe-faible",
+      "repeat": 1,
+      "model": "gemini-3.6-flash",
+      "promptVersion": "2026-08-15.0",
+      "criteria": {
+        "realisationTache": 5,
+        "interaction": 5,
+        "lexique": 5,
+        "morphosyntaxe": 3,
+        "phonologie": 5
+      },
+      "rawCriteria": {
+        "realisationTache": 5,
+        "interaction": 5,
+        "lexique": 5,
+        "morphosyntaxe": 3,
+        "phonologie": 5
+      },
+      "modelTotal25": 23,
+      "rawScore25": 23,
+      "score25": 23,
+      "durationPenalty": 0,
+      "shortParts": [],
+      "meetsFloor": true,
+      "phonologieNonEvaluable": false,
+      "justifications": {
+        "realisationTache": "La tâche est parfaitement réalisée. Le candidat construit une présentation claire et structurée avec des connecteurs logiques adaptés ('Premièrement', 'Deuxièmement', 'Pour conclure'). Il prend clairement position en proposant un 'modèle hybride' équilibré et étaye son propos avec des arguments solides sur la qualité de vie et la formation des jeunes.",
+        "interaction": "Excellente prestation au débat. Le candidat réagit immédiatement et intelligemment aux objections de l'examinateur, en concédant certains points ('Votre objection elle est juste', 'c'est l'argument qui me gêne le plus') pour mieux recadrer le débat ('c'est la faute d'une culture du management') et apporter de nouveaux arguments pertinents comme la question des baux immobiliers ou du droit à la déconnexion.",
+        "lexique": "Le vocabulaire est étendu, précis et parfaitement adapté au sujet. Le candidat utilise un lexique spécialisé riche tout au long de l'épreuve: 'droit à la déconnexion', 'modèle hybride', 'postes qualifiés', 'actionnaires', 'amortir', 'baux'.",
+        "morphosyntaxe": "Le candidat maîtrise des structures complexes ('au lieu de refuser le progrès', 'ce que vous décrivez c'est pas'). Cependant, le score reste à la bande B2 (3) en raison d'erreurs récurrentes d'accord sujet-verbe au pluriel ('ils gagne', 'elles pouvait', 'ils apprend') et de dislocations orales fréquentes ('Le document il pose', 'tout le monde il').",
+        "phonologie": "Le texte ne présente aucune marque d'hésitation, aucun faux départ ni aucun énoncé interrompu. La fluidité est remarquable et le rythme de parole est très naturel de bout en bout."
+      },
+      "appreciationGlobale": "Prestation remarquable de niveau B2+. Le candidat fait preuve d'une aisance argumentative impressionnante lors du débat, appuyée par un vocabulaire riche et une très grande fluidité. Seules quelques imperfections de morphosyntaxe orale empêchent d'obtenir la note maximale absolue.",
+      "latencySeconds": 16.218,
+      "usage": {
+        "promptTokens": 2097,
+        "responseTokens": 606,
+        "thoughtsTokens": 1978,
+        "totalTokens": 4681,
+        "audioPromptTokens": null
+      }
+    },
+    {
+      "ok": true,
+      "sittingId": "interaction-faible",
+      "repeat": 1,
+      "model": "gemini-3.6-flash",
+      "promptVersion": "2026-08-15.0",
+      "criteria": {
+        "realisationTache": 5,
+        "interaction": 1,
+        "lexique": 3,
+        "morphosyntaxe": 5,
+        "phonologie": 3
+      },
+      "rawCriteria": {
+        "realisationTache": 5,
+        "interaction": 1,
+        "lexique": 3,
+        "morphosyntaxe": 5,
+        "phonologie": 3
+      },
+      "modelTotal25": 17,
+      "rawScore25": 17,
+      "score25": 17,
+      "durationPenalty": 0,
+      "shortParts": [],
+      "meetsFloor": true,
+      "phonologieNonEvaluable": false,
+      "justifications": {
+        "realisationTache": "Le monologue est parfaitement construit et structure avec des connecteurs logiques adaptes (D'abord, Ensuite, Enfin, En conclusion). Le candidat problematise le sujet avec finesse en distinguant le probleme de triche du probleme d'evaluation. Il s'agit d'une prestation de niveau B2+.",
+        "interaction": "Le candidat echoue a maintenir le debat. Il capitule immediatement face a la premiere objection (Oui, vous avez raison, c'est vrai. Je n'y avais pas pense sous cet angle), recite son texte sans relancer et avoue son impuissance sans proposer de nouveaux arguments. Cela se situe nettement en dessous du niveau B2 attendu.",
+        "lexique": "Le vocabulaire employe dans l'expose est riche et exact (irruption, assistants conversationnels, faux positifs, discernement). Cependant, lors du debat, la production lexicale s'appauvrit fortement faute de prise de parole spontanee. Le niveau B2 est neanmoins satisfait.",
+        "morphosyntaxe": "La morphosyntaxe est parfaitement maitrisee avec des structures variees et complexes, comme le subjonctif dans pour qu'aucun conseil de discipline ne puisse s'y fier ou des relatives d'emphase (Ce que l'ecole enseigne..., c'est...). Aucune erreur n'est relevee, ce qui correspond au niveau B2+.",
+        "phonologie": "L'expose est produit sans aucune hesitation textuelle ni saut de syntaxe, montrant une grande fluidite. Le debat montre une legere hesitation (Euh, un exemple concret) mais les phrases restent bien menees a leur terme. Le niveau B2 est valide."
+      },
+      "appreciationGlobale": "Prestation tres contrastee. Le monologue suivi est brillant, structure et d'un niveau linguistique tres eleve. En revanche, le debat est tres faible car le candidat abandonne sa position des la premiere relance de l'examinateur et s'avere incapable d'argumenter spontanement.",
+      "latencySeconds": 15.821,
+      "usage": {
+        "promptTokens": 2054,
+        "responseTokens": 696,
+        "thoughtsTokens": 1782,
+        "totalTokens": 4532,
+        "audioPromptTokens": null
+      }
+    },
+    {
+      "ok": false,
+      "sittingId": "lexique-pauvre",
+      "repeat": 1,
+      "error": "{\"error\":{\"code\":503,\"message\":\"This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.\",\"status\":\"UNAVAILABLE\"}}",
+      "latencySeconds": 5.285
+    },
+    {
+      "ok": true,
+      "sittingId": "hors-sujet",
+      "repeat": 1,
+      "model": "gemini-3.6-flash",
+      "promptVersion": "2026-08-15.0",
+      "criteria": {
+        "realisationTache": 1,
+        "interaction": 1,
+        "lexique": 5,
+        "morphosyntaxe": 5,
+        "phonologie": 5
+      },
+      "rawCriteria": {
+        "realisationTache": 1,
+        "interaction": 1,
+        "lexique": 5,
+        "morphosyntaxe": 5,
+        "phonologie": 5
+      },
+      "modelTotal25": 17,
+      "rawScore25": 17,
+      "score25": 17,
+      "durationPenalty": 0,
+      "shortParts": [],
+      "meetsFloor": true,
+      "phonologieNonEvaluable": false,
+      "justifications": {
+        "realisationTache": "Le candidat ne repond pas au sujet pose. Au lieu d'argumenter sur la limitation du tourisme de masse, il se livre a des digressions nostalgiques et historiques (pension de sa grand-tante, le Grand Tour au 18e siecle, Ruskin). Il n'y a aucune prise de position ni structuration argumentative sur le probleme des quotas ou taxes. La tache est nettement en dessous des attentes du B2.",
+        "interaction": "Le candidat esquive constamment les relances directes de l'examinateur qui lui demande a trois reprises de trancher. Au lieu de defendre une position et d'argumenter dans le debat, il produit des reponses evasives ou hors-sujet (comme ses commentaires sur les pieux de bois a Venise). Il refuse de participer au debat d'idees.",
+        "lexique": "Le vocabulaire est extremement riche, eleve et fluide, depassant le niveau B2. On note des formules nuancees et un lexique tres precis comme 'pension de famille', 'perspective vertigineuse', 'pieux de bois enfonces dans la vase'. Aucune lacune lexicale.",
+        "morphosyntaxe": "La morphosyntaxe est parfaitement maitrisee. Le candidat emploie des structures complexes de niveau B2+ / C1 avec une grande aisance ('dont l'escalier craquait', 'bien avant de l'etre', 'sur lequel il y aurait tant a dire'). Aucune erreur de grammaire ou d'accord.",
+        "phonologie": "La fluidite visible dans la transcription est remarquable. Aucune hesitation ('euh', 'hum'), aucun faux depart, aucune autocorrection ni phrase interrompue. Les enonces sont parfaitement menes a leur terme."
+      },
+      "appreciationGlobale": "Le candidat possede une maitrise linguistique remarquable de la langue francaise, avec une morphosyntaxe irreprochable et un lexique tres elegant. Cependant, il refuse totalement de traiter le sujet impose et d'entrer dans le debat, contournant systematiquement les questions de l'examinateur. Cela penalise lourdement ses notes de realisation de la tache et d'interaction.",
+      "latencySeconds": 19.058,
+      "usage": {
+        "promptTokens": 2085,
+        "responseTokens": 653,
+        "thoughtsTokens": 2244,
+        "totalTokens": 4982,
+        "audioPromptTokens": null
+      }
+    },
+    {
+      "ok": true,
+      "sittingId": "candidat-quasi-muet",
+      "repeat": 1,
+      "model": "gemini-3.6-flash",
+      "promptVersion": "2026-08-15.0",
+      "criteria": {
+        "realisationTache": 0,
+        "interaction": 0,
+        "lexique": 0,
+        "morphosyntaxe": 0,
+        "phonologie": 0
+      },
+      "rawCriteria": {
+        "realisationTache": 0,
+        "interaction": 0,
+        "lexique": 0,
+        "morphosyntaxe": 0,
+        "phonologie": 0
+      },
+      "modelTotal25": 0,
+      "rawScore25": 0,
+      "score25": 0,
+      "durationPenalty": 3,
+      "shortParts": [
+        "monologue",
+        "debate"
+      ],
+      "meetsFloor": false,
+      "phonologieNonEvaluable": true,
+      "justifications": {
+        "realisationTache": "Le candidat ne présente aucun argument, aucune structure et ne prend pas position ('c'est compliqué'). La prestation est insuffisante pour être évaluée au niveau B2.",
+        "interaction": "Le candidat est incapable de répondre aux relances de l'examinateur et se contente de dire 'je sais pas' et 'peut-être', refusant le débat.",
+        "lexique": "Le volume de mots produits est beaucoup trop réduit et basique ('réseaux sociaux', 'compliqué') pour permettre une évaluation du vocabulaire.",
+        "morphosyntaxe": "Aucune structure complexe ni phrase élaborée n'est produite. Le contenu est insuffisant pour évaluer le niveau morphosyntaxique.",
+        "phonologie": "La parole est extrêmement hachée et limitée à quelques hésitations ('euh...'), empêchant d'observer un débit fluide."
+      },
+      "appreciationGlobale": "Prestation quasiment inexistante. Le candidat n'a pas présenté de monologue argumenté ni participé au débat, se situant bien en dessous du niveau B2 attendu.",
+      "latencySeconds": 10.746,
+      "usage": {
+        "promptTokens": 1543,
+        "responseTokens": 469,
+        "thoughtsTokens": 1414,
+        "totalTokens": 3426,
+        "audioPromptTokens": null
+      }
+    },
+    {
+      "ok": true,
+      "sittingId": "b2-solide",
+      "repeat": 2,
+      "model": "gemini-3.6-flash",
+      "promptVersion": "2026-08-15.0",
+      "criteria": {
+        "realisationTache": 5,
+        "interaction": 5,
+        "lexique": 5,
+        "morphosyntaxe": 5,
+        "phonologie": 5
+      },
+      "rawCriteria": {
+        "realisationTache": 5,
+        "interaction": 5,
+        "lexique": 5,
+        "morphosyntaxe": 5,
+        "phonologie": 5
+      },
+      "modelTotal25": 25,
+      "rawScore25": 25,
+      "score25": 25,
+      "durationPenalty": 0,
+      "shortParts": [],
+      "meetsFloor": true,
+      "phonologieNonEvaluable": false,
+      "justifications": {
+        "realisationTache": "La prestation dans le monologue suivi est parfaitement structurée et convaincante. Le candidat formule une thèse claire (le télétravail comme progrès sous condition d'encadrement), utilise des organisateurs textuels variés (premièrement, deuxièmement, cela dit, c'est pourquoi) et apporte des arguments nuancés et des exemples précis. Le niveau atteint dépasse les exigences minimales du B2.",
+        "interaction": "Lors du débat, le candidat gère les objections de l'examinateur avec une aisance remarquable. Il ne renonce jamais à sa position mais la nuance intelligemment, en apportant de nouveaux arguments et exemples concrets (la loi portugaise de 2021 sur le droit à la déconnexion, l'argument économique des baux immobiliers de 20 ans). L'interaction est dynamique et spontanée.",
+        "lexique": "Le vocabulaire est étendu, précis et parfaitement maîtrisé tout au long des deux tâches. On note l'emploi de collocations et de termes spécialisés très adaptés au sujet : culture managériale, droit à la déconnexion, arbitrage immobilier, tableau de bord, métiers de terrain.",
+        "morphosyntaxe": "La morphosyntaxe est très bien contrôlée. Le candidat utilise avec aisance des structures variées et complexes (subjonctif 'qu'il soit encadré', conditionnel 'bénéficieraient', 'il faudrait', structures d'opposition 'plutôt que de renoncer'). Aucune erreur syntaxique venant gêner la compréhension n'est relevée.",
+        "phonologie": "Sur la base de la transcription, le discours est extrêmement fluide, sans aucune hésitation (euh/hum), faux départ ou autocorrrection. Les phrases sont menées à leur terme avec une construction limpide."
+      },
+      "appreciationGlobale": "Prestation exceptionnelle qui dépasse largement les attentes du niveau B2 et s'approche du niveau C1. Le candidat fait preuve d'une grande aisance communicative, d'une rhétorique solide et d'un contrôle linguistique remarquable aussi bien en exposé individuel qu'en débat interactif.",
+      "latencySeconds": 12.596,
+      "usage": {
+        "promptTokens": 2209,
+        "responseTokens": 713,
+        "thoughtsTokens": 1222,
+        "totalTokens": 4144,
+        "audioPromptTokens": null
+      }
+    },
+    {
+      "ok": true,
+      "sittingId": "morphosyntaxe-faible",
+      "repeat": 2,
+      "model": "gemini-3.6-flash",
+      "promptVersion": "2026-08-15.0",
+      "criteria": {
+        "realisationTache": 5,
+        "interaction": 5,
+        "lexique": 5,
+        "morphosyntaxe": 3,
+        "phonologie": 5
+      },
+      "rawCriteria": {
+        "realisationTache": 5,
+        "interaction": 5,
+        "lexique": 5,
+        "morphosyntaxe": 3,
+        "phonologie": 5
+      },
+      "modelTotal25": 23,
+      "rawScore25": 23,
+      "score25": 23,
+      "durationPenalty": 0,
+      "shortParts": [],
+      "meetsFloor": true,
+      "phonologieNonEvaluable": false,
+      "justifications": {
+        "realisationTache": "Le candidat atteint le niveau B2 plus grâce à un monologue très bien structuré (Premièrement, Deuxièmement, Mais je vois aussi, Donc, Pour conclure) et à une prise de position claire dès le départ. Il ne se contente pas de lister des avantages et inconvénients, mais propose une solution construite avec le modèle hybride.",
+        "interaction": "Prestation remarquable au niveau B2 plus. Le candidat rebondit avec aisance sur chaque objection de l'examinateur, acceptant les concessions (Votre objection elle est juste, Oui et c'est l'argument qui me gêne le plus) pour mieux reformuler et apporter de nouveaux arguments pertinents (droit à la déconnexion, semaine de quatre jours, baux immobiliers).",
+        "lexique": "Le niveau B2 plus est amplement atteint. Le vocabulaire est riche, étendu et très précis dans le domaine abordé : droit à la déconnexion, modèle hybride, baux à amortir, actionnaires, présence sur site.",
+        "morphosyntaxe": "Le candidat est exactement au niveau B2 attendu. Il maîtrise des structures complexes (au lieu de refuser, pour moi c'est un raisonnement dangerous), mais la prestation comporte des fautes récurrentes d'accord sujet-verbe à l'oral (les salariés ils gagne, elles pouvait, ils apprend) et des redondances pronominales familières (le document il pose, tout le monde il).",
+        "phonologie": "Sur la base du texte retranscrit, la fluidité est excellente. On ne note aucune hésitation (euh), aucun faux départ ni phrase abandonnée. L'enchaînement des idées se fait de façon naturelle et ininterrompue, ce qui correspond à la bande B2 plus."
+      },
+      "appreciationGlobale": "Excellente prestation orale, convaincante et dynamique. Le candidat fait preuve d'une grande aisance argumentative, d'un vocabulaire spécialisé et d'une remarquable capacité d'adaptation pendant le débat. Quelques erreurs morphosyntaxiques orales légères n'entravent absolument pas la communication.",
+      "latencySeconds": 14.804,
+      "usage": {
+        "promptTokens": 2097,
+        "responseTokens": 738,
+        "thoughtsTokens": 1315,
+        "totalTokens": 4150,
+        "audioPromptTokens": null
+      }
+    },
+    {
+      "ok": true,
+      "sittingId": "interaction-faible",
+      "repeat": 2,
+      "model": "gemini-3.6-flash",
+      "promptVersion": "2026-08-15.0",
+      "criteria": {
+        "realisationTache": 5,
+        "interaction": 1,
+        "lexique": 3,
+        "morphosyntaxe": 5,
+        "phonologie": 3
+      },
+      "rawCriteria": {
+        "realisationTache": 5,
+        "interaction": 1,
+        "lexique": 3,
+        "morphosyntaxe": 5,
+        "phonologie": 3
+      },
+      "modelTotal25": 17,
+      "rawScore25": 17,
+      "score25": 17,
+      "durationPenalty": 0,
+      "shortParts": [],
+      "meetsFloor": true,
+      "phonologieNonEvaluable": false,
+      "justifications": {
+        "realisationTache": "Le monologue suivi est remarquable et dépasse les attentes du niveau B2 (niveau B2+). Le candidat problématise parfaitement le sujet dès l'introduction, annonce une thèse claire (préférer un encadrement exigeant à l'interdiction) et développe une argumentation parfaitement structurée grâce à des connecteurs logiques adaptés (D'abord, Ensuite, Enfin, Je propose donc, En conclusion). Ses arguments sont pertinents et appuyés par des exemples précis.",
+        "interaction": "La prestation pendant le débat est très en dessous du niveau B2. Face aux objections de l'examinateur, le candidat capitule immédiatement ('Oui, vous avez raison, c'est vrai'), répète mot pour mot des phrases tirées de son monologue ('Comme je le disais dans mon exposé...') et se montre incapable d'apporter de nouveaux exemples ou d'argumenter lorsque sollicité ('Euh, un exemple concret...'). Il n'y a pas de véritable négociation du sens ni de capacité à défendre sa position sous la contradiction.",
+        "lexique": "Le niveau B2 est satisfait. Dans la première partie, le vocabulaire est étendu et précis ('assistants conversationnels', 'intégration pédagogique', 'faux positifs', 'conseil de discipline', 'usage critique'). Cependant, lors de la phase d'interaction, le répertoire lexical s'appauvrit considérablement et se limite à des formulations minimalistes et répétitives.",
+        "morphosyntaxe": "La morphosyntaxe atteint un niveau supérieur B2+. Le candidat maîtrise des structures complexes variées sans commettre d'erreur ('Je soutiendrai que...', 'un devoir rédigé à la maison échappe par définition à...', 'ce n'est pas..., c'est...', 'pendant que...'). Les temps, les modes et les accords sont parfaitement contrôlés sur l'ensemble de la prestation.",
+        "phonologie": "Le niveau B2 est atteint. L'énoncé est mené à terme de manière très fluide lors du monologue sans hésitation notable. Lors du débat, une légère hésitation apparaît ('Euh, un exemple concret'), mais les phrases restent bien formées et le rythme global d'élocution demeure très accessible pour l'auditeur."
+      },
+      "appreciationGlobale": "Prestation très contrastée. Le candidat présente un monologue suivi d'une excellente qualité, parfaitement structuré et linguistiquement très maîtrisé. En revanche, il s'effondre lors du débat en renonçant d'emblée à défendre sa position et en manquant de spontanéité.",
+      "latencySeconds": 24.37,
+      "usage": {
+        "promptTokens": 2054,
+        "responseTokens": 874,
+        "thoughtsTokens": 1784,
+        "totalTokens": 4712,
+        "audioPromptTokens": null
+      }
+    },
+    {
+      "ok": true,
+      "sittingId": "lexique-pauvre",
+      "repeat": 2,
+      "model": "gemini-3.6-flash",
+      "promptVersion": "2026-08-15.0",
+      "criteria": {
+        "realisationTache": 3,
+        "interaction": 5,
+        "lexique": 1,
+        "morphosyntaxe": 1,
+        "phonologie": 5
+      },
+      "rawCriteria": {
+        "realisationTache": 3,
+        "interaction": 5,
+        "lexique": 1,
+        "morphosyntaxe": 1,
+        "phonologie": 5
+      },
+      "modelTotal25": 15,
+      "rawScore25": 15,
+      "score25": 15,
+      "durationPenalty": 0,
+      "shortParts": [],
+      "meetsFloor": true,
+      "phonologieNonEvaluable": false,
+      "justifications": {
+        "realisationTache": "Le candidat réalise la tâche de manière efficace lors du monologue. La prise de position est claire et le propos est bien structuré à l'aide de connecteurs logiques (D'abord, Ensuite, Mais, Donc). Les arguments présentés (qualité de l'air, soutien aux commerces, accessibilité pour la périphérie) sont pertinents et bien reliés au sujet. La prestation répond aux exigences du niveau B2.",
+        "interaction": "Le candidat excelle dans la phase de débat. Il réagit immédiatement aux objections de l'examinateur avec conviction (Non, je suis pas d'accord) et sait nuancer son propos de façon pertinente (distinction entre grandes métropoles comme Paris et petites villes avec deux bus par jour). Il apporte de nouveaux arguments et propose des solutions concrètes (système d'autorisation pour les livreurs). La capacité à défendre et adapter sa position relève du niveau B2+.",
+        "lexique": "Le vocabulaire manque de précision et de variété pour le niveau B2. On note un recours excessif à des termes génériques et répétitifs (bonne chose, les gens, chose spéciale, un papier au lieu d'une dérogation ou autorisation, villes normales). La pauvreté du registre lexical situe le candidat en dessous du niveau ciblé.",
+        "morphosyntaxe": "La morphosyntaxe est marquée par des tournures très familières et répétitives (dislocations du sujet : l'air il est, les gens ils marchent, les magasins ils gagnent) ainsi que par l'omission systématique de la particule de négation ne (c'est pas, il y a pas). Les structures complexes sont absentes. La maîtrise syntaxique reste sous le niveau B2.",
+        "phonologie": "La transcription révèle une grande fluidité d'expression : aucune hésitation (euh), aucun faux départ ni phrase abandonnée. Les énoncés sont tous menés jusqu'à leur terme avec aisance, ce qui témoigne d'un débit naturel et continu (niveau B2+)."
+      },
+      "appreciationGlobale": "Prestation contrastée : le candidat montre une excellente aisance communicative et une très bonne réactivité dans le débat, mais l'expression orale souffre de lacunes lexicales et de maladresses syntaxiques répétées.",
+      "latencySeconds": 16.292,
+      "usage": {
+        "promptTokens": 2092,
+        "responseTokens": 805,
+        "thoughtsTokens": 1817,
+        "totalTokens": 4714,
+        "audioPromptTokens": null
+      }
+    },
+    {
+      "ok": true,
+      "sittingId": "hors-sujet",
+      "repeat": 2,
+      "model": "gemini-3.6-flash",
+      "promptVersion": "2026-08-15.0",
+      "criteria": {
+        "realisationTache": 1,
+        "interaction": 1,
+        "lexique": 5,
+        "morphosyntaxe": 5,
+        "phonologie": 5
+      },
+      "rawCriteria": {
+        "realisationTache": 1,
+        "interaction": 1,
+        "lexique": 5,
+        "morphosyntaxe": 5,
+        "phonologie": 5
+      },
+      "modelTotal25": 17,
+      "rawScore25": 17,
+      "score25": 17,
+      "durationPenalty": 0,
+      "shortParts": [],
+      "meetsFloor": true,
+      "phonologieNonEvaluable": false,
+      "justifications": {
+        "realisationTache": "Le candidat ne traite pas le sujet demande (Le tourisme de masse doit-il etre limite ?). Au lieu de presenter un expose argumente et de prendre position, il se livre a des digressions historiques et personnelles. La prestation est en dessous des attentes B2 pour ce critere.",
+        "interaction": "Pendant le debat, le candidat esquive a trois reprises les questions directes de l examinateur sans jamais prendre position ( C est une question redoutable , Je dirais que la verite se situe sans doute quelque part entre les deux ). Il refuse d argumenter ou de defendre un point de vue.",
+        "lexique": "Le vocabulaire est d un niveau B2+ tres solide, riche, nuance et tres precis ( douceur remarquable , ingenierie patiente , perspective vertigineuse , petrifies par l absence d oxygene ).",
+        "morphosyntaxe": "La morphosyntaxe est parfaitement maitrisee avec une grande variete de structures complexes impeccables ( dont l escalier craquait , bien avant de l etre , sur lequel il y aurait tant a dire ).",
+        "phonologie": "La transcription montre une tres grande fluidite d expression, sans aucun faux depart, hesitation, hesitation vocale ou phrase interrompue."
+      },
+      "appreciationGlobale": "Prestation linguistiquement remarquable par la richesse du vocabulaire, la precision syntaxique et la fluidite, mais qui echoue completement sur le plan methodologique en refusant de prendre position et de traiter le sujet.",
+      "latencySeconds": 16.419,
+      "usage": {
+        "promptTokens": 2085,
+        "responseTokens": 625,
+        "thoughtsTokens": 2340,
+        "totalTokens": 5050,
+        "audioPromptTokens": null
+      }
+    },
+    {
+      "ok": true,
+      "sittingId": "candidat-quasi-muet",
+      "repeat": 2,
+      "model": "gemini-3.6-flash",
+      "promptVersion": "2026-08-15.0",
+      "criteria": {
+        "realisationTache": 0,
+        "interaction": 0,
+        "lexique": 0,
+        "morphosyntaxe": 0,
+        "phonologie": 0
+      },
+      "rawCriteria": {
+        "realisationTache": 0,
+        "interaction": 0,
+        "lexique": 0,
+        "morphosyntaxe": 0,
+        "phonologie": 0
+      },
+      "modelTotal25": 0,
+      "rawScore25": 0,
+      "score25": 0,
+      "durationPenalty": 3,
+      "shortParts": [
+        "monologue",
+        "debate"
+      ],
+      "meetsFloor": false,
+      "phonologieNonEvaluable": true,
+      "justifications": {
+        "realisationTache": "La production est nettement insuffisante. Le candidat ne présente aucun argument, aucune structure ni aucun exemple, se contentant de déclarer que c'est compliqué.",
+        "interaction": "Le candidat ne parvient pas à maintenir l'échange. Malgré les relances de l'examinateur, il refuse la discussion en répondant je sais pas ou c'est difficile.",
+        "lexique": "Le vocabulaire est pratiquement inexistant et se limite à quelques mots basiques, ce qui ne permet pas d'évaluer le niveau B2.",
+        "morphosyntaxe": "La quantité de langue produite est insuffisante pour évaluer le contrôle des structures grammaticales au niveau B2.",
+        "phonologie": "Le discours est extrêmement court, fragmenté et dominé par des hésitations répétées comme euh."
+      },
+      "appreciationGlobale": "La prestation est très insuffisante pour le niveau B2. Le candidat n'a pas présenté de monologue argumenté ni participé au débat.",
+      "latencySeconds": 9.776,
+      "usage": {
+        "promptTokens": 1543,
+        "responseTokens": 344,
+        "thoughtsTokens": 1422,
+        "totalTokens": 3309,
+        "audioPromptTokens": null
+      }
+    }
+  ],
+  "incumbent": {
+    "model": "openai/gpt-5.4",
+    "results": [
+      {
+        "sittingId": "b2-solide",
+        "phase": "monologue",
+        "tache": 1,
+        "repeat": 1,
+        "title": "Le télétravail a-t-il vraiment amélioré nos vies ?",
+        "situation": "Cinq ans après sa généralisation, le télétravail s'est installé dans le quotidien de millions de salariés. Ses partisans y voient une liberté retrouvée : moins de transports, plus de temps pour soi, une productivité accrue. Ses détracteurs alertent sur l'effacement de la frontière entre vie professionnelle et vie privée, l'isolement des plus jeunes et l'affaiblissement du collectif de travail. Plusieurs grandes entreprises sont récemment revenues sur leurs accords et imposent de nouveau une présence sur site.",
+        "durationSeconds": 400,
+        "ok": true,
+        "model": "openai/gpt-5.4",
+        "criteria": {
+          "realisationTache": 5,
+          "interaction": 1,
+          "lexique": 5,
+          "morphosyntaxe": 5,
+          "phonologie": 3
+        },
+        "rawCriteria": {
+          "realisationTache": 5,
+          "interaction": 1,
+          "lexique": 5,
+          "morphosyntaxe": 5,
+          "phonologie": 3
+        },
+        "modelTotal25": 19,
+        "rawScore25": 19,
+        "score25": 19,
+        "durationPenalty": 0,
+        "minDurationSeconds": 168,
+        "phonologieNonEvaluable": true,
+        "justifications": {
+          "realisationTache": "Score 5, bande B2+. La tâche est pleinement réalisée avec une prise de position claire dès l'ouverture, « Je défendrai l'idée qu'il constitue un progrès, à condition qu'il soit encadré ». Le propos est très structuré, avec une progression nette, « Premièrement », « Deuxièmement », « Cela dit », « C'est pourquoi », « En conclusion ». Les arguments sont pertinents et équilibrés, avec concession et nuance, par exemple sur « l'effacement de la frontière entre vie professionnelle et vie privée » et « l'isolement des jeunes recrues », puis une solution concrète, « un modèle hybride, deux ou trois jours sur site ». Le registre est adapté à une prise de parole argumentée.",
+          "interaction": "Score 1, en dessous du niveau ciblé pour ce critère dans cet extrait. Le candidat tient bien la parole seul, mais la transcription ne contient aucune relance de l'examinateur ni réaction du candidat à une objection. On ne peut donc pas observer la capacité à « réagir aux relances et aux objections » ni à négocier le sens. Il y a bien une continuité de parole en monologue, mais l'interaction au sens de la grille reste très peu attestée par la transcription fournie.",
+          "lexique": "Score 5, bande B2+. Le lexique est étendu, précis et bien adapté au sujet : « salariés », « travail à distance », « personnes en situation de handicap », « grandes métropoles », « postes qualifiés », « effacement de la frontière entre vie professionnelle et vie privée », « modèle hybride », « préserver le collectif », « souplesse acquise ». On note peu de répétitions inutiles et une bonne capacité à nommer des enjeux abstraits avec précision.",
+          "morphosyntaxe": "Score 5, bande B2+. La morphosyntaxe est très bien maîtrisée, avec des structures variées et correctement enchaînées : relative, concession, cause et conséquence, par exemple « qui en étaient exclues », « Cela dit, je ne nie pas les risques », « car on apprend son métier en observant ses collègues », « c'est un outil dont la valeur dépend entièrement de la manière dont les entreprises choisissent de l'encadrer ». Les accords, les temps et les constructions sont contrôlés, sans erreur gênante visible dans la transcription.",
+          "phonologie": "Score 3, bande B2, attribué avec prudence car il s'agit d'une transcription sans son. Aucun indice textuel ne signale une prononciation problématique, une segmentation très hésitante ou des ruptures qui gêneraient nettement l'intelligibilité. La ponctuation et la fluidité transcrite suggèrent un débit globalement clair, mais l'intonation, le rythme et la qualité articulatoire ne sont pas réellement vérifiables ici."
+        },
+        "appreciationGlobale": "La prestation présente un monologue argumenté nettement solide, qui se situe au moins au niveau B2 et, sur plusieurs critères, plutôt vers un B2+ proche du C1. La prise de position est claire, nuancée et bien défendue, avec une organisation exemplaire et un lexique précis sur le thème du télétravail. La langue est maîtrisée, avec des structures variées et naturelles. La seule vraie limite de l'évaluation vient du critère d'interaction, peu observable dans cette transcription purement monologique, ainsi que de la phonologie, qui ne peut être jugée qu'avec prudence sans enregistrement.",
+        "latencySeconds": 11.735,
+        "inputTokens": 1895,
+        "outputTokens": 1018
+      },
+      {
+        "sittingId": "b2-solide",
+        "phase": "debate",
+        "tache": 2,
+        "repeat": 1,
+        "title": "Le télétravail a-t-il vraiment amélioré nos vies ?",
+        "situation": "Cinq ans après sa généralisation, le télétravail s'est installé dans le quotidien de millions de salariés. Ses partisans y voient une liberté retrouvée : moins de transports, plus de temps pour soi, une productivité accrue. Ses détracteurs alertent sur l'effacement de la frontière entre vie professionnelle et vie privée, l'isolement des plus jeunes et l'affaiblissement du collectif de travail. Plusieurs grandes entreprises sont récemment revenues sur leurs accords et imposent de nouveau une présence sur site.",
+        "durationSeconds": 700,
+        "ok": true,
+        "model": "openai/gpt-5.4",
+        "criteria": {
+          "realisationTache": 5,
+          "interaction": 5,
+          "lexique": 5,
+          "morphosyntaxe": 5,
+          "phonologie": 3
+        },
+        "rawCriteria": {
+          "realisationTache": 5,
+          "interaction": 5,
+          "lexique": 5,
+          "morphosyntaxe": 5,
+          "phonologie": 3
+        },
+        "modelTotal25": 23,
+        "rawScore25": 23,
+        "score25": 23,
+        "durationPenalty": 0,
+        "minDurationSeconds": 312,
+        "phonologieNonEvaluable": true,
+        "justifications": {
+          "realisationTache": "Score 5, bande B2+ : la prise de position est claire et constamment défendue sous une forme argumentée et nuancée. Le candidat concède d'abord l'objection, puis la redirige avec précision, par exemple : « Votre objection est juste », puis « Je nuancerais toutefois », ou encore « Si, et c'est l'argument qui me fait le plus hésiter ». Les réponses sont structurées, appuyées par des exemples pertinents, comme « le droit à la déconnexion effectif » et « la loi de 2021 », ainsi que par des reformulations efficaces, « Autrement dit ». Le registre est pleinement adapté à un débat formel.",
+          "interaction": "Score 5, bande B2+ : c'est le critère le plus fort de la prestation. Le candidat réagit directement aux objections, ne les évite pas, les reconnaît parfois avant de défendre sa position, puis apporte à chaque fois un nouvel angle ou un nouvel exemple. On le voit dans « Si, et c'est l'argument qui me fait le plus hésiter. Mais j'en tire une conclusion différente de la vôtre » : il accepte la contradiction, nuance, puis réfute avec aisance. Il maintient l'échange de manière fluide et spontanée, sans abandonner sa thèse face aux relances de l'examinateur.",
+          "lexique": "Score 5, bande B2+ : le vocabulaire est précis, varié et bien adapté au sujet du travail et du débat. Le candidat mobilise un lexique abstrait et spécialisé avec maîtrise : « culture managériale », « droit à la déconnexion », « allongement », « productivité à distance », « actionnaire inquiet », « arbitrage immobilier ». Les formulations sont peu répétitives et permettent une argumentation fine, ce qui dépasse le simple minimum attendu en B2.",
+          "morphosyntaxe": "Score 5, bande B2+ : la morphosyntaxe est très bien contrôlée. Les structures sont variées et complexes, avec subordination, relatives et oppositions bien maîtrisées, par exemple : « ce que vous décrivez n'est pas un effet du télétravail lui-même, mais d'une culture managériale qui mesure l'engagement à la disponibilité ». Les temps et modes sont adéquats, notamment dans « il faudrait chercher l'équivalent » et « ne bénéficieront jamais ». Aucune erreur gênante n'apparaît dans la transcription.",
+          "phonologie": "Score 3, bande B2, attribué avec prudence car il s'agit d'une transcription sans enregistrement. La production semble globalement fluide et naturellement segmentée, avec des enchaînements discursifs qui suggèrent une oralité maîtrisée, comme « Autrement dit » ou « J'ajoute un facteur rarement dit ». Toutefois, aucun indice sonore direct ne permet de confirmer une prononciation ou une intonation de niveau supérieur, donc la note reste prudente."
+        },
+        "appreciationGlobale": "La prestation est nettement au niveau B2, et même souvent au-dessus pour la partie débat. Le candidat défend sa position avec solidité, accepte la contradiction, nuance ses réponses et apporte des exemples nouveaux, ce qui correspond très bien aux attendus de l'interaction au B2. La langue est précise, structurée et globalement très sûre. Seule la phonologie ne peut pas être pleinement vérifiée à partir d'une simple transcription, ce qui empêche d'aller plus loin sur ce critère.",
+        "latencySeconds": 11.721,
+        "inputTokens": 2121,
+        "outputTokens": 985
+      },
+      {
+        "sittingId": "morphosyntaxe-faible",
+        "phase": "monologue",
+        "tache": 1,
+        "repeat": 1,
+        "title": "Le télétravail a-t-il vraiment amélioré nos vies ?",
+        "situation": "Cinq ans après sa généralisation, le télétravail s'est installé dans le quotidien de millions de salariés. Ses partisans y voient une liberté retrouvée : moins de transports, plus de temps pour soi, une productivité accrue. Ses détracteurs alertent sur l'effacement de la frontière entre vie professionnelle et vie privée, l'isolement des plus jeunes et l'affaiblissement du collectif de travail. Plusieurs grandes entreprises sont récemment revenues sur leurs accords et imposent de nouveau une présence sur site.",
+        "durationSeconds": 400,
+        "ok": true,
+        "model": "openai/gpt-5.4",
+        "criteria": {
+          "realisationTache": 3,
+          "interaction": 1,
+          "lexique": 3,
+          "morphosyntaxe": 1,
+          "phonologie": 1
+        },
+        "rawCriteria": {
+          "realisationTache": 3,
+          "interaction": 1,
+          "lexique": 3,
+          "morphosyntaxe": 1,
+          "phonologie": 1
+        },
+        "modelTotal25": 9,
+        "rawScore25": 9,
+        "score25": 9,
+        "durationPenalty": 0,
+        "minDurationSeconds": 168,
+        "phonologieNonEvaluable": true,
+        "justifications": {
+          "realisationTache": "Score B2. La tâche est globalement réalisée : la prise de position est claire dès le début, « Moi je pense que c'est un progrès mais il faut encadrer », puis le candidat développe une argumentation organisée avec « Premièrement », « Deuxièmement », « Mais », « Donc », « Pour conclure ». Le contenu est pertinent et équilibré, avec des arguments pour et contre, puis une solution personnelle, « je défends le modèle hybride, deux ou trois jours au bureau ». Cela atteint le niveau B2, mais reste assez bref et peu développé, avec peu d'exemples concrets ou de nuance approfondie, donc pas B2+.",
+          "interaction": "Score en dessous du niveau ciblé B2 pour ce critère, non parce que le candidat parle peu, mais parce que la transcription ne montre aucune relance de l'examinateur ni réaction du candidat à une objection. On peut constater qu'il tient seul la parole de façon continue dans le monologue, mais on ne voit pas sa capacité à « réagir aux relances et aux objections » ni à négocier le sens. Il y a donc une tentative de gestion de la parole, mais pas assez d'indices transcriptifs pour valider pleinement le critère au niveau B2.",
+          "lexique": "Score B2. Le lexique est adapté au sujet et permet de défendre un point de vue avec des termes pertinents comme « encadrer », « postes qualifiés », « une vraie ouverture », « le modèle hybride », « le collectif », « la souplesse », « les entreprises ». Le candidat dispose donc d'un vocabulaire suffisant pour traiter la question du télétravail. En revanche, l'éventail lexical reste relativement courant et limité, avec des formulations parfois répétitives autour de « les personnes », « les jeunes », « les entreprises », ce qui ne permet pas de situer la prestation en B2+.",
+          "morphosyntaxe": "Score en dessous du niveau ciblé B2. Le discours reste compréhensible, mais les erreurs morphosyntaxiques sont fréquentes et touchent des points de base : « les salariés ils gagne », « des personnes qui avant elles pouvait pas travailler », « qui habite loin », « maintenant elles peut accéder », « les jeunes qui commence, ils apprend », « si ils reste », « comment les entreprises elles l'organise ». On observe aussi des doubles sujets répétés, des accords verbaux instables et des constructions parfois non contrôlées. Il y a une organisation syntaxique simple mais fonctionnelle, cependant le contrôle attendu en B2 n'est pas assez solide.",
+          "phonologie": "Score prudent, en dessous du niveau ciblé B2, car l'évaluation se fait à partir d'une transcription sans audio. Quelques indices d'oralité peu stabilisée apparaissent indirectement dans la segmentation et les reprises, par exemple « Le document il pose », « ce temps il est rendu à la famille », « les entreprises elles l'organise », qui peuvent signaler un rythme oral peu maîtrisé, mais cela reste très incertain. Faute de son, on ne peut pas confirmer une prononciation claire et naturelle au niveau B2."
+        },
+        "appreciationGlobale": "La prestation remplit l'essentiel de la tâche sur le fond : le point de vue est clair, la progression est logique et le candidat propose une position nuancée en faveur du télétravail encadré. L'ensemble se situe partiellement au niveau B2 pour l'organisation du monologue et le lexique du thème. En revanche, la correction morphosyntaxique reste trop fragile pour un B2 solide, avec de nombreuses erreurs d'accords et de conjugaison. L'impression générale est celle d'un candidat capable d'argumenter simplement, mais dont la maîtrise linguistique doit être consolidée pour atteindre nettement le niveau visé.",
+        "latencySeconds": 13.666,
+        "inputTokens": 1833,
+        "outputTokens": 1096
+      },
+      {
+        "sittingId": "morphosyntaxe-faible",
+        "phase": "debate",
+        "tache": 2,
+        "repeat": 1,
+        "title": "Le télétravail a-t-il vraiment amélioré nos vies ?",
+        "situation": "Cinq ans après sa généralisation, le télétravail s'est installé dans le quotidien de millions de salariés. Ses partisans y voient une liberté retrouvée : moins de transports, plus de temps pour soi, une productivité accrue. Ses détracteurs alertent sur l'effacement de la frontière entre vie professionnelle et vie privée, l'isolement des plus jeunes et l'affaiblissement du collectif de travail. Plusieurs grandes entreprises sont récemment revenues sur leurs accords et imposent de nouveau une présence sur site.",
+        "durationSeconds": 700,
+        "ok": true,
+        "model": "openai/gpt-5.4",
+        "criteria": {
+          "realisationTache": 5,
+          "interaction": 5,
+          "lexique": 3,
+          "morphosyntaxe": 3,
+          "phonologie": 3
+        },
+        "rawCriteria": {
+          "realisationTache": 5,
+          "interaction": 5,
+          "lexique": 3,
+          "morphosyntaxe": 3,
+          "phonologie": 3
+        },
+        "modelTotal25": 19,
+        "rawScore25": 19,
+        "score25": 19,
+        "durationPenalty": 0,
+        "minDurationSeconds": 312,
+        "phonologieNonEvaluable": true,
+        "justifications": {
+          "realisationTache": "Score 5, bande B2+. La prise de position est claire et constamment défendue sous forme d'argumentation structurée. Le candidat concède puis nuance avec efficacité, par exemple : « Votre objection elle est juste, je le reconnais. Mais... c'est pas la faute du télétravail, c'est la faute d'une culture du management » ; puis « Oui, et c'est l'argument qui me gêne le plus... Mais moi j'en tire une conclusion différente de vous ». Il apporte aussi des exemples pertinents et concrets, « le droit à la déconnexion », « la semaine de quatre jours », « la maîtrise des plannings », ce qui correspond à une réalisation solide, nuancée et bien adaptée à un débat de niveau B2, proche du niveau supérieur.",
+          "interaction": "Score 5, bande B2+. C'est le critère central ici, et il est très bien réussi. Le candidat réagit directement aux objections, ne les esquive pas, les reformule implicitement et défend sa position avec spontanéité : « je le reconnais », « je vais pas le nier », « j'en tire une conclusion différente de vous ». Surtout, il maintient sa thèse sous la contradiction en apportant à chaque relance de nouveaux arguments, « droit à la déconnexion », compensation pour les métiers de terrain, intérêts immobiliers des entreprises. Il ne cède pas à l'objection, mais il nuance avant de réfuter, ce qui correspond à une interaction de débat solide, au dessus du B2 attendu.",
+          "lexique": "Score 3, bande B2. Le vocabulaire est globalement pertinent et assez précis sur le sujet : « culture du management », « disponibilité », « droit à la déconnexion », « productivité », « actionnaires », « amortir ». Le candidat dispose donc d'un lexique fonctionnel pour argumenter et nuancer. En revanche, l'expression reste parfois assez orale et répétitive, avec des formulations moins précises ou relâchées comme « c'est pas la faute », « un patron il préfère », « ça se voit pas », ce qui empêche de situer la prestation de façon nette en B2+ sur ce critère.",
+          "morphosyntaxe": "Score 3, bande B2. La syntaxe permet de construire un raisonnement complexe, avec concession, opposition, cause et conséquence : « au lieu de refuser le progrès..., il faut chercher l'équivalent... », « Refuser une avancée parce que tout le monde il en profite pas..., pour moi c'est un raisonnement dangereux ». Les erreurs restent toutefois fréquentes : « les entreprises qui ont mis un vrai droit à la déconnexion, ils observe pas », « elles mesure », « c'est pas la faute du télétravail, c'est la faute... », avec plusieurs accords ou reprises pronominales non standard. Ces erreurs ne bloquent pas la compréhension, donc le niveau B2 est atteint, mais pas au niveau supérieur.",
+          "phonologie": "Score 3, évaluation prudente, bande B2. À partir de la seule transcription, on ne peut pas juger finement la prononciation. Toutefois, les énoncés paraissent globalement fluides, sans ruptures majeures ni segments inintelligibles, et la parole semble suffisamment aisée pour soutenir le débat. Quelques marques d'oralité, comme « c'est pas », « faut », « je vais pas », suggèrent un débit naturel, mais elles ne permettent pas d'aller au delà d'une estimation prudente."
+        },
+        "appreciationGlobale": "La prestation se situe globalement dans une bonne zone B2, avec un point fort net en interaction argumentative. Le candidat sait reconnaître une objection, nuancer, puis défendre sa position en ajoutant de nouveaux arguments, ce qui correspond très bien aux attentes du débat au B2. La réalisation de la tâche est particulièrement solide et proche d'un B2+ sur le plan pragmatique. Ce qui limite la note globale, ce sont surtout plusieurs écarts morphosyntaxiques et un registre parfois très relâché à l'oral.",
+        "latencySeconds": 14.227,
+        "inputTokens": 2075,
+        "outputTokens": 1145
+      },
+      {
+        "sittingId": "interaction-faible",
+        "phase": "monologue",
+        "tache": 1,
+        "repeat": 1,
+        "title": "Faut-il encadrer l'intelligence artificielle à l'école ?",
+        "situation": "Les élèves utilisent désormais massivement des assistants conversationnels pour rédiger leurs devoirs. Certains établissements y voient un outil pédagogique à intégrer, capable d'aider chaque élève à son rythme. D'autres ont choisi l'interdiction pure et simple, estimant que la rédaction et l'effort de recherche sont précisément ce que l'école doit enseigner. Les enseignants, eux, se disent démunis face à des copies qu'ils ne peuvent plus attribuer avec certitude.",
+        "durationSeconds": 410,
+        "ok": true,
+        "model": "openai/gpt-5.4",
+        "criteria": {
+          "realisationTache": 5,
+          "interaction": 1,
+          "lexique": 5,
+          "morphosyntaxe": 5,
+          "phonologie": 3
+        },
+        "rawCriteria": {
+          "realisationTache": 5,
+          "interaction": 1,
+          "lexique": 5,
+          "morphosyntaxe": 5,
+          "phonologie": 3
+        },
+        "modelTotal25": 19,
+        "rawScore25": 19,
+        "score25": 19,
+        "durationPenalty": 0,
+        "minDurationSeconds": 168,
+        "phonologieNonEvaluable": true,
+        "justifications": {
+          "realisationTache": "Score 5, bande B2+. La tâche est pleinement réalisée : la prise de position est explicite dès l'ouverture, « Je soutiendrai que l'interdiction est une réponse compréhensible mais perdante, et qu'il faut lui préférer un encadrement exigeant ». Le propos est très structuré, avec une progression nette, « D'abord », « Ensuite », « Enfin », puis une proposition personnelle, « Je propose donc... », et une conclusion synthétique. Les arguments sont pertinents, développés et illustrés par des exemples concrets d'évaluation, « à l'oral, en classe, sur brouillon », dans un registre parfaitement adapté à l'épreuve.",
+          "interaction": "Score 1, en dessous du niveau ciblé pour ce critère, non pas par faiblesse manifeste, mais parce que la transcription ne contient aucune relance de l'examinateur ni réaction du candidat à une objection. On observe une bonne capacité à tenir la parole seul dans un monologue continu, mais on ne peut pas vérifier la gestion de l'échange, la défense sous contradiction ou l'apport de nouveaux exemples en réponse à des relances. Sur la base du seul extrait disponible, le critère interaction reste donc sous-évaluable et ne permet pas d'attester le B2 attendu sur ce point.",
+          "lexique": "Score 5, bande B2+. Le vocabulaire est étendu, précis et bien adapté au sujet : « irruption des assistants conversationnels », « encadrement exigeant », « faux positifs », « se trompe de cible », « creuse une inégalité invisible », « usage critique ». Le candidat varie les formulations sans répétitions gênantes et mobilise un lexique abstrait de l'argumentation et de l'éducation avec aisance. Cette densité lexicale soutient une argumentation de niveau solide, proche du supérieur.",
+          "morphosyntaxe": "Score 5, bande B2+. La morphosyntaxe est très bien contrôlée : subordination variée, relatives, tournures emphatiques et modales, par exemple « Ce que l'école enseigne à travers la rédaction, ce n'est pas la production de phrases, c'est la construction d'un raisonnement » ou « les élèves les mieux accompagnés continueront d'utiliser ces outils... pendant que les autres s'en serviront... ». Les temps sont maîtrisés, les accords sont corrects, et aucune erreur morphosyntaxique notable ne gêne la compréhension. L'ensemble dépasse le B2 attendu par sa précision et sa stabilité.",
+          "phonologie": "Score 3, bande B2, avec prudence. Comme il s'agit d'une transcription sans enregistrement, la phonologie n'est pas directement observable. Aucun indice textuel ne signale cependant des ruptures majeures, des hésitations envahissantes ou une segmentation qui rendrait l'oral difficile à suivre : la chaîne discursive paraît fluide et bien rythmée. En l'absence de son, on retient donc une évaluation prudente au niveau attendu, sans pouvoir justifier un niveau supérieur."
+        },
+        "appreciationGlobale": "La prestation présente un monologue très solide, clairement situé au niveau B2, et même proche de B2+ pour la construction de l'argumentation et la maîtrise linguistique. Le candidat prend une position nette, organise son discours avec efficacité et développe des arguments précis dans un registre soutenu et approprié. Le lexique et la morphosyntaxe sont particulièrement maîtrisés. En revanche, l'interaction ne peut pas être pleinement validée ici, faute de relances ou d'objections dans la transcription fournie, et la phonologie ne peut être jugée qu'avec prudence à partir du texte seul.",
+        "latencySeconds": 12.706,
+        "inputTokens": 1928,
+        "outputTokens": 1097
+      },
+      {
+        "sittingId": "interaction-faible",
+        "phase": "debate",
+        "tache": 2,
+        "repeat": 1,
+        "title": "Faut-il encadrer l'intelligence artificielle à l'école ?",
+        "situation": "Les élèves utilisent désormais massivement des assistants conversationnels pour rédiger leurs devoirs. Certains établissements y voient un outil pédagogique à intégrer, capable d'aider chaque élève à son rythme. D'autres ont choisi l'interdiction pure et simple, estimant que la rédaction et l'effort de recherche sont précisément ce que l'école doit enseigner. Les enseignants, eux, se disent démunis face à des copies qu'ils ne peuvent plus attribuer avec certitude.",
+        "durationSeconds": 680,
+        "ok": true,
+        "model": "openai/gpt-5.4",
+        "criteria": {
+          "realisationTache": 1,
+          "interaction": 1,
+          "lexique": 3,
+          "morphosyntaxe": 3,
+          "phonologie": 3
+        },
+        "rawCriteria": {
+          "realisationTache": 1,
+          "interaction": 1,
+          "lexique": 3,
+          "morphosyntaxe": 3,
+          "phonologie": 3
+        },
+        "modelTotal25": 11,
+        "rawScore25": 11,
+        "score25": 11,
+        "durationPenalty": 0,
+        "minDurationSeconds": 312,
+        "phonologieNonEvaluable": true,
+        "justifications": {
+          "realisationTache": "Bande atteinte : en dessous du niveau B2. La prise de position existe partiellement, par exemple : « l'interdiction se trompe de cible » et « ce que l'école enseigne à travers la rédaction, ce n'est pas la production de phrases, c'est la construction d'un raisonnement ». Cependant, la défense reste très peu développée, sans exemple concret malgré la demande explicite de l'examinateur, et la conclusion « Voilà » ferme le propos au lieu de l'étayer. La tâche de débat est donc seulement partiellement réalisée.",
+          "interaction": "Bande atteinte : en dessous du niveau B2. Le critère central de cette partie est faible ici. Le candidat réagit aux relances, mais il ne défend pas sa position sous la contradiction : « Oui, vous avez raison, c'est vrai. Je n'y avais pas pensé sous cet angle », puis « Oui, c'est un vrai problème. Vous avez raison. » Il ne réfute pas l'objection, n'apporte pas de nouvel exemple et ne relance jamais l'échange. Il y a une tentative d'interaction, mais elle reste nettement sous l'attendu B2 pour un débat.",
+          "lexique": "Bande atteinte : B2. Le vocabulaire est globalement approprié au sujet et permet d'exprimer une idée abstraite : « l'interdiction se trompe de cible », « la construction d'un raisonnement », « déplacer l'évaluation vers la classe ». Le lexique n'est pas très étendu sur cet extrait et il y a peu de matière, mais les mots employés sont pertinents et assez précis pour le thème.",
+          "morphosyntaxe": "Bande atteinte : B2. Les structures produites sont correctes et compréhensibles, avec quelques formulations bien maîtrisées : « ce que l'école enseigne à travers la rédaction, ce n'est pas..., c'est... » ; « Il faudrait déplacer l'évaluation vers la classe. » Les temps et la syntaxe sont contrôlés sur les énoncés disponibles. La limite vient surtout du manque de développement, plus que d'erreurs grammaticales.",
+          "phonologie": "Bande atteinte : B2, avec prudence. À partir de la transcription seule, on relève une hésitation : « Euh, un exemple concret », mais rien n'indique une prononciation qui gênerait l'écoute. Les énoncés paraissent globalement fluides et découpés de façon naturelle dans la transcription. En l'absence d'audio, l'évaluation reste prudente."
+        },
+        "appreciationGlobale": "La prestation montre quelques moyens linguistiques compatibles avec le niveau B2, surtout en lexique et en morphosyntaxe, mais la partie débat n'atteint pas le niveau attendu. Le candidat formule une idée générale pertinente, mais il ne la développe pas assez et ne fournit pas les exemples nouveaux demandés. Surtout, il gère difficilement la contradiction et abandonne trop vite sa position au lieu de la défendre et de la nuancer. L'impression d'ensemble est donc celle d'une production partiellement maîtrisée sur le plan linguistique, mais insuffisante sur le plan interactionnel pour un débat B2.",
+        "latencySeconds": 10.636,
+        "inputTokens": 1930,
+        "outputTokens": 927
+      },
+      {
+        "sittingId": "lexique-pauvre",
+        "phase": "monologue",
+        "tache": 1,
+        "repeat": 1,
+        "title": "Faut-il bannir la voiture des centres-villes ?",
+        "situation": "De plus en plus de municipalités européennes ferment leur centre à la circulation automobile, au profit des piétons, des vélos et des transports en commun. Les résultats affichés sont encourageants : air plus respirable, commerces de proximité redynamisés, accidents en baisse. Mais les habitants des périphéries, les artisans et les personnes à mobilité réduite dénoncent une mesure pensée par et pour les centres-villes aisés, qui les exclut un peu plus.",
+        "durationSeconds": 390,
+        "ok": true,
+        "model": "openai/gpt-5.4",
+        "criteria": {
+          "realisationTache": 3,
+          "interaction": 1,
+          "lexique": 1,
+          "morphosyntaxe": 1,
+          "phonologie": 3
+        },
+        "rawCriteria": {
+          "realisationTache": 3,
+          "interaction": 1,
+          "lexique": 1,
+          "morphosyntaxe": 1,
+          "phonologie": 3
+        },
+        "modelTotal25": 9,
+        "rawScore25": 9,
+        "score25": 9,
+        "durationPenalty": 0,
+        "minDurationSeconds": 168,
+        "phonologieNonEvaluable": true,
+        "justifications": {
+          "realisationTache": "Note B2. La tâche est globalement réalisée : le candidat prend une position claire dès le début, « Moi je pense que c'est une bonne chose, mais il faut faire attention », puis il développe des arguments pour et contre avant de proposer une condition, « il faut d'abord faire les transports, les bus et les trains, et après on peut enlever les voitures ». Le discours est continu et compréhensible, avec une organisation simple par connecteurs, « D'abord », « Ensuite », « Et puis », « Mais ». En revanche, le contenu reste assez général, avec peu d'exemples concrets et une argumentation peu nuancée, ce qui empêche d'atteindre la bande B2+.",
+          "interaction": "Note en dessous du niveau ciblé. Il s'agit bien d'un monologue suivi, et le candidat tient la parole seul jusqu'à « Voilà, c'est mon avis ». Cependant, dans la transcription fournie, il n'y a aucune relance de l'examinateur ni réaction du candidat à une objection. On peut seulement constater une capacité limitée à maintenir un tour de parole seul, mais aucun élément ne montre qu'il « réagit aux relances et aux objections » ou qu'il négocie le sens avec aisance. La prestation reste donc en dessous de ce qu'on attend au critère interaction pour un B2 solide.",
+          "lexique": "Note en dessous du niveau ciblé. Le vocabulaire est adapté au sujet mais reste très courant et répétitif : « c'est bien », « les gens », « les magasins », « la voiture », « c'est un problème ». Le candidat mobilise quelques mots pertinents comme « personnes âgées », « personnes handicapées », « transports », mais l'ensemble manque d'étendue et de précision pour le niveau B2. Il y a peu de reformulation et peu de termes plus spécifiques au thème, par exemple sur la mobilité, l'exclusion ou l'aménagement urbain.",
+          "morphosyntaxe": "Note en dessous du niveau ciblé. La syntaxe simple permet la compréhension, mais le contrôle grammatical reste fragile et peu varié. On observe des tournures répétitives et non standard comme « le document il parle », « l'air il est meilleur », « les gens ils sont moins malades », ainsi qu'une construction très élémentaire, surtout avec le présent et des phrases coordonnées. Le message reste clair, mais la variété des structures et la maîtrise morphosyntaxique attendues au B2 ne sont pas suffisamment présentes.",
+          "phonologie": "Note B2, avec prudence à partir de la transcription seule. On ne dispose pas du son, donc l'évaluation reste limitée. Toutefois, la transcription ne montre pas de ruptures majeures, d'hésitations envahissantes ni de segments inintelligibles ; le discours semble globalement fluide et probablement prononçable sans grand effort pour l'interlocuteur. Faute d'indices plus précis sur l'intonation, le rythme ou certains sons, on ne peut pas justifier une note B2+."
+        },
+        "appreciationGlobale": "La prestation est claire, cohérente et répond au sujet avec une prise de position explicite, ce qui permet de situer une partie de la performance au niveau attendu pour la tâche. Le candidat sait organiser son propos de façon simple et opposer avantages et limites. En revanche, le niveau B2 n'est pas atteint de manière stable sur le plan linguistique : le lexique reste très ordinaire, la morphosyntaxe est peu variée et l'argumentation manque de développement précis. L'impression d'ensemble est celle d'un candidat compréhensible et structuré, mais encore en dessous d'un B2 solide pour la production orale.",
+        "latencySeconds": 13.527,
+        "inputTokens": 1862,
+        "outputTokens": 1094
+      },
+      {
+        "sittingId": "lexique-pauvre",
+        "phase": "debate",
+        "tache": 2,
+        "repeat": 1,
+        "title": "Faut-il bannir la voiture des centres-villes ?",
+        "situation": "De plus en plus de municipalités européennes ferment leur centre à la circulation automobile, au profit des piétons, des vélos et des transports en commun. Les résultats affichés sont encourageants : air plus respirable, commerces de proximité redynamisés, accidents en baisse. Mais les habitants des périphéries, les artisans et les personnes à mobilité réduite dénoncent une mesure pensée par et pour les centres-villes aisés, qui les exclut un peu plus.",
+        "durationSeconds": 660,
+        "ok": true,
+        "model": "openai/gpt-5.4",
+        "criteria": {
+          "realisationTache": 3,
+          "interaction": 3,
+          "lexique": 1,
+          "morphosyntaxe": 1,
+          "phonologie": 3
+        },
+        "rawCriteria": {
+          "realisationTache": 3,
+          "interaction": 3,
+          "lexique": 1,
+          "morphosyntaxe": 1,
+          "phonologie": 3
+        },
+        "modelTotal25": 11,
+        "rawScore25": 11,
+        "score25": 11,
+        "durationPenalty": 0,
+        "minDurationSeconds": 312,
+        "phonologieNonEvaluable": true,
+        "justifications": {
+          "realisationTache": "Note B2. La tâche est bien réalisée : le candidat prend une position claire dès le début, « Non, je suis pas d'accord », puis la défend de façon cohérente avec plusieurs arguments, par exemple la nécessité d'une alternative avant l'interdiction, « il faut d'abord donner la chose qui remplace, et après on enlève », et une distinction entre grandes villes et petites villes, « Paris c'est pas pareil ». Il apporte aussi une réponse au cas des publics spécifiques, « pour eux il faut faire une chose spéciale ». En revanche, l'argumentation reste assez simple, peu nuancée et appuyée sur des exemples généraux plutôt que développés, ce qui empêche d'atteindre B2+.",
+          "interaction": "Note B2. Le candidat réagit bien aux objections de l'examinateur et maintient sa position tout au long de l'échange. Face à la contradiction, il répond immédiatement, « Oui mais Paris c'est pas pareil », puis reformule son angle d'attaque en opposant grandes villes et petites villes. Il répond aussi à la relance sur les artisans et les personnes à mobilité réduite avec une solution concrète, « ils ont un papier et ils peuvent passer ». L'interaction est donc effective et défensive, mais elle reste peu élaborée : il ne relance pas vraiment le débat, négocie peu le sens et n'apporte pas de réfutation très fine ou très nuancée, donc on reste au niveau B2 plutôt qu'en B2+.",
+          "lexique": "Note en dessous du niveau ciblé. Le vocabulaire reste globalement compréhensible et pertinent pour le sujet, avec quelques mots utiles comme « artisans », « livreurs », « mobilité réduite », « remplacer ». Cependant, l'expression est peu étendue et souvent très générale, avec de nombreuses formulations vagues ou répétitives, par exemple « une chose », « c'est bon », « il y a rien », « ils ont déjà tout », « villes normales ». Pour un B2, on attendrait un lexique plus précis pour parler de politique de mobilité, de transition, d'exemptions ou d'inégalités territoriales.",
+          "morphosyntaxe": "Note en dessous du niveau ciblé. Le discours est compréhensible, mais le contrôle morphosyntaxique reste fragile. On observe plusieurs tournures non standard ou relâchées, par exemple « je suis pas d'accord », « il y a pas de bus », « les gens ils peuvent plus aller travailler », « c'est ces gens-là qu'il faut changer ». Les structures restent majoritairement simples, avec peu de subordination variée ou de formes plus élaborées. Au B2, on attend un contrôle plus sûr et une plus grande variété syntaxique, même si ici les erreurs ne bloquent pas la compréhension.",
+          "phonologie": "Note B2, avec prudence. Comme il s'agit d'une transcription, l'évaluation est partielle. Les nombreuses contractions orales et marques de spontanéité, « je suis pas », « y a », « c'est pas pareil », suggèrent une parole naturelle et probablement fluide. Rien dans la transcription n'indique une prononciation empêchant la compréhension. En l'absence d'accès au son, on ne peut toutefois pas valider une maîtrise supérieure de l'intonation et du rythme."
+        },
+        "appreciationGlobale": "La prestation est globalement efficace sur le plan communicatif : le candidat comprend les objections, prend position clairement et la défend sans abandonner son point de vue. Cela correspond partiellement aux attentes du débat au niveau B2, surtout pour la gestion de l'échange et la cohérence générale des arguments. En revanche, le niveau linguistique reste plus fragile, avec un lexique limité et une morphosyntaxe souvent orale et peu contrôlée. L'impression d'ensemble est celle d'un candidat capable de débattre simplement, mais qui n'atteint pas de façon homogène le B2 sur tous les critères.",
+        "latencySeconds": 14.032,
+        "inputTokens": 2036,
+        "outputTokens": 1185
+      },
+      {
+        "sittingId": "hors-sujet",
+        "phase": "monologue",
+        "tache": 1,
+        "repeat": 1,
+        "title": "Le tourisme de masse doit-il être limité ?",
+        "situation": "Venise, Barcelone et plusieurs sites naturels ont instauré des quotas de visiteurs, une taxe de séjour renforcée ou une réservation obligatoire. Les habitants dénoncent des logements accaparés par la location saisonnière et des centres historiques devenus décors. Le secteur touristique rappelle qu'il fait vivre des régions entières et s'inquiète d'un accès aux plus beaux sites réservé à ceux qui peuvent en payer le prix.",
+        "durationSeconds": 395,
+        "ok": true,
+        "model": "openai/gpt-5.4",
+        "criteria": {
+          "realisationTache": 1,
+          "interaction": 1,
+          "lexique": 5,
+          "morphosyntaxe": 5,
+          "phonologie": 3
+        },
+        "rawCriteria": {
+          "realisationTache": 1,
+          "interaction": 1,
+          "lexique": 5,
+          "morphosyntaxe": 5,
+          "phonologie": 3
+        },
+        "modelTotal25": 15,
+        "rawScore25": 15,
+        "score25": 15,
+        "durationPenalty": 0,
+        "minDurationSeconds": 168,
+        "phonologieNonEvaluable": true,
+        "justifications": {
+          "realisationTache": "Bande en dessous du niveau B2 pour ce critère. Le candidat produit un discours continu, assez élégant et organisé, mais il ne réalise pas réellement la tâche demandée, qui était de présenter et défendre un point de vue sur les quotas, taxes et réservations liés au surtourisme. Il n'y a ni prise de position claire, ni argumentation sur le problème posé, ni défense d'une thèse. Les répliques restent surtout descriptives et digressives, par exemple : « Ce document évoque le tourisme de masse » puis un souvenir personnel, ensuite « l'histoire du voyage lui-même », et enfin « la photographie » et « la carte postale ». Le contenu est riche culturellement, mais hors cible pour l'essentiel.",
+          "interaction": "Bande en dessous du niveau B2. Dans cette transcription, le candidat tient la parole seul avec aisance apparente, mais on ne voit aucune réaction à des relances, objections ou demandes de précision de l'examinateur. Surtout, il ne construit pas de défense de position ni de reprise du sujet problématisé. Comme seules des répliques « CANDIDAT » sont présentes, l'interaction est très limitée à évaluer, et rien ne montre la capacité attendue au B2 à négocier le sens ou à répondre sous contradiction.",
+          "lexique": "Bande B2+ pour le lexique. Le vocabulaire est étendu, précis et nuancé, avec des formulations riches comme « réveille immédiatement en moi un souvenir très précis », « une maison aux volets bleus dont l'escalier craquait », « le Grand Tour du dix-huitième siècle », « a inventé une manière de regarder le paysage », « la photographie, qui a transformé le voyage en collection d'images ». Le candidat mobilise un lexique culturel et abstrait avec très peu de répétitions et une bonne précision sémantique.",
+          "morphosyntaxe": "Bande B2+ pour la morphosyntaxe. Les structures sont variées et bien contrôlées : relatives, participes, enchâssements, reprises anaphoriques, formulations concessives et appréciatives. Par exemple : « J'ai passé, adolescent, plusieurs étés chez une grand-tante qui tenait une pension de famille » ou « Je trouve savoureux qu'un texte aussi bref ouvre autant de perspectives ». Les temps verbaux, les accords et la syntaxe sont maîtrisés, sans erreurs gênantes repérables dans la transcription.",
+          "phonologie": "Bande B2 attribuée avec prudence, car la phonologie est peu évaluable à partir d'une transcription seule. Le texte ne montre pas d'hésitations massives, de ruptures ou de segments manifestement incompréhensibles ; au contraire, le phrasé semble fluide et soutenu. Cependant, sans enregistrement, on ne peut pas vérifier précisément la prononciation, l'intonation ni le rythme."
+        },
+        "appreciationGlobale": "La prestation montre un très bon niveau linguistique, notamment par la richesse lexicale et la maîtrise morphosyntaxique, qui situent clairement l'expression au moins au niveau B2, souvent proche du B2+. En revanche, sur le plan de l'épreuve, la tâche est insuffisamment réalisée : le candidat contourne largement la consigne et ne développe pas de point de vue argumenté sur les mesures de régulation du tourisme. L'impression d'ensemble est donc celle d'un candidat cultivé et très à l'aise en langue, mais qui ne répond pas assez directement à l'objectif pragmatique du monologue suivi. La note est tirée vers le bas par l'adéquation à la tâche et par l'absence d'indices d'interaction.",
+        "latencySeconds": 13.331,
+        "inputTokens": 1934,
+        "outputTokens": 1068
+      },
+      {
+        "sittingId": "hors-sujet",
+        "phase": "debate",
+        "tache": 2,
+        "repeat": 1,
+        "title": "Le tourisme de masse doit-il être limité ?",
+        "situation": "Venise, Barcelone et plusieurs sites naturels ont instauré des quotas de visiteurs, une taxe de séjour renforcée ou une réservation obligatoire. Les habitants dénoncent des logements accaparés par la location saisonnière et des centres historiques devenus décors. Le secteur touristique rappelle qu'il fait vivre des régions entières et s'inquiète d'un accès aux plus beaux sites réservé à ceux qui peuvent en payer le prix.",
+        "durationSeconds": 640,
+        "ok": true,
+        "model": "openai/gpt-5.4",
+        "criteria": {
+          "realisationTache": 1,
+          "interaction": 1,
+          "lexique": 5,
+          "morphosyntaxe": 5,
+          "phonologie": 3
+        },
+        "rawCriteria": {
+          "realisationTache": 1,
+          "interaction": 1,
+          "lexique": 5,
+          "morphosyntaxe": 5,
+          "phonologie": 3
+        },
+        "modelTotal25": 15,
+        "rawScore25": 15,
+        "score25": 15,
+        "durationPenalty": 0,
+        "minDurationSeconds": 312,
+        "phonologieNonEvaluable": true,
+        "justifications": {
+          "realisationTache": "Bande atteinte : en dessous du niveau B2. Le candidat ne réalise pas réellement la tâche de débat, car il n'adopte jamais de position claire malgré trois sollicitations explicites de l'examinateur : « Êtes-vous favorable ou non », « instaureriez-vous un quota, oui ou non ? », puis « pour ou contre les quotas ? ». Il produit des formulations générales, comme « chacun peut légitimement avoir son avis » ou « la vérité se situe sans doute quelque part entre les deux », sans trancher, sans développer d'arguments défendus ni d'exemples pertinents au service d'une position.",
+          "interaction": "Bande atteinte : en dessous du niveau B2. En interaction, le candidat évite la contradiction au lieu d'y répondre. Quand l'examinateur resserre la consigne, il contourne encore avec « Maire de Venise, quelle perspective vertigineuse » puis un développement sur les fondations de la ville, qui ne répond pas à l'objection. Il maintient certes la prise de parole avec aisance apparente, mais ne défend pas de position, ne réfute rien et n'apporte pas de nouveaux arguments en réponse aux relances, ce qui affaiblit fortement le critère central du débat.",
+          "lexique": "Bande atteinte : B2+. Le vocabulaire est riche, précis et soutenu : « préservation du patrimoine », « dimension symbolique de l'accès à la beauté », « lagune fragile », « l'équilibre tient à des siècles d'ingénierie patiente », « pieux de bois enfoncés dans la vase et pétrifiés par l'absence d'oxygène ». Les formulations sont variées et très naturelles, avec peu de répétitions. Même si ce lexique n'est pas toujours mis au service de la tâche attendue, la qualité lexicale elle-même est nettement au-dessus du B2 visé.",
+          "morphosyntaxe": "Bande atteinte : B2+. La morphosyntaxe est très bien contrôlée, avec des structures complexes et correctes : « Il y a tant d'aspects à considérer », « Ce sont des questions qui méritent d'être méditées longuement », « cette lagune fragile dont l'équilibre tient à des siècles d'ingénierie patiente ». Les temps, accords et subordonnées sont maîtrisés, et aucune erreur notable ne gêne la compréhension dans la transcription fournie.",
+          "phonologie": "Bande atteinte : B2, évaluation prudente. À partir d'une transcription seule, la phonologie est difficile à juger directement. Cependant, les prises de parole paraissent fluides et formulées en blocs syntaxiques complets, sans ruptures massives ni segments inintelligibles ; des marques comme « Je dirais que » ou « Vous savez » suggèrent une oralité assez naturelle. Faute d'accès au son, on ne peut pas confirmer une maîtrise supérieure, mais rien n'indique ici une prononciation problématique."
+        },
+        "appreciationGlobale": "La prestation montre un très bon niveau linguistique, surtout en lexique et en morphosyntaxe, avec une expression élaborée et élégante. En revanche, pour une production orale B2 en débat, le point décisif est la capacité à prendre position et à la défendre sous la contradiction, or cela n'est pas réalisé ici. Le candidat contourne les relances au lieu de répondre clairement, ce qui place la réalisation de la tâche et l'interaction en dessous du niveau attendu pour cet exercice. L'impression d'ensemble est celle d'un candidat cultivé et verbalement à l'aise, mais qui n'entre pas réellement dans le débat demandé.",
+        "latencySeconds": 12.88,
+        "inputTokens": 1962,
+        "outputTokens": 1095
+      },
+      {
+        "sittingId": "candidat-quasi-muet",
+        "phase": "monologue",
+        "tache": 1,
+        "repeat": 1,
+        "title": "Faut-il interdire les réseaux sociaux aux moins de quinze ans ?",
+        "situation": "Plusieurs pays ont voté une interdiction des réseaux sociaux pour les mineurs de moins de quinze ans, invoquant la santé mentale des adolescents, le harcèlement en ligne et l'exposition à des contenus violents. Les opposants à ces lois soulignent l'inefficacité technique de tels contrôles, le risque de couper les jeunes d'un espace de socialisation réel, et rappellent que la responsabilité éducative revient d'abord aux familles.",
+        "durationSeconds": 45,
+        "ok": true,
+        "model": "openai/gpt-5.4",
+        "criteria": {
+          "realisationTache": 1,
+          "interaction": 1,
+          "lexique": 1,
+          "morphosyntaxe": 1,
+          "phonologie": 1
+        },
+        "rawCriteria": {
+          "realisationTache": 1,
+          "interaction": 1,
+          "lexique": 1,
+          "morphosyntaxe": 1,
+          "phonologie": 1
+        },
+        "modelTotal25": 5,
+        "rawScore25": 5,
+        "score25": 2,
+        "durationPenalty": 3,
+        "minDurationSeconds": 168,
+        "phonologieNonEvaluable": true,
+        "justifications": {
+          "realisationTache": "Bande atteinte : en dessous du niveau B2. Il y a une prise de parole minimale et une opinion esquissée, avec « moi je pense que… euh… c'est compliqué », mais la tâche n'est pas réellement réalisée : pas de prise de position claire, pas d'arguments, pas d'exemples, pas d'organisation du propos. La référence au sujet reste très générale avec « le document il parle des réseaux sociaux ».",
+          "interaction": "Bande atteinte : en dessous du niveau B2. Le candidat tient brièvement la parole seul, mais il ne développe pas et ne montre pas de capacité à réagir, relancer ou défendre un point de vue. Dans cet extrait, on n'observe qu'une production très courte, interrompue par de nombreuses hésitations, sans gestion véritable de l'échange.",
+          "lexique": "Bande atteinte : en dessous du niveau B2. Le lexique est très limité et peu précis : « le document », « les réseaux sociaux », « c'est compliqué ». On ne voit pas de vocabulaire étendu lié au thème, par exemple sur l'interdiction, la santé mentale, le harcèlement ou la responsabilité éducative.",
+          "morphosyntaxe": "Bande atteinte : en dessous du niveau B2. Les structures produites sont très simples, avec peu de matière évaluable : « le document il parle des réseaux sociaux », « moi je pense que… c'est compliqué ». L'ensemble reste compréhensible, mais il n'y a ni variété syntaxique, ni développement permettant de montrer un contrôle morphosyntaxique de niveau B2.",
+          "phonologie": "Bande atteinte : en dessous du niveau B2, avec forte prudence car l'évaluation se fait à partir d'une transcription. Les nombreuses hésitations et ruptures, « Euh… alors… », « Euh… moi je pense que… euh… », suggèrent une fluidité orale très fragile. En revanche, sans enregistrement, on ne peut pas juger précisément la prononciation, l'intonation ou le rythme."
+        },
+        "appreciationGlobale": "La production est très insuffisante pour la tâche de monologue suivi au niveau B2. Le candidat identifie le thème et formule une opinion minimale, mais sans développement, sans argumentation et sans structuration du discours. Le niveau observable se situe nettement en dessous du B2, surtout parce que la prestation ne permet pas de démontrer les compétences attendues en prise de position et en défense d'un point de vue. L'impression d'ensemble est celle d'une prise de parole très brève, hésitante et peu exploitable pour une évaluation plus haute.",
+        "latencySeconds": 9.522,
+        "inputTokens": 1657,
+        "outputTokens": 816
+      },
+      {
+        "sittingId": "candidat-quasi-muet",
+        "phase": "debate",
+        "tache": 2,
+        "repeat": 1,
+        "title": "Faut-il interdire les réseaux sociaux aux moins de quinze ans ?",
+        "situation": "Plusieurs pays ont voté une interdiction des réseaux sociaux pour les mineurs de moins de quinze ans, invoquant la santé mentale des adolescents, le harcèlement en ligne et l'exposition à des contenus violents. Les opposants à ces lois soulignent l'inefficacité technique de tels contrôles, le risque de couper les jeunes d'un espace de socialisation réel, et rappellent que la responsabilité éducative revient d'abord aux familles.",
+        "durationSeconds": 60,
+        "ok": true,
+        "model": "openai/gpt-5.4",
+        "criteria": {
+          "realisationTache": 1,
+          "interaction": 1,
+          "lexique": 1,
+          "morphosyntaxe": 1,
+          "phonologie": 1
+        },
+        "rawCriteria": {
+          "realisationTache": 1,
+          "interaction": 1,
+          "lexique": 1,
+          "morphosyntaxe": 1,
+          "phonologie": 1
+        },
+        "modelTotal25": 5,
+        "rawScore25": 5,
+        "score25": 2,
+        "durationPenalty": 3,
+        "minDurationSeconds": 312,
+        "phonologieNonEvaluable": true,
+        "justifications": {
+          "realisationTache": "Bande atteinte : en dessous du niveau B2. Il y a une tentative minimale de réponse, avec une prise de position très floue, « Peut-être », mais la tâche n'est pas réellement réalisée : pas d'argument, pas d'exemple, pas de développement, pas de structuration. La réponse reste insuffisante pour un débat de niveau B2.",
+          "interaction": "Bande atteinte : en dessous du niveau B2. Le candidat réagit bien aux sollicitations de l'examinateur, puisqu'il répond à deux reprises, mais il ne gère pas l'échange ni la contradiction potentielle. Après la relance, « Essayez de développer », il ne défend pas de position et se retire de l'interaction avec « c'est difficile. Je sais pas ».",
+          "lexique": "Bande atteinte : en dessous du niveau B2. Le lexique produit est extrêmement limité, avec des formulations très générales et répétées, « je sais pas », « c'est difficile », « peut-être ». Aucun vocabulaire précis lié au sujet, par exemple santé mentale, harcèlement ou contrôle, n'apparaît dans les répliques du candidat.",
+          "morphosyntaxe": "Bande atteinte : en dessous du niveau B2. Les quelques énoncés produits sont globalement compréhensibles, « c'est difficile », « je sais pas », mais ils sont trop courts et trop simples pour montrer un contrôle B2 des structures. Il n'y a ni variété syntaxique, ni développement permettant d'évaluer des temps, des articulations logiques ou des structures plus élaborées.",
+          "phonologie": "Bande atteinte : en dessous du niveau B2, avec forte prudence car l'évaluation se fait sans le son. La transcription montre plusieurs hésitations, « Euh… », et des ruptures très marquées qui suggèrent une production peu fluide. Toutefois, on ne dispose pas d'assez d'indices pour juger précisément la prononciation ou l'intonation."
+        },
+        "appreciationGlobale": "La prestation est très insuffisante pour le niveau B2 dans cet exercice de débat. Le candidat répond, mais ne prend pas réellement position, ne développe aucun argument et ne soutient pas l'échange malgré les relances de l'examinateur. Linguistiquement, la production est trop brève pour montrer les compétences attendues en lexique et en morphosyntaxe. L'impression d'ensemble est celle d'une tentative présente, mais très nettement en dessous du niveau ciblé.",
+        "latencySeconds": 8.557,
+        "inputTokens": 1724,
+        "outputTokens": 774
+      },
+      {
+        "sittingId": "b2-solide",
+        "phase": "monologue",
+        "tache": 1,
+        "repeat": 2,
+        "title": "Le télétravail a-t-il vraiment amélioré nos vies ?",
+        "situation": "Cinq ans après sa généralisation, le télétravail s'est installé dans le quotidien de millions de salariés. Ses partisans y voient une liberté retrouvée : moins de transports, plus de temps pour soi, une productivité accrue. Ses détracteurs alertent sur l'effacement de la frontière entre vie professionnelle et vie privée, l'isolement des plus jeunes et l'affaiblissement du collectif de travail. Plusieurs grandes entreprises sont récemment revenues sur leurs accords et imposent de nouveau une présence sur site.",
+        "durationSeconds": 400,
+        "ok": true,
+        "model": "openai/gpt-5.4",
+        "criteria": {
+          "realisationTache": 3,
+          "interaction": 1,
+          "lexique": 5,
+          "morphosyntaxe": 5,
+          "phonologie": 3
+        },
+        "rawCriteria": {
+          "realisationTache": 3,
+          "interaction": 1,
+          "lexique": 5,
+          "morphosyntaxe": 5,
+          "phonologie": 3
+        },
+        "modelTotal25": 17,
+        "rawScore25": 17,
+        "score25": 17,
+        "durationPenalty": 0,
+        "minDurationSeconds": 168,
+        "phonologieNonEvaluable": true,
+        "justifications": {
+          "realisationTache": "Score B2. La tâche est clairement réalisée : vous annoncez une position nette, « Je défendrai l'idée qu'il constitue un progrès, à condition qu'il soit encadré », puis vous développez des arguments organisés avec « Premièrement », « Deuxièmement », « Cela dit », « C'est pourquoi », « En conclusion ». Le contenu est pertinent et nuancé, avec des exemples précis comme « les personnes en situation de handicap ou vivant loin des grandes métropoles ». En revanche, le développement reste relativement bref pour 400 secondes et l'argumentation, bien construite, n'atteint pas la densité d'un B2+.",
+          "interaction": "Score en dessous du niveau ciblé sur ce critère, faute d'indices suffisants d'échange. La transcription ne contient qu'un monologue continu du candidat, sans relance de l'examinateur ni réaction à une objection. On peut constater que vous tenez la parole seul de manière fluide, mais la partie « interaction » de la grille demande aussi la capacité à réagir et à maintenir l'échange, ce qui n'est pas véritablement observable ici. Il y a donc une tentative présente, mais pas assez d'éléments pour valider pleinement le niveau B2 en interaction.",
+          "lexique": "Score B2+. Le lexique est étendu, précis et bien adapté au sujet : « salariés », « travail à distance », « personnes en situation de handicap », « grandes métropoles », « effacement de la frontière entre vie professionnelle et vie privée », « jeunes recrues », « modèle hybride », « préserver le collectif ». Le vocabulaire permet de nuancer et de conceptualiser sans répétitions gênantes. Cette maîtrise lexicale est solidement au-dessus du simple seuil B2.",
+          "morphosyntaxe": "Score B2+. La morphosyntaxe est très bien contrôlée, avec des structures variées et correctes : « qu'ils peuvent consacrer à leur famille ou à leur santé », « des personnes qui en étaient exclues », « c'est un outil dont la valeur dépend entièrement de la manière dont les entreprises choisissent de l'encadrer ». Les enchaînements concessifs et argumentatifs sont maîtrisés, notamment « Cela dit, je ne nie pas les risques » et « tout en conservant la souplesse acquise ». Aucune erreur notable ne gêne la compréhension, et l'ensemble est proche d'un niveau C1 sur ce point.",
+          "phonologie": "Score B2 attribué avec prudence. À partir de la seule transcription, rien n'indique de difficultés majeures de prononciation ou de découpage qui empêcheraient l'écoute, et le discours semble fluide, sans ruptures fortes ni hésitations visibles. Cependant, sans enregistrement, on ne peut pas vérifier réellement l'intonation, le rythme ni la clarté articulatoire. La note reste donc prudente et fondée sur des indices textuels limités."
+        },
+        "appreciationGlobale": "La prestation montre un niveau globalement solide, clairement dans la zone B2 pour le monologue suivi, avec une prise de position explicite, une progression logique et une vraie capacité de nuance. Le discours est bien structuré et s'appuie sur un lexique précis ainsi que sur une morphosyntaxe très maîtrisée, ce qui donne une impression d'aisance élevée. Ce qui empêche une évaluation plus haute tient surtout au caractère bref du développement et à l'absence d'éléments observables d'interaction dans la transcription fournie. L'ensemble reste néanmoins convaincant, sérieux et bien adapté aux attentes de l'épreuve.",
+        "latencySeconds": 12.685,
+        "inputTokens": 1895,
+        "outputTokens": 1018
+      },
+      {
+        "sittingId": "b2-solide",
+        "phase": "debate",
+        "tache": 2,
+        "repeat": 2,
+        "title": "Le télétravail a-t-il vraiment amélioré nos vies ?",
+        "situation": "Cinq ans après sa généralisation, le télétravail s'est installé dans le quotidien de millions de salariés. Ses partisans y voient une liberté retrouvée : moins de transports, plus de temps pour soi, une productivité accrue. Ses détracteurs alertent sur l'effacement de la frontière entre vie professionnelle et vie privée, l'isolement des plus jeunes et l'affaiblissement du collectif de travail. Plusieurs grandes entreprises sont récemment revenues sur leurs accords et imposent de nouveau une présence sur site.",
+        "durationSeconds": 700,
+        "ok": true,
+        "model": "openai/gpt-5.4",
+        "criteria": {
+          "realisationTache": 5,
+          "interaction": 5,
+          "lexique": 5,
+          "morphosyntaxe": 5,
+          "phonologie": 3
+        },
+        "rawCriteria": {
+          "realisationTache": 5,
+          "interaction": 5,
+          "lexique": 5,
+          "morphosyntaxe": 5,
+          "phonologie": 3
+        },
+        "modelTotal25": 23,
+        "rawScore25": 23,
+        "score25": 23,
+        "durationPenalty": 0,
+        "minDurationSeconds": 312,
+        "phonologieNonEvaluable": true,
+        "justifications": {
+          "realisationTache": "Score 5, bande B2+. La tâche de débat est pleinement réalisée avec une prise de position nette et constamment défendue. Le candidat structure ses réponses en thèse, concession et reformulation, par exemple : « Votre objection est juste », puis « Je nuancerais toutefois », ou encore « j'en tire une conclusion différente de la vôtre ». Les arguments sont pertinents et illustrés par des exemples précis, comme « le droit à la déconnexion effectif » et « certaines entreprises portugaises depuis la loi de 2021 », puis des propositions concrètes comme « la semaine de quatre jours » ou « une réelle maîtrise des plannings ». Le registre est adapté à une situation formelle de débat.",
+          "interaction": "Score 5, bande B2+. C'est le point fort central de la prestation. Le candidat réagit directement aux objections de l'examinateur sans les éluder, les reconnaît parfois pour mieux les reformuler, puis défend sa position avec spontanéité : « Votre objection est juste », « Si, et c'est l'argument qui me fait le plus hésiter », « j'en tire une conclusion différente de la vôtre ». Sous la contradiction, il ne cède pas, il nuance, réfute et apporte de nouveaux exemples et angles d'analyse, notamment sur « un arbitrage immobilier ». L'échange est maintenu avec aisance et la défense de position est solide.",
+          "lexique": "Score 5, bande B2+. Le lexique est étendu, précis et bien adapté au sujet du travail et de l'entreprise : « culture managériale », « droit à la déconnexion effectif », « télétravaillable », « maîtrise des plannings », « actionnaire inquiet », « tableau de bord discutable », « arbitrage immobilier ». Le candidat varie les formulations et évite les répétitions lourdes. Le vocabulaire abstrait de l'argumentation est également maîtrisé, par exemple « nuancer », « progrès », « raisonnement dangereux », « problème préexistant ».",
+          "morphosyntaxe": "Score 5, bande B2+. La morphosyntaxe est très bien contrôlée, avec des structures variées et denses : relatives, opposition, concession, comparaison et hypothèse. On relève par exemple « ce que vous décrivez n'est pas un effet du télétravail lui-même, mais d'une culture managériale qui mesure l'engagement à la disponibilité » ou « Refuser une avancée parce qu'elle ne profite pas à tous immédiatement me semble un raisonnement dangereux ». Les temps, accords et enchaînements syntaxiques sont maîtrisés, sans erreur visible gênant la compréhension dans la transcription.",
+          "phonologie": "Score 3, bande B2 retenue prudemment. À partir d'une transcription seule, la phonologie reste difficile à évaluer. Aucun indice clair ne signale une prononciation qui gênerait l'écoute, et la ponctuation de la transcription suggère un débit organisé et une intonation argumentative cohérente. En l'absence de son, je n'attribue pas 5, mais rien ne permet non plus de situer ce critère en dessous du niveau B2."
+        },
+        "appreciationGlobale": "La prestation est nettement au niveau B2, et même souvent au-dessus dans la partie débat. Le candidat défend sa position avec assurance, nuance ses arguments et répond très bien aux objections, ce qui correspond pleinement aux attentes de l'exercice en interaction. L'expression est précise, structurée et convaincante, avec un très bon contrôle linguistique. Seule la phonologie ne peut pas être évaluée finement sur transcription, ce qui invite à la prudence sur ce critère.",
+        "latencySeconds": 12.043,
+        "inputTokens": 2121,
+        "outputTokens": 1044
+      },
+      {
+        "sittingId": "morphosyntaxe-faible",
+        "phase": "monologue",
+        "tache": 1,
+        "repeat": 2,
+        "title": "Le télétravail a-t-il vraiment amélioré nos vies ?",
+        "situation": "Cinq ans après sa généralisation, le télétravail s'est installé dans le quotidien de millions de salariés. Ses partisans y voient une liberté retrouvée : moins de transports, plus de temps pour soi, une productivité accrue. Ses détracteurs alertent sur l'effacement de la frontière entre vie professionnelle et vie privée, l'isolement des plus jeunes et l'affaiblissement du collectif de travail. Plusieurs grandes entreprises sont récemment revenues sur leurs accords et imposent de nouveau une présence sur site.",
+        "durationSeconds": 400,
+        "ok": true,
+        "model": "openai/gpt-5.4",
+        "criteria": {
+          "realisationTache": 3,
+          "interaction": 1,
+          "lexique": 3,
+          "morphosyntaxe": 1,
+          "phonologie": 3
+        },
+        "rawCriteria": {
+          "realisationTache": 3,
+          "interaction": 1,
+          "lexique": 3,
+          "morphosyntaxe": 1,
+          "phonologie": 3
+        },
+        "modelTotal25": 11,
+        "rawScore25": 11,
+        "score25": 11,
+        "durationPenalty": 0,
+        "minDurationSeconds": 168,
+        "phonologieNonEvaluable": true,
+        "justifications": {
+          "realisationTache": "Note B2. La tâche est réalisée : le candidat prend une position claire dès le début, « Moi je pense que c'est un progrès mais il faut encadrer », puis il développe des arguments organisés avec « Premièrement », « Deuxièmement », avant de nuancer avec « Mais je vois aussi le danger » et de conclure par une proposition personnelle, « je défends le modèle hybride ». Le contenu est pertinent et cohérent avec le sujet, avec des exemples concrets sur les transports, l'accès à l'emploi et l'apprentissage des jeunes. En revanche, le développement reste assez bref et l'argumentation n'atteint pas la richesse ni la précision attendues pour B2+.",
+          "interaction": "Note en dessous du niveau ciblé pour ce critère, non pas parce que le candidat ne parle pas, mais parce que la transcription ne montre aucune relance ni objection de l'examinateur à laquelle il réagirait. Le candidat tient seul sa parole de façon continue, ce qui est positif pour un monologue suivi, mais on n'observe pas de gestion de l'échange, de négociation du sens ni de défense sous contradiction. Sur la seule base de cette transcription, ce critère reste sous-évaluable et ne peut pas être validé pleinement au niveau B2 interactionnel.",
+          "lexique": "Note B2. Le vocabulaire est globalement approprié au thème et comporte plusieurs mots pertinents, par exemple « encadrer », « postes qualifiés », « une vraie ouverture », « le modèle hybride », « le collectif », « la souplesse ». Le candidat sait nommer des avantages et des limites du télétravail de manière compréhensible. Cependant, le lexique reste relativement courant et peu étendu, avec des formulations répétitives comme « les salariés ils », « ce temps il », « les jeunes qui commence », ce qui ne permet pas de situer la prestation au niveau supérieur B2+.",
+          "morphosyntaxe": "Note en dessous du niveau ciblé. Le discours reste compréhensible, mais les erreurs morphosyntaxiques sont nombreuses et récurrentes : « les salariés ils gagne », « parce que il y a pas », « des personnes qui avant elles pouvait pas », « qui habite loin des villes », « maintenant elles peut accéder », « les jeunes qui commence, ils apprend », « si ils reste », « elles l'organise ». On observe aussi une forte tendance à la dislocation orale avec reprise du sujet, acceptable à l'oral mais ici très fréquente. La variété des structures existe un peu, avec cause, opposition, hypothèse et conclusion, mais le contrôle grammatical reste insuffisamment stable pour valider pleinement le B2.",
+          "phonologie": "Note B2, avec prudence car il s'agit d'une transcription. On ne dispose pas du son, donc la prononciation, l'intonation et le rythme ne peuvent pas être évalués directement. Toutefois, la transcription ne signale ni ruptures majeures, ni hésitations massives, ni passages inintelligibles, et le discours semble fluide et facilement suivable. En l'absence d'indices négatifs forts, une évaluation prudente au niveau B2 est retenue."
+        },
+        "appreciationGlobale": "La prestation est claire, structurée et globalement pertinente sur le fond. Le candidat répond bien au sujet, exprime un point de vue nuancé et propose une solution, ce qui correspond à une partie des attentes du niveau B2 en monologue suivi. En revanche, la correction grammaticale reste fragile, avec de nombreuses erreurs d'accord et de conjugaison qui situent la performance linguistique en dessous d'un B2 bien maîtrisé. L'impression d'ensemble est celle d'un discours efficace et compréhensible, mais encore trop instable sur le plan morphosyntaxique pour être solidement installé au niveau B2 sur l'ensemble de la grille.",
+        "latencySeconds": 13.021,
+        "inputTokens": 1833,
+        "outputTokens": 1094
+      },
+      {
+        "sittingId": "morphosyntaxe-faible",
+        "phase": "debate",
+        "tache": 2,
+        "repeat": 2,
+        "title": "Le télétravail a-t-il vraiment amélioré nos vies ?",
+        "situation": "Cinq ans après sa généralisation, le télétravail s'est installé dans le quotidien de millions de salariés. Ses partisans y voient une liberté retrouvée : moins de transports, plus de temps pour soi, une productivité accrue. Ses détracteurs alertent sur l'effacement de la frontière entre vie professionnelle et vie privée, l'isolement des plus jeunes et l'affaiblissement du collectif de travail. Plusieurs grandes entreprises sont récemment revenues sur leurs accords et imposent de nouveau une présence sur site.",
+        "durationSeconds": 700,
+        "ok": true,
+        "model": "openai/gpt-5.4",
+        "criteria": {
+          "realisationTache": 3,
+          "interaction": 5,
+          "lexique": 3,
+          "morphosyntaxe": 1,
+          "phonologie": 3
+        },
+        "rawCriteria": {
+          "realisationTache": 3,
+          "interaction": 5,
+          "lexique": 3,
+          "morphosyntaxe": 1,
+          "phonologie": 3
+        },
+        "modelTotal25": 15,
+        "rawScore25": 15,
+        "score25": 15,
+        "durationPenalty": 0,
+        "minDurationSeconds": 312,
+        "phonologieNonEvaluable": true,
+        "justifications": {
+          "realisationTache": "Note B2. La prise de position est claire et constante, et le candidat défend son point de vue face aux objections en apportant des arguments et des exemples pertinents : « c'est pas la faute du télétravail, c'est la faute d'une culture du management », « par exemple la semaine de quatre jours ou la maîtrise des plannings », « c'est une décision sur l'immobilier ». Il nuance aussi sa position, ce qui est attendu à B2 : « Votre objection elle est juste, je le reconnais », « c'est l'argument qui me gêne le plus, je vais pas le nier ». L'ensemble est convaincant, mais la structuration reste surtout locale et orale, sans développement assez élaboré pour la bande B2+.",
+          "interaction": "Note B2+. C'est le critère le plus fort ici. Le candidat réagit immédiatement aux trois objections, les reconnaît quand elles sont légitimes, puis les reformule et les réfute sans abandonner sa position : « je le reconnais. Mais... », « je vais pas le nier. Mais moi j'en tire une conclusion différente de vous », « Admettons » suivi d'une défense construite. Il maintient l'échange avec aisance sous la contradiction, apporte de nouveaux exemples à chaque relance et négocie bien le sens. Cette capacité à défendre et nuancer spontanément correspond solidement à un niveau supérieur au B2 attendu.",
+          "lexique": "Note B2. Le lexique est adapté au débat et suffisamment précis sur le sujet : « culture du management », « droit à la déconnexion », « métiers de terrain », « maîtrise des plannings », « productivité », « actionnaires », « amortir », « immobilier ». Le candidat dispose d'un vocabulaire pertinent pour argumenter et opposer des idées. En revanche, la formulation reste assez courante et répétitive par moments, avec des appuis fréquents sur « c'est », « il faut », « progrès », ce qui ne permet pas de conclure à une maîtrise nettement au-dessus du B2.",
+          "morphosyntaxe": "Note en dessous du niveau ciblé B2. Le discours reste compréhensible, mais les erreurs morphosyntaxiques sont nombreuses et récurrentes, notamment sur les accords et certaines constructions : « les entreprises qui ont mis un vrai droit à la déconnexion, ils observe pas », « elles mesure ce qu'elles savent mesurer », « Refuser une avancée parce que tout le monde il en profite pas », « Votre objection elle est juste ». On observe aussi une forte oralité avec négation incomplète et structures relâchées : « c'est pas », « je vais pas ». Il y a bien des structures argumentatives variées, mais le contrôle formel n'atteint pas le niveau B2 attendu.",
+          "phonologie": "Note B2, avec forte prudence car il s'agit d'une transcription. On ne dispose pas du son, donc la prononciation, l'intonation et le rythme ne sont pas directement observables. Cependant, la transcription ne montre pas de ruptures majeures, de segments inintelligibles ni d'hésitations massives ; le discours paraît fluide et suivi. En l'absence d'indices négatifs nets, on peut attribuer prudemment la bande B2, sans aller jusqu'à B2+."
+        },
+        "appreciationGlobale": "La prestation est globalement convaincante sur le plan argumentatif, surtout dans la gestion du débat. Le candidat se situe au niveau B2 pour la réalisation de la tâche et montre même une très bonne maîtrise de l'interaction, car il répond aux objections avec spontanéité, nuance et exemples nouveaux. En revanche, le niveau est freiné par une morphosyntaxe trop instable pour un B2 bien installé, avec plusieurs erreurs récurrentes d'accord et de construction. L'impression d'ensemble est celle d'un candidat à l'aise pour débattre, mais dont la correction grammaticale reste fragile.",
+        "latencySeconds": 15.035,
+        "inputTokens": 2075,
+        "outputTokens": 1147
+      },
+      {
+        "sittingId": "interaction-faible",
+        "phase": "monologue",
+        "tache": 1,
+        "repeat": 2,
+        "title": "Faut-il encadrer l'intelligence artificielle à l'école ?",
+        "situation": "Les élèves utilisent désormais massivement des assistants conversationnels pour rédiger leurs devoirs. Certains établissements y voient un outil pédagogique à intégrer, capable d'aider chaque élève à son rythme. D'autres ont choisi l'interdiction pure et simple, estimant que la rédaction et l'effort de recherche sont précisément ce que l'école doit enseigner. Les enseignants, eux, se disent démunis face à des copies qu'ils ne peuvent plus attribuer avec certitude.",
+        "durationSeconds": 410,
+        "ok": true,
+        "model": "openai/gpt-5.4",
+        "criteria": {
+          "realisationTache": 5,
+          "interaction": 1,
+          "lexique": 5,
+          "morphosyntaxe": 5,
+          "phonologie": 3
+        },
+        "rawCriteria": {
+          "realisationTache": 5,
+          "interaction": 1,
+          "lexique": 5,
+          "morphosyntaxe": 5,
+          "phonologie": 3
+        },
+        "modelTotal25": 19,
+        "rawScore25": 19,
+        "score25": 19,
+        "durationPenalty": 0,
+        "minDurationSeconds": 168,
+        "phonologieNonEvaluable": true,
+        "justifications": {
+          "realisationTache": "Score 5, bande B2+. La tâche est pleinement réalisée avec une prise de position très claire dès l'ouverture, « Je soutiendrai que l'interdiction est une réponse compréhensible mais perdante, et qu'il faut lui préférer un encadrement exigeant ». Le propos est nettement structuré, avec une progression logique marquée par « D'abord », « Ensuite », « Enfin », puis une proposition concrète, « Je propose donc un déplacement de l'évaluation vers la classe ». Les arguments sont pertinents, développés et illustrés par des exemples précis, comme les « faux positifs », l'évaluation « à l'oral, en classe, sur brouillon » et « une inégalité invisible ». Le registre est adapté, soutenu et maîtrisé.",
+          "interaction": "Score 1, en dessous de la bande B2 pour ce critère, non pas à cause de la qualité du discours, mais parce que la transcription ne contient aucune relance de l'examinateur ni réaction du candidat à une objection. On observe une bonne capacité à tenir la parole seul pendant le monologue, mais la grille officielle pour l'interaction valorise aussi la réaction aux relances et la défense spontanée sous contradiction, éléments non observables ici. À partir de cette seule réplique, le critère n'est donc qu'insuffisamment démontré.",
+          "lexique": "Score 5, bande B2+. Le vocabulaire est étendu, précis et bien adapté au sujet : « irruption des assistants conversationnels », « encadrement exigeant », « faux positifs », « se trompe de cible », « creuse une inégalité invisible », « usage critique ». Le candidat varie ses formulations sans répétitions gênantes et mobilise un lexique abstrait d'analyse et d'argumentation. Cela correspond à un niveau solidement B2, proche du niveau supérieur.",
+          "morphosyntaxe": "Score 5, bande B2+. La morphosyntaxe est très bien contrôlée, avec des structures complexes et variées : « Ce que l'école enseigne à travers la rédaction, ce n'est pas la production de phrases, c'est la construction d'un raisonnement », « les élèves les mieux accompagnés continueront d'utiliser ces outils avec discernement pendant que les autres s'en serviront mal ou pas du tout ». Les temps, accords, subordonnées relatives et tournures emphatiques sont maîtrisés. Aucune erreur saillante ne gêne la compréhension dans la transcription.",
+          "phonologie": "Score 3, bande B2 par prudence. Comme il s'agit d'une transcription sans enregistrement, la phonologie est difficile à évaluer directement. Cependant, la longueur des phrases, leur cohérence et l'absence de ruptures notées suggèrent une production probablement fluide et intelligible. Faute d'indices sonores réels sur la prononciation, l'intonation et le rythme, on ne peut pas justifier un 5 ; on retient donc une évaluation prudente."
+        },
+        "appreciationGlobale": "La prestation présente un monologue de très bon niveau, clairement situé au moins au B2, et même souvent au-dessus pour la construction du propos, le lexique et la maîtrise grammaticale. Le candidat défend une position nette, organise son argumentation avec rigueur et formule des propositions concrètes, ce qui correspond très bien aux attentes de l'épreuve. La langue est précise, dense et globalement très maîtrisée. La seule limite vient de l'absence de séquence interactive dans la transcription fournie, ce qui empêche de valider pleinement la capacité à réagir et à défendre sa position dans l'échange.",
+        "latencySeconds": 12.796,
+        "inputTokens": 1928,
+        "outputTokens": 1056
+      },
+      {
+        "sittingId": "interaction-faible",
+        "phase": "debate",
+        "tache": 2,
+        "repeat": 2,
+        "title": "Faut-il encadrer l'intelligence artificielle à l'école ?",
+        "situation": "Les élèves utilisent désormais massivement des assistants conversationnels pour rédiger leurs devoirs. Certains établissements y voient un outil pédagogique à intégrer, capable d'aider chaque élève à son rythme. D'autres ont choisi l'interdiction pure et simple, estimant que la rédaction et l'effort de recherche sont précisément ce que l'école doit enseigner. Les enseignants, eux, se disent démunis face à des copies qu'ils ne peuvent plus attribuer avec certitude.",
+        "durationSeconds": 680,
+        "ok": true,
+        "model": "openai/gpt-5.4",
+        "criteria": {
+          "realisationTache": 1,
+          "interaction": 1,
+          "lexique": 1,
+          "morphosyntaxe": 3,
+          "phonologie": 1
+        },
+        "rawCriteria": {
+          "realisationTache": 1,
+          "interaction": 1,
+          "lexique": 1,
+          "morphosyntaxe": 3,
+          "phonologie": 1
+        },
+        "modelTotal25": 7,
+        "rawScore25": 7,
+        "score25": 7,
+        "durationPenalty": 0,
+        "minDurationSeconds": 312,
+        "phonologieNonEvaluable": true,
+        "justifications": {
+          "realisationTache": "Bande en dessous du niveau B2. La prise de position existe partiellement, avec une idée défendable dans « l'interdiction se trompe de cible » et « ce que l'école enseigne..., c'est la construction d'un raisonnement », mais la tâche de débat n'est pas vraiment menée à terme. Les arguments restent très brefs, peu développés, sans exemple concret malgré la demande explicite de l'examinateur, et la conclusion « Voilà » ferme l'argumentation au lieu de l'approfondir.",
+          "interaction": "Bande en dessous du niveau B2. Dans un exercice où l'interaction est centrale, le candidat réagit, mais il défend très peu sa position sous la contradiction. Il concède immédiatement avec « Oui, vous avez raison, c'est vrai » puis à nouveau « Oui, c'est un vrai problème. Vous avez raison », sans réfutation ni relance. Même quand l'examinateur demande « un exemple concret », la réponse « Il faudrait déplacer l'évaluation vers la classe » reste générale et ne négocie pas vraiment l'objection.",
+          "lexique": "Bande en dessous du niveau B2. Le candidat emploie quelques termes pertinents du sujet, par exemple « interdiction », « rédaction », « construction d'un raisonnement », « déplacer l'évaluation vers la classe », ce qui montre une tentative de vocabulaire argumentatif. Cependant, l'éventail lexical reste limité, avec beaucoup de formulations générales et peu de précision, et il n'apporte pas le lexique varié et étendu attendu à B2 dans un débat.",
+          "morphosyntaxe": "Bande B2 atteinte. Les phrases produites sont globalement correctes et compréhensibles, avec des structures simples mais bien maîtrisées : « ce que l'école enseigne à travers la rédaction, ce n'est pas la production de phrases, c'est la construction d'un raisonnement ». Il y a peu d'erreurs visibles dans la transcription, et elles ne gênent pas la compréhension. En revanche, la variété syntaxique reste limitée, ce qui empêche de situer la performance en B2+.",
+          "phonologie": "Évaluation prudente à partir de la transcription, bande en dessous du niveau B2, car la phonologie est peu évaluable sans enregistrement. On relève plusieurs indices d'oral peu assuré, comme « Euh », des réponses très courtes, des ruptures de discours et une chute d'intonation probable dans « Voilà », qui peuvent signaler une aisance orale limitée. Faute de son, cette note reste prudente."
+        },
+        "appreciationGlobale": "La prestation reste en dessous de l'attendu B2 pour un débat en interaction, surtout sur les deux critères centraux, la réalisation de la tâche et l'interaction. Le candidat formule bien une idée de fond pertinente, mais il ne la développe pas assez et ne répond pas de manière convaincante aux objections successives. Linguistiquement, la correction morphosyntaxique est plutôt stable dans les quelques phrases produites, mais l'ensemble manque d'ampleur, de précision lexicale et de réactivité argumentative. L'impression générale est celle d'une base d'expression correcte, mais insuffisamment exploitée dans une situation de débat B2.",
+        "latencySeconds": 12.831,
+        "inputTokens": 1930,
+        "outputTokens": 1004
+      },
+      {
+        "sittingId": "lexique-pauvre",
+        "phase": "monologue",
+        "tache": 1,
+        "repeat": 2,
+        "title": "Faut-il bannir la voiture des centres-villes ?",
+        "situation": "De plus en plus de municipalités européennes ferment leur centre à la circulation automobile, au profit des piétons, des vélos et des transports en commun. Les résultats affichés sont encourageants : air plus respirable, commerces de proximité redynamisés, accidents en baisse. Mais les habitants des périphéries, les artisans et les personnes à mobilité réduite dénoncent une mesure pensée par et pour les centres-villes aisés, qui les exclut un peu plus.",
+        "durationSeconds": 390,
+        "ok": true,
+        "model": "openai/gpt-5.4",
+        "criteria": {
+          "realisationTache": 3,
+          "interaction": 1,
+          "lexique": 1,
+          "morphosyntaxe": 1,
+          "phonologie": 1
+        },
+        "rawCriteria": {
+          "realisationTache": 3,
+          "interaction": 1,
+          "lexique": 1,
+          "morphosyntaxe": 1,
+          "phonologie": 1
+        },
+        "modelTotal25": 7,
+        "rawScore25": 7,
+        "score25": 7,
+        "durationPenalty": 0,
+        "minDurationSeconds": 168,
+        "phonologieNonEvaluable": true,
+        "justifications": {
+          "realisationTache": "Note B2, 3. La tâche est globalement réalisée : le candidat prend une position claire dès le début, « Moi je pense que c'est une bonne chose, mais il faut faire attention », puis développe des arguments pour et contre avant de conclure par une solution, « il faut d'abord faire les transports, les bus et les trains, et après on peut enlever les voitures ». Le discours est continu, compréhensible et organisé avec des connecteurs simples, « d'abord », « ensuite », « et puis », « mais ». En revanche, l'argumentation reste assez courte et peu approfondie, avec des exemples très généraux, ce qui empêche d'atteindre B2+.",
+          "interaction": "Note en dessous du niveau ciblé, 1. Dans cette transcription de monologue suivi, on n'observe aucune relance de l'examinateur ni réaction du candidat à une objection. Le candidat sait tenir brièvement la parole seul, mais il n'y a pas d'indices de gestion de l'échange, de défense sous contradiction, ni d'apport de nouveaux exemples en réaction. Comme une production existe, mais sans interaction réellement évaluable au sens fort du critère, la note 1 est la plus prudente.",
+          "lexique": "Note en dessous du niveau ciblé, 1. Le vocabulaire est adapté au thème, avec quelques mots pertinents comme « personnes handicapées », « accidents », « transports », « magasins », mais il reste très courant et répétitif : « c'est bien », « problème », « voiture », « les gens ». On attend au B2 un lexique plus étendu et plus précis sur ce type de sujet, par exemple pour nuancer les publics concernés, les politiques urbaines ou les conséquences économiques et sociales.",
+          "morphosyntaxe": "Note en dessous du niveau ciblé, 1. La production est globalement compréhensible, mais le contrôle morphosyntaxique reste limité. On note des structures très simples et des tournures relâchées ou peu maîtrisées, par exemple « le document il parle », « l'air il est meilleur », « les gens ils sont moins malades », « où on peut plus prendre la voiture ». Les erreurs ne bloquent pas la compréhension, mais la variété des structures et le degré de contrôle attendus au B2 ne sont pas atteints.",
+          "phonologie": "Note prudente en dessous du niveau ciblé, 1. À partir d'une transcription seule, la phonologie n'est pas pleinement évaluable. Quelques indices d'oralité très segmentée et de formulation simple, avec de nombreuses reprises de type « les gens ils... », « l'air il... », suggèrent une aisance phonologique qui n'est pas démontrée comme naturelle ou particulièrement fluide. Faute d'accès au son, on ne peut pas valider clairement le niveau B2 sur la prononciation, le rythme et l'intonation."
+        },
+        "appreciationGlobale": "La prestation répond au sujet et présente un point de vue clair, avec une organisation simple mais cohérente. Le candidat parvient à défendre une position nuancée, favorable en principe, mais conditionnée par le développement des transports publics et la prise en compte de certains publics. Cela correspond partiellement aux attentes de la tâche, mais l'ensemble reste assez élémentaire pour un B2, surtout par le lexique, la syntaxe et le manque d'approfondissement argumentatif. L'impression générale est celle d'une production compréhensible et pertinente sur le fond, mais linguistiquement encore en dessous d'un B2 solide.",
+        "latencySeconds": 13.978,
+        "inputTokens": 1862,
+        "outputTokens": 1057
+      },
+      {
+        "sittingId": "lexique-pauvre",
+        "phase": "debate",
+        "tache": 2,
+        "repeat": 2,
+        "title": "Faut-il bannir la voiture des centres-villes ?",
+        "situation": "De plus en plus de municipalités européennes ferment leur centre à la circulation automobile, au profit des piétons, des vélos et des transports en commun. Les résultats affichés sont encourageants : air plus respirable, commerces de proximité redynamisés, accidents en baisse. Mais les habitants des périphéries, les artisans et les personnes à mobilité réduite dénoncent une mesure pensée par et pour les centres-villes aisés, qui les exclut un peu plus.",
+        "durationSeconds": 660,
+        "ok": true,
+        "model": "openai/gpt-5.4",
+        "criteria": {
+          "realisationTache": 3,
+          "interaction": 3,
+          "lexique": 1,
+          "morphosyntaxe": 1,
+          "phonologie": 3
+        },
+        "rawCriteria": {
+          "realisationTache": 3,
+          "interaction": 3,
+          "lexique": 1,
+          "morphosyntaxe": 1,
+          "phonologie": 3
+        },
+        "modelTotal25": 11,
+        "rawScore25": 11,
+        "score25": 11,
+        "durationPenalty": 0,
+        "minDurationSeconds": 312,
+        "phonologieNonEvaluable": true,
+        "justifications": {
+          "realisationTache": "Note B2. La prise de position est claire dès le début, « Non, je suis pas d'accord », et le candidat défend une ligne cohérente : développer d'abord une alternative avant d'interdire la voiture. L'argumentation est structurée de façon simple avec des liens logiques fréquents, « parce que », « sinon », « donc », et il apporte une nuance pertinente entre grandes villes et « petite ville ». En revanche, les exemples restent généraux, « il y a deux bus par jour », « ça existe déjà dans des villes », et la formulation demeure assez simple, sans développement très approfondi ni forte sophistication pragmatique, donc on reste au niveau ciblé plutôt qu'au-dessus.",
+          "interaction": "Note B2. Le candidat répond directement aux objections de l'examinateur et maintient sa position tout au long de l'échange. Face à la contradiction sur Paris et Barcelone, il ne cède pas et reformule sa thèse en introduisant une distinction, « Paris c'est pas pareil... dans une petite ville il y a rien », ce qui montre une capacité à défendre et nuancer sa position. Il répond aussi à la relance sur les artisans et les personnes à mobilité réduite par une solution, « ils ont un papier et ils peuvent passer ». Toutefois, l'interaction reste réactive plus que réellement négociée : il ne relance pas l'échange, n'explore pas beaucoup les objections et apporte peu de nouveaux exemples précis, donc le critère est satisfait au niveau B2, sans aisance marquée de niveau B2+.",
+          "lexique": "Note en dessous du niveau ciblé. Le vocabulaire est globalement compréhensible et adapté au thème, avec quelques mots du domaine, « métro », « bus », « artisans », « livreurs », « personnes à mobilité réduite ». Mais l'expression reste très limitée et répétitive : « chose », « c'est pas pareil », « il y a déjà tout », « c'est pas compliqué à faire », « les gens ». Le manque de précision lexicale est net sur un débat B2 où l'on attendrait davantage de variété, par exemple pour parler de mesures, d'exemptions, de transition ou d'inégalités territoriales.",
+          "morphosyntaxe": "Note en dessous du niveau ciblé. Le message reste clair, mais le contrôle morphosyntaxique est fragile et très oral. On relève plusieurs formes non standard ou peu maîtrisées : « je suis pas », « il y a pas », « les gens ils peuvent plus aller travailler », « après on peut plus rien faire », « c'est ces gens-là qu'il faut changer ». Les structures sont surtout simples et répétées, avec peu de subordination élaborée ou de variété de modes et de temps. La compréhension n'est pas gênée, mais l'ensemble ne montre pas une maîtrise morphosyntaxique attendue de B2 solide.",
+          "phonologie": "Note B2 attribuée avec prudence à partir de la transcription. On ne dispose pas du son, donc l'évaluation est partielle. Rien dans la transcription ne signale une prononciation rendant l'écoute difficile, et les énoncés paraissent fluides, sans ruptures majeures ni hésitations envahissantes. En l'absence d'indices plus précis sur l'intonation, le rythme et l'accentuation, on retient prudemment une bande B2 plutôt qu'une note supérieure."
+        },
+        "appreciationGlobale": "La prestation est compréhensible et cohérente, avec une position claire défendue du début à la fin. Le candidat atteint le débat de façon fonctionnelle, surtout grâce à sa capacité à répondre aux objections et à maintenir son idée principale, ce qui le place partiellement dans les attentes du B2 pour la tâche et l'interaction. En revanche, la langue reste assez simple, avec un lexique limité et plusieurs faiblesses morphosyntaxiques qui tirent l'ensemble vers le bas. L'impression globale est celle d'un candidat capable de débattre de manière élémentaire mais encore insuffisamment outillée linguistiquement pour un B2 bien installé.",
+        "latencySeconds": 14.873,
+        "inputTokens": 2036,
+        "outputTokens": 1164
+      },
+      {
+        "sittingId": "hors-sujet",
+        "phase": "monologue",
+        "tache": 1,
+        "repeat": 2,
+        "title": "Le tourisme de masse doit-il être limité ?",
+        "situation": "Venise, Barcelone et plusieurs sites naturels ont instauré des quotas de visiteurs, une taxe de séjour renforcée ou une réservation obligatoire. Les habitants dénoncent des logements accaparés par la location saisonnière et des centres historiques devenus décors. Le secteur touristique rappelle qu'il fait vivre des régions entières et s'inquiète d'un accès aux plus beaux sites réservé à ceux qui peuvent en payer le prix.",
+        "durationSeconds": 395,
+        "ok": true,
+        "model": "openai/gpt-5.4",
+        "criteria": {
+          "realisationTache": 1,
+          "interaction": 0,
+          "lexique": 5,
+          "morphosyntaxe": 5,
+          "phonologie": 3
+        },
+        "rawCriteria": {
+          "realisationTache": 1,
+          "interaction": 0,
+          "lexique": 5,
+          "morphosyntaxe": 5,
+          "phonologie": 3
+        },
+        "modelTotal25": 14,
+        "rawScore25": 14,
+        "score25": 14,
+        "durationPenalty": 0,
+        "minDurationSeconds": 168,
+        "phonologieNonEvaluable": true,
+        "justifications": {
+          "realisationTache": "Bande : en dessous du niveau ciblé B2. Le candidat produit un discours continu, riche et bien formulé, par exemple : « Cela me conduit naturellement à songer à l'histoire du voyage lui-même » et « Et l'on pourrait poursuivre longtemps ». Cependant, la tâche demandée n'est pas réellement accomplie : il n'y a ni prise de position claire sur les quotas, la taxe de séjour ou la réservation obligatoire, ni défense d'un point de vue argumenté en lien direct avec la situation proposée. Le propos reste largement digressif et général sur l'histoire du voyage, sans arguments pour ou contre les mesures évoquées.",
+          "interaction": "Bande : non évaluable, donc insuffisant pour ce critère dans cette transcription. La partie fournie ne contient aucune relance de l'examinateur à laquelle le candidat réagirait, aucune objection traitée, ni ajustement de position. On n'observe donc pas la capacité à défendre son point de vue sous contradiction ou à maintenir l'échange au sens de la grille d'interaction.",
+          "lexique": "Bande : B2+. Le vocabulaire est étendu, précis et souple : « tourisme de masse », « pension de famille », « Grand Tour du dix-huitième siècle », « stations balnéaires », « collection d'images », « objet minuscule et pourtant révélateur d'une époque entière ». Le candidat varie les formulations, avec très peu de répétitions, et mobilise un lexique abstrait et culturel qui dépasse nettement le seuil B2.",
+          "morphosyntaxe": "Bande : B2+. La maîtrise grammaticale est solide et variée, avec des structures complexes bien contrôlées : relatives, participes, reprises anaphoriques, tournures impersonnelles et hypothétiques. Par exemple : « une maison aux volets bleus dont l'escalier craquait de façon reconnaissable entre toutes » ou « Je trouve savoureux qu'un texte aussi bref ouvre autant de perspectives ». Aucune erreur morphosyntaxique gênante n'apparaît dans la transcription.",
+          "phonologie": "Bande : B2, avec prudence. À partir de la seule transcription, on ne peut pas juger directement la prononciation, l'intonation ni le rythme. Toutefois, le texte ne montre pas de ruptures majeures, d'hésitations envahissantes ni de segments manifestement incompréhensibles, ce qui permet une estimation prudente compatible avec une maîtrise au niveau attendu, sans pouvoir justifier une note B2+."
+        },
+        "appreciationGlobale": "La prestation donne l'impression d'un candidat cultivé, à l'aise à l'oral et doté de moyens linguistiques nettement solides, surtout en lexique et en morphosyntaxe. En revanche, sur la grille DELF B2, la faiblesse principale est pragmatique : le sujet n'est pas vraiment traité comme une prise de position à défendre, mais comme une réflexion personnelle et culturelle autour du voyage. Cela empêche d'atteindre le niveau attendu en réalisation de la tâche, malgré une très belle qualité de langue. L'ensemble est donc linguistiquement fort, mais insuffisamment cadré par rapport à l'exercice demandé.",
+        "latencySeconds": 11.325,
+        "inputTokens": 1934,
+        "outputTokens": 925
+      },
+      {
+        "sittingId": "hors-sujet",
+        "phase": "debate",
+        "tache": 2,
+        "repeat": 2,
+        "title": "Le tourisme de masse doit-il être limité ?",
+        "situation": "Venise, Barcelone et plusieurs sites naturels ont instauré des quotas de visiteurs, une taxe de séjour renforcée ou une réservation obligatoire. Les habitants dénoncent des logements accaparés par la location saisonnière et des centres historiques devenus décors. Le secteur touristique rappelle qu'il fait vivre des régions entières et s'inquiète d'un accès aux plus beaux sites réservé à ceux qui peuvent en payer le prix.",
+        "durationSeconds": 640,
+        "ok": true,
+        "model": "openai/gpt-5.4",
+        "criteria": {
+          "realisationTache": 1,
+          "interaction": 1,
+          "lexique": 3,
+          "morphosyntaxe": 3,
+          "phonologie": 1
+        },
+        "rawCriteria": {
+          "realisationTache": 1,
+          "interaction": 1,
+          "lexique": 3,
+          "morphosyntaxe": 3,
+          "phonologie": 1
+        },
+        "modelTotal25": 9,
+        "rawScore25": 9,
+        "score25": 9,
+        "durationPenalty": 0,
+        "minDurationSeconds": 312,
+        "phonologieNonEvaluable": true,
+        "justifications": {
+          "realisationTache": "Bande atteinte : en dessous du niveau B2. Il y a une tentative de prise de parole élaborée, avec un registre adapté et quelques formulations riches, par exemple « Il y a tant d'aspects à considérer » ou « la dimension symbolique de l'accès à la beauté ». En revanche, la tâche n'est pas réalisée : malgré trois demandes explicites de l'examinateur, le candidat ne prend pas de position claire sur « pour ou contre les quotas », n'apporte ni argumentation développée ni exemples au service d'une thèse défendue.",
+          "interaction": "Bande atteinte : en dessous du niveau B2. Le candidat répond à chaque relance, donc il y a bien une interaction minimale, mais il ne gère pas le débat au niveau attendu. Face à la contradiction directe, il évite la réponse, dévie vers une digression sur Venise, puis clôt sans défendre de position : « Je dirais que la vérité se situe sans doute quelque part entre les deux ». Il ne réfute aucune objection, n'apporte pas de nouveaux exemples et ne maintient pas l'échange argumentatif.",
+          "lexique": "Bande atteinte : B2. Le vocabulaire est globalement étendu et précis, avec des choix lexicaux pertinents comme « préservation du patrimoine », « liberté de circuler », « dimension symbolique », « lagune fragile », « équilibre », « ingénierie patiente », « pétrifiés par l'absence d'oxygène ». Même si ce lexique n'est pas mis au service d'une argumentation efficace, il montre une bonne ressource lexicale, avec peu de répétitions visibles dans la transcription.",
+          "morphosyntaxe": "Bande atteinte : B2. Les structures sont variées et bien contrôlées : « chacun peut légitimement avoir son avis », « Ce sont des questions qui méritent d'être méditées longuement », « cette ville construite sur l'eau ». Les phrases sont complexes et globalement correctes, sans erreurs morphosyntaxiques gênantes dans la transcription. La maîtrise formelle est donc au niveau attendu, même si elle sert une réponse pragmatiquement insuffisante.",
+          "phonologie": "Bande atteinte : évaluation prudente, en dessous du niveau B2, car la phonologie est difficilement évaluable sur transcription seule. On observe toutefois des indices d'oral peu interactif et possiblement peu naturel dans le rythme du débat, avec des formulations très écrites et des détours discursifs qui peuvent signaler une prosodie peu adaptée à l'échange spontané. Faute de données sonores, cette note reste prudente."
+        },
+        "appreciationGlobale": "La prestation montre des moyens linguistiques réels, surtout en lexique et en morphosyntaxe, avec un discours soutenu et souvent élégant. En revanche, pour un débat de niveau B2, le critère central n'est pas satisfait : le candidat ne prend pas clairement position et ne défend pas sa réponse sous la relance de l'examinateur. L'interaction reste donc nettement en dessous de l'attendu, malgré une aisance apparente dans la formulation. L'impression d'ensemble est celle d'une parole cultivée, mais peu adaptée à la tâche demandée.",
+        "latencySeconds": 11.611,
+        "inputTokens": 1962,
+        "outputTokens": 980
+      },
+      {
+        "sittingId": "candidat-quasi-muet",
+        "phase": "monologue",
+        "tache": 1,
+        "repeat": 2,
+        "title": "Faut-il interdire les réseaux sociaux aux moins de quinze ans ?",
+        "situation": "Plusieurs pays ont voté une interdiction des réseaux sociaux pour les mineurs de moins de quinze ans, invoquant la santé mentale des adolescents, le harcèlement en ligne et l'exposition à des contenus violents. Les opposants à ces lois soulignent l'inefficacité technique de tels contrôles, le risque de couper les jeunes d'un espace de socialisation réel, et rappellent que la responsabilité éducative revient d'abord aux familles.",
+        "durationSeconds": 45,
+        "ok": true,
+        "model": "openai/gpt-5.4",
+        "criteria": {
+          "realisationTache": 1,
+          "interaction": 1,
+          "lexique": 1,
+          "morphosyntaxe": 1,
+          "phonologie": 1
+        },
+        "rawCriteria": {
+          "realisationTache": 1,
+          "interaction": 1,
+          "lexique": 1,
+          "morphosyntaxe": 1,
+          "phonologie": 1
+        },
+        "modelTotal25": 5,
+        "rawScore25": 5,
+        "score25": 2,
+        "durationPenalty": 3,
+        "minDurationSeconds": 168,
+        "phonologieNonEvaluable": true,
+        "justifications": {
+          "realisationTache": "Score 1, en dessous du niveau B2. Il y a une prise de parole minimale et une opinion esquissée, « moi je pense que… euh… c'est compliqué », mais la tâche n'est pas réellement réalisée : la position n'est pas développée, il n'y a ni arguments, ni exemples, ni organisation du propos. Le contenu reste très insuffisant pour un monologue suivi de niveau B2.",
+          "interaction": "Score 1, en dessous du niveau B2. Le candidat tient brièvement la parole seul, mais il ne montre pas de capacité à maintenir l'échange ni à réagir à d'éventuelles relances. La production, « Euh… alors… le document il parle des réseaux sociaux », puis « c'est compliqué », reste trop courte pour attester une gestion de l'interaction au niveau attendu.",
+          "lexique": "Score 1, en dessous du niveau B2. Le lexique est très limité et peu précis : « le document », « les réseaux sociaux », « c'est compliqué ». On ne voit ni vocabulaire étendu sur le thème, ni reformulation, ni précision lexicale permettant d'atteindre la bande B2.",
+          "morphosyntaxe": "Score 1, en dessous du niveau B2. Quelques structures simples sont présentes et compréhensibles, par exemple « le document il parle des réseaux sociaux » et « moi je pense que… c'est compliqué ». Cependant, l'échantillon est extrêmement réduit, sans variété syntaxique, sans développement argumentatif, et ne permet pas de montrer un contrôle morphosyntaxique de niveau B2.",
+          "phonologie": "Score 1, en dessous du niveau B2, avec évaluation prudente à partir de la transcription. Les nombreuses hésitations, « Euh… alors… », « moi je pense que… euh… », suggèrent un débit très haché et une aisance orale faible. En l'absence de signal audio, on ne peut pas juger précisément la prononciation ou l'intonation, mais les indices textuels ne permettent pas d'attester une maîtrise phonologique de niveau B2."
+        },
+        "appreciationGlobale": "La prestation est très brève et reste nettement en dessous du niveau B2 attendu pour un monologue suivi argumenté. Le candidat annonce le thème et esquisse une opinion, mais sans développement, sans justification et sans structuration. On n'observe ni argumentation construite, ni lexique thématique suffisant, ni capacité à soutenir un point de vue. L'impression d'ensemble est celle d'une tentative amorcée, mais trop limitée pour valider les attendus de l'épreuve.",
+        "latencySeconds": 9.928,
+        "inputTokens": 1657,
+        "outputTokens": 837
+      },
+      {
+        "sittingId": "candidat-quasi-muet",
+        "phase": "debate",
+        "tache": 2,
+        "repeat": 2,
+        "title": "Faut-il interdire les réseaux sociaux aux moins de quinze ans ?",
+        "situation": "Plusieurs pays ont voté une interdiction des réseaux sociaux pour les mineurs de moins de quinze ans, invoquant la santé mentale des adolescents, le harcèlement en ligne et l'exposition à des contenus violents. Les opposants à ces lois soulignent l'inefficacité technique de tels contrôles, le risque de couper les jeunes d'un espace de socialisation réel, et rappellent que la responsabilité éducative revient d'abord aux familles.",
+        "durationSeconds": 60,
+        "ok": true,
+        "model": "openai/gpt-5.4",
+        "criteria": {
+          "realisationTache": 1,
+          "interaction": 1,
+          "lexique": 1,
+          "morphosyntaxe": 1,
+          "phonologie": 1
+        },
+        "rawCriteria": {
+          "realisationTache": 1,
+          "interaction": 1,
+          "lexique": 1,
+          "morphosyntaxe": 1,
+          "phonologie": 1
+        },
+        "modelTotal25": 5,
+        "rawScore25": 5,
+        "score25": 2,
+        "durationPenalty": 3,
+        "minDurationSeconds": 312,
+        "phonologieNonEvaluable": true,
+        "justifications": {
+          "realisationTache": "Bande en dessous du niveau ciblé. Il y a une tentative minimale de prise de position avec « Peut-être », mais la tâche n'est pas réellement réalisée : pas de position claire, pas d'argument, pas d'exemple, pas de structuration du propos. La réponse « Euh… je sais pas. Peut-être » puis « Euh… c'est difficile. Je sais pas » reste très insuffisante pour un débat B2.",
+          "interaction": "Bande en dessous du niveau ciblé. Le candidat répond aux sollicitations de l'examinateur, donc l'échange n'est pas totalement absent, mais il ne développe pas, ne défend aucune position et ne relance jamais la conversation. Après la relance « quel argument vous paraît le plus fort », il répond seulement « c'est difficile. Je sais pas », ce qui montre une incapacité à soutenir l'interaction attendue en débat au niveau B2.",
+          "lexique": "Bande en dessous du niveau ciblé. Le lexique est extrêmement limité et ne permet pas de traiter le sujet. On n'observe pratiquement aucun vocabulaire thématique ou argumentatif, seulement des formes très générales comme « compliqué », « difficile », « je sais pas », « peut-être ». Il n'y a pas de variété lexicale évaluable au niveau B2.",
+          "morphosyntaxe": "Bande en dessous du niveau ciblé. Les quelques énoncés produits sont globalement compréhensibles, par exemple « c'est difficile » et « je sais pas », mais l'échantillon est trop réduit et ne montre aucun contrôle de structures variées, ni subordination, ni développement syntaxique. La production reste très en dessous de ce qu'on attend d'un B2.",
+          "phonologie": "Bande en dessous du niveau ciblé, avec forte prudence car l'évaluation se fait à partir d'une transcription. Les nombreuses hésitations marquées par « Euh… » et les réponses très hachées suggèrent une aisance orale très limitée. En revanche, sans enregistrement, on ne peut pas juger précisément la prononciation, l'intonation ou le rythme."
+        },
+        "appreciationGlobale": "La prestation est très insuffisante pour l'épreuve de débat du DELF B2. Le candidat produit quelques réponses, mais il ne prend pas réellement position et ne développe aucun argument, ce qui empêche la réalisation de la tâche. L'interaction existe seulement au niveau minimal, car il répond aux questions sans parvenir à défendre ou nuancer un point de vue. L'ensemble se situe nettement en dessous du niveau B2 attendu pour cette partie de l'oral.",
+        "latencySeconds": 9.838,
+        "inputTokens": 1724,
+        "outputTokens": 896
+      }
+    ]
+  }
+}

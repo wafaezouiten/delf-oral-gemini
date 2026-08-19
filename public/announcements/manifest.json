@@ -1,0 +1,30 @@
+{
+  "model": "gemini-3.1-flash-tts-preview",
+  "voice": "Charon",
+  "clips": {
+    "preparation": {
+      "file": "preparation.wav",
+      "digest": "74035bc2",
+      "bytes": 1643564,
+      "seconds": 34.24
+    },
+    "monologue": {
+      "file": "monologue.wav",
+      "digest": "fed3b8dc",
+      "bytes": 1244204,
+      "seconds": 25.92
+    },
+    "debate": {
+      "file": "debate.wav",
+      "digest": "7147ac6f",
+      "bytes": 1086764,
+      "seconds": 22.64
+    },
+    "finished": {
+      "file": "finished.wav",
+      "digest": "c811648a",
+      "bytes": 710444,
+      "seconds": 14.8
+    }
+  }
+}

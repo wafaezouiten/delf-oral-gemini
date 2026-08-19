@@ -30,7 +30,7 @@ import { config } from "dotenv";
 
 config({ path: ".env.local" });
 
-import { ORAL_CRITERIA, type OralCriterion } from "../src/lib/delf/rubric";
+import { ORAL_CRITERIA, type OralCriterion } from "../src/lib/delf/criteria";
 import { findTopic } from "../src/lib/delf/topics";
 import type { TranscriptEntry } from "../src/lib/delf/transcript";
 import { evaluateExam, type EvaluationResult } from "../src/lib/gemini/evaluate";

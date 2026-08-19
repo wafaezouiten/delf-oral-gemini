@@ -24,7 +24,9 @@ config({ path: ".env.local" });
 
 import { GoogleGenAI, Modality } from "@google/genai";
 
-import { ORAL_CRITERIA, GRILLE_BANDS, criteriaToScore25 } from "../src/lib/delf/rubric";
+import { ORAL_CRITERIA } from "../src/lib/delf/criteria";
+import { GRILLE_BANDS } from "../src/lib/delf/grille";
+import { DEBATE_FLOOR_SECONDS, criteriaToScore25 } from "../src/lib/delf/orale-rubric";
 import { ORAL_TOPICS } from "../src/lib/delf/topics";
 import type { TranscriptEntry } from "../src/lib/delf/transcript";
 import { evaluateExam } from "../src/lib/gemini/evaluate";
@@ -309,6 +311,40 @@ async function main() {
       record("audio evaluation completes via the Files API", false, String(error).slice(0, 200));
     }
   }
+
+  console.log("3. The duration rule, through the real corrector\n");
+
+  // The same strong transcript, against a débat that produced 40 seconds. The
+  // rubric — not the model, which is never told the rule — has to notice.
+  const shortSitting = await evaluateExam({
+    mode: "text",
+    topic: TOPIC,
+    transcript: STRONG,
+    monologueSeconds: 400,
+    debateSeconds: 40,
+  });
+
+  record(
+    "a short part is docked, and the part that was short is named",
+    shortSitting.durationPenalty === 3 &&
+      shortSitting.shortParts.length === 1 &&
+      shortSitting.shortParts[0] === "debate",
+    `penalty ${shortSitting.durationPenalty}, short: [${shortSitting.shortParts.join(", ")}] ` +
+      `(débat 40s against a ${DEBATE_FLOOR_SECONDS}s floor)`,
+  );
+
+  record(
+    "the three stored scores tell one story",
+    shortSitting.score25 === Math.max(shortSitting.rawScore25 - shortSitting.durationPenalty, 0),
+    `${shortSitting.rawScore25} − ${shortSitting.durationPenalty} = ${shortSitting.score25}/25, ` +
+      `which is what evaluations_score_25_check asserts in SQL`,
+  );
+
+  record(
+    "a full sitting of the same transcript is not docked",
+    strong.durationPenalty === 0 && strong.shortParts.length === 0,
+    `the same transcript over 400s + 700s scored ${strong.score25}/25 with no penalty`,
+  );
 
   const passed = checks.filter((c) => c.pass).length;
   console.log(`${"=".repeat(64)}\n${passed}/${checks.length} checks passed\n`);

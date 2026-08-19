@@ -1,0 +1,141 @@
+name: Fallow
+
+# Codebase intelligence (unused code, duplication, complexity, maintainability).
+# REPORT-ONLY: this workflow never fails the build. It surfaces Fallow's scores
+# on every push/PR so we can keep an eye on the trend. To turn it into a gate
+# later, switch to a saved baseline (`fallow --baseline`) and fail on NEW issues.
+#
+# Ported from the company's DELF repository. The one change is the trunk: audits
+# are taken against `develop`, which is this repository's integration branch and
+# the base of every feature pull request.
+
+on:
+  push:
+    branches:
+      - main
+      - staging
+      - develop
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+# Avoid piling up runs on rapid pushes to the same ref.
+concurrency:
+  group: fallow-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Pinned for reproducible scores — `pnpm dlx fallow` (unpinned) pulls latest and
+# the numbers drift between runs. Bump deliberately.
+env:
+  FALLOW_VERSION: "2.86.0"
+
+jobs:
+  fallow:
+    if: github.event_name == 'push' || github.event.pull_request.draft == false
+    name: Codebase Intelligence
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write # post/update the PR comment
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # Full history so `fallow audit` can diff the PR against its base ref.
+          fetch-depth: 0
+          # Check out the PR's head commit (not the default merge commit) so the
+          # "changed files" diff matches what a dev sees locally on their branch.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+
+      # No `pnpm install`: Fallow analyzes source (module graph + package.json),
+      # it does not need node_modules. pnpm dlx fetches the analyzer itself.
+      - name: Run Fallow
+        id: fallow
+        continue-on-error: true # report-only — never break the build
+        run: |
+          set +e
+          # Whole-project scores (pre-existing context).
+          pnpm dlx "fallow@${FALLOW_VERSION}" --format json --quiet > fallow.json 2>/dev/null
+          pnpm dlx "fallow@${FALLOW_VERSION}" health --format badge --quiet > fallow-badge.svg 2>/dev/null
+
+          # On PRs, add two base-relative views:
+          #   1. audit  → findings introduced vs inherited in changed files
+          #   2. base.json → whole-project scan at the merge-base, so the report
+          #      can show a Before/After delta (and surface REMOVED issues).
+          AUDIT_ARG=""
+          BASE_ARG=""
+          BASE_BADGE_ARG=""
+          if [ "$GITHUB_EVENT_NAME" = "pull_request" ] && [ -n "$GITHUB_BASE_REF" ]; then
+            git fetch --no-tags origin "$GITHUB_BASE_REF" >/dev/null 2>&1
+            pnpm dlx "fallow@${FALLOW_VERSION}" audit --base "origin/${GITHUB_BASE_REF}" \
+              --format json --quiet > audit.json 2>/dev/null
+            [ -s audit.json ] && AUDIT_ARG="audit.json"
+
+            # Analyze the branch point in a throwaway worktree (no node_modules
+            # needed — Fallow reads source only) for the Before/After delta,
+            # including the composite health grade.
+            BASE_SHA=$(git merge-base "origin/${GITHUB_BASE_REF}" HEAD)
+            if [ -n "$BASE_SHA" ]; then
+              BASE_TREE="$(mktemp -d)"
+              if git worktree add --detach "$BASE_TREE" "$BASE_SHA" >/dev/null 2>&1; then
+                pnpm dlx "fallow@${FALLOW_VERSION}" --format json --quiet --root "$BASE_TREE" > base.json 2>/dev/null
+                pnpm dlx "fallow@${FALLOW_VERSION}" health --format badge --quiet --root "$BASE_TREE" > base-badge.svg 2>/dev/null
+                git worktree remove "$BASE_TREE" --force >/dev/null 2>&1
+                [ -s base.json ] && BASE_ARG="base.json"
+                [ -s base-badge.svg ] && BASE_BADGE_ARG="base-badge.svg"
+              fi
+            fi
+          fi
+
+          node scripts/fallow-ci-summary.mjs fallow.json fallow-badge.svg "$AUDIT_ARG" "$BASE_ARG" "$BASE_BADGE_ARG" >> "$GITHUB_OUTPUT"
+
+      - name: Write job summary
+        if: always()
+        run: |
+          if [ -f fallow-report.md ]; then
+            cat fallow-report.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Fallow produced no report." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Post PR comment
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const fs = require('fs');
+            const marker = '<!-- fallow-intelligence-comment -->';
+            let report = '';
+            try { report = fs.readFileSync('fallow-report.md', 'utf8'); } catch {}
+
+            const body = `${marker}\n## Codebase Intelligence (Fallow)\n\n${report}`;
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            // Delete any prior Fallow comments and post a fresh one, so the
+            // latest result always lands at the bottom of the PR (most visible)
+            // instead of staying edited-in-place at its original position.
+            const stale = comments.filter(c =>
+              c.user?.login === 'github-actions[bot]' && c.body.includes(marker)
+            );
+            for (const c of stale) {
+              await github.rest.issues.deleteComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: c.id,
+              });
+            }
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body,
+            });

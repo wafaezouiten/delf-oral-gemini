@@ -1,0 +1,12 @@
+--> The line a candidate draws under their record when they start over (#69).
+-->
+--> Nullable, no default, no backfill: every row that exists before this
+--> migration is on somebody's record and stays there. The column only ever gets
+--> written by the reset route, which is the only thing that knows a candidate
+--> asked.
+-->
+--> Nothing is deleted here and nothing ever will be by this column — an archived
+--> sitting keeps its correction, its recording and its results page, and loses
+--> only its vote on the figures. That is why the migration is one nullable
+--> timestamp rather than a table of tombstones.
+ALTER TABLE "oral_exams" ADD COLUMN "archived_at" timestamp with time zone;
