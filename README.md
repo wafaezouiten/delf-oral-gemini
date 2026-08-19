@@ -211,10 +211,12 @@ written up in [`docs/GEMINI_LIVE_FINDINGS.md`](docs/GEMINI_LIVE_FINDINGS.md) and
 
 ## Working on it
 
-`feature/*` → `develop` → `staging` → `main`, one issue and one pull request per
-phase. Every pull request shows the same six checks as the company's DELF
-repository: `Build / Lint, typecheck, unit tests & build`, `Claude Code Review /
-claude-review`, `Fallow / Codebase Intelligence`, `GitGuardian Security Checks`,
-`Vercel` and `Vercel Preview Comments`. The process — branch model, the
-phase-to-issue mapping, and the setup steps only a human can do — is written up in
+`<type>/*` → `staging` → `main`, one issue and one pull request each. An issue
+branch is cut from `staging` and merges back into it; `develop` is a sandbox off
+to one side, not a stop on the way. Every pull request shows the same six checks
+as the company's DELF repository: `Build / Lint, typecheck, unit tests & build`,
+`Claude Code Review / claude-review`, `Fallow / Codebase Intelligence`,
+`GitGuardian Security Checks`, `Vercel` and `Vercel Preview Comments`. The
+process — branch model, the phase-to-issue mapping, and the setup steps only a
+human can do — is written up in
 [`docs/ENGINEERING_WORKFLOW.md`](docs/ENGINEERING_WORKFLOW.md).

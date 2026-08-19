@@ -10,40 +10,69 @@ same gates before anything reaches production.
 ```text
 main        production
  ↑          promoted from staging, by pull request only
-staging     pre-production
- ↑          promoted from develop, by pull request only
-develop     integration — the default branch, where phases land
+staging     integration and pre-production — the default branch, where issues land
  ↑
-feature/*   one per issue, cut from develop
+<type>/*    one per issue, cut from staging
+
+develop     sandbox — off to one side, fed by staging, never feeding it
 ```
 
 Rules:
 
-- Cut every feature branch from `develop`. Name it `feature/<phase>-<slug>`, e.g.
-  `feature/2-db-schema`.
-- Merge feature branches into `develop` through a pull request. Never push to
-  `develop` directly.
-- Promote `develop` → `staging` and `staging` → `main` with a pull request each.
-  A promotion carries no new commits of its own.
-- `develop` is the repository's default branch, so new pull requests target it
+- Cut every issue branch from `staging`. Name it `<type>/<issue>-<slug>`, e.g.
+  `fix/77-verify-db-constraints`, where `<type>` is `feat`, `fix`, `chore` or
+  `docs`.
+- Merge issue branches into `staging` through a pull request. Never push to
+  `staging` directly. The fix is on `staging` as soon as that pull request
+  merges — there is no intermediate branch to clear first.
+- Promote `staging` → `main` with a pull request. A promotion carries no new
+  commits of its own.
+- `staging` is the repository's default branch, so new pull requests target it
   without anyone having to remember to retarget.
 
 Cutting a branch:
 
 ```bash
-git fetch origin && git switch -c feature/4-gemini-session origin/develop
+git fetch origin && git switch -c fix/77-verify-db-constraints origin/staging
 ```
 
-Promoting:
+Opening the pull request — the base is already right, so no `--base` is needed:
 
 ```bash
-gh pr create --base staging --head develop --title "chore: promote develop to staging"
+git push -u origin HEAD && gh pr create --fill
 ```
 
-> **Naming note.** This repository originally called the integration branch `dev`.
-> It was renamed to `develop` to match the company repository; GitHub retargeted
-> the open pull request automatically. If you have a stale local clone:
-> `git branch -m dev develop && git fetch --prune && git branch -u origin/develop develop`.
+Promoting to production:
+
+```bash
+gh pr create --base main --head staging --title "chore: promote staging to main"
+```
+
+### What `develop` is for
+
+`develop` is a sandbox for experimental or long-running work that is not
+issue-shaped. It is **not** a stop on the way to `staging`: no issue branch is
+cut from it, and it is never the head of a pull request into `staging`.
+
+The flow runs the other way. `develop` catches up *from* `staging` whenever you
+want to start sandbox work:
+
+```bash
+git switch develop && git merge --ff-only origin/staging && git push origin develop
+```
+
+`--ff-only` is the whole discipline. It succeeds only while `develop` carries no
+commits of its own, which is exactly the condition that keeps `develop` from
+drifting into a stale trap. If it ever refuses, `develop` has diverged and needs
+a deliberate decision — merge it, or reset it to `staging` and lose the sandbox
+work — rather than a reflexive merge commit.
+
+> **History.** The integration branch was originally `dev`, renamed to `develop`
+> to match the company repository. It then stopped being the integration branch
+> altogether: issues now go straight to `staging`, and `develop` was kept as a
+> sandbox rather than deleted. The `feature/*` branches and the six
+> `develop` → `staging` promotions in this repository's history (#32, #43, #45,
+> #47, #63, #81) are from the old model and are left as they were.
 
 ## Issues, branches, pull requests
 
@@ -134,11 +163,11 @@ to surface a trend, not to block. To turn it into a gate later, save a baseline
 The version is pinned (`FALLOW_VERSION`) because unpinned `pnpm dlx fallow`
 pulls latest and the scores drift between runs. Bump it deliberately.
 
-Audits are taken against `develop`, this repository's trunk. To reproduce what
+Audits are taken against `staging`, this repository's trunk. To reproduce what
 CI reports:
 
 ```bash
-git fetch origin develop && pnpm dlx fallow@2.86.0 audit --base origin/develop
+git fetch origin staging && pnpm dlx fallow@2.86.0 audit --base origin/staging
 ```
 
 ## Secret scanning (GitGuardian)
@@ -195,11 +224,11 @@ Two things about this check look like bugs and are not:
   again, or `gh run rerun <id>`, and check the new run.
 - **`claude-code-action` refuses to run until the workflow file is on the default
   branch.** It exchanges an OIDC token for an app token and validates that the
-  workflow file is identical to the version on `develop`; on the pull request
+  workflow file is identical to the version on `staging`; on the pull request
   that *introduces* the workflow there is no such version, so it logs
   `Skipping action due to workflow validation` and exits successfully. The check
   is green and no review is posted. It starts reviewing on the first pull request
-  opened after this workflow lands on `develop`. Note the same rule bites any
+  opened after this workflow lands on `staging`. Note the same rule bites any
   pull request that *edits* `claude-review.yml`.
 
 Reviews are posted by `claude[bot]`, a GitHub App identity obtained through that
@@ -250,9 +279,17 @@ What the script applies:
 
 | Branch    | Pull request required | Required checks                                                      | Extra                                           |
 | --------- | --------------------- | -------------------------------------------------------------------- | ----------------------------------------------- |
-| `develop` | yes                   | `Lint, typecheck, unit tests & build` + `GitGuardian Security Checks` | conversations resolved; no force push or delete |
-| `staging` | yes                   | same                                                                 | branch must be up to date before merging        |
+| `staging` | yes                   | `Lint, typecheck, unit tests & build` + `GitGuardian Security Checks` | conversations resolved; no force push or delete |
 | `main`    | yes                   | same                                                                 | up to date, **and admins included** — nobody pushes directly |
+| `develop` | no                    | none                                                                 | a sandbox; nothing reaches production through it |
+
+The script still names `develop` as a protected branch. Leave that alone or
+relax it when the script is next applied — under the current model `develop` is
+a sandbox, and requiring a pull request to push to your own scratch branch buys
+nothing. `staging` is the branch that now needs the protection `develop` used to
+have. Note also that the script marks `staging` **strict** (up to date before
+merging): with issues landing on `staging` one after another, that means
+refreshing an issue branch whenever another one merges first.
 
 Claude review and Fallow are deliberately not required: one is a comment, the
 other is report-only. `GitGuardian Security Checks` only starts reporting once
@@ -267,7 +304,7 @@ pull request, so a non-zero count deadlocks a solo repository. Raise it to 1 for
 
 - [x] Pull request template configured
 - [x] `Build / Lint, typecheck, unit tests & build` — one workflow, one job, green
-- [x] `Claude Code Review / claude-review` — secret added and read; the action self-skips until the workflow file is on `develop`, then reviews every pull request
+- [x] `Claude Code Review / claude-review` — secret added and read; the action self-skips until the workflow file is on the default branch, then reviews every pull request
 - [x] `Fallow / Codebase Intelligence` — running, report-only
 - [ ] `GitGuardian Security Checks` — **pending** the GitGuardian GitHub App install, which only a human can do; nothing in this repository can make this check appear
 - [x] `Vercel` and `Vercel Preview Comments` — confirmed live on a pull request
