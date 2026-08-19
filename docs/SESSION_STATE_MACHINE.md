@@ -44,6 +44,23 @@ audio is not cut dead mid-sentence. A 12-second safety timeout bounds even that,
 because a silent examiner must not be able to freeze the exam. Outside that
 window `turnComplete` is ignored entirely — pinned by a unit test.
 
+**Owning the transition is not the same as owning the room (#85).** A model with
+no clock will eventually decide the conversation is finished and say so: one
+thanked the candidate, announced a third part of a two-part épreuve and told them
+they could leave, at 6:00 of a 13:00 débat. The rule above held — the phase kept
+running — which is what made it bad, since the candidate was left with an
+examiner that believed it was done and seven minutes still on the timer. Three
+things answer it, and none of them moves the transition:
+
+- the examiner is told, in its standing instructions, that it never concludes and
+  never dismisses the candidate, and that the épreuve has exactly two parts;
+- the débat lends it the clock it does not otherwise have, as a directive every
+  three minutes saying how many minutes are left, sent only when the floor is
+  free and never within two minutes of the close;
+- a goodbye heard in the transcript outside a closing handshake is logged and,
+  at the next turn boundary, contradicted with a directive that hands the
+  examiner a new objection to make. Twice per débat; logged every time.
+
 ---
 
 ## 2. The session

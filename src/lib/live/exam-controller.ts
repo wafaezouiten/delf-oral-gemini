@@ -43,11 +43,14 @@ import {
   remainingSeconds,
   type OralPhase,
 } from "@/lib/delf/phases";
+import { readsAsClosing } from "@/lib/delf/early-closing";
 import {
   closingInstruction,
   examinerOpeningLine,
   presenceCheckInstruction,
+  resumeDebateInstruction,
   silenceRelanceInstruction,
+  timeRemainingInstruction,
 } from "@/lib/delf/examiner-prompt";
 import type { OralTopic } from "@/lib/delf/topics";
 import {
@@ -384,6 +387,48 @@ const SILENCE_NUDGE_MS = 8_000;
  */
 const MAX_PRESENCE_CHECKS = 2;
 
+/**
+ * How often the débat tells the examiner how much of it is left (#85).
+ *
+ * Coarse on purpose. Every cue makes the model speak — `sendDirective` is
+ * `sendRealtimeInput`, which takes a turn — so this is not a clock display, it
+ * is an intervention. One every three minutes is three of them in a
+ * thirteen-minute débat, the last two minutes belonging to the closing handshake,
+ * rather than a metronome the candidate has to talk around.
+ */
+const TIME_CUE_INTERVAL_MS = 180_000;
+
+/**
+ * How little may be left for a cue still to be worth sending.
+ *
+ * Under two minutes there is nothing a cue can do that the closing handshake is
+ * not about to do properly, and everything to lose: the last cue of a débat
+ * would land next to the closing directive with no turn boundary between them,
+ * which is the blend {@link checkCandidateSilence} is also written to avoid.
+ */
+const TIME_CUE_FLOOR_MS = 120_000;
+
+/**
+ * How long the room must have been quiet before a cue is slipped into it.
+ *
+ * A cue is the app speaking on the examiner's behalf, and the one thing worse
+ * than an examiner with no clock is one that talks over the candidate every
+ * three minutes. Two seconds rather than one tick: a candidate hunting for a
+ * word produces a 300 ms hole in the voiced audio, and a single quiet tick would
+ * read that as the floor being free.
+ */
+const TIME_CUE_QUIET_MS = 2_000;
+
+/**
+ * How many times one débat will contradict an examiner that has said goodbye.
+ *
+ * Rationed for the same reason as the presence check: a model that has decided
+ * the épreuve is over may say so again, and an app that answers every time is
+ * two machines arguing in front of the candidate. Every occurrence is logged;
+ * only the first two are answered.
+ */
+const MAX_EARLY_CLOSING_RECOVERIES = 2;
+
 /** The two phases that produce a recording, in exam order. */
 const SPEAKING_PHASES: readonly RecordedPhase[] = ["monologue", "debate"];
 
@@ -509,6 +554,35 @@ export class ExamController {
   /** The voiced total the watch last saw, so growth in it reads as "the
    *  candidate is speaking right now" — the aggregate alone cannot. */
   private lastVoicedSeconds = 0;
+
+  /**
+   * The débat's time cue: which cue has gone out, and how long the room has been
+   * quiet enough to send the next one into (#85).
+   *
+   * `lastTimeCueIndex` is an index into the three-minute grid rather than a
+   * count, so a cue held back by a candidate who is still speaking coalesces
+   * with the next one instead of queueing behind it. A débat interrupted for
+   * four minutes owes one cue, not two.
+   *
+   * The quiet clock is deliberately NOT the silence watch's. That one is armed
+   * only between an examiner turn and its stand-down, and it is re-anchored as a
+   * side effect of reading it; this one has to be true at every moment of the
+   * débat, including the ones the watch has stood down from.
+   */
+  private lastTimeCueIndex = 0;
+  private cueVoicedSeconds = 0;
+  private floorQuietSince: number | null = null;
+
+  /**
+   * The examiner said goodbye in the middle of the débat (#85).
+   *
+   * `earlyClosingHeard` belongs to the turn being transcribed, not to the phase:
+   * fragments merge into one entry, so the same sentence is re-read on every
+   * fragment after it and must be flagged once. Cleared when the turn ends,
+   * which is also where the answer is sent from.
+   */
+  private earlyClosingHeard = false;
+  private earlyClosingRecoveries = 0;
 
   /**
    * The consigne being spoken, and everything the candidate can do about it (#37).
@@ -707,7 +781,66 @@ export class ExamController {
       timestamp: this.now() - this.examStart,
       text,
     });
+    if (speaker === "examiner") this.watchForEarlyClosing();
     this.emit();
+  }
+
+  /**
+   * Notice that the examiner has taken its leave seven minutes early (#85).
+   *
+   * Read off the transcript because that is the only place the intent exists:
+   * Gemini reports a turn, not what the turn was for, and « Vous pouvez quitter
+   * la salle » is ordinary French. See `delf/early-closing.ts` for the phrases
+   * and for why a false positive is cheap here.
+   *
+   * **Only outside a closing handshake.** Inside one the examiner was ASKED for
+   * exactly this sentence and saying it is the handshake working. `closing` is
+   * therefore the whole difference between the line that ends the épreuve and
+   * the identical line that must not.
+   *
+   * The turn accumulated so far is what is matched, not the fragment that just
+   * arrived: Gemini splits a sentence wherever it likes, and half a goodbye in
+   * each of two fragments is still a goodbye.
+   *
+   * Nothing is sent from here. The examiner is still mid-turn, and a directive
+   * arriving now would blend into the sentence it is answering — the hazard
+   * `tick()` is ordered around. It is answered at the turn boundary instead.
+   */
+  private watchForEarlyClosing(): void {
+    if (this.phase !== "debate" || this.closing || this.earlyClosingHeard) return;
+    const turn = this.transcript[this.transcript.length - 1];
+    if (!turn || turn.speaker !== "examiner" || !readsAsClosing(turn.text)) return;
+    this.earlyClosingHeard = true;
+    // Logged whether or not it will be answered, and with what is left on the
+    // clock: a débat where the examiner tried to leave at 6:00 is a fact about
+    // the sitting, and one the transcript alone states only by implication.
+    this.log("examiner-early-closing", {
+      remainingSeconds: remainingSeconds("debate", this.elapsed),
+      answered: this.earlyClosingRecoveries < MAX_EARLY_CLOSING_RECOVERIES,
+    });
+  }
+
+  /**
+   * Answer the goodbye, now that the examiner has stopped speaking (#85).
+   *
+   * Returns whether anything was said, because the caller must not also arm the
+   * silence watch on a turn it has just answered: the recovery makes the
+   * examiner speak again, and that turn ending is what opens the candidate's
+   * window. Arming here would start an eight-second countdown racing a directive
+   * already in flight.
+   */
+  private answerEarlyClosing(): boolean {
+    if (!this.earlyClosingHeard) return false;
+    this.earlyClosingHeard = false;
+    // The clock ran out between the goodbye and this boundary, so the épreuve
+    // really is ending and the model was merely early. Nothing to contradict.
+    if (this.phase !== "debate" || this.closing) return false;
+    if (this.earlyClosingRecoveries >= MAX_EARLY_CLOSING_RECOVERIES) return false;
+    this.earlyClosingRecoveries += 1;
+    const minutes = Math.max(1, Math.round(remainingSeconds("debate", this.elapsed) / 60));
+    this.log("examiner-early-closing-answered", { minutes });
+    this.sendControllerDirective("early-closing-recovery", resumeDebateInstruction(minutes));
+    return true;
   }
 
   // ------------------------------------------------------------- announcements
@@ -1187,7 +1320,7 @@ export class ExamController {
     }
 
     // A step spent into a socket that is not up is spent unheard. Worse than it
-    // looks from `sendSilenceDirective`'s catch: `SessionManager.sendDirective`
+    // looks from `sendControllerDirective`'s catch: `SessionManager.sendDirective`
     // opens with `if (!this.socket) return`, so a directive during a reconnect
     // is dropped WITHOUT throwing, and nothing downstream could tell the
     // difference. Since the check is rationed, a candidate who froze just as the
@@ -1222,7 +1355,7 @@ export class ExamController {
       // change to either has to keep meaning that.
       this.silenceSince = now;
       this.log("silence-relance");
-      this.sendSilenceDirective("silence-relance", silenceRelanceInstruction());
+      this.sendControllerDirective("silence-relance", silenceRelanceInstruction());
       return;
     }
 
@@ -1235,7 +1368,7 @@ export class ExamController {
       // this silence, and re-anchoring would only schedule a stand-down.
       this.silenceSince = null;
       this.log("silence-presence-check", { of: MAX_PRESENCE_CHECKS });
-      this.sendSilenceDirective("silence-presence-check", presenceCheckInstruction());
+      this.sendControllerDirective("silence-presence-check", presenceCheckInstruction());
       return;
     }
 
@@ -1247,15 +1380,109 @@ export class ExamController {
     this.log("silence-unanswered", { nudges: this.silenceNudges });
   }
 
-  /** Speak into the silence, and survive a socket that has gone away. Its own
-   *  catch rather than `tolerate`, whose event says "teardown" — nothing is
-   *  ending here, and a relance that failed to go out should not read as a
-   *  phase that failed to close. */
-  private sendSilenceDirective(step: string, instruction: string): void {
+  /**
+   * Lend the examiner the clock it does not have (#85).
+   *
+   * A Live session carries no notion of elapsed time. The model is told « environ
+   * 13 minutes » once, in its system instruction, and after that nothing ever
+   * tells it how much of the débat has gone or how much is left. A model that has
+   * run out of counter-arguments, or that reads a lull as the end of an exchange,
+   * has nothing to weigh against the feeling that this is over — and one of them
+   * thanked the candidate and showed them the door at 6:00 of 13:00. Two things
+   * make that likelier the longer a débat runs: the sliding context window drops
+   * the oldest turns, and the temperature is high on purpose.
+   *
+   * So the app says it, every three minutes, through the same directive path as
+   * the closing line.
+   *
+   * **A cue is an intervention, not a display.** `sendDirective` is
+   * `sendRealtimeInput`, which takes a turn: the examiner WILL speak in response
+   * to this. That is why the text tells it to spend the turn on a new objection
+   * rather than on an acknowledgement, and why nothing is sent unless the floor
+   * is free — {@link floorIsQuiet}. A candidate who never pauses simply gets the
+   * cue late, which costs nothing; a candidate talked over mid-argument loses a
+   * graded answer.
+   *
+   * **Nothing is sent near the end.** Under two minutes the closing handshake is
+   * about to do this properly, and a cue there would land beside the closing
+   * directive with no turn boundary between them.
+   *
+   * A stalled or lost microphone does NOT stand this down, unlike the silence
+   * relance: that one asks the candidate a question over a device that cannot
+   * carry the answer, and this one only keeps the examiner from concluding a part
+   * that has not finished. The speaker still works, and a candidate reading a
+   * microphone error is better off in an épreuve that is still running.
+   *
+   * Returns whether it spoke, so `tick()` can keep the silence relance from
+   * speaking on the same tick.
+   */
+  private checkDebateTimeCue(): boolean {
+    if (this.phase !== "debate") return false;
+    const now = this.now();
+    // Before every guard below, because a quiet clock only means anything if it
+    // has been kept during the noise as well.
+    const quiet = this.floorIsQuiet(now);
+    if (this.closing || this.devTextMode) return false;
+    if (this.connection !== "connected") return false;
+
+    const remaining = remainingSeconds("debate", this.elapsed);
+    if (remaining * 1000 < TIME_CUE_FLOOR_MS) return false;
+
+    // An index into the three-minute grid, not a count: a cue held back while
+    // the candidate was speaking coalesces with the next one rather than
+    // arriving two at a time behind it.
+    const index = Math.floor((this.elapsed * 1000) / TIME_CUE_INTERVAL_MS);
+    if (index === 0 || index <= this.lastTimeCueIndex) return false;
+    if (!quiet) return false;
+
+    this.lastTimeCueIndex = index;
+    const minutes = Math.max(1, Math.round(remaining / 60));
+    // The cue makes the examiner speak, so the silence window is re-anchored on
+    // the attempt for the same reason the relance is: the answer to a question
+    // that has not been asked yet is not a silence.
+    if (this.silenceSince !== null) this.silenceSince = now;
+    this.log("debate-time-cue", { minutes });
+    this.sendControllerDirective("debate-time-cue", timeRemainingInstruction(minutes));
+    return true;
+  }
+
+  /**
+   * Has the room been quiet long enough to speak into it?
+   *
+   * Its own measurement rather than the silence watch's, and the two are not
+   * duplicates: `silenceSince` exists only between an examiner turn and the
+   * watch standing down, and reading it re-anchors it. This has to hold at every
+   * moment of the débat, including the stretches the watch has stood down from.
+   *
+   * Two seconds rather than one tick, because a B2 candidate hunting for a word
+   * leaves a 300 ms hole in the voiced audio and a single quiet tick would read
+   * that as the floor being free.
+   */
+  private floorIsQuiet(now: number): boolean {
+    const voiced = this.recorder?.voicedSeconds("debate") ?? 0;
+    const busy = this.examinerSpeaking || this.announcementPlaying || voiced > this.cueVoicedSeconds;
+    this.cueVoicedSeconds = voiced;
+    if (busy) {
+      this.floorQuietSince = null;
+      return false;
+    }
+    if (this.floorQuietSince === null) {
+      this.floorQuietSince = now;
+      return false;
+    }
+    return now - this.floorQuietSince >= TIME_CUE_QUIET_MS;
+  }
+
+  /** Make the examiner speak on the app's initiative rather than the model's —
+   *  a relance into a silence, a time cue, a débat put back on its feet — and
+   *  survive a socket that has gone away. Its own catch rather than `tolerate`,
+   *  whose event says "teardown": nothing is ending here, and a directive that
+   *  failed to go out should not read as a phase that failed to close. */
+  private sendControllerDirective(step: string, instruction: string): void {
     try {
       this.session?.sendDirective(instruction);
     } catch (error) {
-      this.log("silence-directive-failed", { step, error: String(error) });
+      this.log("directive-failed", { step, error: String(error) });
     }
   }
 
@@ -1867,6 +2094,11 @@ export class ExamController {
           this.advanceDetached();
           return;
         }
+        // The turn that just ended was a goodbye the app never asked for, and
+        // this is the first boundary at which it can be contradicted without
+        // blending into it (#85). The recovery is itself an examiner turn, so
+        // the window opens when THAT one ends and not before.
+        if (this.answerEarlyClosing()) return;
         // Otherwise the examiner has finished asking something and the floor is
         // the candidate's. That is the moment the silence window opens (#84).
         this.armSilenceWatch();
@@ -2167,6 +2399,13 @@ export class ExamController {
     // let the candidate's last transcription arrive. A candidate who freezes in
     // the closing seconds is exactly who reaches it. From here `this.closing` is
     // already true and {@link checkCandidateSilence} stands down on it.
+    //
+    // The time cue answers to the same rule and sits inside the same window: it
+    // speaks, so it runs after the closing branch, and it runs before the relance
+    // so that a tick where both are due sends one directive rather than two (#85).
+    // Which of the two wins does not much matter — a cue and a relance both end
+    // in the examiner asking something — but sending both does.
+    if (this.checkDebateTimeCue()) return;
     this.checkCandidateSilence();
   }
 
