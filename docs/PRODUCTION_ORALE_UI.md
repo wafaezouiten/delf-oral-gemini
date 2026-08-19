@@ -297,13 +297,14 @@ is stamped only on sittings already on the record, so an épreuve still in
 progress when the button is pressed belongs to the new record instead of
 vanishing into the old one.
 
-**The avatar is a link, not a menu.** Clerk's `<UserButton>` opened a popover
-offering a modal and a sign out; `/app/compte` now holds both, so the click that
-opened a dropdown goes straight where the dropdown pointed. The account is one
-page with a left-hand nav — *Profil*, *Sécurité*, *Repartir de zéro* — reached by
-clicking yourself, which is where a candidate looks for it anyway. It is not a
-fifth destination in the rail: an account is not part of the épreuve, and the
-four destinations stay four.
+**The avatar keeps its menu; the account stops being a modal.** Clicking it still
+offers « Gérer le compte » and « Se déconnecter », as it always did — what
+changed is that the first of those lands on `/app/compte`
+(`userProfileMode="navigation"`) instead of opening Clerk's dialog over the app.
+The account is therefore a page with a left-hand nav — *Profil*, *Sécurité*,
+*Repartir de zéro* — and signing out stays in the menu, so the page carries no
+sign-out control of its own. It is not a fifth destination in the rail: an
+account is not part of the épreuve, and the four destinations stay four.
 
 Clerk still draws the account screens. `<UserProfile>` is embedded rather than
 reproduced — name, e-mail, password and sessions change when the provider

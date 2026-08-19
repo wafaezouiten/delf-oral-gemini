@@ -2,10 +2,11 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { UserAvatar } from "@clerk/nextjs";
+import { UserButton } from "@clerk/nextjs";
 
 import { ChartIcon, ClockIcon, DocumentIcon, MicIcon } from "@/app/_components/po/icons";
 import { cn } from "@/lib/ui/class-names";
+import { clerkAppearance } from "@/lib/ui/clerk-appearance";
 import { HUB_LINKS, isNavLinkActive } from "@/lib/ui/epreuve-hub";
 
 /**
@@ -97,25 +98,20 @@ export function AppSidebar() {
           </ul>
         </nav>
 
-        {/* The avatar is a link to /app/compte, not a menu (#69). Clerk's
-            `<UserButton>` opened a popover offering a modal and a sign out, and
-            both now live on the account page itself — so the click that used to
-            open a dropdown goes straight where the dropdown was pointing. The
-            whole row is the target, avatar and words together, because a 32-pixel
-            circle is a poor thing to ask a thumb to find. */}
-        <Link
-          href={HUB_LINKS.compte}
-          aria-current={isNavLinkActive(pathname, HUB_LINKS.compte) ? "page" : undefined}
-          className={cn(
-            "border-border flex items-center gap-2.5 border-t px-4 py-3 transition-colors",
-            isNavLinkActive(pathname, HUB_LINKS.compte)
-              ? "bg-primary-subtle text-primary font-semibold"
-              : "text-muted-foreground hover:text-foreground hover:bg-muted",
-          )}
-        >
-          <UserAvatar />
-          <span className="truncate text-xs">Mon compte</span>
-        </Link>
+        {/* Clerk's avatar menu, kept as it was: clicking it offers the account
+            and the sign out. What changed is where the first of those two goes
+            — `userProfileMode="navigation"` sends « Gérer le compte » to
+            /app/compte instead of opening Clerk's modal over the app, and that
+            page is where « Repartir de zéro » lives (#69). The popover wears the
+            product's palette for the same reason the page does. */}
+        <div className="border-border flex items-center gap-2.5 border-t px-4 py-3">
+          <UserButton
+            userProfileMode="navigation"
+            userProfileUrl={HUB_LINKS.compte}
+            appearance={clerkAppearance}
+          />
+          <span className="text-muted-foreground truncate text-xs">Mon compte</span>
+        </div>
       </aside>
 
       {/* Phone: a slim top bar for the brand and the account, because neither
@@ -127,17 +123,11 @@ export function AppSidebar() {
             Production orale
           </span>
         </Link>
-        {/* Same destination as the rail's account row, since the phone has no
-            rail to hold one and the tab bar's four slots are the four
-            destinations. */}
-        <Link
-          href={HUB_LINKS.compte}
-          aria-label="Mon compte"
-          aria-current={isNavLinkActive(pathname, HUB_LINKS.compte) ? "page" : undefined}
-          className="flex items-center"
-        >
-          <UserAvatar />
-        </Link>
+        <UserButton
+          userProfileMode="navigation"
+          userProfileUrl={HUB_LINKS.compte}
+          appearance={clerkAppearance}
+        />
       </header>
     </>
   );
