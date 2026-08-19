@@ -126,8 +126,8 @@ export class ExaminerAnnouncer implements AnnouncerLike {
   /**
    * Bumped on every `play()`. A clip that has been superseded must not tidy away
    * the fields belonging to the one that replaced it — the ordering that makes
-   * that reachable is a candidate pressing « Réécouter » while the consigne is
-   * still playing.
+   * that reachable is a candidate pressing « Écouter la consigne » twice, or a
+   * phase boundary speaking over a clip that is still playing.
    */
   private generation = 0;
   private closed = false;

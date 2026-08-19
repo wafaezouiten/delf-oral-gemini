@@ -27,6 +27,13 @@ import { SittingRow } from "../_components/sitting-row";
  *
  * The rows themselves are `SittingRow`, shared with the dashboard, so a score
  * cannot be printed one way here and another way there.
+ *
+ * **This is the one screen that asks for the archive** (#69). A candidate who
+ * starts over takes their épreuves off the tableau de bord and off the sujet
+ * cards; what they do not do is destroy them, and this page is where that
+ * promise is kept. So it reads the record and the archive in one query — one
+ * newest-first ordering rather than two that could disagree — and splits them
+ * under a divider on the flag the rows carry.
  */
 
 export const metadata: Metadata = {
@@ -42,9 +49,15 @@ export default async function HistoriquePage() {
   // On the page, not only in the layout: a layout does not re-render on a client
   // transition and does not decide whether this segment renders.
   const userId = await requireUserId();
-  const history = await readCandidateHistory(userId);
+  const history = await readCandidateHistory(userId, { includeArchived: true });
 
-  const abandoned = history.filter((sitting) => sitting.outcome === "abandoned").length;
+  // The split, on the flag rather than on a second query. `record` is what every
+  // other screen in the product is looking at; `archived` is what only this one
+  // still shows.
+  const record = history.filter((sitting) => sitting.archivedAt === null);
+  const archived = history.filter((sitting) => sitting.archivedAt !== null);
+
+  const abandoned = record.filter((sitting) => sitting.outcome === "abandoned").length;
 
   if (history.length === 0) {
     return (
@@ -72,7 +85,12 @@ export default async function HistoriquePage() {
       <Kicker>DELF B2 · Production orale</Kicker>
       <h1 className="font-serif mt-1 text-2xl leading-tight font-semibold">Historique</h1>
       <p className="text-muted-foreground mt-2 text-sm leading-relaxed">
-        {history.length} épreuve{history.length > 1 ? "s" : ""} à votre actif
+        {/* The count is the current record's, not the whole table's: it is the
+            same number the tableau de bord computes its figures from, and two
+            screens disagreeing about how many épreuves somebody has sat is
+            exactly what a reset must not cause. The archive counts itself,
+            below. */}
+        {record.length} épreuve{record.length > 1 ? "s" : ""} à votre actif
         {abandoned > 0 && (
           <>
             , dont {abandoned} abandonnée{abandoned > 1 ? "s" : ""} et comptée
@@ -82,13 +100,55 @@ export default async function HistoriquePage() {
         . Une épreuve en cours n&apos;y figure pas.
       </p>
 
-      <section className="border-border bg-card mt-6 sheet border">
-        <ul className="divide-border divide-y">
-          {history.map((sitting) => (
-            <SittingRow key={sitting.examId} sitting={sitting} detailed />
-          ))}
-        </ul>
-      </section>
+      {record.length > 0 ? (
+        <section className="border-border bg-card mt-6 sheet border">
+          <ul className="divide-border divide-y">
+            {record.map((sitting) => (
+              <SittingRow key={sitting.examId} sitting={sitting} detailed />
+            ))}
+          </ul>
+        </section>
+      ) : (
+        /* Reachable only after a reset: the page-level empty state above needs
+           the whole table to be empty, and it is not. Saying "aucune épreuve"
+           here would contradict the archive sitting directly underneath. */
+        <p className="border-border bg-card mt-6 sheet border px-6 py-5 text-sm leading-relaxed">
+          Vous êtes reparti de zéro. Vos épreuves précédentes sont dans les
+          archives, ci-dessous.{" "}
+          <Link href={HUB_LINKS.sujets} className="font-semibold underline">
+            Choisir un sujet
+          </Link>
+          .
+        </p>
+      )}
+
+      {archived.length > 0 && (
+        /* Below the record, under its own heading, and in the same rows: an
+           archived épreuve is not a lesser one, it simply no longer counts. Its
+           correction opens exactly as it always did, which is the whole promise
+           « Repartir de zéro » makes. */
+        <section className="mt-10">
+          <h2 className="font-serif text-lg font-semibold">Archives</h2>
+          <p className="text-muted-foreground mt-1.5 text-sm leading-relaxed">
+            {archived.length} épreuve{archived.length > 1 ? "s" : ""} d&apos;avant votre
+            réinitialisation. Elle{archived.length > 1 ? "s" : ""} ne compte
+            {archived.length > 1 ? "nt" : ""} plus dans vos statistiques, et
+            {archived.length > 1 ? " leurs corrections restent" : " sa correction reste"}{" "}
+            consultable{archived.length > 1 ? "s" : ""}.
+          </p>
+          {/* No dimming. The obvious way to show "this no longer counts" is to
+              fade the block, and it would take the contrast of every score in it
+              down with it — for a distinction the heading and the sentence above
+              already make in words. */}
+          <div className="border-border bg-card mt-4 sheet border">
+            <ul className="divide-border divide-y">
+              {archived.map((sitting) => (
+                <SittingRow key={sitting.examId} sitting={sitting} detailed />
+              ))}
+            </ul>
+          </div>
+        </section>
+      )}
     </main>
   );
 }

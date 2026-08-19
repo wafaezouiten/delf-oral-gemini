@@ -16,6 +16,12 @@ import {
 import { Kicker, Tag } from "@/app/_components/po/tag";
 import { scoreInk } from "@/app/_components/score-band";
 import { cn } from "@/lib/ui/class-names";
+import { correctionNotices } from "@/lib/ui/correction-notices";
+import {
+  CORRECTION_TRANSCRIPT_COPY,
+  correctionTranscriptView,
+} from "@/lib/ui/correction-transcript";
+import { speakerLabel, turnKey } from "@/lib/ui/debate-conversation";
 import { COMPETENCY_FLOOR, COMPETENCY_MAX } from "@/lib/delf/constants";
 import {
   ORAL_CRITERIA,
@@ -26,7 +32,6 @@ import {
 } from "@/lib/delf/criteria";
 import { scoreTone, type GrilleBand } from "@/lib/delf/grille";
 import { meetsCompetencyFloor } from "@/lib/delf/orale-rubric";
-import { formatClock } from "@/lib/delf/phases";
 import { type TranscriptEntry } from "@/lib/delf/transcript";
 import type { OralTopic } from "@/lib/delf/topics";
 
@@ -73,6 +78,14 @@ export interface StoredResult {
      */
     durationPenalty?: number;
     shortParts?: Array<"monologue" | "debate">;
+    /**
+     * What the halving cost, and which part never happened. Optional for the
+     * same reason as the two above, and the fallback matters more here: the
+     * old reading would attribute 13 points to a short épreuve, which is not
+     * what took them.
+     */
+    absencePenalty?: number;
+    absentParts?: Array<"monologue" | "debate">;
     model: string;
     /**
      * Nullable because `evaluations.latency_seconds` is, and this object is
@@ -219,35 +232,32 @@ export function ResultsClient({
    * treatment at full force and the band colours the numeral it describes (#50).
    */
   const tone = scoreTone(evaluation.score25);
-  const penalised =
-    evaluation.durationPenalty !== undefined
-      ? evaluation.durationPenalty > 0
-      : evaluation.score25 < evaluation.rawScore25;
 
   /**
-   * Which half fell short, in the candidate's own words.
-   *
-   * Capitalised, because it opens a sentence. It used to be spliced in
-   * lowercase after "Note avant pénalité de durée : 15/25." and read as a typo
-   * on the one paragraph that has to be believed — the one explaining why the
-   * number above it is lower than the marking earned.
+   * The two paragraphs below the mark, and the figure each is measured
+   * against. Both live in `lib/ui/correction-notices.ts`, which is where the
+   * arithmetic can be tested — and it needs to be, because the duration
+   * paragraph's baseline is no longer the sum of the bands whenever the
+   * halving fired in front of it.
    */
-  const shortParts = evaluation.shortParts ?? [];
-  const shortLabel =
-    shortParts.length === 2
-      ? "Vos deux prises de parole ont été"
-      : shortParts[0] === "monologue"
-        ? "Votre monologue a été"
-        : shortParts[0] === "debate"
-          ? "Votre débat a été"
-          : "Votre temps de parole a été";
+  const notices = correctionNotices(evaluation);
 
   const phonoNote = evaluation.feedback.phonologieNonEvaluable
     ? "La phonologie n'a pas pu être évaluée de façon fiable sur cette production."
     : undefined;
 
+  // `print:*` on all four of this page's scroll containers — the shell, the
+  // grid, the transcript column and the rail. On screen the correction is a
+  // fixed-height, independently-scrolling pair of columns, and a scroll
+  // container prints as one clipped screenful. Releasing the clipping is what
+  // lets the sheet paginate at all — and therefore what makes the section
+  // headings' `break-*` rules further down mean anything.
+  //
+  // All four, not just the transcript's: the rail is the half carrying the /25,
+  // so a page that paginates on one side and clips on the other loses the grade
+  // rather than the words.
   return (
-    <div className="bg-background text-foreground flex h-full min-h-0 flex-col overflow-hidden">
+    <div className="bg-background text-foreground flex h-full min-h-0 flex-col overflow-hidden print:h-auto print:overflow-visible">
       {/* Header. `no-print` on the actions only: the correction is the thing a
           candidate keeps, so the sujet and the level stay on the printed sheet
           while the buttons do not. */}
@@ -286,7 +296,7 @@ export function ResultsClient({
       </header>
 
       {/* Split body: the transcript reads, the rail marks. */}
-      <div className="grid min-h-0 flex-1 grid-cols-1 overflow-y-auto lg:grid-cols-[minmax(0,1fr)_26.25rem] lg:overflow-hidden">
+      <div className="grid min-h-0 flex-1 grid-cols-1 overflow-y-auto lg:grid-cols-[minmax(0,1fr)_26.25rem] lg:overflow-hidden print:overflow-visible">
         <TranscriptColumn
           title={topic.title}
           transcript={transcript}
@@ -319,14 +329,20 @@ export function ResultsClient({
               </Tag>
             </div>
 
-            {penalised && (
+            {/* Whole sentences, built and tested in `lib/ui/correction-notices.ts`.
+                The component chooses neither the wording nor the figure: both
+                depend on which rules fired, and the last version that decided
+                the wording here told a candidate who sat neither part about
+                « celle que vous avez réalisée ». */}
+            {notices.absence && (
               <p className="text-muted-foreground mt-3 text-xs leading-relaxed">
-                Note avant pénalité de durée : {evaluation.rawScore25}/{COMPETENCY_MAX}.{" "}
-                {/* Named, not merely announced: "vous avez été pénalisé" is an
-                    assertion, "votre débat a duré 40 secondes" is something the
-                    candidate can check against the clock beside it. */}
-                {shortLabel} nettement plus court que ce que demande l&apos;épreuve
-                réelle.
+                {notices.absence}
+              </p>
+            )}
+
+            {notices.duration && (
+              <p className="text-muted-foreground mt-3 text-xs leading-relaxed">
+                {notices.duration}
               </p>
             )}
 
@@ -341,7 +357,11 @@ export function ResultsClient({
             )}
           </div>
 
-          <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4">
+          {/* The rail scrolls on its own too, and it is the half carrying the
+              /25 and the five criteria — the part of a printed correction it
+              would hurt most to lose the foot of. Same release as the three on
+              the shell. */}
+          <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4 print:overflow-visible">
             {evaluation.mode === "text" && (
               <div className="mb-4">
                 <Notice tone="warning" title="Corrigé sans l'audio">
@@ -425,7 +445,8 @@ export function ResultsClient({
 }
 
 /**
- * The left column: the épreuve as it was spoken, set as one printed page.
+ * The left column: the épreuve as it was spoken, set as one printed page — in
+ * the two parts it was sat in (#70).
  *
  * The turns are paragraphs with a speaker label above them rather than the
  * reference's chat bubbles. Two reasons, and the second is the one that decides
@@ -433,7 +454,18 @@ export function ResultsClient({
  * transcript of a DELF oral is a document — the same thing the sujet is — so it
  * belongs on the paper stock the rest of the épreuve is printed on. The
  * reference's bubbles read as a messaging app, which is the one thing the
- * passation screen deliberately refuses to look like.
+ * passation screen deliberately refuses to look like. **That holds for the débat
+ * too**, now that it has a heading of its own: the same exchange is set as a
+ * feed while it is happening (`debate-conversation.ts`) and as a record once it
+ * is over, and only the sectioning changed here.
+ *
+ * The head no longer carries « Monologue 7:02 · Débat 4:38 ». Each section now
+ * prints its own duration beside its own heading, and leaving the combined line
+ * up top would print both numbers twice.
+ *
+ * Everything decided rather than drawn — the order, the headings, which
+ * duration goes where, and which of the two "nothing was said" messages fires —
+ * is in `lib/ui/correction-transcript.ts`, where it is tested.
  */
 function TranscriptColumn({
   title,
@@ -446,56 +478,81 @@ function TranscriptColumn({
   monologueSeconds: number;
   debateSeconds: number;
 }) {
-  const spoke = transcript.some((entry) => entry.speaker !== "examiner");
+  const { sections, silentNotice } = correctionTranscriptView(transcript, {
+    monologueSeconds,
+    debateSeconds,
+  });
 
   return (
-    <section className="bg-muted/30 min-h-0 lg:overflow-y-auto">
+    <section className="bg-muted/30 min-h-0 lg:overflow-y-auto print:overflow-visible">
       <div className="mx-auto max-w-[42.5rem] px-4 py-6 pb-16 sm:px-7">
         <article className="border-paper-border bg-paper sheet border p-7 sm:p-9">
-          <div className="border-border flex flex-wrap items-baseline justify-between gap-3 border-b pb-3">
-            <Kicker>Transcription de l&apos;épreuve</Kicker>
-            <span className="text-muted-foreground tabular shrink-0 text-[0.6875rem]">
-              Monologue {formatClock(monologueSeconds)} · Débat {formatClock(debateSeconds)}
-            </span>
+          <div className="border-border border-b pb-3">
+            <Kicker>{CORRECTION_TRANSCRIPT_COPY.kicker}</Kicker>
           </div>
 
           <h2 className="font-serif mt-4 text-xl leading-tight font-semibold">{title}</h2>
 
-          {!spoke && (
+          {silentNotice && (
             <div className="border-danger/40 bg-danger-subtle mt-5 rounded-md border border-dashed p-4">
-              <p className="text-danger text-[0.8125rem] font-bold">
-                Aucune intervention transcrite
-              </p>
+              <p className="text-danger text-[0.8125rem] font-bold">{silentNotice.title}</p>
               <p className="text-muted-foreground mt-1.5 text-xs leading-relaxed">
-                Le micro n&apos;a capté aucune prise de parole. L&apos;évaluation
-                porte donc sur une non-réponse.
+                {silentNotice.body}
               </p>
             </div>
           )}
 
-          <div className="mt-5 space-y-4">
-            {transcript.map((entry, index) => {
-              const isCandidate = entry.speaker !== "examiner";
-              return (
-                <p key={`${entry.timestamp}-${index}`} className="text-sm leading-relaxed">
-                  <span
-                    className={cn(
-                      "block text-[0.625rem] font-semibold tracking-[0.16em] uppercase",
-                      isCandidate ? "text-primary" : "text-muted-foreground",
-                    )}
-                  >
-                    {isCandidate ? "Vous" : "Examinateur"}
-                  </span>
-                  {entry.text}
+          {sections.map((section) => (
+            <section key={section.phase} className="mt-7">
+              {/* `break-after-avoid` and the heading row's `break-inside-avoid`:
+                  a section heading that lands as the last line of a printed
+                  page sends the candidate over the fold to find out which half
+                  they are reading. The correction is the thing they keep, so
+                  the heading travels with at least the start of its turns. */}
+              <div className="border-border flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 border-b pb-1.5 break-inside-avoid break-after-avoid">
+                <h3 className="text-[0.8125rem] font-semibold">{section.heading}</h3>
+                <span className="text-muted-foreground tabular shrink-0 text-[0.6875rem]">
+                  {section.durationLabel}
+                </span>
+              </div>
+
+              {section.emptyNote ? (
+                <p className="text-muted-foreground mt-3 text-xs leading-relaxed italic">
+                  {section.emptyNote}
                 </p>
-              );
-            })}
-          </div>
+              ) : (
+                <div className="mt-4 space-y-4">
+                  {section.turns.map(({ entry, timeLabel }, index) => {
+                    const isCandidate = entry.speaker !== "examiner";
+                    return (
+                      <p
+                        key={turnKey(entry, index)}
+                        className="text-sm leading-relaxed break-inside-avoid"
+                      >
+                        {/* The stamp shares the label's line rather than taking
+                            one of its own: it is a locator, not a heading, and a
+                            transcript where every turn costs three lines instead
+                            of two reads as a log. `tabular` so the column of
+                            stamps lines up down the page. */}
+                        <span className="flex items-baseline gap-2 text-[0.625rem] font-semibold tracking-[0.16em] uppercase">
+                          <span className={isCandidate ? "text-primary" : "text-muted-foreground"}>
+                            {speakerLabel(entry.speaker)}
+                          </span>
+                          <span className="text-muted-foreground/70 tabular tracking-normal">
+                            {timeLabel}
+                          </span>
+                        </span>
+                        {entry.text}
+                      </p>
+                    );
+                  })}
+                </div>
+              )}
+            </section>
+          ))}
 
           <p className="border-border text-muted-foreground mt-6 border-t pt-3 text-[0.6875rem] leading-relaxed">
-            Transcription automatique : les hésitations et les pauses sont
-            conservées pour l&apos;évaluation. Les durées ci-dessus sont celles de
-            l&apos;audio effectivement enregistré, et non du chronomètre.
+            {CORRECTION_TRANSCRIPT_COPY.footnote}
           </p>
         </article>
       </div>

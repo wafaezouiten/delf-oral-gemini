@@ -6,6 +6,7 @@ import { UserButton } from "@clerk/nextjs";
 
 import { ChartIcon, ClockIcon, DocumentIcon, MicIcon } from "@/app/_components/po/icons";
 import { cn } from "@/lib/ui/class-names";
+import { clerkAppearance } from "@/lib/ui/clerk-appearance";
 import { HUB_LINKS, isNavLinkActive } from "@/lib/ui/epreuve-hub";
 
 /**
@@ -97,8 +98,18 @@ export function AppSidebar() {
           </ul>
         </nav>
 
+        {/* Clerk's avatar menu, kept as it was: clicking it offers the account
+            and the sign out. What changed is where the first of those two goes
+            — `userProfileMode="navigation"` sends « Gérer le compte » to
+            /app/compte instead of opening Clerk's modal over the app, and that
+            page is where « Repartir de zéro » lives (#69). The popover wears the
+            product's palette for the same reason the page does. */}
         <div className="border-border flex items-center gap-2.5 border-t px-4 py-3">
-          <UserButton />
+          <UserButton
+            userProfileMode="navigation"
+            userProfileUrl={HUB_LINKS.compte}
+            appearance={clerkAppearance}
+          />
           <span className="text-muted-foreground truncate text-xs">Mon compte</span>
         </div>
       </aside>
@@ -112,7 +123,11 @@ export function AppSidebar() {
             Production orale
           </span>
         </Link>
-        <UserButton />
+        <UserButton
+          userProfileMode="navigation"
+          userProfileUrl={HUB_LINKS.compte}
+          appearance={clerkAppearance}
+        />
       </header>
     </>
   );

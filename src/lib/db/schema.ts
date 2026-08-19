@@ -6,7 +6,7 @@
  * serves billing, an admin console or a scraped catalogue, all of which the
  * reproduction audit marks "Drop" (§01).
  *
- * The four decisions worth recording, because each one is a departure from
+ * The five decisions worth recording, because each one is a departure from
  * something:
  *
  *  - **Corrections are their own table, keyed by `mode`.** The incumbent stores
@@ -30,6 +30,11 @@
  *    ends and read whole, and its entries already carry their own phase tag
  *    (`TranscriptEntry.phase`). A row-per-turn table would buy queries nobody
  *    runs, cost a join on every read, and store the phase twice.
+ *  - **Starting over is a stamp, not a delete.** A candidate who resets their
+ *    record (#69) archives it: `oral_exams.archived_at` takes the sittings out
+ *    of the figures and leaves every row, correction and recording exactly where
+ *    it was. Nothing in this schema deletes a sitting, and the one product
+ *    feature that sounds like it does not either.
  *
  * This schema deliberately did not decide which of the two rubric
  * implementations on `develop` won: it stores the five bands, the pre-penalty
@@ -170,6 +175,36 @@ export const oralExams = pgTable(
      * evaluation exists, so a sitting is graded or abandoned and never both.
      */
     abandonedAt: timestamp("abandoned_at", { withTimezone: true }),
+
+    /**
+     * When the candidate drew a line under their record and started over (#69).
+     *
+     * A line, not a delete. An archived sitting keeps its correction, its
+     * recording and its `/app/results/:id`; what it loses is its vote on what
+     * the tableau de bord averages and what the sujet cards print. So the reset
+     * is reversible in principle and destroys nothing in practice, which is what
+     * lets it be a single confirmed click rather than a typed-name ceremony.
+     *
+     * On the row rather than in a `candidate_resets` table keyed by reset
+     * instant, and the read is the reason: `readCandidateHistory` is the single
+     * query behind the hub, the tableau de bord and the historique, so this is
+     * one `is null` on a query that is already filtered by `user_id` — against a
+     * correlated subquery re-deriving the latest reset on every render of every
+     * one of those screens. It also puts the fact on the row that carries it,
+     * which leaves archiving a single sitting possible later without a second
+     * mechanism.
+     *
+     * Stamped only on sittings already **on** the record — graded, or walked out
+     * of. A sitting still in progress when the button is pressed belongs to the
+     * new record, and archiving it would file a correction that has not landed
+     * yet: the candidate would sit an épreuve *after* resetting and never see it
+     * counted. See `archiveCandidateRecord`.
+     *
+     * No index of its own: every read that filters on it also filters on
+     * `user_id`, and one candidate's sittings are already few enough that the
+     * index below does the work.
+     */
+    archivedAt: timestamp("archived_at", { withTimezone: true }),
   },
   (table) => [
     // Every read in the product is "this user's sittings" or "this sitting, if
@@ -348,8 +383,26 @@ export const evaluations = pgTable(
     // The five official grille criteria, each a 0/1/3/5 band.
     ...criterionColumns,
 
-    /** Sum of the five bands, before the duration penalty. */
+    /** Sum of the five bands, before either penalty. */
     rawScore25: integer("raw_score_25").notNull(),
+    /**
+     * Points lost because a part of the épreuve never happened — the candidate
+     * walked out of the débat, or sat through the monologue in silence. The
+     * mark is halved, so this is `raw_score_25 − floor(raw_score_25 / 2)`, and
+     * 0 for the ordinary sitting where both parts ran.
+     *
+     * A separate column rather than more `duration_penalty`, which is the shape
+     * that would need no migration: the two answer different questions ("spoke
+     * for less than the épreuve asks" versus "did not sit half of it"), they are
+     * charged from different evidence — seconds of recording versus words of
+     * transcript — and a row that records 13 points of "duration penalty" is a
+     * mark nobody can explain to the candidate who received it.
+     *
+     * `default(0)` because rows written before this column existed were scored
+     * under the old rule, which had no halving. That is a truthful backfill, not
+     * a convenience: those sittings really were docked nothing for it.
+     */
+    absencePenalty: integer("absence_penalty").notNull().default(0),
     /**
      * Points docked because the candidate spoke for less than the épreuve asks.
      *
@@ -363,7 +416,8 @@ export const evaluations = pgTable(
      * number on any score below the penalty. Only reachable under 3/25.
      */
     durationPenalty: integer("duration_penalty").notNull().default(0),
-    /** What the candidate is shown: `raw_score_25 − duration_penalty`, floored at 0. */
+    /** What the candidate is shown: `raw − absence_penalty − duration_penalty`,
+     *  floored at 0. */
     score25: integer("score_25").notNull(),
     /**
      * Whether this score clears the DELF per-competency floor (≥ 5/25). Derived
@@ -401,14 +455,32 @@ export const evaluations = pgTable(
     ),
     check(
       "evaluations_score_range_check",
-      sql`${table.rawScore25} between 0 and 25 and ${table.score25} between 0 and 25 and ${table.durationPenalty} >= 0`,
+      sql`${table.rawScore25} between 0 and 25 and ${table.score25} between 0 and 25
+        and ${table.durationPenalty} >= 0 and ${table.absencePenalty} >= 0`,
     ),
-    // Keeps the three score columns telling one story. Both rubric copies apply
+    // WARNING, learned the hard way: `drizzle-kit push` applies a new COLUMN and
+    // silently leaves these CHECK constraints at whatever the database already
+    // had. A pushed database therefore ends up with `absence_penalty` present
+    // and `evaluations_score_25_check` still reading `raw − duration`, which
+    // accepts every correction that took no absence penalty and refuses every
+    // one that did. That is not a theoretical drift — it strands a real
+    // candidate's correction, because the finish route logs the failed write
+    // and shows them « correction perdue ». Constraint changes must be applied
+    // from the generated migration; `pnpm verify:db` now writes a row with both
+    // penalties non-zero, which is the only shape that notices.
+    //
+    // Keeps the four score columns telling one story. Both rubric copies apply
     // the penalty the same way — subtract, floor at 0 — so this constraint is
     // neutral in the disagreement between them.
+    //
+    // The two penalties are summed rather than nested because the halving can
+    // never drive the score below 0 on its own: it takes at most half of a
+    // non-negative number. So `greatest(raw − absence − duration, 0)` and
+    // `greatest(greatest(raw − absence, 0) − duration, 0)` — which is the order
+    // `scoreSitting` actually applies — agree on every row.
     check(
       "evaluations_score_25_check",
-      sql`${table.score25} = greatest(${table.rawScore25} - ${table.durationPenalty}, 0)`,
+      sql`${table.score25} = greatest(${table.rawScore25} - ${table.absencePenalty} - ${table.durationPenalty}, 0)`,
     ),
   ],
 );

@@ -102,6 +102,10 @@ export interface PlayerLike {
   enqueue(base64: string): void;
   interrupt(): void;
   close(): Promise<void>;
+  /** Audio scheduled but not yet heard. Logged when an interruption is about to
+   *  throw it away, so a question the candidate never heard leaves a record of
+   *  how much of it there was. See {@link ExamController.handleInterruption}. */
+  readonly bufferedSeconds: number;
 }
 
 /** Diagnostics from the audio layer, routed into the same session log the
@@ -120,6 +124,21 @@ export interface ExamState {
   phase: OralPhase;
   elapsed: number;
   remaining: number;
+  /**
+   * When the current phase's clock started, in the transcript's own time base —
+   * ms since the exam began, the same origin `TranscriptEntry.timestamp` counts
+   * from. Null while the phase has not started its clock, which is a real window
+   * rather than a transient: the consigne is spoken first and the clock starts
+   * after it (#37).
+   *
+   * Exposed so the débat's feed can stamp each turn with the count the scene's
+   * clock is already showing, instead of one anchored somewhere else. In the
+   * transcript's base rather than the controller's so that no reader has to hold
+   * two origins at once — `elapsed` answers "how long has this phase run", this
+   * answers "where in the transcript did it start", and they are not
+   * interchangeable.
+   */
+  phaseStartedAt: number | null;
   connection: ConnectionState;
   /**
    * The two machines flattened into one value (`lib/live/state-machine.ts`).
@@ -177,11 +196,13 @@ export interface ExamState {
    * The examiner's consigne for the phase now open, or null before the first one
    * (#37).
    *
-   * It outlives its own playback on purpose. The clip is the *spoken* half of a
-   * consigne whose written half must stay readable for as long as it applies, so
-   * the card stays on screen for the rest of the phase, carrying the text and a
-   * « Réécouter ». A candidate whose browser refused to play it, or who muted it,
-   * loses nothing.
+   * It outlives its own playback, and since #59 nothing on screen does: the
+   * consigne's control is a « Passer » button that exists for as long as the
+   * voice does, and it reads the two flags below rather than this. What is left
+   * here is the snapshot's record of which consigne the phase opened with — the
+   * clip {@link ExamController.playAnnouncement} would play again out of a hold,
+   * and the one thing that says *which* boundary a held or playing state belongs
+   * to.
    */
   announcement: AnnouncementId | null;
   /**
@@ -204,8 +225,6 @@ export interface ExamState {
    * the recording and then playing the consigne into it. See {@link announce}.
    */
   announcementBlocked: boolean;
-  /** The candidate turned the consignes off for the rest of the sitting. */
-  announcementsMuted: boolean;
 }
 
 /**
@@ -412,6 +431,14 @@ export class ExamController {
    * the closing handshake and the phase transition coordinate through this.
    */
   private activityEnded = false;
+  /**
+   * The examiner's opening turn of this phase has been delivered.
+   *
+   * False from the moment a session opens until the examiner has finished its
+   * first turn on it, or the speaker has run out of that turn. While it is
+   * false an interruption is refused — see {@link handleInterruption}.
+   */
+  private openingTurnDelivered = false;
   private phaseSeconds = { monologue: 0, debate: 0 };
   /** Wall-clock stamps per speaking phase, for `oral_exam_phases`' audit trail.
    *  Null means the phase was never entered, which is the truth about an
@@ -445,7 +472,6 @@ export class ExamController {
   private announcementId: AnnouncementId | null = null;
   private announcementPlaying = false;
   private announcementBlocked = false;
-  private announcementsMuted = false;
   private announceToken = 0;
   /** The same guard for candidate-initiated playback. See {@link playAnnouncement}
    *  for why it cannot share `announceToken`. */
@@ -496,6 +522,7 @@ export class ExamController {
       phase: this.phase,
       elapsed: this.elapsed,
       remaining: remainingSeconds(this.phase, this.elapsed),
+      phaseStartedAt: this.phaseStart === null ? null : this.phaseStart - this.examStart,
       connection: this.connection,
       status: examStatus(this.phase, this.connection),
       // A consigne is the examiner talking, so the scene animates for it exactly
@@ -542,12 +569,11 @@ export class ExamController {
       devTextMode: this.devTextMode,
       announcement: this.announcementId,
       // Armed and waiting for the click — as distinct from waiting for the
-      // consigne to finish, which is the announcement card's business.
+      // consigne to finish, which is the consigne control's business.
       awaitingStart:
         this.phaseAwaitingStart && !this.announcementPlaying && !this.announcementBlocked,
       announcementPlaying: this.announcementPlaying,
       announcementBlocked: this.announcementBlocked,
-      announcementsMuted: this.announcementsMuted,
     };
   }
 
@@ -658,7 +684,7 @@ export class ExamController {
    */
   private async announce(id: AnnouncementId): Promise<AnnouncementOutcome> {
     const announcer = this.announcer;
-    if (!announcer || this.announcementsMuted) return "skipped";
+    if (!announcer) return "skipped";
 
     // A hold left over from an earlier consigne. Reachable because the
     // préparation's briefing is spoken without being awaited: if the browser
@@ -700,10 +726,10 @@ export class ExamController {
   /**
    * Play the phase's consigne now, on the candidate's own click.
    *
-   * Two buttons, one method. « Écouter la consigne » answers a browser that
-   * refused to autoplay, and « Réécouter » replays one that has already been
-   * heard; the difference between them is only whether a phase is waiting on the
-   * answer, which {@link releaseAnnouncementHold} sorts out on its own.
+   * One button since #59: « Écouter la consigne », which answers a browser that
+   * refused to autoplay. The « Réécouter » that shared this method went with the
+   * card, and with it every case where a phase was *not* waiting on the answer —
+   * which {@link releaseAnnouncementHold} handles either way.
    *
    * Being a click is what makes it work: the autoplay policy this exists to
    * survive is satisfied by the gesture that called it.
@@ -711,13 +737,13 @@ export class ExamController {
   playAnnouncement(): void {
     const id = this.announcementId;
     const announcer = this.announcer;
-    if (!id || !announcer || this.announcementsMuted) return;
+    if (!id || !announcer) return;
 
-    // Its own counter, not `announceToken`: a replay must not supersede the
-    // `announce()` that may be parked on a hold, only other replays. Without it a
-    // double-clicked « Réécouter » has the first click's playback report itself
-    // finished while the second one is still audible, and the card folds up over
-    // the sound of the examiner talking.
+    // Its own counter, not `announceToken`: this playback must not supersede the
+    // `announce()` parked on the hold it is answering, only another of its own.
+    // Without it a double-clicked « Écouter la consigne » has the first click's
+    // playback report itself finished while the second one is still audible, and
+    // the control disappears over the sound of the examiner talking.
     const token = (this.playbackToken += 1);
 
     this.announcementPlaying = true;
@@ -735,10 +761,16 @@ export class ExamController {
   /**
    * Silence the consigne that is playing, and let the phase get on with it.
    *
-   * Labelled « Passer l'annonce » rather than « Passer », because the préparation
-   * screen already has a « Passer et commencer maintenant » that ends a
-   * thirty-minute phase. Two controls both reading "Passer", one ending the
-   * préparation and one silencing a clip, would be genuinely ambiguous.
+   * Labelled « Passer » (#59). It could not be, while the préparation carried a
+   * ghost « Passer et commencer maintenant » that ended a thirty-minute phase —
+   * two controls both reading "Passer", one silencing a clip and one ending the
+   * préparation, would have been genuinely ambiguous. That ghost is gone and the
+   * only other way on is « Commencer » in the topbar, so the short label is the
+   * unambiguous one.
+   *
+   * This clip only. The sticky « Couper les annonces » was deleted with the card
+   * that carried it: nothing now silences a consigne the candidate has not
+   * reached yet.
    */
   skipAnnouncement(): void {
     this.announcer?.stop();
@@ -749,33 +781,9 @@ export class ExamController {
     this.releaseAnnouncementHold("skipped");
   }
 
-  /**
-   * Turn the consignes off for the rest of the sitting.
-   *
-   * Sticky, deliberately. Somebody practising their fourth épreuve knows the
-   * consigne by heart, and making them silence it again at every boundary is how
-   * a product teaches people to click without reading. It also disposes of the
-   * autoplay problem for anyone who has opted out: a muted consigne is never
-   * played, so it can never be refused, so no phase can ever be held waiting for
-   * one.
-   *
-   * The text stays on screen. This mutes the voice, it does not withdraw the
-   * instruction.
-   */
-  muteAnnouncements(): void {
-    if (this.announcementsMuted) return;
-    this.announcementsMuted = true;
-    this.announcer?.stop();
-    // Same reason as `skipAnnouncement`: the voice is already gone.
-    this.announcementPlaying = false;
-    this.log("announcements-muted");
-    this.releaseAnnouncementHold("skipped");
-    this.emit();
-  }
-
-  /** Let a held phase continue. Releases nothing when nothing is held, which is
-   *  the ordinary case for « Réécouter » — but still emits, because the caller has
-   *  just changed what the card should be drawing. */
+  /** Let a held phase continue. Releases nothing when nothing is held — a skip
+   *  landing after the clip finished on its own — but still emits, because the
+   *  caller has just changed what the control should be drawing. */
   private releaseAnnouncementHold(outcome: AnnouncementOutcome): void {
     const hold = this.announcementHold;
     this.announcementHold = null;
@@ -795,9 +803,25 @@ export class ExamController {
    * re-anchoring its clock afterwards would show a timer jumping backwards from
    * 29:26 to 30:00. Half a minute out of thirty minutes is also not a duration
    * anything grades — unlike the monologue's, which is why that one waits.
+   *
+   * **Called when the épreuve opens, not from a button (#55).** A briefing screen
+   * used to stand between the sujet and the préparation and call this from its
+   * CTA, so a candidate who had already pressed « Commencer » was asked to press
+   * it again — and the consigne fired below, being the first thing that happens
+   * after this, could not be heard until they did. `ExamClient` calls it on mount
+   * now. The clip still plays on the ordinary path because entering the épreuve
+   * is a client-side navigation: the document keeps the sticky activation the
+   * candidate's click gave it. A hard load of the same URL has no activation, and
+   * `announce()` already answers for that — the phase is not held, the card
+   * carries the text, and « Écouter la consigne » is one click.
+   *
+   * Refused after `destroy()`, which is not hypothetical: this is now called from
+   * an effect rather than a click, and a controller torn down between the two
+   * would otherwise start a ticker counting a phase nobody is in and speak into
+   * a closed announcer.
    */
   start(): void {
-    if (this.started) return;
+    if (this.started || this.destroyed) return;
     this.started = true;
     this.examStart = this.now();
     this.phaseStart = this.now();
@@ -828,21 +852,19 @@ export class ExamController {
   }
 
   private async openAudio(): Promise<boolean> {
-    // Held locally until BOTH devices are open. Assigning as we went meant a
-    // microphone failure — the common one; it is the half that needs
-    // permission — left the speaker's context open with nothing to close it
-    // until the exam ended.
-    let player: PlayerLike | null = null;
-    try {
-      player = this.deps.createPlayer({
-        onSpeakingChange: (speaking) => {
-          this.examinerSpeaking = speaking;
-          this.emit();
-        },
-        onEvent: (name, detail) => this.log(name, detail),
-      });
-      await player.resume();
+    // The speaker first, and on its own terms (#74).
+    //
+    // The two devices fail for different reasons and only one of them is the
+    // candidate's to fix, but they used to be installed together: the player
+    // was built, resumed, and then closed in the microphone's catch. A refused
+    // permission therefore also cost the examiner its voice on a sitting whose
+    // socket and transcript were both working — so the débat printed questions
+    // that were never spoken, the faces never moved, and the only notice on
+    // screen talked about the microphone. Nothing about the examiner speaking
+    // depends on the candidate being recorded, so nothing here makes it.
+    if (!(await this.openPlayer())) return false;
 
+    try {
       const recorder = this.deps.createRecorder({
         // The recording does not go through here and must not: `sendAudio` on a
         // torn-down session is a no-op, and a sitting has several of those.
@@ -854,20 +876,19 @@ export class ExamController {
 
       // `destroy()` can land while the permission prompt is up — which is the
       // very window this method was moved late in the exam to create. The
-      // devices are installed on the controller only at the lines below, so a
-      // teardown that ran meanwhile found both fields null and closed nothing;
-      // without this check they are then adopted by a controller that is
-      // already gone, and nothing will ever stop them again. The microphone
-      // and the speaker each guard their own version of this internally; this
-      // is the same race one layer up, where only the controller can see it.
+      // microphone is installed on the controller only at the line below, so a
+      // teardown that ran meanwhile found the field null and closed nothing;
+      // without this check the device is then adopted by a controller that is
+      // already gone, and nothing will ever stop it again. The speaker answers
+      // its half of the same race in `openPlayer`, and each device guards its
+      // own version internally; this is that race one layer up, where only the
+      // controller can see it.
       if (this.destroyed) {
         await recorder.stop().catch(() => {});
-        await player.close().catch(() => {});
-        this.log("audio-discarded", "the sitting ended while the devices were opening");
+        this.log("audio-discarded", "the sitting ended while the microphone was opening");
         return false;
       }
 
-      this.player = player;
       this.recorder = recorder;
       // The development text mode can be switched on during preparation, before
       // there is any microphone to turn off. The device has to arrive already
@@ -878,18 +899,76 @@ export class ExamController {
       this.log("audio-ready");
       return true;
     } catch (error) {
+      // The speaker opened above is deliberately left running. It is the half
+      // that still works, and it is not the candidate's recording: keeping it is
+      // the difference between an épreuve that goes unrecorded and one that is
+      // also silent, on which the examiner asks questions only the feed reports.
+      // `destroy()` closes it, as it does on every other path.
+      this.reportAudioFailure(error);
+      return false;
+    }
+  }
+
+  /**
+   * Open the speaker, and install it whether or not the microphone follows.
+   *
+   * Idempotent by reuse rather than by rebuilding: `prepareAudio()` retries
+   * while there is no microphone — from `advanceEarly()`, and again at every
+   * speaking boundary — and the speaker now survives those failures, so a retry
+   * arrives with a working one already installed. Building a second
+   * `AudioContext` there would abandon the first with nothing holding it, which
+   * is the leak the two devices were bundled together to avoid.
+   */
+  private async openPlayer(): Promise<boolean> {
+    if (this.player) return true;
+
+    let player: PlayerLike | null = null;
+    try {
+      player = this.deps.createPlayer({
+        onSpeakingChange: (speaking) => {
+          // The speaker running out of the examiner's turn is one of the two
+          // things that prove the opening question was delivered. See
+          // {@link handleInterruption}.
+          if (!speaking && this.examinerSpeaking) this.openingTurnDelivered = true;
+          this.examinerSpeaking = speaking;
+          this.emit();
+        },
+        onEvent: (name, detail) => this.log(name, detail),
+      });
+      await player.resume();
+
+      // The same teardown race the microphone answers below, one device earlier.
+      if (this.destroyed) {
+        await player.close().catch(() => {});
+        this.log("audio-discarded", "the sitting ended while the speaker was opening");
+        return false;
+      }
+
+      this.player = player;
+      return true;
+    } catch (error) {
       await player?.close().catch(() => {
         /* nothing left to report; the exam failure below is the story */
       });
-      const denied =
-        typeof DOMException !== "undefined" &&
-        error instanceof DOMException &&
-        (error.name === "NotAllowedError" || error.name === "SecurityError");
-      this.micError = denied ? MIC_MESSAGES.denied : MIC_MESSAGES.unavailable;
-      this.log("audio-failed", String(error));
-      this.emit();
+      // The microphone is not attempted after this, and the notice below is the
+      // one it would have raised anyway: a browser that cannot open an
+      // `AudioContext` for playback will not open a capture graph either.
+      this.reportAudioFailure(error);
       return false;
     }
+  }
+
+  /** One notice for either device. Both are refused by the same prompt and by
+   *  the same browser, and neither failure is worth a sentence that asks the
+   *  candidate for something different. */
+  private reportAudioFailure(error: unknown): void {
+    const denied =
+      typeof DOMException !== "undefined" &&
+      error instanceof DOMException &&
+      (error.name === "NotAllowedError" || error.name === "SecurityError");
+    this.micError = denied ? MIC_MESSAGES.denied : MIC_MESSAGES.unavailable;
+    this.log("audio-failed", String(error));
+    this.emit();
   }
 
   /**
@@ -1232,7 +1311,13 @@ export class ExamController {
     // emits before it does anything asynchronous, so the débat is on screen by
     // the time this returns. What follows — the microphone handed back, the
     // débat's own consigne — is the ordinary path, unchanged.
-    void this.advance();
+    //
+    // That synchronous stretch is what makes the `true` below true, and it used
+    // to be reachable only if nothing in it threw: a socket that failed on the
+    // way out took the phase change with it and left this method still claiming
+    // the exposé had counted (#65). The steps in question are guarded now, and
+    // `advanceDetached` reports anything else that fails rather than dropping it.
+    this.advanceDetached();
     return true;
   }
 
@@ -1303,7 +1388,7 @@ export class ExamController {
    */
   private beginClosingHandshake(): void {
     if (this.phase !== "monologue" && this.phase !== "debate") {
-      void this.advance();
+      this.advanceDetached();
       return;
     }
     if (this.closing) return;
@@ -1312,7 +1397,13 @@ export class ExamController {
     this.log("closing-handshake");
 
     if (this.phase === "monologue") this.endMonologueActivity();
-    this.session?.sendDirective(closingInstruction(this.phase));
+    // Tolerated for the same reason as the teardown steps, and this one is the
+    // candidate's own « Terminer » rather than a development tool: a socket that
+    // threw here never reached the stamp below, so `closingHasTimedOut()` could
+    // never become true and the safety timeout — the whole reason a silent
+    // examiner cannot strand anybody — was itself stranded (#65).
+    const instruction = closingInstruction(this.phase);
+    this.tolerate("closing-directive", () => this.session?.sendDirective(instruction));
 
     // Stamped, not scheduled. The deadline is checked from `tick()` against the
     // injected clock, like every other timing decision here — this used to be a
@@ -1333,6 +1424,33 @@ export class ExamController {
     this.closingStartedAt = null;
   }
 
+  /**
+   * Advance without waiting for it, and without dropping the reason if it fails.
+   *
+   * Five callers hand the phase change off rather than awaiting it, and every
+   * one of them is right to: a turn completing, a clock running out and a typed
+   * exposé all have somewhere else to be, and `advance()` ends with a consigne
+   * that takes twenty-five seconds to speak.
+   *
+   * What they were not right to do was write it `void this.advance()`. That
+   * dropped the rejection: `submitTypedExpose` had already told the panel the
+   * exposé was accepted, so the box emptied, the screen stayed on the exposé,
+   * and the only trace anywhere was an unhandled rejection in a console nobody
+   * had open (#65). The teardown steps that produced it are guarded now — but a
+   * phase change that fails for some other reason must still say so, and this is
+   * where it says it.
+   */
+  private advanceDetached(): void {
+    // Read here, not in the catch. `advance()` flips the phase before the awaits
+    // that can still fail — `finish()`'s teardown among them — so by the time a
+    // rejection lands, `this.phase` is the part being entered and a log naming
+    // it `from` would point at the wrong transition entirely.
+    const from = this.phase;
+    void this.advance().catch((error: unknown) => {
+      this.log("advance-failed", { from, error: String(error) });
+    });
+  }
+
   /** Every phase transition runs through here, so ordering lives in one place. */
   private async advance(): Promise<void> {
     const current = this.phase;
@@ -1351,7 +1469,7 @@ export class ExamController {
         this.phaseSeconds[current] = Math.round((this.now() - this.phaseStart) / 1000);
       }
       this.phaseStamps[current].endedAt = this.now();
-      this.recorder?.endPhase();
+      this.tolerate("end-phase", () => this.recorder?.endPhase());
     }
 
     this.log("phase-transition", `${current} -> ${target}`);
@@ -1372,7 +1490,9 @@ export class ExamController {
     // Without this the mode would outlive the only screen that can use it: the
     // débat would be neither typeable nor recordable, and it would arrive at the
     // correction with an empty transcript and zero seconds.
-    if (this.devTextMode && current === "monologue") this.setDevTextMode(false);
+    if (this.devTextMode && current === "monologue") {
+      this.tolerate("dev-text-mode-off", () => this.setDevTextMode(false));
+    }
 
     this.phase = target;
     // Null, not `now()`: the phase is open but its clock has not started. The
@@ -1474,6 +1594,10 @@ export class ExamController {
     // machine. Without this the previous phase's terminal `closed` would show
     // as the new session's starting state until its first callback arrived.
     this.connection = "idle";
+    // Same lifetime, same reason: the opening turn this guards is this
+    // session's, not the one the previous phase finished. See
+    // {@link handleInterruption}.
+    this.openingTurnDelivered = false;
 
     const callbacks: SessionManagerCallbacks = {
       onStateChange: (state) => {
@@ -1498,8 +1622,11 @@ export class ExamController {
       onCandidateTranscript: (text) => this.addFragment("candidate", text),
       onExaminerTranscript: (text) => this.addFragment("examiner", text),
       onExaminerAudio: (base64) => this.player?.enqueue(base64),
-      onInterrupted: () => this.player?.interrupt(),
+      onInterrupted: () => this.handleInterruption(),
       onTurnComplete: () => {
+        // Whatever else this turn ending means below, it means the examiner has
+        // finished the first thing it said on this session.
+        this.openingTurnDelivered = true;
         // The ONLY thing Gemini is allowed to influence about the exam's flow,
         // and only inside a window the app opened: once the clock has run out
         // and the closing directive has gone out, the examiner's turn ending is
@@ -1510,7 +1637,7 @@ export class ExamController {
         if (this.closing) {
           this.closing = false;
           this.clearClosingTimer();
-          void this.advance();
+          this.advanceDetached();
         }
       },
       onEvent: (name, detail) => this.log(name, detail),
@@ -1538,16 +1665,93 @@ export class ExamController {
     }
   }
 
+  /**
+   * Gemini reports that the candidate took the floor: drop the queued playback.
+   *
+   * Refused until the examiner's opening turn has been delivered (#74), because
+   * before that there is nothing to take the floor FROM. The débat opens with
+   * the examiner's question, and the candidate cannot be interrupting a question
+   * they have not been asked yet — so an interruption arriving in that window is
+   * automatic VAD reacting to the room, and honouring it threw away the whole
+   * question while the transcript went on printing it. The candidate then read
+   * an objection nobody had spoken.
+   *
+   * Two things release it, whichever comes first: the turn completing, and the
+   * speaker running out of it. The second matters because an interrupted
+   * generation is not guaranteed to be followed by a `turnComplete`, and a guard
+   * that could only be released by one of them could stay shut for a whole
+   * débat — leaving an examiner the candidate genuinely cannot talk over.
+   *
+   * After that, an interruption is exactly what it says: the candidate is
+   * speaking, and the examiner stops.
+   *
+   * **What refusing it can and cannot do.** `interrupted` reports a decision the
+   * server has already taken: generation stopped, and no client can ask for the
+   * rest of a turn that was never produced. What this keeps is everything
+   * already delivered — which is usually the whole question, because Gemini
+   * streams a turn faster than real time and the candidate is hearing its first
+   * second while the remaining four sit queued in the player. That queue is
+   * exactly what the flush threw away, and it is the failure that was reported:
+   * a question printed in full and never heard. A turn genuinely cut short
+   * server-side arrives short in the transcript too, and nothing here can make
+   * it longer.
+   */
+  private handleInterruption(): void {
+    // Redundant to name the phase: `log` stamps every event with it.
+    const buffered = this.player?.bufferedSeconds ?? 0;
+    if (!this.openingTurnDelivered) {
+      this.log("interruption-refused", { buffered });
+      return;
+    }
+    this.log("interruption", { buffered });
+    this.player?.interrupt();
+  }
+
   /** Release the monologue floor exactly once. See `activityEnded`. */
   private endMonologueActivity(): void {
     if (this.activityEnded) return;
     this.activityEnded = true;
-    this.session?.endCandidateActivity();
+    this.tolerate("end-candidate-activity", () => this.session?.endCandidateActivity());
   }
 
   private closeSession(): void {
-    this.session?.close();
+    this.tolerate("close-session", () => this.session?.close());
+    // Dropped whether or not the close succeeded. A socket this controller can
+    // no longer talk to is not one it should keep a reference to — and holding
+    // it would hand the next phase a session belonging to the last one.
     this.session = null;
+  }
+
+  /**
+   * Run a step that ends something, and let the épreuve survive it failing.
+   *
+   * Every caller is a variation on telling a thing that is going away that it is
+   * going away: the socket's activity marker, the socket itself, the recorder's
+   * open artefact, the development text mode. None of them is a reason to keep
+   * the candidate on a part that has ended — and all of them sit in `advance()`
+   * BEFORE the phase changes, so before this existed, one throw left the épreuve
+   * on a finished part with no way forward (#65).
+   *
+   * The throw is real rather than theoretical: `endCandidateActivity` reaches
+   * `sendRealtimeInput` on a WebSocket the SDK still believes is open, which is
+   * exactly the state a dropped connection leaves behind.
+   *
+   * Not every site is one that throws *today* — `SessionManager.sendDirective`
+   * and `close` catch their own errors, so those two are the interface's contract
+   * being honoured rather than a live failure being caught. That is deliberate
+   * and is not dead code: this class holds `LiveSessionLike`, not that class, and
+   * the one time it assumed an implementation detail of the socket instead of the
+   * interface was this bug.
+   *
+   * Logged, not swallowed. The step failed and the event log says which one, so
+   * a recording that is short by one phase has something to be explained by.
+   */
+  private tolerate(step: string, run: () => void): void {
+    try {
+      run();
+    } catch (error) {
+      this.log("teardown-failed", { step, error: String(error) });
+    }
   }
 
   private async finish(): Promise<void> {
@@ -1699,7 +1903,7 @@ export class ExamController {
       this.closing = false;
       this.clearClosingTimer();
       this.log("closing-safety-timeout");
-      void this.advance();
+      this.advanceDetached();
       return;
     }
 
@@ -1713,7 +1917,7 @@ export class ExamController {
         return;
       }
       if (phaseUsesLiveSession(this.phase)) this.beginClosingHandshake();
-      else void this.advance();
+      else this.advanceDetached();
     }
   }
 

@@ -5,8 +5,9 @@
  * runs, what the monologue asks for, when to begin, when it is over. This product
  * only ever wrote it down. These four scripts are the spoken half, and this file
  * is the only place they exist — the clip in `public/announcements/` is generated
- * from the text below, and the caption printed under the player is that same
- * text. There is no second copy to drift.
+ * from the text below and nothing prints it (#59). There is no second copy to
+ * drift, and since the card was replaced by a « Passer » button there is no
+ * written copy at all: what the candidate gets is the voice.
  *
  * Three properties are deliberate, and each one comes from a constraint the rest
  * of the codebase had already decided:
@@ -60,14 +61,15 @@ export const ANNOUNCEMENT_IDS: readonly AnnouncementId[] = [
 
 export interface Announcement {
   id: AnnouncementId;
-  /** The heading above the player. Not spoken. */
-  title: string;
   /**
-   * Exactly what is spoken, and exactly what is printed beneath the player.
+   * Exactly what is spoken, and the only form it takes.
    *
-   * One string for both, so the text equivalent cannot say less than the audio.
-   * A candidate who never hears a word of this — muted, blocked by the browser's
-   * autoplay policy, sitting in a library — reads the same sentences.
+   * It used to be printed under the player as well, so that a candidate who
+   * never heard a word of it — muted, refused by the browser's autoplay policy,
+   * sitting in a library — read the same sentences. #59 removed the card that
+   * printed it, deliberately: what is left is a « Passer » button, and a
+   * candidate who cannot hear the consigne now misses it. `announcement-control.ts`
+   * records that trade.
    */
   text: string;
   /** The generated clip, under `public/`. */
@@ -123,13 +125,11 @@ export function spokenMinutes(seconds: number): string {
 export const ANNOUNCEMENTS: Record<AnnouncementId, Announcement> = {
   preparation: {
     id: "preparation",
-    title: "Consigne de préparation",
     text: `Bonjour, et bienvenue à l'épreuve de production orale du DELF B2. Vous entrez maintenant dans le temps de préparation. Vous disposez de ${spokenMinutes(PHASE_DURATIONS.preparation)} minutes. Lisez le document qui vous a été remis, puis dégagez le thème qu'il soulève. Vous pouvez prendre des notes : elles resteront à votre disposition pendant toute l'épreuve. Vous présenterez ensuite votre point de vue de façon construite, seul, puis nous en discuterons ensemble. Si vous êtes prêt avant la fin du temps imparti, vous pouvez commencer sans attendre.`,
     src: "/announcements/preparation.wav",
   },
   monologue: {
     id: "monologue",
-    title: "Consigne du monologue suivi",
     // Replaces the greeting the Live examiner used to speak at this boundary.
     // Two things are gained. The wording is now the same at every sitting, which
     // a consigne must be; and it is spoken BEFORE the microphone starts
@@ -140,13 +140,11 @@ export const ANNOUNCEMENTS: Record<AnnouncementId, Announcement> = {
   },
   debate: {
     id: "debate",
-    title: "Consigne du débat",
     text: `Je vous remercie, votre exposé est terminé. Nous passons à la seconde partie de l'épreuve, le débat. Pendant ${spokenMinutes(PHASE_DURATIONS.debate)} minutes, je vais revenir sur ce que vous venez de dire et contester certains de vos arguments. Défendez votre position, nuancez-la, et donnez-moi de nouveaux exemples. Vous pouvez me répondre dès que je vous adresse la parole.`,
     src: "/announcements/debate.wav",
   },
   finished: {
     id: "finished",
-    title: "Fin de l'épreuve",
     text: `L'épreuve de production orale est terminée. Je vous remercie de votre participation. Votre prestation est maintenant transmise pour correction : ne fermez pas cet onglet avant l'affichage de vos résultats.`,
     src: "/announcements/finished.wav",
   },

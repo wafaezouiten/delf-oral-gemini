@@ -44,6 +44,7 @@ export function ConversationControls({
   recording,
   awaitingStart = false,
   startDisabled = false,
+  closing = false,
   elapsed,
   hasNotes,
   notesOpen,
@@ -70,6 +71,15 @@ export function ConversationControls({
   awaitingStart?: boolean;
   /** Armed, but not yet startable: the examiner is still giving the consigne. */
   startDisabled?: boolean;
+  /**
+   * The click has been taken and the part is ending: the examiner is delivering
+   * its closing sentence (#55).
+   *
+   * Without this the control fell back to `locked` — `canAdvance` goes false the
+   * moment the handshake starts — and printed « Encore 0 min avant de pouvoir
+   * conclure » over a monologue that was already concluding.
+   */
+  closing?: boolean;
   elapsed: number;
   hasNotes: boolean;
   notesOpen: boolean;
@@ -85,17 +95,24 @@ export function ConversationControls({
   devPanel?: ReactNode;
 }) {
   // Armed outranks everything: a part that has not begun is not connecting, and
-  // it is not locked behind a floor it has not started counting towards.
+  // it is not locked behind a floor it has not started counting towards. Closing
+  // comes next, and for the same kind of reason: a part that is ending is not
+  // waiting for a floor it passed, whatever `canAdvance` says about it.
   const state: MicState = awaitingStart
     ? "armed"
-    : connecting
-      ? "connecting"
-      : canAdvance
-        ? "recording"
-        : "locked";
+    : closing
+      ? "closing"
+      : connecting
+        ? "connecting"
+        : canAdvance
+          ? "recording"
+          : "locked";
   const { hint, label, button } = micCopy(phase, state, secondsToMonologueFloor(elapsed));
   const armed = state === "armed";
   const locked = state === "locked";
+  /** Nothing the candidate presses now changes what happens next, so the control
+   *  stops looking like an offer. */
+  const inert = locked || state === "closing";
 
   return (
     <div className="border-border bg-card/95 relative shrink-0 border-t backdrop-blur">
@@ -132,7 +149,7 @@ export function ConversationControls({
           <button
             type="button"
             onClick={armed ? onStart : onAdvance}
-            disabled={armed ? startDisabled : locked || connecting}
+            disabled={armed ? startDisabled : inert || connecting}
             aria-label={label}
             className={cn(
               "relative flex items-center justify-center gap-2 transition-colors disabled:cursor-not-allowed disabled:opacity-50",
@@ -142,9 +159,9 @@ export function ConversationControls({
                 ? "bg-danger h-11 rounded-full px-5 text-sm font-semibold text-white hover:opacity-90"
                 : "size-14 rounded-full",
               !armed &&
-                (recording && !locked
+                (recording && !inert
                   ? "bg-danger text-white hover:opacity-90"
-                  : locked
+                  : inert
                     ? "bg-muted text-muted-foreground border-border border"
                     : "bg-primary text-primary-foreground hover:opacity-90"),
             )}
@@ -163,7 +180,9 @@ export function ConversationControls({
                 <MicIcon className="size-4" aria-hidden />
                 {button}
               </>
-            ) : connecting ? (
+            ) : connecting || state === "closing" ? (
+              // The same spinner the connection uses, for the same reason: the
+              // épreuve is waiting on the examiner and the candidate is not.
               <LoadingIcon className="size-6 animate-spin" />
             ) : locked ? (
               <MicIcon className="size-6" />
@@ -174,7 +193,8 @@ export function ConversationControls({
           {/* Not a live region: it changes once a minute during the locked
               window, and a screen reader reciting the countdown over the
               examiner is the fault the clock's milestones exist to avoid. The
-              button's own name carries the same fact on demand. */}
+              button's own name carries the same fact on demand, and the close is
+              announced by the status line above the controls. */}
           <span className="text-muted-foreground text-center text-[0.6875rem]">{hint}</span>
         </div>
 

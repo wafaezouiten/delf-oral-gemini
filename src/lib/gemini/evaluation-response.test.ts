@@ -64,6 +64,8 @@ describe("a correction that can be trusted", () => {
       scoreSitting(criterionScores(parsed), {
         monologueSeconds: 400,
         debateSeconds: 700,
+        monologueWords: 400,
+        debateWords: 300,
         phonologyHeard: true,
       })
         .criteria.lexique,

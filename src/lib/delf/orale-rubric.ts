@@ -34,8 +34,8 @@
  * pieces rather than new rules:
  *
  *  - {@link scoreSitting}, the single entry point the evaluator calls. The
- *    order — snap, sum, dock, then test the floor — is a rule in itself, and a
- *    call site free to get it wrong is how a 2 reaches a column that only
+ *    order — snap, sum, halve, dock, then test the floor — is a rule in itself,
+ *    and a call site free to get it wrong is how a 2 reaches a column that only
  *    accepts 0, 1, 3 and 5.
  *  - {@link applySittingDurationPenalty}, which applies a **per-part** rule to a
  *    sitting that has two parts and one /25. The incumbent corrects one task per
@@ -153,12 +153,99 @@ export interface SittingDurations {
   debateSeconds: number;
 }
 
+/** How much the candidate actually said in each part, in words. */
+export interface SittingParticipation {
+  monologueWords: number;
+  debateWords: number;
+}
+
 /** Which parts of the sitting fell under their own floor, in exam order. */
 export function partsUnderFloor(durations: SittingDurations): Array<"monologue" | "debate"> {
   const short: Array<"monologue" | "debate"> = [];
   if (durations.monologueSeconds < MONOLOGUE_FLOOR_SECONDS) short.push("monologue");
   if (durations.debateSeconds < DEBATE_FLOOR_SECONDS) short.push("debate");
   return short;
+}
+
+/**
+ * How much the candidate must say in a part before it counts as having happened
+ * at all, in words.
+ *
+ * The same figure the finish route already applies to a whole sitting — a
+ * transcript with fewer than 20 candidate words is refused outright there, on
+ * the grounds that a model handed silence will still confidently return five
+ * scores. This is that judgement made per part, which is where it was missing:
+ * a sitting whose monologue runs 400 words and whose débat runs none clears the
+ * route's gate comfortably.
+ *
+ * Deliberately not zero. "Answered nothing" in practice looks like « euh… non,
+ * ça va, merci », and a rule that a single « oui » defeats is a rule that
+ * rewards saying one word over saying none.
+ */
+export const PARTICIPATION_WORD_FLOOR = 20;
+
+/** Which parts the candidate did not actually produce, in exam order. */
+export function partsAbsent(
+  participation: SittingParticipation,
+): Array<"monologue" | "debate"> {
+  const absent: Array<"monologue" | "debate"> = [];
+  if (participation.monologueWords < PARTICIPATION_WORD_FLOOR) absent.push("monologue");
+  if (participation.debateWords < PARTICIPATION_WORD_FLOOR) absent.push("debate");
+  return absent;
+}
+
+/** What the absence rule did: the halved score, the points it cost, and why. */
+export interface AbsencePenalty extends DurationPenalty {
+  absentParts: Array<"monologue" | "debate">;
+}
+
+/**
+ * Halve the mark for a sitting where one of the two parts never happened.
+ *
+ * THIS PROJECT'S RULE, and the second one in this file that is neither the
+ * grille's nor the incumbent's (see {@link UNHEARD_PHONOLOGY_CEILING} for the
+ * first, and for the same reasoning about where such a rule belongs). The
+ * grille has no notion of it because a real jury does not grade an épreuve half
+ * of which the candidate declined to sit; they would not produce a mark at all.
+ * We have to produce one, so it has to be defined.
+ *
+ * What it replaces: nothing but {@link applySittingDurationPenalty}'s flat −3,
+ * which is all that used to happen here. That rule measures a *shortfall* — six
+ * minutes of débat instead of thirteen — and −3 is a fair price for it. It was
+ * also the entire price of walking out of the débat without answering a single
+ * question, because the penalty fires once at one magnitude whichever way a
+ * part falls short. A candidate could produce half the épreuve and keep 22/25.
+ *
+ * Three decisions, all of which change marks:
+ *
+ *   - **Halved, not capped.** `floor(score / 2)`, so a 25 becomes 12 and a 14
+ *     becomes 7. A cap at 12 would leave every walk-out below 12 untouched —
+ *     the weakest candidates would be the ones the rule never reached — and it
+ *     would flatten the ranking of everyone above it.
+ *   - **Measured in words, not seconds.** The duration rule already asks the
+ *     recording how long a part ran; this asks the transcript whether the
+ *     candidate was in it. They are different questions and a microphone that
+ *     dies answers only the first. See {@link PARTICIPATION_WORD_FLOOR}.
+ *   - **It halves once, not per part.** Both parts absent would be a quarter of
+ *     a mark for none of an épreuve, and a quarter is a magnitude no rule here
+ *     produces. Note that this branch is reachable in production rather than
+ *     merely defensive: the finish route's own gate counts the WHOLE transcript
+ *     against {@link PARTICIPATION_WORD_FLOOR}, so 10 candidate words in the
+ *     monologue and 15 in the débat total 25, clear that gate, and fall under
+ *     the per-part floor twice.
+ *
+ * `absentParts` comes back for the reason `shortParts` does: "halved" and
+ * "halved because you answered nothing in the débat" are different records.
+ */
+export function applyAbsentPartPenalty(
+  score25: number,
+  participation: SittingParticipation,
+): AbsencePenalty {
+  const absentParts = partsAbsent(participation);
+  if (absentParts.length === 0) return { score25, penalty: 0, absentParts };
+
+  const halved = Math.floor(score25 / 2);
+  return { score25: halved, penalty: score25 - halved, absentParts };
 }
 
 /** The duration rule over a whole sitting, and which parts triggered it. */
@@ -185,12 +272,21 @@ export interface SittingDurationPenalty extends DurationPenalty {
  * `shortParts` comes back so the reason is legible afterwards: "docked 3" and
  * "docked 3 because the débat produced 40 seconds" are different records, and
  * only one of them can be argued with.
+ *
+ * `absent` names the parts {@link applyAbsentPartPenalty} has already charged
+ * for, and they are dropped from consideration entirely — not merely excused
+ * the −3, but removed from `shortParts` too. A part that never happened is
+ * necessarily under its floor, so leaving it in would dock a candidate twice
+ * for one absence and then report the second charge under the wrong reason. The
+ * rule still fires on the *other* part: an abandoned débat after a
+ * ninety-second monologue is halved, and then docked 3 for the monologue.
  */
 export function applySittingDurationPenalty(
   score25: number,
   durations: SittingDurations,
+  absent: readonly ("monologue" | "debate")[] = [],
 ): SittingDurationPenalty {
-  const shortParts = partsUnderFloor(durations);
+  const shortParts = partsUnderFloor(durations).filter((part) => !absent.includes(part));
   if (shortParts.length === 0) return { score25, penalty: 0, shortParts };
 
   // Delegated with the first short part's own measurement against its own floor
@@ -282,8 +378,12 @@ export function snapCriteria(raw: Record<OralCriterion, number>): CriteriaBands 
  * `phonologyHeard` is deliberately a fact about the épreuve rather than the
  * `evaluations.mode` enum it will usually be derived from. This module is pure
  * DELF logic and must not learn the shape of a storage column to apply a rule.
+ *
+ * The word counts arrive as numbers for the same reason: `transcript.ts` knows
+ * how to count what a candidate said in a phase, and this module needs the
+ * answer without learning the shape of a transcript entry to get it.
  */
-export interface SittingConditions extends SittingDurations {
+export interface SittingConditions extends SittingDurations, SittingParticipation {
   /**
    * Whether the correction actually had the candidate's recording. Required, with
    * no default: defaulting it true reinstates #29 for any caller who forgets, and
@@ -296,11 +396,21 @@ export interface SittingConditions extends SittingDurations {
 export interface SittingScore {
   /** The five bands, snapped — and capped, where the corrector could not hear. */
   criteria: CriteriaBands;
-  /** Their sum, before the duration penalty. */
+  /** Their sum, before any penalty. */
   rawScore25: number;
+  /**
+   * The points the halving took off for a part the candidate never produced —
+   * 0 when both parts happened. See {@link applyAbsentPartPenalty}.
+   */
+  absencePenalty: number;
+  /** Which parts never happened, so the halving can be explained. */
+  absentParts: Array<"monologue" | "debate">;
   /** What the rubric asked to dock, nominal. See {@link DurationPenalty}. */
   durationPenalty: number;
-  /** Which parts were short, so the penalty can be explained. */
+  /**
+   * Which parts were short, so the penalty can be explained. Never includes a
+   * part listed in {@link absentParts} — absence supersedes shortfall.
+   */
   shortParts: Array<"monologue" | "debate">;
   /**
    * Whether « phonologie » was held down because the correction had no audio —
@@ -323,8 +433,8 @@ export interface SittingScore {
  * somewhere else — the snapping in `rubric.ts`, the floor in the finish route,
  * the penalty in two different shapes. Composing them here is what makes
  * "exactly one implementation survives" true of the *sequence* and not just of
- * the functions: a caller cannot sum before snapping, dock before summing, or
- * ask about the floor before the penalty has been taken off.
+ * the functions: a caller cannot sum before snapping, halve after docking, or
+ * ask about the floor before both penalties have been taken off.
  *
  * Nothing here is asked of the model. It returns five numbers and prose; the
  * arithmetic that turns those into a mark is the rubric's, and a prompt that
@@ -341,11 +451,24 @@ export function scoreSitting(
   const snapped = snapCriteria(raw);
   const criteria = capUnheardPhonology(snapped, conditions.phonologyHeard);
   const rawScore25 = criteriaToScore25(criteria);
-  const { score25, penalty, shortParts } = applySittingDurationPenalty(rawScore25, conditions);
+
+  // Halve first, dock second. The order is the decision: a candidate who
+  // produced half an épreuve is marked on half the scale, and the shortfall
+  // rule then applies to what is left. Reversing it would charge the flat 3
+  // against the full mark and then halve the remainder, which quietly makes the
+  // duration penalty worth 1.5 points on exactly the sittings that earned it.
+  const absence = applyAbsentPartPenalty(rawScore25, conditions);
+  const { score25, penalty, shortParts } = applySittingDurationPenalty(
+    absence.score25,
+    conditions,
+    absence.absentParts,
+  );
 
   return {
     criteria,
     rawScore25,
+    absencePenalty: absence.penalty,
+    absentParts: absence.absentParts,
     durationPenalty: penalty,
     shortParts,
     phonologyCapped: criteria.phonologie !== snapped.phonologie,

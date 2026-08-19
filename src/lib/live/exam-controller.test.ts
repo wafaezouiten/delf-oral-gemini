@@ -113,6 +113,17 @@ class FakeSession implements LiveSessionLike {
     this.callbacks.onExaminerTranscript(text);
   }
 
+  /** The examiner's voice, which arrives on its own callback and reaches the
+   *  speaker rather than the transcript. */
+  examinerVoice(base64: string): void {
+    this.callbacks.onExaminerAudio(base64);
+  }
+
+  /** Gemini reporting that somebody took the floor from the examiner. */
+  interrupts(): void {
+    this.callbacks.onInterrupted();
+  }
+
   finishTurn(): void {
     this.callbacks.onTurnComplete();
   }
@@ -279,18 +290,37 @@ class FakePlayer implements PlayerLike {
   resumed = false;
   closed = false;
   interrupts = 0;
-  constructor(private readonly options: DeviceOptions = {}) {}
+  /** The examiner's voice, as far as it has reached the speaker: what an
+   *  interruption drops, and therefore what the candidate does not hear. */
+  chunks: string[] = [];
+  /** One chunk stands for one second. Derived rather than hardcoded so the
+   *  figure the controller logs is a figure a test can hold it to. */
+  get bufferedSeconds(): number {
+    return this.chunks.length;
+  }
+  constructor(
+    private readonly options: DeviceOptions = {},
+    private readonly callbacks: { onSpeakingChange?: (speaking: boolean) => void } = {},
+  ) {}
   async resume(): Promise<void> {
     if (this.options.gate) await this.options.gate;
     if (this.options.fail) throw this.options.fail;
     this.resumed = true;
   }
-  enqueue(): void {}
+  enqueue(base64: string): void {
+    this.chunks.push(base64);
+  }
   interrupt(): void {
     this.interrupts += 1;
+    this.chunks = [];
   }
   async close(): Promise<void> {
     this.closed = true;
+  }
+  /** The real player reports this from its own queue: audible while there is
+   *  something scheduled, silent when it runs out. */
+  speak(speaking: boolean): void {
+    this.callbacks.onSpeakingChange?.(speaking);
   }
 }
 
@@ -365,8 +395,8 @@ function harness(
       recorders.push(recorder);
       return recorder;
     },
-    createPlayer: () => {
-      const player = new FakePlayer(devices.player);
+    createPlayer: (callbacks) => {
+      const player = new FakePlayer(devices.player, callbacks);
       players.push(player);
       return player;
     },
@@ -755,16 +785,18 @@ describe("opening the microphone and the speaker", () => {
     assert.equal(h.players.length, 1, "nor a second AudioContext");
   });
 
-  it("closes the speaker when the microphone is refused", async () => {
+  it("keeps the speaker when the microphone is refused", async () => {
     // The common failure, and the asymmetric one: the microphone is the half
     // that needs permission, and it fails AFTER the speaker is already open.
+    // Closing the speaker with it was how a sitting reached the débat with a
+    // working socket, a streaming transcript and no examiner's voice (#74).
     const h = harness({
       recorder: { fail: new DOMException("Permission denied", "NotAllowedError") },
     });
     h.controller.start();
 
-    assert.equal(await h.controller.prepareAudio(), false);
-    assert.equal(h.players[0].closed, true, "the speaker's context does not outlive the failure");
+    assert.equal(await h.controller.prepareAudio(), false, "the épreuve is not recorded");
+    assert.equal(h.players[0].closed, false, "but the examiner still has a voice");
     assert.match(h.controller.getSnapshot().micError ?? "", /microphone a été refusé/);
   });
 
@@ -775,35 +807,52 @@ describe("opening the microphone and the speaker", () => {
     await h.controller.prepareAudio();
     await h.controller.prepareAudio();
 
-    assert.equal(h.players.length, 2, "a retry legitimately builds a new pair");
-    assert.deepEqual(
-      h.players.map((player) => player.closed),
-      [true, true],
-      "and every abandoned one is closed",
+    assert.equal(h.players.length, 1, "the open speaker is reused, never rebuilt beside itself");
+    assert.equal(h.players[0].closed, false);
+    assert.equal(h.recorders.length, 2, "and the microphone is the half that is retried");
+  });
+
+  it("releases a microphone that finishes opening after the sitting ended", async () => {
+    // The candidate closes the tab while the permission prompt is up. `destroy()`
+    // runs, finds the field still null — the device is installed only once it
+    // has started — and closes nothing. Without the check in `openAudio()` the
+    // microphone is then handed to a controller that no longer exists, and
+    // nothing will ever stop it again.
+    //
+    // The tick before `destroy()` is what puts the sitting in that window: the
+    // speaker opens first and on its own now (#74), so without it the teardown
+    // lands while the SPEAKER is opening and no microphone is ever asked for,
+    // which is the case below.
+    const gate = deferred();
+    const h = harness({ recorder: { gate: gate.promise } });
+    h.controller.start();
+
+    const preparing = h.controller.prepareAudio();
+    await new Promise((resolve) => setImmediate(resolve));
+    h.controller.destroy();
+    gate.resolve();
+
+    assert.equal(await preparing, false, "the audio never became this exam's");
+    assert.equal(h.recorders[0].stopped, true, "the late microphone was released");
+    assert.equal(h.players[0].closed, true, "and the speaker went with the sitting");
+    assert.ok(
+      h.controller.getSnapshot().events.some((event) => event.name === "audio-discarded"),
+      "and it is in the session log rather than silent",
     );
   });
 
-  it("releases devices that finish opening after the sitting ended", async () => {
-    // The candidate closes the tab while the permission prompt is up. `destroy()`
-    // runs, finds both fields still null — they are assigned only once BOTH
-    // devices are open — and closes nothing. Without the check in `openAudio()`
-    // the microphone and the AudioContext are then handed to a controller that
-    // no longer exists, and nothing will ever stop them again.
+  it("asks for no microphone when the sitting ends while the speaker is opening", async () => {
     const gate = deferred();
-    const h = harness({ recorder: { gate: gate.promise } });
+    const h = harness({ player: { gate: gate.promise } });
     h.controller.start();
 
     const preparing = h.controller.prepareAudio();
     h.controller.destroy();
     gate.resolve();
 
-    assert.equal(await preparing, false, "the audio never became this exam's");
-    assert.equal(h.recorders[0].stopped, true, "the late microphone was released");
-    assert.equal(h.players[0].closed, true, "and so was the late AudioContext");
-    assert.ok(
-      h.controller.getSnapshot().events.some((event) => event.name === "audio-discarded"),
-      "and it is in the session log rather than silent",
-    );
+    assert.equal(await preparing, false);
+    assert.equal(h.players[0].closed, true, "the late AudioContext was released");
+    assert.equal(h.recorders.length, 0, "and a sitting that has ended asks for no permission");
   });
 
   it("refuses to open anything once the exam has been torn down", async () => {
@@ -1925,24 +1974,35 @@ describe("spoken consignes", () => {
     assert.equal(h.controller.getSnapshot().recording, true);
   });
 
-  it("stays silent for the rest of the sitting once muted, and keeps the text", async () => {
+  it("silences one clip and still speaks at the next boundary", async () => {
+    // « Passer » is per-clip, and that is the whole of what it is (#59). The
+    // sticky « Couper les annonces » went with the card it lived on, so a
+    // candidate who skips the briefing still hears the monologue's consigne —
+    // and the phase it opens still waits for it.
     const { h, announcer } = speaking();
     h.controller.start();
     await settle();
 
-    h.controller.muteAnnouncements();
-    assert.equal(h.controller.getSnapshot().announcementsMuted, true);
+    h.controller.skipAnnouncement();
     assert.equal(h.controller.getSnapshot().announcementPlaying, false);
     assert.equal(announcer.stops, 1, "the briefing was silenced mid-sentence");
 
+    // The time-out path into the monologue, so nothing here awaits a consigne
+    // that is deliberately left mid-sentence.
     const playedByThen = announcer.played.length;
-    h.advanceClock(120);
-    await h.controller.advanceEarly();
+    h.advanceClock(PHASE_DURATIONS.preparation);
     await settle();
 
-    assert.equal(announcer.played.length, playedByThen, "the monologue's consigne never played");
-    // Straight to armed: a muted consigne cannot be refused, so no part can be
-    // held waiting for one. The « Enregistrer » press is still the candidate's.
+    assert.equal(
+      announcer.played.length,
+      playedByThen + 1,
+      "the monologue's consigne is a different clip and still plays",
+    );
+    assert.equal(h.controller.getSnapshot().announcementPlaying, true);
+    announcer.reachEnd();
+    await settle();
+    await settle();
+
     assert.equal(h.controller.getSnapshot().awaitingStart, true);
     await pressRecord(h);
     assert.deepEqual(h.recorder.calls, ["monologue"]);
@@ -2000,5 +2060,345 @@ describe("spoken consignes", () => {
     await settle();
 
     assert.equal(h.finished.length, 1, "and it is handed over once the voice has finished");
+  });
+});
+
+/**
+ * A part that has ended must end, whatever the things being closed have to say
+ * about it (#65).
+ *
+ * Every step between one part finishing and the next one opening is some form
+ * of "tell a thing that is going away that it is going away" — the socket's
+ * activity marker, the socket, the recorder's open artefact, the development
+ * text mode. They all run BEFORE `advance()` changes the phase, and none of them
+ * used to be allowed to fail: one throw and the épreuve stayed on a part the
+ * candidate had finished, with no control on screen that could move it.
+ *
+ * It was found through the typed exposé, which made the failure loudest — the
+ * panel had already reported the exposé accepted, so the box emptied and the
+ * screen did not move — but nothing about it was development-only. The last two
+ * tests here are the candidate's own « Terminer » on a socket that has gone.
+ */
+describe("a teardown step that throws does not strand the épreuve", () => {
+  const settle = () => new Promise((resolve) => setImmediate(resolve));
+
+  /** Preparation → a monologue that has actually begun, with a live session. */
+  async function intoStartedMonologue(h: Harness): Promise<void> {
+    h.controller.start();
+    await h.controller.advanceEarly();
+    await pressRecord(h);
+    h.controller.startSpeaking();
+    await settle();
+  }
+
+  /** What a real socket does once it has gone: `endCandidateActivity` and
+   *  `close` reach the SDK, which throws rather than returning. */
+  const gone = () => {
+    throw new Error("WebSocket is not open");
+  };
+
+  it("leaves for the débat when the session throws on the way out", async () => {
+    const h = harness();
+    await intoStartedMonologue(h);
+    h.controller.setDevTextMode(true);
+    h.session().endCandidateActivity = gone;
+
+    const accepted = await h.controller.submitTypedExpose("Un exposé complet, tapé.", 330);
+
+    assert.equal(accepted, true);
+    assert.equal(
+      h.controller.getSnapshot().phase,
+      "debate",
+      "the exposé counted, so the part it ended is over",
+    );
+  });
+
+  it("leaves for the débat when closing the session throws", async () => {
+    const h = harness();
+    await intoStartedMonologue(h);
+    h.controller.setDevTextMode(true);
+    h.session().close = gone;
+
+    await h.controller.submitTypedExpose("Un exposé complet, tapé.", 330);
+
+    assert.equal(h.controller.getSnapshot().phase, "debate");
+  });
+
+  it("leaves for the débat when the recorder throws while closing the artefact", async () => {
+    const h = harness();
+    await intoStartedMonologue(h);
+    h.controller.setDevTextMode(true);
+    h.recorder.endPhase = () => {
+      throw new Error("the framer could not be flushed");
+    };
+
+    await h.controller.submitTypedExpose("Un exposé complet, tapé.", 330);
+
+    assert.equal(h.controller.getSnapshot().phase, "debate");
+  });
+
+  it("says which step failed, rather than swallowing it", async () => {
+    // The phase change surviving is not the same as nothing having gone wrong.
+    // A recording short by one phase has to have something to be explained by.
+    const h = harness();
+    await intoStartedMonologue(h);
+    h.controller.setDevTextMode(true);
+    h.session().endCandidateActivity = gone;
+
+    await h.controller.submitTypedExpose("Un exposé complet, tapé.", 330);
+
+    const failure = h.controller
+      .getSnapshot()
+      .events.find((event) => event.name === "teardown-failed");
+    assert.ok(failure, "the event log carries the failure");
+    assert.match(String(failure.detail), /end-candidate-activity/);
+    assert.match(String(failure.detail), /WebSocket is not open/);
+  });
+
+  it("ends a spoken monologue whose socket throws on « Terminer »", async () => {
+    // No development tooling in this one. The candidate presses the button, the
+    // examiner is asked for its closing sentence on a socket that has gone, and
+    // the épreuve must still be able to reach the débat.
+    const h = harness();
+    await intoStartedMonologue(h);
+    h.session().candidateSays("Le télétravail a transformé le rapport au bureau.");
+    h.advanceClock(MONOLOGUE_MIN_SECONDS + 10);
+    h.session().sendDirective = gone;
+    h.session().endCandidateActivity = gone;
+
+    await h.controller.advanceEarly();
+    assert.equal(h.controller.getSnapshot().closing, true, "the handshake opened all the same");
+
+    h.session().finishTurn();
+    await settle();
+
+    assert.equal(h.controller.getSnapshot().phase, "debate");
+  });
+
+  it("names the part it was leaving when the transition itself fails", async () => {
+    // `finish()` is not a teardown step this guards — it is the whole of the
+    // sitting being handed over — but it runs inside `advance()` and can still
+    // throw, and that is the case `advanceDetached` exists to report. The phase
+    // has already flipped by then, so the label has to have been read before.
+    const h = harness();
+    await intoStartedMonologue(h);
+    h.advanceClock(MONOLOGUE_MIN_SECONDS + 10);
+    await h.controller.advanceEarly();
+    h.session().finishTurn();
+    await settle();
+    await pressRecord(h);
+    assert.equal(h.controller.getSnapshot().phase, "debate");
+
+    h.players[h.players.length - 1].interrupt = () => {
+      throw new Error("the speaker is gone");
+    };
+    // The débat ends the way it always does: its clock runs out, the examiner is
+    // asked for a closing sentence, and its turn completing is what releases the
+    // phase into `finished`.
+    h.advanceClock(PHASE_DURATIONS.debate);
+    h.session().finishTurn();
+    await settle();
+    await settle();
+
+    const failure = h.controller
+      .getSnapshot()
+      .events.find((event) => event.name === "advance-failed");
+    assert.ok(failure, "the rejection reached the event log rather than the void");
+    assert.match(String(failure.detail), /"from":"debate"/, "the part it was leaving");
+    assert.match(String(failure.detail), /the speaker is gone/);
+  });
+
+  it("still times the handshake out when the closing directive throws", async () => {
+    // The safety timeout is what stops a silent examiner stranding the
+    // candidate. It is stamped after the directive goes out, so a directive that
+    // threw used to take the stamp with it — and the one guard against being
+    // stuck on a finished part was itself stuck.
+    const h = harness();
+    await intoStartedMonologue(h);
+    h.session().candidateSays("Le télétravail a transformé le rapport au bureau.");
+    h.advanceClock(MONOLOGUE_MIN_SECONDS + 10);
+    h.session().sendDirective = gone;
+
+    await h.controller.advanceEarly();
+    assert.equal(h.controller.getSnapshot().phase, "monologue", "waiting on the examiner");
+
+    // The examiner never speaks. The deadline is the only way out — twelve
+    // seconds, driven off the injected clock like the test above.
+    h.advanceClock(13);
+    await settle();
+
+    assert.equal(h.controller.getSnapshot().phase, "debate");
+  });
+});
+
+/**
+ * The examiner's opening question (#74).
+ *
+ * The débat opens with the examiner speaking, and the candidate reads that
+ * question in the conversation as it is transcribed. The two halves of it travel
+ * separately — the text on one callback, the voice on another — so anything that
+ * takes the voice away leaves the feed printing an objection nobody spoke, which
+ * is what this covers: an interruption reported before the candidate has said
+ * anything, which is automatic VAD reacting to the room rather than to them.
+ */
+describe("the examiner's opening question", () => {
+  const settle = () => new Promise((resolve) => setImmediate(resolve));
+
+  /** Preparation → a débat that has begun, with its own live session. */
+  async function intoDebate(h: Harness): Promise<void> {
+    h.controller.start();
+    await h.controller.advanceEarly();
+    await pressRecord(h);
+    h.session().candidateSays("Le télétravail a transformé le rapport au bureau.");
+    h.advanceClock(MONOLOGUE_MIN_SECONDS + 10);
+    await h.controller.advanceEarly();
+    // Ends the handshake and presses « Enregistrer » on the part it lands in.
+    await completeClosing(h);
+  }
+
+  it("is not thrown away by an interruption the candidate did not make", async () => {
+    const h = harness();
+    await intoDebate(h);
+    const player = h.players[h.players.length - 1];
+
+    // The examiner opens the débat. Gemini reports an interruption before a word
+    // of it has been answered — there is nothing yet to answer.
+    h.session().examinerSays("Vous dites que le télétravail isole. N'est-ce pas plutôt le bureau ?");
+    h.session().examinerVoice("the opening question");
+    h.session().interrupts();
+
+    assert.equal(player.interrupts, 0, "the speaker was not told to drop the turn");
+    assert.deepEqual(player.chunks, ["the opening question"], "so it is still there to hear");
+    const refused = h.controller
+      .getSnapshot()
+      .events.find((event) => event.name === "interruption-refused");
+    assert.ok(refused, "and the refusal is in the session log rather than silent");
+    assert.match(
+      String(refused.detail),
+      /"buffered":1/,
+      "carrying how much playback it kept, which is what makes the log worth reading",
+    );
+  });
+
+  it("stops the examiner once the candidate really does take the floor", async () => {
+    const h = harness();
+    await intoDebate(h);
+    const player = h.players[h.players.length - 1];
+
+    h.session().examinerVoice("the opening question");
+    h.session().finishTurn();
+
+    h.session().examinerVoice("a second question, spoken over");
+    h.session().interrupts();
+
+    assert.equal(player.interrupts, 1, "the examiner gives way, which is the débat working");
+    assert.deepEqual(player.chunks, []);
+  });
+
+  it("gives way again after the speaker ran out of the opening turn", async () => {
+    // The other release, and the one that stops this being a trap: an
+    // interrupted generation is not guaranteed to be followed by a turn
+    // completing, so a guard only that could open could stay shut for a whole
+    // débat — an examiner the candidate is structurally unable to talk over.
+    const h = harness();
+    await intoDebate(h);
+    const player = h.players[h.players.length - 1];
+
+    player.speak(true);
+    player.speak(false);
+    h.session().interrupts();
+
+    assert.equal(player.interrupts, 1, "the question was delivered; the next one can be cut");
+  });
+
+  it("guards each part's own opening, not the sitting's", async () => {
+    // The flag belongs to the session. A monologue whose closing line completed
+    // must not hand the débat a guard that is already spent.
+    const h = harness();
+    await intoDebate(h);
+    const player = h.players[h.players.length - 1];
+
+    h.session().examinerVoice("the opening question");
+    h.session().interrupts();
+
+    assert.equal(player.interrupts, 0, "the débat's own opening is guarded in its own right");
+    assert.equal(h.sessions.length, 2, "and this is the débat's session, not the monologue's");
+  });
+
+  it("still lets the finish silence the examiner mid-sentence", async () => {
+    // Nothing above touches the interrupt the épreuve itself performs: the part
+    // is over, and the examiner does not go on talking into the correction.
+    const h = harness();
+    await intoDebate(h);
+    const player = h.players[h.players.length - 1];
+
+    h.session().examinerVoice("an objection nobody will answer");
+    h.advanceClock(PHASE_DURATIONS.debate);
+    await completeClosing(h);
+    await settle();
+
+    assert.equal(h.controller.getSnapshot().phase, "finished");
+    assert.equal(player.interrupts, 1, "the speaker was emptied by the finish");
+  });
+});
+
+describe("where a phase started, in the transcript's own time base (#70)", () => {
+  /** Preparation → monologue, clock running. */
+  async function intoMonologue(h: Harness): Promise<void> {
+    h.controller.start();
+    await h.controller.advanceEarly();
+    await pressRecord(h);
+    h.controller.startSpeaking();
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+
+  async function intoDebate(h: Harness): Promise<void> {
+    await intoMonologue(h);
+    h.session().candidateSays("Le télétravail a transformé le rapport au bureau.");
+    h.advanceClock(MONOLOGUE_MIN_SECONDS + 10);
+    await h.controller.advanceEarly();
+    await completeClosing(h);
+  }
+
+  it("is null before any clock has started", () => {
+    const h = harness();
+    assert.equal(h.controller.getSnapshot().phaseStartedAt, null);
+  });
+
+  it("subtracting it from a turn's timestamp gives the phase clock", async () => {
+    // The whole reason it is exposed. `elapsed` answers "how long has this phase
+    // run" and `TranscriptEntry.timestamp` counts from the exam; this is the one
+    // number that converts between them, so the débat's feed can stamp a turn
+    // with the count the scene's clock is already showing.
+    const h = harness();
+    await intoDebate(h);
+
+    h.advanceClock(45);
+    h.session().examinerSays("Vous dites que c'est un progrès. Vraiment ?");
+
+    const state = h.controller.getSnapshot();
+    const turn = state.transcript[state.transcript.length - 1];
+    assert.equal(turn.phase, "debate");
+    assert.notEqual(state.phaseStartedAt, null);
+    assert.equal(
+      Math.floor((turn.timestamp - state.phaseStartedAt!) / 1000),
+      state.elapsed,
+      "the stamp and the clock the candidate is looking at are the same count",
+    );
+  });
+
+  it("re-anchors on each phase, so the débat does not inherit the monologue's", async () => {
+    const h = harness();
+    await intoMonologue(h);
+    const monologue = h.controller.getSnapshot().phaseStartedAt;
+
+    h.session().candidateSays("Le télétravail a transformé le rapport au bureau.");
+    h.advanceClock(MONOLOGUE_MIN_SECONDS + 10);
+    await h.controller.advanceEarly();
+    await completeClosing(h);
+
+    const debate = h.controller.getSnapshot().phaseStartedAt;
+    assert.notEqual(debate, null);
+    assert.ok(debate! > monologue!, "the débat starts after the monologue did");
   });
 });

@@ -4,8 +4,9 @@ import { describe, it } from "node:test";
 import { MONOLOGUE_MIN_SECONDS, PHASE_DURATIONS, formatClock } from "@/lib/delf/phases";
 import {
   buildDeroule,
+  candidateStatus,
+  examinerStatus,
   micCopy,
-  partSubtitle,
   passationStatus,
   poKicker,
   secondsToMonologueFloor,
@@ -34,13 +35,6 @@ describe("the masthead", () => {
     assert.equal(shortPartLabel("Débat"), "Débat");
   });
 
-  it("keeps the tail as the subtitle, and nothing when there is no tail", () => {
-    assert.equal(
-      partSubtitle("Monologue suivi : présenter et défendre un point de vue"),
-      "présenter et défendre un point de vue",
-    );
-    assert.equal(partSubtitle("Débat"), "");
-  });
 });
 
 describe("the déroulé", () => {
@@ -127,6 +121,22 @@ describe("the mic copy", () => {
   it("says what it is waiting for while the socket opens", () => {
     assert.match(micCopy("debate", "connecting").hint, /Connexion/);
   });
+
+  it("stops counting down to a floor once the part is closing", () => {
+    // `canAdvance` goes false the moment the handshake starts, so the control
+    // used to fall back to `locked` and print « Encore 0 min avant de pouvoir
+    // conclure » over a monologue that was already concluding (#55).
+    const { hint, button } = micCopy("monologue", "closing", 0);
+    assert.doesNotMatch(hint, /Encore/);
+    assert.match(hint, /Fin de l'exposé/);
+    // The button is no longer an offer, and stops being worded as one.
+    assert.equal(button, "Terminé");
+  });
+
+  it("names what comes next at the close, per part", () => {
+    assert.match(micCopy("monologue", "closing").hint, /consigne du débat/);
+    assert.match(micCopy("debate", "closing").hint, /correction/);
+  });
 });
 
 describe("the floor", () => {
@@ -138,6 +148,54 @@ describe("the floor", () => {
   it("never goes negative once the floor is passed", () => {
     assert.equal(secondsToMonologueFloor(MONOLOGUE_MIN_SECONDS), 0);
     assert.equal(secondsToMonologueFloor(MONOLOGUE_MIN_SECONDS + 999), 0);
+  });
+});
+
+describe("the status lines", () => {
+  it("distinguishes connecting from disconnected, which look the same otherwise", () => {
+    assert.match(
+      examinerStatus({ connected: false, connecting: true, speaking: false }),
+      /Connexion/,
+    );
+    assert.match(
+      examinerStatus({ connected: false, connecting: false, speaking: false }),
+      /pas en ligne/,
+    );
+  });
+
+  it("says the examiner is speaking when the consigne is playing, not that they are offline", () => {
+    // The one state where the examiner is audible with no session behind them
+    // (#37). This said « L'examinateur n'est pas en ligne » over the sound of the
+    // examiner talking.
+    assert.match(
+      examinerStatus({ connected: false, connecting: false, speaking: true, announcing: true }),
+      /consigne/,
+    );
+  });
+
+  it("says the examiner is finishing while the part is being closed", () => {
+    // The socket is being torn down while the voice is still audible (#55), so
+    // the connection's answer is the wrong one to give.
+    assert.match(
+      examinerStatus({ connected: false, connecting: false, speaking: false, closing: true }),
+      /conclut/,
+    );
+  });
+
+  it("puts listening above speaking: the examiner talking outranks the mic", () => {
+    // Both are true while the examiner interrupts, and « Vous avez la parole »
+    // next to a talking examiner is the one that misleads.
+    assert.equal(
+      candidateStatus({ connected: true, examinerSpeaking: true, recording: true }),
+      "En écoute…",
+    );
+  });
+
+  it("says the microphone is waiting when it is, rather than claiming the floor", () => {
+    assert.match(
+      candidateStatus({ connected: true, examinerSpeaking: false, recording: false }),
+      /Microphone/,
+    );
   });
 });
 
@@ -168,25 +226,45 @@ describe("the status card", () => {
     // really is running while the socket opens.
     assert.match(passationStatus("monologue", false).body, /déjà commencé/);
   });
+
+  it("acknowledges the click that ended the part, and says what follows", () => {
+    // Between « Terminer » and the next consigne the examiner is asked for a
+    // closing sentence, which takes seconds. Nothing on screen said so, so the
+    // click read as ignored on the one screen where pressing it twice is exactly
+    // what should not happen (#55).
+    const monologue = passationStatus("monologue", true, false, true);
+    assert.equal(monologue.title, "Fin de l'exposé");
+    assert.match(monologue.body, /consigne du débat/);
+    const debate = passationStatus("debate", true, false, true);
+    assert.match(debate.body, /correction/);
+  });
+
+  it("lets the close outrank the connection and the consigne", () => {
+    // The part is ending: what the socket is doing, and what the last consigne
+    // was, are both answers to a question the candidate has stopped asking.
+    assert.equal(
+      passationStatus("monologue", false, true, true).title,
+      "Fin de l'exposé",
+    );
+  });
 });
 
 describe("the topbar stepper", () => {
-  it("stands on the préparation until the épreuve starts", () => {
-    // The briefing is where a candidate about to prepare is standing, so the
-    // sujet screen and the préparation share a step rather than the stepper
-    // spending one of its three on a screen nobody is examined on.
-    assert.equal(topbarStep("preparation", false), 0);
-    assert.equal(topbarStep("preparation", true), 0);
+  it("stands on the préparation for the whole of it", () => {
+    // It stood on « Exposé » instead, for as long as the briefing screen took
+    // the first step: the préparation screen wrote its own index and wrote 1.
+    // Nothing derives it now — the phase is the answer (#55).
+    assert.equal(topbarStep("preparation"), 0);
   });
 
   it("names the épreuve's parts, so the exposé and the débat are not one step", () => {
     // It used to fold both into a single « Passage », which told a candidate
     // halfway through the épreuve they were on the last step — and forced a
     // second stepper inside the scene to say which half they were in.
-    assert.equal(topbarStep("monologue", true), 1);
-    assert.equal(topbarStep("debate", true), 2);
+    assert.equal(topbarStep("monologue"), 1);
+    assert.equal(topbarStep("debate"), 2);
     // `finished` is the évaluation's loading state, not a fourth part.
-    assert.equal(topbarStep("finished", true), 2);
+    assert.equal(topbarStep("finished"), 2);
   });
 
   it("numbers the parts as the DELF does", () => {

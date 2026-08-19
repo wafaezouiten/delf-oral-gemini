@@ -13,10 +13,9 @@ import { selectDeliverable } from "@/lib/exams/uploaded-recording";
 import { requestAbandon } from "@/lib/exams/abandon";
 import { describeFinishFailure, type FinishFailure } from "@/lib/ui/finish-failure";
 import type { OralTopic } from "@/lib/delf/topics";
-import { AnnouncementCard } from "./_components/announcement-card";
+import { AnnouncementControl } from "./_components/announcement-control";
 import { DEV_TOOLS_ENABLED } from "@/lib/dev-tools";
 import { DevTranscriptionPanel } from "./_components/dev-transcription-panel";
-import { BriefingScreen } from "./_components/briefing-screen";
 import { PreparationScreen } from "./_components/preparation-screen";
 import { PassationScreen } from "./_components/passation-screen";
 import { FinishedScreen } from "./_components/finished-screen";
@@ -26,10 +25,14 @@ import { FinishedScreen } from "./_components/finished-screen";
  *
  * PORT NOTE: this is the reference's `simulateur-client.tsx` — an orchestrator
  * that holds the notes, the exit dialog and the finished payload, decides which
- * of four screens is on, and owns no layout at all. Every branch below returns a
- * whole screen rather than composing one out of conditionals, which is the
- * property that made the reference's four screens possible to reason about
- * separately.
+ * screen is on, and owns no layout at all. Every branch below returns a whole
+ * screen rather than composing one out of conditionals, which is the property
+ * that made the reference's screens possible to reason about separately.
+ *
+ * There were four; there are three (#55). The briefing that opened the sequence
+ * is gone, and with it the second « Commencer » a candidate had to press to
+ * reach the préparation they had already asked for. The épreuve now starts when
+ * this page does.
  *
  * What is NOT the reference's is everything about the épreuve itself: the phases,
  * the clocks, the socket, the microphone and the upload all belong to
@@ -40,7 +43,7 @@ import { FinishedScreen } from "./_components/finished-screen";
  */
 
 /**
- * How long the briefing waits for the browser to say whether it can encode.
+ * How long the préparation waits for the browser to say whether it can encode.
  *
  * `AudioEncoder.isConfigSupported` answers in milliseconds; this is only here so
  * that one that never answers costs the candidate three seconds rather than the
@@ -52,15 +55,6 @@ export function ExamClient({ examId, topic }: { examId: string; topic: OralTopic
   const router = useRouter();
   const [notes, setNotes] = useState("");
   const [notesOpen, setNotesOpen] = useState(false);
-  /**
-   * Whether the débat prints its exchange (#48). Open by default.
-   *
-   * Here rather than in `PassationScreen` for the same reason `notesOpen` is:
-   * that screen owns no state, which is what lets it stay a layout. It also has
-   * to survive the phase change — a candidate who hid the feed and then saw it
-   * come back because the screen re-rendered would have to hide it twice.
-   */
-  const [transcriptOpen, setTranscriptOpen] = useState(true);
   const [showExitDialog, setShowExitDialog] = useState(false);
   const [abandoning, setAbandoning] = useState(false);
   const [abandonFailed, setAbandonFailed] = useState(false);
@@ -138,7 +132,8 @@ export function ExamClient({ examId, topic }: { examId: string; topic: OralTopic
        * from measured audio. That is the same rule a dead microphone meets and
        * the only honest one available here — the server cannot grade audio it
        * was not given — but it is why this drops per artefact instead of
-       * all-or-nothing, and why the briefing says so before the épreuve starts.
+       * all-or-nothing, and why the préparation says so before the passation
+       * starts.
        */
       const deliverable = selectDeliverable(
         payload.recordings,
@@ -217,6 +212,25 @@ export function ExamClient({ examId, topic }: { examId: string; topic: OralTopic
   const { state, controller } = useExamController({ examId, topic, onFinished });
 
   /**
+   * Start the épreuve on arrival (#55).
+   *
+   * The candidate has already committed: they pressed « Commencer » in the
+   * sujet's launch dialog, under a line reading « La préparation démarre dès
+   * l'ouverture », and the sitting row was created before this page was
+   * navigated to. Asking them to press a second button here was asking them to
+   * confirm something the product had already told them was done — and it kept
+   * the examiner's first consigne, which `start()` speaks, behind a click.
+   *
+   * `start()` is idempotent and refuses on a destroyed controller, so this is
+   * safe to run on every mount rather than once per sitting; a reload of a
+   * sitting that is already under way is a new controller either way, which is
+   * the pre-existing behaviour this does not change.
+   */
+  useEffect(() => {
+    controller.start();
+  }, [controller]);
+
+  /**
    * Whether this browser can compress the recording, asked before the épreuve
    * rather than discovered after it.
    *
@@ -224,14 +238,17 @@ export function ExamClient({ examId, topic }: { examId: string; topic: OralTopic
    * what one request may carry — so the recording is never sent, the correction
    * is made from the transcript alone, and the duration penalty applies as if
    * nothing had been recorded (#24). That is the whole product lost, and the
-   * only moment the candidate can do anything about it is now, before thirty
-   * minutes of preparation.
+   * last moment the candidate can do anything about it is the préparation.
    *
-   * Which is why the épreuve does not start until the question has been
-   * answered. `isConfigSupported` is fast, but "fast" is not "synchronous": a
-   * candidate who clicks straight through on a slow device would take the
-   * briefing — and with it the only warning there will ever be — off screen
-   * before it could render, and the briefing does not come back.
+   * Which is why the *passation* does not start until the question has been
+   * answered. `isConfigSupported` is fast, but "fast" is not "synchronous", and
+   * a candidate who clicks straight through on a slow device would otherwise
+   * take the only warning there will ever be off screen before it could render.
+   * The gate used to sit on « Commencer la préparation » and moved down one
+   * screen with the briefing (#55); it is a better place for it, since the
+   * warning is now read over thirty minutes rather than over the seconds before
+   * a candidate presses the one button on a screen they have already committed
+   * to leaving.
    *
    * The timeout is the other half of that. A browser that never answers must
    * not hold the exam shut, so the wait is bounded; past it the sitting starts
@@ -353,13 +370,34 @@ export function ExamClient({ examId, topic }: { examId: string; topic: OralTopic
   const hasNotices = state.status === "error" || Boolean(state.micError);
 
   /**
-   * The examiner's spoken consigne, on both screens it can appear on (#37).
+   * The préparation's own notices: the two above, plus the browser that cannot
+   * send the recording.
    *
-   * One element handed to whichever screen is up, rather than each screen building
-   * its own: the card has to survive the préparation → monologue boundary looking
-   * like the same card, and the four controller calls behind it should not be
-   * written down twice.
+   * Said during the préparation, and only there. After it the candidate can do
+   * nothing about it — the épreuve is one-way — and the results page can only
+   * report that the correction was made without the audio (#24). It was the
+   * briefing's danger notice; the briefing is gone (#55) and this is the screen
+   * that inherited the job, so it goes over the sujet rather than into the rail,
+   * where a five-line warning beside a notes field would not be read.
    */
+  const preparationNotices = (
+    <>
+      {notices}
+      {canEncode === false && (
+        <Notice
+          tone="danger"
+          title="Votre navigateur ne peut pas envoyer l'enregistrement"
+        >
+          Il ne sait pas compresser l&apos;audio. Votre prestation sera corrigée à
+          partir de la transcription seule, sans écoute de votre prononciation, et
+          la pénalité de durée s&apos;appliquera comme si aucun enregistrement
+          n&apos;existait. Passez plutôt l&apos;épreuve sur une version récente de
+          Chrome, Edge, Safari ou Firefox.
+        </Notice>
+      )}
+    </>
+  );
+
   /**
    * The phase is open but has not begun: the consigne is playing, or is held
    * waiting for a click the browser's autoplay policy made necessary (#37).
@@ -371,40 +409,24 @@ export function ExamClient({ examId, topic }: { examId: string; topic: OralTopic
    */
   const awaitingConsigne = state.announcementPlaying || state.announcementBlocked;
 
+  /**
+   * The examiner's spoken consigne, on every screen it can appear on (#37, #59).
+   *
+   * One element handed to whichever screen is up, rather than each screen
+   * building its own: the control has to survive the préparation → monologue
+   * boundary looking like the same control, and the two controller calls behind
+   * it should not be written down twice.
+   */
   const announcement = (
-    <AnnouncementCard
-      announcement={state.announcement}
+    <AnnouncementControl
       playing={state.announcementPlaying}
       blocked={state.announcementBlocked}
-      muted={state.announcementsMuted}
       onPlay={() => controller.playAnnouncement()}
       onSkip={() => controller.skipAnnouncement()}
-      onMute={() => controller.muteAnnouncements()}
     />
   );
 
   // ------------------------------------------------------------------ screens
-
-  if (!state.started) {
-    return (
-      <BriefingScreen
-        topic={topic}
-        canEncode={canEncode}
-        checking={checkingBrowser}
-        onStart={() => controller.start()}
-        onSkip={() => {
-          // The reference's "Passer et aller directement à l'épreuve", against a
-          // controller that has no such jump: preparation must be entered before
-          // it can be left early. Two calls rather than a new controller path,
-          // because the second one is the same button the préparation rail
-          // offers and shares its microphone prompt.
-          controller.start();
-          void controller.advanceEarly();
-        }}
-        onBack={leave}
-      />
-    );
-  }
 
   if (state.phase === "finished") {
     return (
@@ -446,7 +468,9 @@ export function ExamClient({ examId, topic }: { examId: string; topic: OralTopic
           remaining={state.remaining}
           onStartExam={() => void controller.advanceEarly()}
           onExit={() => setShowExitDialog(true)}
-          notices={hasNotices ? notices : undefined}
+          canEncode={canEncode}
+          checking={checkingBrowser}
+          notices={hasNotices || canEncode === false ? preparationNotices : undefined}
           announcement={announcement}
         />
         {exitDialog}
@@ -460,19 +484,20 @@ export function ExamClient({ examId, topic }: { examId: string; topic: OralTopic
         phase={state.phase}
         topic={topic}
         elapsed={state.elapsed}
+        phaseStartedAt={state.phaseStartedAt}
         remaining={state.remaining}
         recording={state.recording}
+        examinerSpeaking={state.examinerSpeaking}
         connected={state.connection === "connected"}
         connecting={state.connection === "connecting"}
         canAdvance={state.canAdvance}
         awaitingStart={state.awaitingStart}
+        closing={state.closing}
         onStart={() => controller.startSpeaking()}
         notes={notes}
         notesOpen={notesOpen}
         onToggleNotes={() => setNotesOpen((open) => !open)}
         transcript={state.transcript}
-        transcriptOpen={transcriptOpen}
-        onToggleTranscript={() => setTranscriptOpen((open) => !open)}
         onAdvance={advance}
         onExit={() => setShowExitDialog(true)}
         emptyTranscript={state.monologueHeld}

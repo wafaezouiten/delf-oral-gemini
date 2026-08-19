@@ -1,9 +1,9 @@
 import type { Metadata } from "next";
 
 import { requireUserId } from "@/lib/auth/exam-guard";
-import { bestScoreBySujet, readCandidateHistory } from "@/lib/db/history";
+import { readCandidateHistory } from "@/lib/db/history";
 import { ORAL_TOPICS } from "@/lib/delf/topics";
-import { buildHubSujets } from "@/lib/ui/epreuve-hub";
+import { buildHubSujets, latestScoreBySujet } from "@/lib/ui/epreuve-hub";
 import { SujetsCatalogue, type KioskSujet } from "./_components/sujets-catalogue";
 
 /**
@@ -35,7 +35,7 @@ export default async function SujetsPage({ searchParams }: PageProps<"/app/sujet
   const userId = await requireUserId();
 
   const [history, query] = await Promise.all([readCandidateHistory(userId), searchParams]);
-  const scores = bestScoreBySujet(history);
+  const scores = latestScoreBySujet(history);
 
   // `buildHubSujets` owns the card's every string; the topic rides along so the
   // sheet can print the document without a second pass over the catalogue.

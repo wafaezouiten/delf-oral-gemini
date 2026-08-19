@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 
 import { COMPETENCY_MAX, ORAL_PARTS_B2 } from "@/lib/delf/constants";
 import { ORAL_CRITERIA } from "@/lib/delf/criteria";
+import { zeroCriteria, type DashboardSitting } from "./dashboard-view";
 import {
   buildHubFormat,
   buildHubSujets,
@@ -10,6 +11,7 @@ import {
   buildShapePill,
   HUB_LINKS,
   isNavLinkActive,
+  latestScoreBySujet,
   sujetMeta,
   sujetTeaser,
 } from "./epreuve-hub";
@@ -152,5 +154,90 @@ describe("the sujet cards", () => {
       assert.equal(sujet.meta, sujetMeta());
     }
     assert.equal(sujetMeta(), "30 min de préparation · 20 min d'oral");
+  });
+});
+
+/**
+ * One sitting, as `readCandidateHistory` returns it. Only the slug and the score
+ * are read by the reducer; the rest is filled so the fixture is a real
+ * `DashboardSitting` and a field added to the type fails here rather than
+ * drifting.
+ */
+function sitting(overrides: Partial<DashboardSitting> = {}): DashboardSitting {
+  return {
+    examId: 1,
+    topicSlug: "teletravail",
+    topicTitle: "Le télétravail a-t-il vraiment amélioré nos vies ?",
+    outcome: "corrected",
+    score25: 15,
+    meetsFloor: true,
+    mode: "audio",
+    criteria: {
+      realisationTache: 3,
+      interaction: 3,
+      lexique: 3,
+      morphosyntaxe: 3,
+      phonologie: 3,
+    },
+    spokenSeconds: 600,
+    phase: "finished",
+    endedAt: new Date("2026-08-16T10:00:00Z"),
+    archivedAt: null,
+    ...overrides,
+  };
+}
+
+describe("the score on a sujet card", () => {
+  it("is the last sitting's, not the best one's", () => {
+    // Newest first, as `readCandidateHistory` returns them: 18 was the personal
+    // best, 11 was this morning. The card answers « où j'en suis ? ».
+    const scores = latestScoreBySujet([
+      sitting({ examId: 2, score25: 11, endedAt: new Date("2026-08-17T10:00:00Z") }),
+      sitting({ examId: 1, score25: 18, endedAt: new Date("2026-08-10T10:00:00Z") }),
+    ]);
+    assert.equal(scores.get("teletravail"), 11);
+  });
+
+  it("keeps one sujet's history out of another's", () => {
+    const scores = latestScoreBySujet([
+      sitting({ examId: 3, topicSlug: "ecrans", score25: 7 }),
+      sitting({ examId: 2, topicSlug: "teletravail", score25: 20 }),
+      sitting({ examId: 1, topicSlug: "teletravail", score25: 4 }),
+    ]);
+    assert.equal(scores.get("ecrans"), 7);
+    assert.equal(scores.get("teletravail"), 20);
+  });
+
+  it("counts a walk-out, so a sujet last abandoned reads zero", () => {
+    // The exit dialog told the candidate it would count. This is where that
+    // promise is kept — the 18 is still in the historique and in the moyenne.
+    const scores = latestScoreBySujet([
+      sitting({
+        examId: 2,
+        outcome: "abandoned",
+        score25: 0,
+        meetsFloor: false,
+        mode: null,
+        criteria: zeroCriteria(),
+        spokenSeconds: 0,
+        phase: "monologue",
+        endedAt: new Date("2026-08-17T10:00:00Z"),
+      }),
+      sitting({ examId: 1, score25: 18, endedAt: new Date("2026-08-10T10:00:00Z") }),
+    ]);
+    assert.equal(scores.get("teletravail"), 0);
+  });
+
+  it("leaves a sujet never sat out of the map entirely", () => {
+    // Absent, not zero: `buildHubSujets` turns the miss into `null` and the card
+    // into « Commencer ».
+    const scores = latestScoreBySujet([sitting()]);
+    assert.equal(scores.has("ecrans"), false);
+    const [card] = buildHubSujets([{ slug: "ecrans", title: "É ?", document: "D." }], scores);
+    assert.equal(card.score, null);
+  });
+
+  it("reads an empty history as no scores at all", () => {
+    assert.equal(latestScoreBySujet([]).size, 0);
   });
 });

@@ -71,31 +71,29 @@ same rule, so the reproduction keeps it.
                     └───────────────────────────────────┘
                                                         │
    ┌────────────────────────────────────────────────────▼──────────────────┐
-   │ 1. SUJET (briefing)   step 0                                          │
-   │    left: part title · déroulé de la séance · "Avant de commencer"     │
-   │          (mic test, endroit calme)                                    │
-   │    right: DELF pill · document déclencheur · consigne                 │
-   │    actions: [Passer]  [Commencer la préparation · 30:00]              │
-   └────────────────────────────────────────────────────┬──────────────────┘
-                                                        │ onStart
-   ┌────────────────────────────────────────────────────▼──────────────────┐
-   │ 2. PRÉPARATION        step 1 · timer ring in the topbar               │
-   │    left: sujet, justified, "Votre mission"                            │
-   │    right: passation card + CTA · notes textarea · structure attendue  │
-   │    exits: time-up  |  "Commencer la passation"  |  Retour → dialog    │
+   │ 1. PRÉPARATION        step 0 · ring + « Commencer » in the topbar ·   │
+   │                       starts on arrival, consigne spoken (#37, #55)   │
+   │    left: notices · sujet, justified · « Passer » on the               │
+   │          « Document déclencheur » rule while it speaks (#59) ·        │
+   │          "Votre mission"                                              │
+   │    right: notes textarea · structure attendue · "Avant de             │
+   │           commencer" (mic test, endroit calme, navigateur) · déroulé  │
+   │    exits: time-up  |  « Commencer » (topbar)  |  Retour → dialog      │
    └────────────────────────────────────────────────────┬──────────────────┘
                                                         │
    ┌────────────────────────────────────────────────────▼──────────────────┐
-   │ 3. PASSATION          step 2 · timer ring + exit button               │
-   │    scene: Examinateur (IA) ── beats + clock ── Vous                   │
-   │    body:  exposé → one quiet status card                              │
-   │           débat  → the live transcript, « Masquer » back to the card  │
+   │ 2. PASSATION          steps 1–2 · timer ring + exit button            │
+   │    head: sujet title on paper · « Passer » beside it while the        │
+   │          consigne speaks (#59)                                        │
+   │    body:  exposé → document + « Votre plan » in a column beside it    │
+   │           débat  → the two faces, then the exchange in turns; no      │
+   │                    document (#60)                                     │
    │    foot:  [Mes notes]      (mic)      [Terminer l'épreuve]            │
    │    drawer: préparation notes, read-only                               │
    └────────────────────────────────────────────────────┬──────────────────┘
                                                         │ finish / time-up
    ┌────────────────────────────────────────────────────▼──────────────────┐
-   │ 4. ÉVALUATION                                                          │
+   │ 3. ÉVALUATION                                                          │
    │    loading  → "Évaluation en cours…"  (spinner card)                  │
    │    error    → "Évaluation impossible" + Réessayer                     │
    │    loaded   → header (sujet · level · Correction IA · Recommencer)    │
@@ -125,44 +123,87 @@ same rule, so the reproduction keeps it.
 
 ### Screen-by-screen
 
-**Briefing.** Reproduced whole: the two-column split, the déroulé rail, the
-pre-flight card with a real `getUserMedia` mic test, the document set as a
-justified printed page with its consigne ruled off below.
+**Briefing — dropped as a screen (#55).** The reference opens on a sujet screen
+whose CTA starts the préparation, and this project reproduced it whole. It could
+not stay: a sitting here is created by « Commencer » in the sujets kiosk, under a
+launch dialog that says « La préparation démarre dès l'ouverture », so the
+briefing asked the candidate to commit twice — and it held the examiner's first
+spoken consigne (#37), which `ExamController.start()` fires, behind the second
+click. Its own « Passer », a top-bar neighbour of the primary CTA, went straight
+past the préparation into the exposé. The épreuve now starts when the page does.
 
-- *Adapted:* the déroulé is built from `PHASE_DURATIONS`, so it prints this
-  project's three real phases rather than a level's `OralPartSpec`.
-- *Kept from here:* the WebCodecs support check. The reference has no equivalent
-  because it never uploads audio; here a browser that cannot encode loses the
-  whole audio correction, and the briefing is the last moment the candidate can
-  do anything about it. It renders as a fourth pre-flight row — the reference's
-  own shape for "can I do this now?" — plus the existing danger notice.
-- *Dropped:* the transport toggle row. It is admin-gated in the reference
-  (`connectionLabel` returns `undefined` for candidates) and this project has no
-  admin role, so the row would never render for anyone.
+What it carried was not dropped with it:
 
-**Préparation.** Reproduced whole: the sujet on the left, the rail on the right
-carrying the passation card, the notes textarea and « Structure attendue », the
-single clock in the topbar and the "Passer et commencer maintenant" ghost button
-at the rail's foot.
+- *Moved:* the pre-flight card, into the préparation rail as `PreflightCard`,
+  with the real `getUserMedia` mic test intact.
+- *Moved:* the déroulé, to the foot of the same rail. Still built from
+  `PHASE_DURATIONS`, so it prints this project's three real phases rather than a
+  level's `OralPartSpec`.
+- *Moved:* the WebCodecs danger notice, over the préparation's sujet. The
+  reference has no equivalent because it never uploads audio; here a browser that
+  cannot encode loses the whole audio correction, and the préparation is now the
+  last moment the candidate can do anything about it. The topbar's « Commencer »
+  is what waits for the answer.
+- *Dropped with the screen:* the transport toggle row — admin-gated in the
+  reference (`connectionLabel` returns `undefined` for candidates), and this
+  project has no admin role, so it never rendered for anyone — and the serif
+  part headline, whose `partSubtitle` helper went with its only caller.
 
-**Passation.** Reproduced whole: the scene with its two faces and pulsing rings,
-the beat stepper, the elapsed/total clock with its draining bar, the foot control
-bar, the notes drawer.
+**Préparation.** The sujet on the left, the rail on the right, one clock in the
+topbar. It is now the épreuve's first screen, so the rail also carries the
+pre-flight checks and the déroulé, and the topbar stepper stands on
+« Préparation » rather than on « Exposé » — it was written as a literal `1` when
+the stepper still counted screens.
 
-- *Added, against the reference (#48):* the **débat prints its exchange**, in the
-  status card's place, with « Masquer » to put the card back. The reference has
-  no transcript feed anywhere and this screen originally reproduced that — the
-  argument being that reading along is the fastest way to stop listening to the
-  examiner. It is outweighed in the débat and left standing in the monologue,
-  which is a split the transport forces as much as the design: manual VAD
-  transcribes nothing until the floor is released, so a monologue feed would sit
-  empty for seven minutes and then print the whole exposé at the moment the
-  phase ends. The débat's automatic VAD streams turn by turn. The turns are set
-  like the results page's transcript — speaker label over a paragraph, never chat
-  bubbles.
-- *Adapted:* the beats are `["Exposé", "Débat"]` driven by the actual phase, not
-  by `EXPOSE_SHARE`. This project knows which beat it is in; approximating it
-  would be worse data.
+Two departures from the reference's rail, both #59:
+
+- *The way on moved into the topbar.* The reference has a passation card with the
+  primary CTA and a "Passer et commencer maintenant" ghost at the rail's foot —
+  the same action twice, three cards below the clock that tells a candidate
+  whether to press it. There is one « Commencer » now and it is beside the ring.
+  It keeps the `checking` gate the card's button held.
+- *The consigne is a button, not a card.* It was a panel with the script, a
+  replay and a sticky mute, and it outlived the clip by the length of the phase.
+  While the voice plays there is « Passer » at the right-hand end of the
+  « Document déclencheur » rule — beside the document the consigne is about —
+  and nothing after it. A consigne the browser refuses to autoplay still gets
+  its sentence and its two ways out, because that state holds the épreuve.
+
+**Passation.** The sujet's title on paper, the foot control bar and the notes
+drawer, with the two parts framed differently: the exposé prints the document
+with « Votre plan » in a column beside it (#59); the débat prints no document at
+all and gives the room to the reference's scene — two faces, a ring pulsing
+around whoever holds the floor, the elapsed/total clock with its draining bar —
+over the exchange, turn by turn.
+
+- *Added, against the reference (#48, #60):* the débat shows **who is speaking
+  and what was said**. The reference has no transcript feed anywhere, and this
+  screen has now been built all three ways: the exchange alone (#48), which left
+  no cue for whose turn it was and squeezed the turns into a 20rem box beside the
+  document; the faces alone (#60), which left a candidate no way to re-read the
+  objection they were answering; and this, which pays for both by dropping the
+  document. A candidate arguing a point is not reading the source, and the sujet
+  is still named by its title above the scene. The turns are chat-style — the
+  examiner left, « Vous » right — where the results page sets the same exchange
+  as a printed document: during the sitting it is a conversation, afterwards it
+  is a record. The speaker names are the same in both, because *who* said
+  something must not change between them.
+- *Dropped with it:* the quiet status card the feed could be hidden behind, and
+  its « Masquer » / « Afficher la transcription » pair. Its two sentences are the
+  two lines under the faces, and its guidance is what the conversation panel
+  prints while it is still empty.
+- *Added, against the reference (#55):* the **close is on screen**. Ending a part
+  asks the examiner for a closing sentence and waits up to `CLOSING_SAFETY_MS`
+  for it, so several seconds pass between the click and the next consigne. The
+  control now goes inert and says « Fin de l'exposé », and the status line says
+  what follows. Before, `canAdvance` went false and the control fell back to its
+  locked copy: « Encore 0 min avant de pouvoir conclure », over a monologue that
+  was concluding.
+- *Dropped:* the scene's inner beat stepper. The reference names the two beats
+  — Exposé, Débat — between the faces, and this project's topbar has named the
+  épreuve's three parts since #37; two steppers disagreeing about which step the
+  candidate is on is why the inner one went, and it did not come back with the
+  scene (#60).
 - *Adapted:* the mic button advances the épreuve rather than opening a socket —
   the socket is the controller's. During the monologue it is disabled until the
   5-minute DELF floor, which is `canAdvanceEarly`'s existing rule shown as a hint
@@ -171,7 +212,7 @@ bar, the notes drawer.
   notice with its reconnect button, and the microphone notice. The reference has
   no analogue for any of them; they are real states of this product and #11's
   requirement is that each has a visible, non-technical message. They sit in the
-  topbar (badges) and above the scene (notices).
+  topbar (badges) and above the sujet (notices).
 - *Dropped:* the reference's `alert()` calls on mic failure. This project routes
   every failure through `<Notice>`.
 
@@ -245,6 +286,67 @@ warning.
 bord shows a recent list and nothing more. It is a list and only a list: the
 dashboard answers "how am I doing?", this answers "what have I done?", and two
 pages that both open on a row of statistics would be the same page twice.
+
+**Starting over archives, it does not delete** (#69). The reference has a billing
+page where this product has an account screen, and the one thing that screen
+does is « Réinitialiser ma progression »: the tableau de bord returns to its empty state and
+the sujet cards return to « Commencer », while every épreuve stays in the
+historique under *Archives*, correction and all. `oral_exams.archived_at` is the
+whole mechanism — a line drawn across the record rather than a tombstone — and it
+is stamped only on sittings already on the record, so an épreuve still in
+progress when the button is pressed belongs to the new record instead of
+vanishing into the old one.
+
+**The avatar keeps its menu; the account stops being a modal.** Clicking it still
+offers « Gérer le compte » and « Se déconnecter », as it always did — what
+changed is that the first of those lands on `/app/compte`
+(`userProfileMode="navigation"`) instead of opening Clerk's dialog over the app.
+The account is therefore a page: « Réinitialiser ma progression » in the header
+opposite the title, and Clerk's card below it. The reset is not inside that card
+and not a page of its nav — it touches nothing Clerk owns — and the header is the
+only place on a page this tall that is visible the moment it loads, which matters
+for the one control a candidate might arrive looking for. The explanation travels
+with the confirmation rather than sitting on screen permanently: a candidate who
+is not pressing it does not need the paragraph, and one who is needs it right
+then. The reset is deliberately **not** a third tab in Clerk's
+nav — it touches nothing Clerk owns, and filing it beside *Profil* and *Sécurité*
+claimed it was an account setting. Signing out stays in the menu, so the page
+carries no sign-out control of its own. It is not a fifth destination in the rail: an
+account is not part of the épreuve, and the four destinations stay four.
+
+Clerk still draws the account screens. `<UserProfile>` is embedded rather than
+reproduced — name, e-mail, password and sessions change when the provider
+changes, and a hand-written copy would be a second place to change an e-mail with
+one of the two eventually wrong. What is ours is the palette it is drawn in:
+`lib/ui/clerk-appearance.ts` maps this product's tokens onto Clerk's variables,
+and the load-bearing one is `borderRadius: 2px` — the `.sheet` number, and the
+whole difference between a card from another application and a sheet of paper.
+The colours are duplicated as literals there on purpose, because Clerk derives a
+scale from each and cannot parse a `var(…)`.
+
+The reset's confirmation is a panel under the button rather than a `<dialog>` — a
+deliberate retreat from how the exit dialog does it. That dialog interrupts an
+épreuve in progress and has to; this interrupts nothing, and a modal for a
+control the candidate opened this page to use is a ceremony rather than a
+safeguard.
+
+**« Réinitialiser » is red and its confirm is not**, which narrows the rule
+`button-styles.ts` used to state. Nothing here is deleted, so by the old reading
+("never a destructive one") the trigger would not be red at all; it is, because a
+reset of somebody's record should announce itself as consequential whether or not
+it is reversible. What the colour must not do is hurry the decision, so red
+appears once per decision — on the trigger here, on « Abandonner » in the exit
+dialog — and never again on the button that confirms it.
+
+The count is reported *after* the reset, from what the route says it archived,
+rather than promised before it.
+
+**Changing a password is a Clerk setting, not code.** The *Sécurité* tab shows a
+password section only when the password strategy is enabled on the instance
+(Clerk Dashboard → User & authentication → Password) — #36 §3 recommended turning
+it **off** so the e-mail path is `email → code → in`, and with it off there is
+nothing for the tab to show. Turning it back on makes « Mot de passe » appear
+with no change here.
 
 ## 4. Deliberate departures, collected
 
