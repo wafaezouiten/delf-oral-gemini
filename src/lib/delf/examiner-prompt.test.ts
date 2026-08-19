@@ -6,6 +6,8 @@ import {
   buildExaminerInstruction,
   closingInstruction,
   examinerOpeningLine,
+  presenceCheckInstruction,
+  silenceRelanceInstruction,
 } from "./examiner-prompt";
 import type { OralTopic } from "./topics";
 import { ORAL_TOPICS } from "./topics";
@@ -35,6 +37,11 @@ describe("examiner prompt", () => {
       assert.ok(!text.includes("—"), `${phase} instruction contains an em dash`);
       assert.ok(!text.includes("–"), `${phase} instruction contains an en dash`);
     }
+    // Phase-free, because only the débat has them (#84).
+    for (const text of [silenceRelanceInstruction(), presenceCheckInstruction()]) {
+      assert.ok(!text.includes("—"), "a silence directive contains an em dash");
+      assert.ok(!text.includes("–"), "a silence directive contains an en dash");
+    }
   });
 
   it("keeps the examiner in role in both phases", () => {
@@ -63,6 +70,31 @@ describe("examiner prompt", () => {
     for (const phase of ["monologue", "debate"] as const) {
       assert.ok(closingInstruction(phase).includes("N'évalue pas"));
     }
+  });
+
+  describe("what the examiner says into a silence (#84)", () => {
+    it("asks for a relance on the substance rather than a script", () => {
+      // The examiner's job at that moment is to push on what the candidate
+      // actually said, so the words have to be the model's. A canned « Pouvez-vous
+      // préciser ? » would be the one relance in the épreuve that ignores the
+      // exchange it interrupts.
+      const relance = silenceRelanceInstruction();
+      assert.ok(relance.includes("Relance-le sur le fond"));
+      assert.ok(!relance.includes("mot pour mot"), "it is a directive, not a line to read");
+    });
+
+    it("keeps the relance from turning into a reproach or an assessment", () => {
+      const relance = silenceRelanceInstruction();
+      assert.ok(relance.includes("Ne fais aucune remarque sur son silence"));
+      assert.ok(relance.includes("ne lui demande pas s'il a compris"));
+      assert.ok(relance.includes("n'évalue pas"));
+    });
+
+    it("fixes the wording of the presence check, because it is a technical check", () => {
+      const check = presenceCheckInstruction();
+      assert.ok(check.includes("mot pour mot"));
+      assert.ok(check.includes("Vous m'entendez ?"));
+    });
   });
 
   it("carries the selected subject into the instruction", () => {

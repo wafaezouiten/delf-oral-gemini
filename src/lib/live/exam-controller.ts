@@ -43,7 +43,12 @@ import {
   remainingSeconds,
   type OralPhase,
 } from "@/lib/delf/phases";
-import { closingInstruction, examinerOpeningLine } from "@/lib/delf/examiner-prompt";
+import {
+  closingInstruction,
+  examinerOpeningLine,
+  presenceCheckInstruction,
+  silenceRelanceInstruction,
+} from "@/lib/delf/examiner-prompt";
 import type { OralTopic } from "@/lib/delf/topics";
 import {
   appendFragment,
@@ -355,6 +360,30 @@ const TICK_MS = 250;
  */
 const CAPTURE_STALL_MS = 4_000;
 
+/**
+ * How long the candidate may say nothing, once the examiner has stopped
+ * speaking, before the examiner speaks again (#84).
+ *
+ * The ask was 7 to 10 seconds and this sits in the middle of it. It is a
+ * different kind of number from `silenceDurationMs` in `gemini/live-config.ts`,
+ * which is 1.2 s: that one decides when a candidate who IS speaking has
+ * finished, and it is long because a B2 candidate hunting for a word must not be
+ * cut off. This one decides when a candidate who has not started at all should
+ * be helped, and eight seconds of nothing is well past any pause for thought
+ * while still being a silence the candidate is living through.
+ */
+const SILENCE_NUDGE_MS = 8_000;
+
+/**
+ * How many times one débat may ask whether the candidate is still there.
+ *
+ * The relance is the épreuve doing its job and is not rationed: every examiner
+ * turn that lands in silence earns one. This is the technical check, and a
+ * candidate who has genuinely frozen — or walked out — must not be asked five
+ * times whether they can hear.
+ */
+const MAX_PRESENCE_CHECKS = 2;
+
 /** The two phases that produce a recording, in exam order. */
 const SPEAKING_PHASES: readonly RecordedPhase[] = ["monologue", "debate"];
 
@@ -457,6 +486,29 @@ export class ExamController {
   /** Terminal, unlike a stall: a device that ended does not come back, so the
    *  watchdog stands down rather than reporting the same silence twice. */
   private captureLost = false;
+
+  /**
+   * The silence watch: when the candidate was last known to be doing something,
+   * and how many times the examiner has spoken into the silence since (#84).
+   *
+   * `silenceSince` doubles as the armed flag — non-null only between an
+   * examiner turn completing in the débat and the watch standing down. It is
+   * re-anchored rather than merely compared, in the same way the held monologue
+   * re-anchors its phase clock: while the examiner is still audible, or while
+   * voiced audio is still arriving, "the silence started now" is the truth and
+   * there is then one number to read rather than several to reconcile.
+   *
+   * `silenceNudges` counts from the candidate's last answer, NOT from the
+   * window. It has to: each nudge makes the examiner speak, and that turn
+   * completing re-arms the window, so a counter that reset with the window would
+   * relance every eight seconds forever.
+   */
+  private silenceSince: number | null = null;
+  private silenceNudges = 0;
+  private presenceChecks = 0;
+  /** The voiced total the watch last saw, so growth in it reads as "the
+   *  candidate is speaking right now" — the aggregate alone cannot. */
+  private lastVoicedSeconds = 0;
 
   /**
    * The consigne being spoken, and everything the candidate can do about it (#37).
@@ -645,6 +697,10 @@ export class ExamController {
 
   private addFragment(speaker: "candidate" | "examiner", text: string): void {
     if (this.phase !== "monologue" && this.phase !== "debate") return;
+    // Here rather than on the session callback, so the development text mode's
+    // typed turns count as answers too — a developer typing into the débat is
+    // exactly as present as one speaking into it (#84).
+    if (speaker === "candidate") this.noteCandidateAnswered();
     this.transcript = appendFragment(this.transcript, {
       phase: this.phase,
       speaker,
@@ -1029,6 +1085,177 @@ export class ExamController {
       this.micError = MIC_MESSAGES.stalled;
       this.log("capture-stalled", { recordedSeconds: Number(seconds.toFixed(2)) });
       this.emit();
+    }
+  }
+
+  /**
+   * The candidate has the floor and the clock on their silence starts now (#84).
+   *
+   * Armed at the end of an examiner turn, and only in the débat. The monologue
+   * is excluded twice over: its prompt says the silences belong to the candidate
+   * — « Les silences font partie de l'épreuve » — and its transport could not do
+   * this anyway, since manual voice-activity detection means no `activityEnd`
+   * for the whole phase and therefore no turn to end.
+   */
+  private armSilenceWatch(): void {
+    if (this.phase !== "debate" || this.silenceStepsSpent) return;
+    this.silenceSince = this.now();
+    this.lastVoicedSeconds = this.recorder?.voicedSeconds("debate") ?? 0;
+  }
+
+  /**
+   * The escalation has nothing left to say into this silence: a relance has gone
+   * out, and so has the check (or the check's ration for the whole débat is
+   * spent).
+   *
+   * It is what keeps the examiner's OWN turns from restarting the watch. Every
+   * nudge makes the model speak, that turn completing re-arms the window, and
+   * without this the pair would trade a directive and a stand-down every eight
+   * seconds for the rest of the débat — silently, since nothing more is sent,
+   * but writing a line into the sitting's log each time. Only an answer restarts
+   * it. See {@link noteCandidateAnswered}.
+   */
+  private get silenceStepsSpent(): boolean {
+    if (this.silenceNudges === 0) return false;
+    return this.silenceNudges >= 2 || this.presenceChecks >= MAX_PRESENCE_CHECKS;
+  }
+
+  /**
+   * The candidate answered: the escalation goes back to the beginning.
+   *
+   * Called for a transcription fragment and for an interruption the controller
+   * honoured, which are the two things that prove a person rather than a room.
+   * Voiced audio is deliberately not one of them — it holds the window open (see
+   * {@link checkCandidateSilence}) but a cough is not an answer, and letting it
+   * clear the counter would let a noisy room earn an unlimited number of « Vous
+   * m'entendez ? ».
+   */
+  private noteCandidateAnswered(): void {
+    this.silenceNudges = 0;
+    if (this.silenceSince !== null) this.silenceSince = this.now();
+  }
+
+  /**
+   * Break a silence the examiner cannot notice on its own (#84).
+   *
+   * The examiner asks a question, the candidate says nothing, and nothing
+   * happens: the débat runs on automatic voice-activity detection, which takes a
+   * turn when it hears speech END. A candidate who never starts speaking
+   * produces no speech-end, so there is no turn boundary and the model is never
+   * given the floor. It is not choosing to wait, it has not been asked anything
+   * — which is why this is the controller's problem and not the prompt's.
+   *
+   * **What counts as "still nothing".** Recent voiced audio, plus any
+   * transcription fragment. The transcript alone would be the wrong signal:
+   * Gemini emits `onCandidateTranscript` on its own schedule, so a candidate two
+   * seconds into an answer may have produced no text yet and a relance fired
+   * then talks over them. The voiced measure is the recorder's own
+   * (`audio/voice-activity.ts`) and is read here as growth per tick rather than
+   * as the per-phase aggregate it was built for, which is what turns "did they
+   * speak at all" into "are they speaking now".
+   *
+   * **Two steps, then silence.** A relance on the substance first, because that
+   * is the épreuve doing its job; a fixed « Vous m'entendez ? » only if that also
+   * lands in nothing, because by then the likely fault is technical. After that
+   * the watch stands down until the candidate answers: the alternative is
+   * badgering someone who has frozen or left.
+   *
+   * **What it declines to notice.** A microphone that has stalled or gone away
+   * produces no voiced audio either, and the candidate can see why on screen
+   * already; asking them out loud whether they can hear, over a device that
+   * cannot carry their reply, is noise on top of a failure. The development text
+   * mode is out for the same reason as the stall watchdog: a microphone we
+   * turned off ourselves has not failed.
+   */
+  private checkCandidateSilence(): void {
+    if (this.silenceSince === null) return;
+    if (this.phase !== "debate" || this.closing || this.devTextMode) return;
+
+    const recorder = this.recorder;
+    if (!recorder || this.captureLost || this.captureStalled) return;
+
+    const now = this.now();
+
+    // The examiner's own question is still coming out of the speaker. The
+    // candidate has not been silent for eight seconds; they have been listening
+    // for eight seconds. `onTurnComplete` fires when generation ends, and Gemini
+    // generates a turn faster than it is heard, so this window is several
+    // seconds wide on every single turn.
+    if (this.examinerSpeaking || this.announcementPlaying) {
+      this.silenceSince = now;
+      return;
+    }
+
+    // A step spent into a socket that is not up is spent unheard. Worse than it
+    // looks from `sendSilenceDirective`'s catch: `SessionManager.sendDirective`
+    // opens with `if (!this.socket) return`, so a directive during a reconnect
+    // is dropped WITHOUT throwing, and nothing downstream could tell the
+    // difference. Since the check is rationed, a candidate who froze just as the
+    // connection dropped could have both of theirs burnt in silence and never be
+    // asked anything at all. Re-anchored rather than merely skipped: when the
+    // socket comes back the eight seconds start again, because a relance should
+    // follow a question the candidate actually heard.
+    if (this.connection !== "connected") {
+      this.silenceSince = now;
+      return;
+    }
+
+    const voiced = recorder.voicedSeconds("debate");
+    if (voiced > this.lastVoicedSeconds) {
+      this.lastVoicedSeconds = voiced;
+      this.silenceSince = now;
+      return;
+    }
+
+    if (now - this.silenceSince < SILENCE_NUDGE_MS) return;
+
+    if (this.silenceNudges === 0) {
+      this.silenceNudges = 1;
+      // Re-anchored rather than closed: a directive is not a promise that the
+      // model will speak, and if it says nothing either, the next step is due
+      // eight seconds from the attempt rather than on the very next tick.
+      //
+      // This is the second site that anchors the window, and the two are not
+      // redundant: {@link armSilenceWatch} covers the model ANSWERING the
+      // relance, this covers it saying nothing back. Whichever happens first
+      // anchors, and they agree only because both mean "now" — so a future
+      // change to either has to keep meaning that.
+      this.silenceSince = now;
+      this.log("silence-relance");
+      this.sendSilenceDirective("silence-relance", silenceRelanceInstruction());
+      return;
+    }
+
+    // Exactly one step is left to reach here, because `silenceStepsSpent` stops
+    // the window being re-armed after this one.
+    if (this.presenceChecks < MAX_PRESENCE_CHECKS) {
+      this.silenceNudges = 2;
+      this.presenceChecks += 1;
+      // Closed, not re-anchored. This is the last thing that will be said into
+      // this silence, and re-anchoring would only schedule a stand-down.
+      this.silenceSince = null;
+      this.log("silence-presence-check", { of: MAX_PRESENCE_CHECKS });
+      this.sendSilenceDirective("silence-presence-check", presenceCheckInstruction());
+      return;
+    }
+
+    // A relance into a débat whose two checks are already spent. Nothing left to
+    // say, so the watch stands down and says so once: a sitting where the
+    // examiner had to prompt and got nothing back is a fact about that sitting,
+    // and the correction's diagnostics read this log.
+    this.silenceSince = null;
+    this.log("silence-unanswered", { nudges: this.silenceNudges });
+  }
+
+  /** Speak into the silence, and survive a socket that has gone away. Its own
+   *  catch rather than `tolerate`, whose event says "teardown" — nothing is
+   *  ending here, and a relance that failed to go out should not read as a
+   *  phase that failed to close. */
+  private sendSilenceDirective(step: string, instruction: string): void {
+    try {
+      this.session?.sendDirective(instruction);
+    } catch (error) {
+      this.log("silence-directive-failed", { step, error: String(error) });
     }
   }
 
@@ -1638,7 +1865,11 @@ export class ExamController {
           this.closing = false;
           this.clearClosingTimer();
           this.advanceDetached();
+          return;
         }
+        // Otherwise the examiner has finished asking something and the floor is
+        // the candidate's. That is the moment the silence window opens (#84).
+        this.armSilenceWatch();
       },
       onEvent: (name, detail) => this.log(name, detail),
     };
@@ -1705,6 +1936,9 @@ export class ExamController {
     }
     this.log("interruption", { buffered });
     this.player?.interrupt();
+    // Talking over the examiner is the loudest possible answer to « Vous
+    // m'entendez ? », and it arrives before any transcription of it does (#84).
+    this.noteCandidateAnswered();
   }
 
   /** Release the monologue floor exactly once. See `activityEnded`. */
@@ -1919,6 +2153,21 @@ export class ExamController {
       if (phaseUsesLiveSession(this.phase)) this.beginClosingHandshake();
       else this.advanceDetached();
     }
+
+    // The other watchdog on this heartbeat, and the same argument for it: a
+    // question that has gone unanswered for eight seconds is a fact the exam's
+    // one clock should notice (#84).
+    //
+    // LAST, and the order is the guard. A relance is the only thing `tick()`
+    // says out loud, and the branch above is where the phase's clock running out
+    // asks for the closing sentence. Run earlier, the one tick that crosses both
+    // deadlines would send a relance and the closing directive back to back with
+    // no turn boundary between them — two `sendRealtimeInput` texts, a blended
+    // sentence, and the blend landing on the one turn the controller waits for to
+    // let the candidate's last transcription arrive. A candidate who freezes in
+    // the closing seconds is exactly who reaches it. From here `this.closing` is
+    // already true and {@link checkCandidateSilence} stands down on it.
+    this.checkCandidateSilence();
   }
 
   /** Release everything. Safe to call twice. */
