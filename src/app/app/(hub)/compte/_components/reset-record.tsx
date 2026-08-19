@@ -7,13 +7,19 @@ import { secondaryButton } from "@/app/_components/button-styles";
 import { requestRecordReset } from "@/lib/account/reset";
 
 /**
- * « Repartir de zéro » — the button, its confirmation and what it says after
- * (#69).
+ * « Réinitialiser ma progression » — the button, its confirmation and what it
+ * says after (#69).
  *
- * A block on /app/compte, under Clerk's card and the same width as it. Not a
- * page of Clerk's own nav: this touches nothing Clerk owns, and filing it beside
- * *Profil* and *Sécurité* claimed it was an account setting. It draws its body
- * and nothing else — the page supplies the sheet around it.
+ * A block on /app/compte, above Clerk's card and the same width as it. Above,
+ * because Clerk's card is tall: below it the button was off the bottom of the
+ * screen, and a control nobody scrolls to is a control nobody has. Not a page of
+ * Clerk's own nav either — this touches nothing Clerk owns, and filing it beside
+ * *Profil* and *Sécurité* claimed it was an account setting.
+ *
+ * The copy is the candidate's own wording, with two claims taken out because
+ * they are not true of this product: it names one épreuve rather than four, and
+ * it says nothing about passes, which do not exist here. Everything else — what
+ * is archived, what stays readable, what is untouched — is theirs.
  *
  * The confirmation is a second state of the block rather than a `<dialog>`,
  * which is a deliberate retreat from how the exit dialog does it. That dialog
@@ -69,12 +75,12 @@ export function ResetRecord() {
 
   return (
     <div className="text-foreground space-y-4">
-      <h2 className="font-serif text-lg font-semibold">Repartir de zéro</h2>
+      <h2 className="font-serif text-lg font-semibold">Réinitialiser ma progression</h2>
 
       <p className="text-muted-foreground text-sm leading-relaxed">
-        Remet votre tableau de bord et vos cartes de sujets à leur état de départ.
-        Vos épreuves ne sont pas supprimées : elles passent aux archives de
-        l&apos;historique, avec leurs corrections, et restent consultables.
+        Vos scores et vos épreuves corrigées sont archivés : ils restent
+        consultables dans votre historique, mais vos tableaux de bord repartent de
+        zéro. Votre compte et vos accès ne sont pas touchés.
       </p>
 
       {archived !== null && (
@@ -97,7 +103,7 @@ export function ResetRecord() {
       {confirming ? (
         <div className="border-border bg-muted space-y-3 border p-4">
           <p className="text-sm font-semibold">
-            Vos épreuves quitteront votre tableau de bord.
+            Vos épreuves quitteront vos tableaux de bord.
           </p>
           <p className="text-muted-foreground text-sm leading-relaxed">
             Rien n&apos;est supprimé : vous les retrouverez dans l&apos;historique,
@@ -128,7 +134,7 @@ export function ResetRecord() {
           }}
           className={secondaryButton}
         >
-          Repartir de zéro
+          Réinitialiser ma progression
         </button>
       )}
     </div>

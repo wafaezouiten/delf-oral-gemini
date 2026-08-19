@@ -289,7 +289,7 @@ pages that both open on a row of statistics would be the same page twice.
 
 **Starting over archives, it does not delete** (#69). The reference has a billing
 page where this product has an account screen, and the one thing that screen
-does is « Repartir de zéro »: the tableau de bord returns to its empty state and
+does is « Réinitialiser ma progression »: the tableau de bord returns to its empty state and
 the sujet cards return to « Commencer », while every épreuve stays in the
 historique under *Archives*, correction and all. `oral_exams.archived_at` is the
 whole mechanism — a line drawn across the record rather than a tombstone — and it
@@ -301,9 +301,11 @@ vanishing into the old one.
 offers « Gérer le compte » and « Se déconnecter », as it always did — what
 changed is that the first of those lands on `/app/compte`
 (`userProfileMode="navigation"`) instead of opening Clerk's dialog over the app.
-The account is therefore a page: Clerk's card on top with its own tabs, and this
-product's « Repartir de zéro » as a block underneath it, the same width and in
-the same centred column. The reset is deliberately **not** a third tab in Clerk's
+The account is therefore a page: this product's « Réinitialiser ma progression »
+as a block at the top, then Clerk's card with its own tabs, the same width and in
+the same column. The order is not decoration — Clerk's card is tall enough that
+anything under it starts below the fold, and a control nobody scrolls to is a
+control nobody has. The reset is deliberately **not** a third tab in Clerk's
 nav — it touches nothing Clerk owns, and filing it beside *Profil* and *Sécurité*
 claimed it was an account setting. Signing out stays in the menu, so the page
 carries no sign-out control of its own. It is not a fifth destination in the rail: an

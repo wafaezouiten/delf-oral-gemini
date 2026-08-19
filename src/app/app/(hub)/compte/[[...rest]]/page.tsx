@@ -8,14 +8,15 @@ import { ResetRecord } from "../_components/reset-record";
 /**
  * Mon compte — one page, two blocks, one column.
  *
- * Clerk's card on top: name, e-mail, password, sessions, all of it Clerk's to
- * draw. This product's own block underneath: « Repartir de zéro ». They are the
- * same width and share the page's centred column, so the account reads as one
- * screen rather than as a widget with something bolted beside it.
+ * « Réinitialiser ma progression » first, then Clerk's card: name, e-mail,
+ * password, sessions, all of it Clerk's to draw. The order is the whole reason
+ * the reset is first — Clerk's card is tall, and a button below it opens off the
+ * bottom of the screen.
  *
  * The reset is a section here and not a page of Clerk's nav. It is not an
  * account setting — it does not touch the identity Clerk owns — and filing it as
- * a third tab beside *Profil* and *Sécurité* claimed it was one.
+ * a third tab beside *Profil* and *Sécurité* claimed it was one. Same width and
+ * the same column as the card, so the two read as one screen.
  *
  * The catch-all segment is Clerk's requirement, not a route this product
  * invented: `<UserProfile routing="path">` gives each of its tabs a real URL
@@ -59,13 +60,16 @@ export default async function ComptePage() {
         </p>
       </header>
 
-      <div className="mt-6 w-full">
-        <AccountProfile />
-      </div>
-
-      <section className="border-border bg-card sheet mt-8 w-full border p-6">
+      {/* Above Clerk's card, not below it. Clerk's is tall enough that anything
+          under it starts off the bottom of the screen, and a control you have to
+          scroll to find is a control nobody finds. */}
+      <section className="border-border bg-card sheet mt-6 w-full border p-6">
         <ResetRecord />
       </section>
+
+      <div className="mt-8 w-full">
+        <AccountProfile />
+      </div>
     </main>
   );
 }
