@@ -8,15 +8,15 @@ import { ResetRecord } from "../_components/reset-record";
 /**
  * Mon compte — one page, two blocks, one column.
  *
- * « Réinitialiser ma progression » first, then Clerk's card: name, e-mail,
- * password, sessions, all of it Clerk's to draw. The order is the whole reason
- * the reset is first — Clerk's card is tall, and a button below it opens off the
- * bottom of the screen.
+ * One frame, two halves. Clerk's screens on top — name, e-mail, password,
+ * sessions, all of it Clerk's to draw — and « Réinitialiser ma progression »
+ * closing the frame at the bottom, under a rule. Clerk's card gives up its own
+ * border and shadow for it (`clerk-appearance.ts`), so the page draws one
+ * container rather than nesting two a pixel apart.
  *
- * The reset is a section here and not a page of Clerk's nav. It is not an
- * account setting — it does not touch the identity Clerk owns — and filing it as
- * a third tab beside *Profil* and *Sécurité* claimed it was one. Same width and
- * the same column as the card, so the two read as one screen.
+ * The reset is a section of that frame and not a page of Clerk's nav. It is not
+ * an account setting — it does not touch the identity Clerk owns — and filing it
+ * as a third tab beside *Profil* and *Sécurité* claimed it was one.
  *
  * The catch-all segment is Clerk's requirement, not a route this product
  * invented: `<UserProfile routing="path">` gives each of its tabs a real URL
@@ -60,16 +60,18 @@ export default async function ComptePage() {
         </p>
       </header>
 
-      {/* Above Clerk's card, not below it. Clerk's is tall enough that anything
-          under it starts off the bottom of the screen, and a control you have to
-          scroll to find is a control nobody finds. */}
-      <section className="border-border bg-card sheet mt-6 w-full border p-6">
-        <ResetRecord />
-      </section>
-
-      <div className="mt-8 w-full">
+      {/* One frame around both. Clerk's card gives up its own border and shadow
+          (`clerk-appearance.ts`) so this is the only container on the screen,
+          and the reset closes it at the bottom — under a rule rather than in a
+          box of its own, because it belongs to the account rather than sitting
+          beside it. */}
+      <section className="border-border bg-card sheet mt-6 w-full border">
         <AccountProfile />
-      </div>
+
+        <div className="border-border border-t p-6">
+          <ResetRecord />
+        </div>
+      </section>
     </main>
   );
 }

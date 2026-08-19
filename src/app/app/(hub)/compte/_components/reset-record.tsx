@@ -10,11 +10,10 @@ import { requestRecordReset } from "@/lib/account/reset";
  * « Réinitialiser ma progression » — the button, its confirmation and what it
  * says after (#69).
  *
- * A block on /app/compte, above Clerk's card and the same width as it. Above,
- * because Clerk's card is tall: below it the button was off the bottom of the
- * screen, and a control nobody scrolls to is a control nobody has. Not a page of
- * Clerk's own nav either — this touches nothing Clerk owns, and filing it beside
- * *Profil* and *Sécurité* claimed it was an account setting.
+ * The foot of the account's own frame on /app/compte: Clerk's screens above,
+ * this under a rule, one container around both. Not a page of Clerk's nav —
+ * this touches nothing Clerk owns, and filing it beside *Profil* and *Sécurité*
+ * claimed it was an account setting.
  *
  * The copy is the candidate's own wording, with two claims taken out because
  * they are not true of this product: it names one épreuve rather than four, and
