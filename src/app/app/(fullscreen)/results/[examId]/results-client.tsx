@@ -459,6 +459,17 @@ export function ResultsClient({
  * feed while it is happening (`debate-conversation.ts`) and as a record once it
  * is over, and only the sectioning changed here.
  *
+ * Each turn is ruled down its left edge in its speaker's colour, with the name
+ * set larger than the words it introduces (#87). The page is meant to be
+ * scannable in one pass — who spoke reads before what they said — and two
+ * voices are told apart more reliably by a line running the height of a turn
+ * than by a colour on four small words. The rules are 2 px against the 1 px
+ * hairlines that divide the sheet, which is the whole of the page's line
+ * vocabulary: a hairline separates, a rule names. The gap between turns is
+ * `space-y-5` rather than `space-y-4` for the same reason — at four, two
+ * consecutive rules of the same colour close up into one long line and the
+ * turns stop being separate.
+ *
  * The head no longer carries « Monologue 7:02 · Débat 4:38 ». Each section now
  * prints its own duration beside its own heading, and leaving the combined line
  * up top would print both numbers twice.
@@ -521,29 +532,72 @@ function TranscriptColumn({
                   {section.emptyNote}
                 </p>
               ) : (
-                <div className="mt-4 space-y-4">
+                <div className="mt-4 space-y-5">
                   {section.turns.map(({ entry, timeLabel }, index) => {
                     const isCandidate = entry.speaker !== "examiner";
+                    /* The rule and the name are one decision taken once (#87).
+                       Both classes come out of the same ternary so that
+                       repainting a speaker cannot leave its rule behind on the
+                       old colour — the line down the left edge *is* the label,
+                       drawn at the height of the turn instead of the width of
+                       four small words.
+
+                       The examiner's rule takes `--muted-foreground` at full
+                       strength, the same value its name does, and is not
+                       darkened to compensate for being the quiet one. The
+                       label was quiet because 10 px capitals are quiet; a 2 px
+                       solid rule of #5b6069 on the paper stock is about 6:1,
+                       twice the 3:1 a non-text mark needs. It reads as a line,
+                       not as an absent one.
+
+                       Both survive Ctrl+P, measured rather than assumed. These
+                       are borders, not the background fills the print block
+                       flattens to white (`globals.css`), so neither is
+                       dropped; on paper the accent is 10.9:1 and print's
+                       darkened `--muted-foreground` 9.7:1 against white.
+
+                       A mono printer is where the *colours* stop working and
+                       the rules do not: #1b3a7a and #444444 come out as greys
+                       56 and 68 of 255 — two firmly visible lines that are no
+                       longer two different ones. Nothing is lost, because
+                       nothing was left to the colour: « Vous » and
+                       « Examinateur » are written above every turn, and the
+                       rule's job on a greyscale sheet is to bound the turn,
+                       not to name it. */
+                    const tone = isCandidate
+                      ? { rule: "border-primary", name: "text-primary" }
+                      : { rule: "border-muted-foreground", name: "text-muted-foreground" };
                     return (
-                      <p
+                      /* `break-inside-avoid` matters more here than it did on
+                         the paragraph: a rule that crosses a page break prints
+                         as two rules with a fold between them. A turn now
+                         travels whole or not at all. */
+                      <div
                         key={turnKey(entry, index)}
-                        className="text-sm leading-relaxed break-inside-avoid"
+                        className={cn("border-l-2 pl-3 break-inside-avoid", tone.rule)}
                       >
-                        {/* The stamp shares the label's line rather than taking
+                        {/* The stamp shares the name's line rather than taking
                             one of its own: it is a locator, not a heading, and a
                             transcript where every turn costs three lines instead
                             of two reads as a log. `tabular` so the column of
-                            stamps lines up down the page. */}
-                        <span className="flex items-baseline gap-2 text-[0.625rem] font-semibold tracking-[0.16em] uppercase">
-                          <span className={isCandidate ? "text-primary" : "text-muted-foreground"}>
+                            stamps lines up down the page.
+
+                            The name grows to `text-base` — above the turn it
+                            names rather than below it — and loses the capitals
+                            and the wide tracking on the way up: small caps at
+                            10 px read as a label, the same capitals at 16 px
+                            read as shouting. Only the name grows; the stamp
+                            stays exactly the size it was. */}
+                        <div className="flex items-baseline gap-2">
+                          <span className={cn("text-base leading-tight font-medium", tone.name)}>
                             {speakerLabel(entry.speaker)}
                           </span>
-                          <span className="text-muted-foreground/70 tabular tracking-normal">
+                          <span className="text-muted-foreground/70 tabular text-[0.625rem] font-semibold">
                             {timeLabel}
                           </span>
-                        </span>
-                        {entry.text}
-                      </p>
+                        </div>
+                        <p className="mt-1 text-sm leading-relaxed">{entry.text}</p>
+                      </div>
                     );
                   })}
                 </div>
