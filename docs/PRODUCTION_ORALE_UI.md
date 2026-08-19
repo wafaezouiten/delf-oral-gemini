@@ -287,6 +287,67 @@ bord shows a recent list and nothing more. It is a list and only a list: the
 dashboard answers "how am I doing?", this answers "what have I done?", and two
 pages that both open on a row of statistics would be the same page twice.
 
+**Starting over archives, it does not delete** (#69). The reference has a billing
+page where this product has an account screen, and the one thing that screen
+does is « Réinitialiser ma progression »: the tableau de bord returns to its empty state and
+the sujet cards return to « Commencer », while every épreuve stays in the
+historique under *Archives*, correction and all. `oral_exams.archived_at` is the
+whole mechanism — a line drawn across the record rather than a tombstone — and it
+is stamped only on sittings already on the record, so an épreuve still in
+progress when the button is pressed belongs to the new record instead of
+vanishing into the old one.
+
+**The avatar keeps its menu; the account stops being a modal.** Clicking it still
+offers « Gérer le compte » and « Se déconnecter », as it always did — what
+changed is that the first of those lands on `/app/compte`
+(`userProfileMode="navigation"`) instead of opening Clerk's dialog over the app.
+The account is therefore a page: « Réinitialiser ma progression » in the header
+opposite the title, and Clerk's card below it. The reset is not inside that card
+and not a page of its nav — it touches nothing Clerk owns — and the header is the
+only place on a page this tall that is visible the moment it loads, which matters
+for the one control a candidate might arrive looking for. The explanation travels
+with the confirmation rather than sitting on screen permanently: a candidate who
+is not pressing it does not need the paragraph, and one who is needs it right
+then. The reset is deliberately **not** a third tab in Clerk's
+nav — it touches nothing Clerk owns, and filing it beside *Profil* and *Sécurité*
+claimed it was an account setting. Signing out stays in the menu, so the page
+carries no sign-out control of its own. It is not a fifth destination in the rail: an
+account is not part of the épreuve, and the four destinations stay four.
+
+Clerk still draws the account screens. `<UserProfile>` is embedded rather than
+reproduced — name, e-mail, password and sessions change when the provider
+changes, and a hand-written copy would be a second place to change an e-mail with
+one of the two eventually wrong. What is ours is the palette it is drawn in:
+`lib/ui/clerk-appearance.ts` maps this product's tokens onto Clerk's variables,
+and the load-bearing one is `borderRadius: 2px` — the `.sheet` number, and the
+whole difference between a card from another application and a sheet of paper.
+The colours are duplicated as literals there on purpose, because Clerk derives a
+scale from each and cannot parse a `var(…)`.
+
+The reset's confirmation is a panel under the button rather than a `<dialog>` — a
+deliberate retreat from how the exit dialog does it. That dialog interrupts an
+épreuve in progress and has to; this interrupts nothing, and a modal for a
+control the candidate opened this page to use is a ceremony rather than a
+safeguard.
+
+**« Réinitialiser » is red and its confirm is not**, which narrows the rule
+`button-styles.ts` used to state. Nothing here is deleted, so by the old reading
+("never a destructive one") the trigger would not be red at all; it is, because a
+reset of somebody's record should announce itself as consequential whether or not
+it is reversible. What the colour must not do is hurry the decision, so red
+appears once per decision — on the trigger here, on « Abandonner » in the exit
+dialog — and never again on the button that confirms it.
+
+The count is reported *after* the reset, from what the route says it archived,
+rather than promised before it.
+
+**Changing a password is a Clerk setting, not code.** The *Sécurité* tab shows a
+password section only when the password strategy is enabled on the instance
+(Clerk Dashboard → User & authentication → Password) — #36 §3 recommended turning
+it **off** so the e-mail path is `email → code → in`, and with it off there is
+nothing for the tab to show. Turning it back on makes « Mot de passe » appear
+with no change here.
+
 ## 4. Deliberate departures, collected
 
 Everything below is a decision, not an oversight:

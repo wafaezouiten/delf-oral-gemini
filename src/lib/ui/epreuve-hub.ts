@@ -46,6 +46,12 @@ export interface HubLinks {
   sujets: string;
   tableauDeBord: string;
   historique: string;
+  /**
+   * Mon compte (#69) — the account screens and « Repartir de zéro », in one
+   * page. In the map but not in the rail: it is reached by clicking the avatar,
+   * which is where an account is reached, and the four destinations stay four.
+   */
+  compte: string;
 }
 
 /** The whole hub, ready to render. */
@@ -140,6 +146,7 @@ export const HUB_LINKS: HubLinks = {
   sujets: "/app/sujets",
   tableauDeBord: "/app/tableau-de-bord",
   historique: "/app/historique",
+  compte: "/app/compte",
 };
 
 /**

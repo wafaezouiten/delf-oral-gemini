@@ -85,6 +85,17 @@ export interface DashboardSitting {
   phase: string;
   /** Graded, or walked out of. Newest-first ordering is on this. */
   endedAt: Date;
+  /**
+   * When a reset took this sitting off the current record (#69), or `null` while
+   * it still counts.
+   *
+   * Nothing in this module reads it, and that is correct: the figures below are
+   * computed from the sittings they are given, and whether a sitting counts is
+   * decided one layer down, in the query. It travels on the row for the
+   * historique, which is handed the archive *and* the record in one list and has
+   * to know which is which.
+   */
+  archivedAt: Date | null;
 }
 
 /** The zero an abandoned sitting scores, on every criterion. */

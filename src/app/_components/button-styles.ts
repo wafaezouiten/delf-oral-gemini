@@ -21,5 +21,16 @@ export const primaryButton = `${BASE} bg-primary text-primary-foreground hover:o
 /** Everything else: going back, opening a subject, leaving. */
 export const secondaryButton = `${BASE} border border-border bg-card text-foreground hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50`;
 
-/** Recovering from a failure — the only red button, and never a destructive one. */
+/**
+ * The red one: recovering from a failure, and the two controls that change a
+ * candidate's record on purpose — abandoning an épreuve, and resetting the
+ * progression (#69).
+ *
+ * It used to say "never a destructive one", which the exit dialog had already
+ * outgrown and the reset finished off. The rule it is left with is narrower and
+ * truer: **red appears once per decision.** The exit dialog spends it on
+ * « Abandonner », which is the step itself; the reset spends it on the trigger
+ * in the header, and its confirm is a plain button. Two reds in one flow is a
+ * colour to click through rather than a warning to read.
+ */
 export const dangerButton = `${BASE} border border-danger/40 bg-danger-subtle text-danger hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50`;
