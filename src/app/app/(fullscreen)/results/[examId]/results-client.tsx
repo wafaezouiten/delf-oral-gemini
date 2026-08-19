@@ -513,20 +513,25 @@ function TranscriptColumn({
                 </p>
               ) : (
                 <div className="mt-4 space-y-4">
-                  {section.entries.map((entry, index) => {
+                  {section.turns.map(({ entry, timeLabel }, index) => {
                     const isCandidate = entry.speaker !== "examiner";
                     return (
                       <p
                         key={turnKey(entry, index)}
                         className="text-sm leading-relaxed break-inside-avoid"
                       >
-                        <span
-                          className={cn(
-                            "block text-[0.625rem] font-semibold tracking-[0.16em] uppercase",
-                            isCandidate ? "text-primary" : "text-muted-foreground",
-                          )}
-                        >
-                          {speakerLabel(entry.speaker)}
+                        {/* The stamp shares the label's line rather than taking
+                            one of its own: it is a locator, not a heading, and a
+                            transcript where every turn costs three lines instead
+                            of two reads as a log. `tabular` so the column of
+                            stamps lines up down the page. */}
+                        <span className="flex items-baseline gap-2 text-[0.625rem] font-semibold tracking-[0.16em] uppercase">
+                          <span className={isCandidate ? "text-primary" : "text-muted-foreground"}>
+                            {speakerLabel(entry.speaker)}
+                          </span>
+                          <span className="text-muted-foreground/70 tabular tracking-normal">
+                            {timeLabel}
+                          </span>
                         </span>
                         {entry.text}
                       </p>

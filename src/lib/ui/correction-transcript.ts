@@ -3,9 +3,9 @@
  *
  * Here rather than in `results-client.tsx` for the reason every other `lib/ui`
  * module is: the sectioning is a decision — which headings print, which duration
- * sits beside which turns, and which of two "nothing was said" messages fires —
- * and a decision belongs somewhere it can be wrong in a test rather than only on
- * somebody's finished exam.
+ * sits beside which turns, what a turn's timestamp is counted from, and which of
+ * two "nothing was said" messages fires — and a decision belongs somewhere it can
+ * be wrong in a test rather than only on somebody's finished exam.
  *
  * **Why the split at all.** `transcript.ts` tags every entry with its phase
  * because the monologue and the débat are different tasks graded on different
@@ -71,12 +71,31 @@ export const PHASE_HEADINGS: Record<TranscriptPhase, string> = {
 /** The parts in the order they were sat. */
 const PHASE_ORDER: readonly TranscriptPhase[] = ["monologue", "debate"];
 
+export interface CorrectionTranscriptTurn {
+  entry: TranscriptEntry;
+  /**
+   * `m:ss` into **this part**, not into the sitting.
+   *
+   * `TranscriptEntry.timestamp` counts from the start of the exam, so a débat
+   * turn carries something like 15:32 — a figure printed under a heading that
+   * says the débat lasted 4:38, which is a contradiction a candidate has to
+   * resolve before they can use either number. Re-anchoring on the part's first
+   * turn makes the stamps read against the duration beside the heading, and
+   * makes the monologue's and the débat's stamps comparable to each other.
+   *
+   * The anchor is the part's first *entry*, not the exam clock reaching the
+   * phase: the transcript has no record of when the phase opened, and the gap
+   * between opening it and the first word is silence nobody is being shown.
+   */
+  timeLabel: string;
+}
+
 export interface CorrectionTranscriptSection {
   phase: TranscriptPhase;
   heading: string;
   /** `m:ss` of the audio actually recorded for this part. */
   durationLabel: string;
-  entries: TranscriptEntry[];
+  turns: CorrectionTranscriptTurn[];
   /** Printed under the heading when the part has no turns at all, else null. */
   emptyNote: string | null;
 }
@@ -115,11 +134,15 @@ export function correctionTranscriptView(
 
   const sections = PHASE_ORDER.map((phase): CorrectionTranscriptSection => {
     const entries = entriesForPhase(transcript, phase);
+    const anchor = entries[0]?.timestamp ?? 0;
     return {
       phase,
       heading: PHASE_HEADINGS[phase],
       durationLabel: formatClock(seconds[phase]),
-      entries,
+      turns: entries.map((entry) => ({
+        entry,
+        timeLabel: elapsedLabel(entry.timestamp - anchor),
+      })),
       emptyNote:
         entries.length === 0 && spoke ? CORRECTION_TRANSCRIPT_COPY.emptySection : null,
     };
@@ -134,4 +157,19 @@ export function correctionTranscriptView(
           body: CORRECTION_TRANSCRIPT_COPY.silentBody,
         },
   };
+}
+
+/**
+ * A turn's offset into its part, as `m:ss`.
+ *
+ * Floored, not rounded: the stamp marks when a turn *started*, and rounding up
+ * would print a turn as beginning a second after the word that begins it. Clamped
+ * at zero because `appendFragment` keeps a turn's opening timestamp while merging
+ * later fragments into it, so nothing downstream guarantees a transcript that was
+ * reordered or spliced still runs forwards — and a negative `-0:01` beside a turn
+ * would be read as a defect in the recording rather than in the arithmetic.
+ */
+function elapsedLabel(offsetMs: number): string {
+  if (!Number.isFinite(offsetMs)) return formatClock(0);
+  return formatClock(Math.max(0, Math.floor(offsetMs / 1000)));
 }

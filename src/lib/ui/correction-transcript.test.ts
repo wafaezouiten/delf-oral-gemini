@@ -61,15 +61,15 @@ describe("cutting the correction into the two parts", () => {
     const view = correctionTranscriptView(FULL, DURATIONS);
 
     assert.deepEqual(
-      view.sections[0].entries.map((e) => e.text),
+      view.sections[0].turns.map((t) => t.entry.text),
       ["Vous pouvez commencer.", "Le sujet aborde la place du télétravail…"],
     );
     assert.deepEqual(
-      view.sections[1].entries.map((e) => e.text),
+      view.sections[1].turns.map((t) => t.entry.text),
       ["Vous dites que c'est un progrès. Vraiment ?", "Je maintiens que oui, et voici pourquoi…"],
     );
     assert.equal(
-      view.sections.reduce((n, s) => n + s.entries.length, 0),
+      view.sections.reduce((n, s) => n + s.turns.length, 0),
       FULL.length,
     );
   });
@@ -101,7 +101,7 @@ describe("an épreuve walked out of mid-exposé", () => {
     const debate = view.sections[1];
     assert.equal(debate.heading, "Débat");
     assert.equal(debate.durationLabel, "0:00");
-    assert.deepEqual(debate.entries, []);
+    assert.deepEqual(debate.turns, []);
     assert.equal(debate.emptyNote, CORRECTION_TRANSCRIPT_COPY.emptySection);
   });
 
@@ -112,7 +112,7 @@ describe("an épreuve walked out of mid-exposé", () => {
     });
 
     assert.equal(view.sections[0].emptyNote, null);
-    assert.equal(view.sections[0].entries.length, 2);
+    assert.equal(view.sections[0].turns.length, 2);
   });
 
   it("does not raise the whole-page block for a half that is merely missing", () => {
@@ -176,5 +176,75 @@ describe("the footnote", () => {
     // « les durées ci-dessus » pointed at nothing.
     assert.ok(!CORRECTION_TRANSCRIPT_COPY.footnote.includes("ci-dessus"));
     assert.ok(CORRECTION_TRANSCRIPT_COPY.footnote.includes("Les durées indiquées"));
+  });
+});
+
+describe("stamping each turn with when it was said", () => {
+  it("counts from the start of the part, not the start of the sitting", () => {
+    // The whole point. `timestamp` is ms since the exam began, so the débat's
+    // first turn carries ~15 minutes — printed under a heading that says the
+    // débat lasted 4:38. Re-anchored, the stamps read against that duration.
+    const view = correctionTranscriptView(
+      [
+        turn("monologue", "candidate", "…", 12_000),
+        turn("debate", "examiner", "…", 930_000),
+        turn("debate", "candidate", "…", 961_000),
+      ],
+      DURATIONS,
+    );
+
+    assert.deepEqual(
+      view.sections[0].turns.map((t) => t.timeLabel),
+      ["0:00"],
+    );
+    assert.deepEqual(
+      view.sections[1].turns.map((t) => t.timeLabel),
+      ["0:00", "0:31"],
+    );
+  });
+
+  it("starts each part at 0:00, so its two halves are comparable", () => {
+    const view = correctionTranscriptView(FULL, DURATIONS);
+
+    assert.equal(view.sections[0].turns[0].timeLabel, "0:00");
+    assert.equal(view.sections[1].turns[0].timeLabel, "0:00");
+  });
+
+  it("floors, because the stamp marks when a turn started", () => {
+    // 1.9 s in is a turn that began during the second second, not the third.
+    const view = correctionTranscriptView(
+      [turn("monologue", "candidate", "a", 0), turn("monologue", "examiner", "b", 1_900)],
+      DURATIONS,
+    );
+
+    assert.equal(view.sections[0].turns[1].timeLabel, "0:01");
+  });
+
+  it("crosses the minute the way a clock does", () => {
+    const view = correctionTranscriptView(
+      [turn("monologue", "candidate", "a", 0), turn("monologue", "examiner", "b", 65_000)],
+      DURATIONS,
+    );
+
+    assert.equal(view.sections[0].turns[1].timeLabel, "1:05");
+  });
+
+  it("never prints a negative stamp", () => {
+    // Nothing downstream guarantees the entries run forwards, and « -0:01 »
+    // beside a turn reads as a defect in the recording rather than in the
+    // arithmetic.
+    const view = correctionTranscriptView(
+      [turn("monologue", "candidate", "a", 9_000), turn("monologue", "examiner", "b", 4_000)],
+      DURATIONS,
+    );
+
+    assert.equal(view.sections[0].turns[1].timeLabel, "0:00");
+  });
+
+  it("keeps each turn's own entry beside its stamp", () => {
+    const view = correctionTranscriptView(FULL, DURATIONS);
+
+    assert.equal(view.sections[1].turns[1].entry.text, "Je maintiens que oui, et voici pourquoi…");
+    assert.equal(view.sections[1].turns[1].entry.speaker, "candidate");
   });
 });
