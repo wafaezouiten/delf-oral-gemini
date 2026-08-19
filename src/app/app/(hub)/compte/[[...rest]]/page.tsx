@@ -42,8 +42,15 @@ export default async function ComptePage() {
   // transition and does not decide whether this segment renders.
   await requireUserId();
 
+  // Narrower than the other reading screens, and left of the column they centre
+  // in. The account is a form to work through rather than a document to read:
+  // the sujets and the tableau de bord earn a wide centred measure because they
+  // are full of prose and figures, and this is a list of fields that only looks
+  // emptier the more room it is given. `lg:mx-0 lg:ml-20` rather than a
+  // translate, so it stays in normal flow — and centred on the phone, where
+  // there is nowhere else to be.
   return (
-    <main className="mx-auto flex w-full max-w-3xl flex-col items-center px-6 py-10">
+    <main className="mx-auto flex w-full max-w-2xl flex-col px-6 py-8 lg:mx-0 lg:ml-20">
       <header className="w-full">
         <Kicker>DELF B2 · Production orale</Kicker>
         <h1 className="font-serif mt-1 text-2xl leading-tight font-semibold">Mon compte</h1>
