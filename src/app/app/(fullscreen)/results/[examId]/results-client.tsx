@@ -246,11 +246,16 @@ export function ResultsClient({
     ? "La phonologie n'a pas pu être évaluée de façon fiable sur cette production."
     : undefined;
 
-  // `print:*` on the three scroll containers below: on screen the shell is a
+  // `print:*` on all four of this page's scroll containers — the shell, the
+  // grid, the transcript column and the rail. On screen the correction is a
   // fixed-height, independently-scrolling pair of columns, and a scroll
   // container prints as one clipped screenful. Releasing the clipping is what
   // lets the sheet paginate at all — and therefore what makes the section
   // headings' `break-*` rules further down mean anything.
+  //
+  // All four, not just the transcript's: the rail is the half carrying the /25,
+  // so a page that paginates on one side and clips on the other loses the grade
+  // rather than the words.
   return (
     <div className="bg-background text-foreground flex h-full min-h-0 flex-col overflow-hidden print:h-auto print:overflow-visible">
       {/* Header. `no-print` on the actions only: the correction is the thing a
@@ -352,7 +357,11 @@ export function ResultsClient({
             )}
           </div>
 
-          <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4">
+          {/* The rail scrolls on its own too, and it is the half carrying the
+              /25 and the five criteria — the part of a printed correction it
+              would hurt most to lose the foot of. Same release as the three on
+              the shell. */}
+          <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4 print:overflow-visible">
             {evaluation.mode === "text" && (
               <div className="mb-4">
                 <Notice tone="warning" title="Corrigé sans l'audio">
