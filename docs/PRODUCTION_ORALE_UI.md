@@ -324,13 +324,22 @@ whole difference between a card from another application and a sheet of paper.
 The colours are duplicated as literals there on purpose, because Clerk derives a
 scale from each and cannot parse a `var(…)`.
 
-The reset's confirmation is a second state of its block rather than a `<dialog>`
-— a deliberate retreat from how the exit dialog does it. That dialog interrupts
-an épreuve in progress and has to; this interrupts nothing, and a modal for a
+The reset's confirmation is a panel under the button rather than a `<dialog>` — a
+deliberate retreat from how the exit dialog does it. That dialog interrupts an
+épreuve in progress and has to; this interrupts nothing, and a modal for a
 control the candidate opened this page to use is a ceremony rather than a
-safeguard. Neither button is the red one, for the reason above: nothing is
-destroyed. The count is reported *after* the reset, from what the route says it
-archived, rather than promised before it.
+safeguard.
+
+**« Réinitialiser » is red and its confirm is not**, which narrows the rule
+`button-styles.ts` used to state. Nothing here is deleted, so by the old reading
+("never a destructive one") the trigger would not be red at all; it is, because a
+reset of somebody's record should announce itself as consequential whether or not
+it is reversible. What the colour must not do is hurry the decision, so red
+appears once per decision — on the trigger here, on « Abandonner » in the exit
+dialog — and never again on the button that confirms it.
+
+The count is reported *after* the reset, from what the route says it archived,
+rather than promised before it.
 
 **Changing a password is a Clerk setting, not code.** The *Sécurité* tab shows a
 password section only when the password strategy is enabled on the instance

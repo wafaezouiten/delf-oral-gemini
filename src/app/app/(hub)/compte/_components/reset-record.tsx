@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 
-import { secondaryButton } from "@/app/_components/button-styles";
+import { dangerButton, secondaryButton } from "@/app/_components/button-styles";
 import { requestRecordReset } from "@/lib/account/reset";
 
 /**
@@ -16,21 +16,23 @@ import { requestRecordReset } from "@/lib/account/reset";
  * card is tall enough that a control under it opens below the fold, where nobody
  * scrolls to find it.
  *
- * So the header shows a button and nothing else, and the explanation arrives
- * with the confirmation instead of sitting on the screen permanently. That is
- * the right way round for a control whose copy is entirely about consequences: a
- * candidate who is not pressing it does not need the paragraph, and one who is
- * needs it right then.
+ * The header carries the button and one line saying what it is for — enough to
+ * tell a candidate whether this is the control they came for, and no more. The
+ * paragraph of consequences arrives with the confirmation, where it is read
+ * because it has to be rather than skimmed past because it is always there.
  *
  * A panel rather than a `<dialog>`. The exit dialog interrupts an épreuve in
  * progress and has to; this interrupts nothing, and a modal for a control the
  * candidate came to this page to use is a ceremony rather than a safeguard.
  *
- * Neither button is the red one. Red in this product means recovering from a
- * failure, and in the exit dialog a zero the candidate is about to take;
- * borrowing it here would claim a loss that does not happen, since nothing is
- * deleted — the épreuves go to the archive of the historique with their
- * corrections and stay open there.
+ * **Red, on the candidate's instruction, and the confirm is not.** Nothing here
+ * is deleted — the épreuves go to the archive of the historique with their
+ * corrections and stay open there — so by this product's own colour rule the
+ * trigger would not be red. It is, because a reset of somebody's record should
+ * announce itself as consequential whether or not it is reversible, and that is
+ * a fair reading. What the colour must not do is *hurry* the decision: the
+ * confirm inside the panel stays a plain button, so the red is a warning to
+ * read the panel rather than a second red button to click through.
  *
  * No count is promised beforehand: a number would mean handing this client
  * component the candidate's record every time the account page mounts. The route
@@ -72,10 +74,11 @@ export function ResetRecord() {
   }
 
   return (
-    // Full width on a phone, where the header stacks; a column of its own beside
-    // the title from `sm` up, wide enough for the confirmation to be read in
-    // sentences rather than in two-word lines.
-    <div className="w-full sm:w-80 sm:shrink-0">
+    // Full width on a phone, where the header stacks; a narrow column of its own
+    // beside the title from `sm` up — wide enough that the confirmation reads in
+    // sentences rather than in two-word lines, and no wider, so the button sits
+    // against the right edge of the page rather than in from it.
+    <div className="w-full sm:w-72 sm:shrink-0">
       {confirming ? (
         <div className="border-border bg-muted space-y-3 border p-4">
           <p className="text-sm font-semibold">Réinitialiser ma progression ?</p>
@@ -110,17 +113,25 @@ export function ResetRecord() {
           </div>
         </div>
       ) : (
-        <button
-          type="button"
-          onClick={() => {
-            setArchived(null);
-            setFailed(null);
-            setConfirming(true);
-          }}
-          className={`${secondaryButton} w-full`}
-        >
-          Réinitialiser ma progression
-        </button>
+        // Right-aligned and only as wide as its label: it is the header's second
+        // element, not a form control, and a button stretched to the width of
+        // the column reads as the page's main action.
+        <div className="flex flex-col gap-2 sm:items-end">
+          <button
+            type="button"
+            onClick={() => {
+              setArchived(null);
+              setFailed(null);
+              setConfirming(true);
+            }}
+            className={`${dangerButton} w-full sm:w-auto`}
+          >
+            Réinitialiser
+          </button>
+          <p className="text-muted-foreground text-xs leading-relaxed sm:text-right">
+            Archive vos épreuves passées et remet vos tableaux de bord à zéro.
+          </p>
+        </div>
       )}
 
       {archived !== null && !confirming && (
