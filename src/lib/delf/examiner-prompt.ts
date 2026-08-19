@@ -17,7 +17,7 @@ import type { OralTopic } from "./topics";
 
 /** Bumped whenever the wording changes, and stored on every evaluation so an
  *  old result can be traced back to the examiner that produced it. */
-export const EXAMINER_PROMPT_VERSION = "2026-08-17.1";
+export const EXAMINER_PROMPT_VERSION = "2026-08-19.1";
 
 /**
  * Shared framing. Every phase gets this, so the examiner's identity, language
@@ -133,6 +133,45 @@ export function examinerOpeningLine(phase: "monologue" | "debate"): string | nul
   return phase === "monologue"
     ? null
     : "Ouvre le débat maintenant, en une ou deux phrases, en citant un argument précis de l'exposé du candidat et en lui opposant le point de vue contraire.";
+}
+
+/**
+ * The relance the examiner speaks when the candidate has said nothing (#84).
+ *
+ * A directive, not a script, and that is the whole difference between this and
+ * the check below. The examiner's job at this moment is to push on what the
+ * candidate actually said, and a canned « Pouvez-vous préciser ? » would be the
+ * one relance in the épreuve that ignores the exchange it interrupts. So the
+ * words are the model's and only the intent is fixed.
+ *
+ * Note what it forbids. Commenting on the silence would turn a pedagogical
+ * relance into a reproach, and « vous avez compris ? » would make it an
+ * assessment of the candidate's comprehension, which no examiner says out loud
+ * during the épreuve. Both are what a model asked merely to "relancer" reaches
+ * for first.
+ *
+ * The controller decides WHEN this is sent, and it has to: total silence
+ * produces no speech-end, so automatic voice-activity detection never gives the
+ * model the floor to notice with. See `ExamController`'s silence watch.
+ */
+export function silenceRelanceInstruction(): string {
+  return "[Le candidat n'a rien répondu depuis plusieurs secondes. Relance-le sur le fond, en une seule phrase : reformule autrement ta dernière question, ou pose une question plus simple et plus précise sur ce qu'il a déjà dit. Ne fais aucune remarque sur son silence, ne lui demande pas s'il a compris, n'évalue pas.]";
+}
+
+/**
+ * The examiner checking that the candidate is still there (#84).
+ *
+ * The opposite case to the relance, and fixed wording for that reason: this is
+ * no longer the épreuve doing its job, it is a technical check, and it should
+ * sound like one. An improvised « êtes-vous toujours avec moi ? » would read as
+ * part of the débat and invite an answer about the subject; four words that
+ * plainly ask about the connection do not.
+ *
+ * Sent at most twice in a débat, and never twice without an answer in between:
+ * a candidate who has genuinely frozen must not be asked five times.
+ */
+export function presenceCheckInstruction(): string {
+  return "[Le candidat n'a toujours rien répondu. Dis exactement ceci, mot pour mot, et rien d'autre : « Vous m'entendez ? »]";
 }
 
 /**
