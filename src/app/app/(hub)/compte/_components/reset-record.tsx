@@ -74,13 +74,15 @@ export function ResetRecord() {
   }
 
   return (
-    // Full width on a phone, where the header stacks; a narrow column of its own
-    // beside the title from `sm` up — wide enough that the confirmation reads in
-    // sentences rather than in two-word lines, and no wider, so the button sits
-    // against the right edge of the page rather than in from it.
-    <div className="w-full sm:w-72 sm:shrink-0">
+    // Full width on a phone, where the header stacks. From `sm` up it shrinks to
+    // its contents and is pushed to the far right by `ml-auto` — the flex row
+    // above already puts it there, and this makes it independent of what the
+    // title beside it happens to be doing. `items-end` then takes the button to
+    // the container's last pixel instead of leaving it inside a block that ends
+    // there.
+    <div className="ml-auto flex w-full flex-col items-stretch sm:w-auto sm:shrink-0 sm:items-end">
       {confirming ? (
-        <div className="border-border bg-muted space-y-3 border p-4">
+        <div className="border-border bg-muted w-full space-y-3 border p-4 sm:w-72">
           <p className="text-sm font-semibold">Réinitialiser ma progression ?</p>
           <p className="text-muted-foreground text-sm leading-relaxed">
             Vos scores et vos épreuves corrigées sont archivés : ils restent
@@ -113,10 +115,10 @@ export function ResetRecord() {
           </div>
         </div>
       ) : (
-        // Right-aligned and only as wide as its label: it is the header's second
-        // element, not a form control, and a button stretched to the width of
-        // the column reads as the page's main action.
-        <div className="flex flex-col gap-2 sm:items-end">
+        // Only as wide as its label: it is the header's second element, not a
+        // form control, and a button stretched to the width of a column reads as
+        // the page's main action.
+        <div className="flex w-full flex-col gap-2 sm:w-auto sm:items-end">
           <button
             type="button"
             onClick={() => {
@@ -128,7 +130,10 @@ export function ResetRecord() {
           >
             Réinitialiser
           </button>
-          <p className="text-muted-foreground text-xs leading-relaxed sm:text-right">
+          {/* Capped, so the line wraps into a short block under the button
+              instead of stretching the header cell and dragging the button back
+              in from the edge. */}
+          <p className="text-muted-foreground max-w-56 text-xs leading-relaxed sm:text-right">
             Archive vos épreuves passées et remet vos tableaux de bord à zéro.
           </p>
         </div>
@@ -137,7 +142,7 @@ export function ResetRecord() {
       {archived !== null && !confirming && (
         <p
           role="status"
-          className="border-border bg-muted mt-3 border p-3 text-sm leading-relaxed"
+          className="border-border bg-muted mt-3 w-full border p-3 text-sm leading-relaxed sm:w-72"
         >
           {archived === 0
             ? "Il n'y avait aucune épreuve à archiver."
