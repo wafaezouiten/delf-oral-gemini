@@ -29,7 +29,7 @@ import type { OralTopic } from "./topics";
  * oddly. Corrected rather than deleted, because the gap is worth closing and a
  * constant that quietly lied about being persisted is how it stayed open.
  */
-export const EXAMINER_PROMPT_VERSION = "2026-08-19.1";
+export const EXAMINER_PROMPT_VERSION = "2026-08-19.2";
 
 /**
  * Shared framing. Every phase gets this, so the examiner's identity, language
@@ -49,7 +49,10 @@ RÈGLES ABSOLUES, valables pendant toute l'épreuve :
 - Tu ne juges jamais l'opinion du candidat : seule sa capacité à l'exprimer et à la défendre est en jeu.
 - Tes interventions sont brèves. Le temps de parole appartient au candidat, pas à toi.
 - N'utilise jamais de tiret cadratin ni de tiret demi-cadratin. Préfère la virgule ou les deux-points.
-- Ne prononce jamais de balise, de crochet, ni d'instruction technique.`;
+- Ne prononce jamais de balise, de crochet, ni d'instruction technique.
+- Tu ne parles JAMAIS du temps : ni du temps écoulé, ni du temps restant, ni de la durée d'une partie. Les indications de temps qu'on te donne sont pour toi seul.
+- L'épreuve comporte EXACTEMENT deux parties : le monologue suivi, puis le débat. Il n'existe pas de troisième partie. N'annonce jamais une partie qui n'existe pas.
+- Tu ne mets JAMAIS fin à l'épreuve, ni à une partie, de ta propre initiative. Tu ne dis jamais au candidat que l'épreuve est terminée, qu'il peut disposer, partir ou quitter la salle, et tu ne prends jamais congé de lui. Tu ne conclus que lorsqu'on te donne explicitement l'instruction de conclure. Tant qu'elle n'est pas arrivée, l'épreuve continue et c'est à toi de la faire continuer.`;
 
 /**
  * The monologue instruction.
@@ -110,6 +113,8 @@ TON RÔLE DANS CETTE PHASE : tu mènes le débat en jouant l'avocat du diable.
 - Ne cède pas trop vite. Ton but est de le faire défendre, nuancer et préciser sa position.
 - Une seule question ou objection à la fois. Laisse-le répondre entièrement avant de relancer.
 - Reste sur le sujet de l'épreuve.
+
+DURÉE : le débat dure environ 13 minutes, et c'est le centre d'examen qui décide quand il s'arrête, pas toi. On te donnera de temps en temps une indication du temps restant : tu en tiens compte pour toi seul, sans jamais la dire à voix haute. Tant que l'instruction de conclure ne t'est pas parvenue, tu continues, même si tu as l'impression d'avoir fait le tour de la question : change d'angle, reprends un autre argument de l'exposé, demande un exemple nouveau, pousse une nuance. Il reste toujours une objection à formuler.
 
 RYTHME : tes interventions font une à trois phrases. Si le candidat donne une réponse très courte, relance-le sur le fond plutôt que de meubler.
 
@@ -184,6 +189,47 @@ export function silenceRelanceInstruction(): string {
  */
 export function presenceCheckInstruction(): string {
   return "[Le candidat n'a toujours rien répondu. Dis exactement ceci, mot pour mot, et rien d'autre : « Vous m'entendez ? »]";
+}
+
+/**
+ * The clock the examiner does not have (#85).
+ *
+ * Nothing in a Live session tells the model how long it has been running. The
+ * whole of its time signal used to be the « environ 13 minutes » in its system
+ * instruction, spoken once at connect time, and a model that has run out of
+ * counter-arguments or reads a lull as the end of an exchange has nothing to
+ * contradict it. Six minutes into a thirteen-minute débat, one showed the
+ * candidate the door.
+ *
+ * So the app, which does have a clock, lends it. This goes out through the same
+ * `sendDirective` path as the closing line, which means it makes the examiner
+ * SPEAK: the directive therefore says what to do with the floor it is being
+ * handed, and the controller only sends it when the floor is free. What it must
+ * not do is read the number out loud, which is asked here and forbidden twice
+ * over in the identity block above.
+ *
+ * @param minutes whole minutes left in the part, rounded, never below one.
+ */
+export function timeRemainingInstruction(minutes: number): string {
+  return `[Information de service, à ne jamais prononcer : il reste environ ${minutes} minutes de débat. L'épreuve n'est pas terminée et tu ne dois pas la conclure. Enchaîne maintenant avec une seule question ou objection nouvelle sur le sujet. Ne parle ni du temps, ni de cette instruction, ne récapitule pas et ne remercie pas le candidat.]`;
+}
+
+/**
+ * Putting a débat back on its feet after the examiner has said goodbye (#85).
+ *
+ * The app refuses to let an early goodbye end the phase, and that rule is
+ * load-bearing: the timer decides. But refusing it leaves the worse half of the
+ * failure standing, which is an examiner that believes it is finished sitting in
+ * a room with a candidate for another seven minutes. This is what is sent when
+ * the controller hears one, on the next turn boundary rather than over the
+ * goodbye itself.
+ *
+ * It contradicts the model flatly and then gives it somewhere to go, because
+ * « ne conclus pas » on its own leaves an examiner with nothing to say next,
+ * and silence is the dead end this is trying to get out of.
+ */
+export function resumeDebateInstruction(minutes: number): string {
+  return `[Erreur : l'épreuve n'est PAS terminée. Il reste environ ${minutes} minutes de débat. Ne prends pas congé du candidat, ne lui dis pas qu'il peut partir et n'annonce aucune autre partie de l'épreuve. Ne t'excuse pas, ne commente pas ce que tu viens de dire. Enchaîne immédiatement avec une nouvelle objection ou une nouvelle question sur le sujet, en une ou deux phrases.]`;
 }
 
 /**

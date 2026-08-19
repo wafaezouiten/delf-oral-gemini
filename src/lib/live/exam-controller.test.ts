@@ -2567,6 +2567,219 @@ describe("breaking a silence in the débat (#84)", () => {
   });
 });
 
+describe("an examiner that says goodbye seven minutes early (#85)", () => {
+  /** Preparation to a débat that has begun, clock at zero. Unlike #84's silent
+   *  débat this one has a candidate who speaks, because the failure being
+   *  described happens in the middle of a working exchange. */
+  async function intoDebate(h: Harness): Promise<void> {
+    h.controller.start();
+    await h.controller.advanceEarly();
+    await pressRecord(h);
+    h.session().candidateSays("Le télétravail a transformé le rapport au bureau.");
+    h.advanceClock(MONOLOGUE_MIN_SECONDS + 10);
+    await h.controller.advanceEarly();
+    await completeClosing(h);
+  }
+
+  /** Nobody is making a sound: the voiced total stops growing while audio keeps
+   *  arriving, so the stall watchdog stays quiet. Two ticks, because the floor
+   *  has to have been quiet for two seconds and one tick is not a duration. */
+  const quiet = (h: Harness, seconds: number) => {
+    h.recorder.voiced.debate = 0;
+    h.advanceClock(seconds - 3);
+    h.advanceClock(3);
+  };
+
+  const cues = (h: Harness) =>
+    h.session().directives.filter((text) => text.includes("Information de service"));
+  const recoveries = (h: Harness) =>
+    h.session().directives.filter((text) => text.includes("n'est PAS terminée"));
+  const events = (h: Harness, name: string) =>
+    h.controller.getSnapshot().events.filter((event) => event.name === name);
+
+  describe("lending it the clock it does not have", () => {
+    it("says how much is left, every three minutes, and never out loud", async () => {
+      const h = harness();
+      await intoDebate(h);
+
+      quiet(h, 120);
+      assert.deepEqual(cues(h), [], "two minutes into a thirteen-minute part is not news");
+
+      h.advanceClock(61);
+      assert.equal(cues(h).length, 1, "three minutes in, the examiner is told where it is");
+      assert.match(cues(h)[0], /environ 10 minutes/);
+      assert.match(cues(h)[0], /ne jamais prononcer/, "for it, not for the candidate");
+      assert.equal(events(h, "debate-time-cue").length, 1, "and the sitting's log says so");
+    });
+
+    it("waits for a pause rather than talking over the candidate", async () => {
+      // A cue goes out through `sendDirective`, which is `sendRealtimeInput`:
+      // the examiner WILL speak in response. A candidate interrupted mid-argument
+      // loses a graded answer, and the cue loses nothing by being late.
+      const h = harness();
+      await intoDebate(h);
+
+      h.advanceClock(120); // voiced audio keeps arriving: somebody is talking
+      h.advanceClock(70);
+      assert.deepEqual(cues(h), [], "the candidate is three minutes into an argument");
+
+      quiet(h, 6);
+      assert.equal(cues(h).length, 1, "and it arrives at the first pause");
+    });
+
+    it("owes one cue for a stretch it could not speak into, not a queue of them", async () => {
+      const h = harness();
+      await intoDebate(h);
+
+      // Seven minutes of unbroken candidate, across two three-minute boundaries.
+      h.advanceClock(200);
+      h.advanceClock(220);
+      quiet(h, 6);
+
+      assert.equal(cues(h).length, 1, "one cue, not the two the grid says are due");
+      assert.match(cues(h)[0], /environ 6 minutes/, "and it names the time now, not then");
+    });
+
+    it("says nothing in the last two minutes, where the closing handshake belongs", async () => {
+      // A cue there would land beside the closing directive with no turn
+      // boundary between them, which is the blend #84's ordering is built to
+      // avoid.
+      const h = harness();
+      await intoDebate(h);
+
+      quiet(h, 690);
+      const sent = cues(h).length;
+      quiet(h, 10);
+      assert.equal(cues(h).length, sent, "nothing more is due before the end");
+      assert.ok(
+        !cues(h).some((text) => /environ 1 minutes?\b/.test(text)),
+        "and no cue ever counted down to the close",
+      );
+    });
+
+    it("holds its tongue while the examiner is still audible", async () => {
+      const h = harness();
+      await intoDebate(h);
+      const player = h.players[h.players.length - 1];
+
+      player.speak(true);
+      quiet(h, 190);
+      assert.deepEqual(cues(h), [], "its own question is still coming out of the speaker");
+
+      player.speak(false);
+      quiet(h, 6);
+      assert.equal(cues(h).length, 1, "the floor is free when the speaker runs out");
+    });
+
+    it("sends one directive on a tick where a relance is also due, not two", async () => {
+      // Both speak, and two `sendRealtimeInput` texts with no turn boundary
+      // between them is one blended sentence.
+      const h = harness();
+      await intoDebate(h);
+
+      quiet(h, 170);
+      // The examiner asks something at 2:50, and the candidate says nothing.
+      h.session().examinerSays("Et le lien social, il se construit où ?");
+      h.session().finishTurn();
+      h.advanceClock(11);
+
+      assert.equal(cues(h).length, 1, "three minutes have passed and the cue is due");
+      assert.equal(
+        h.session().directives.filter((text) => text.includes("Relance-le sur le fond")).length,
+        0,
+        "and the eight-second relance waits its turn",
+      );
+    });
+
+    it("never does any of this during the monologue", async () => {
+      const h = harness();
+      h.controller.start();
+      await h.controller.advanceEarly();
+      await pressRecord(h);
+      h.recorder.voiced.monologue = 0;
+
+      h.advanceClock(180);
+      h.advanceClock(180);
+
+      assert.deepEqual(h.session().directives, [], "the examiner listens, and that is the exercise");
+    });
+  });
+
+  describe("hearing it take its leave anyway", () => {
+    const GOODBYE =
+      "Je vous remercie pour vos réponses. Nous allons maintenant passer à la troisième partie de l'épreuve. Vous pouvez disposer.";
+
+    it("does not let it end the part, and puts the débat back on its feet", async () => {
+      const h = harness();
+      await intoDebate(h);
+      h.advanceClock(360);
+
+      h.session().examinerSays(GOODBYE);
+      assert.equal(
+        h.controller.getSnapshot().phase,
+        "debate",
+        "the timer ends a part, not the model",
+      );
+      assert.deepEqual(recoveries(h), [], "and nothing is said over the sentence it is answering");
+      assert.equal(events(h, "examiner-early-closing").length, 1, "but the log has it already");
+
+      h.session().finishTurn();
+      assert.equal(recoveries(h).length, 1, "answered at the first boundary there is");
+      assert.match(recoveries(h)[0], /environ 7 minutes/);
+      assert.equal(h.controller.getSnapshot().phase, "debate", "with the part still running");
+    });
+
+    it("hears a goodbye split across two transcription fragments, once", async () => {
+      const h = harness();
+      await intoDebate(h);
+      h.advanceClock(360);
+
+      h.session().examinerSays("Je vous remercie. Vous pouvez");
+      assert.deepEqual(events(h, "examiner-early-closing"), [], "half of it is not a goodbye");
+      h.session().examinerSays(" quitter la salle.");
+
+      assert.equal(events(h, "examiner-early-closing").length, 1, "and the other half completes it");
+    });
+
+    it("stops answering after twice, and keeps logging", async () => {
+      // A model that has decided the épreuve is over may say so again, and an app
+      // that contradicts it every time is two machines arguing in front of the
+      // candidate.
+      const h = harness();
+      await intoDebate(h);
+      h.advanceClock(360);
+
+      for (let turn = 0; turn < 4; turn += 1) {
+        h.session().examinerSays("Au revoir.");
+        h.session().finishTurn();
+      }
+
+      assert.equal(events(h, "examiner-early-closing").length, 4, "every one is on the record");
+      assert.equal(recoveries(h).length, 2, "only the first two are answered");
+      assert.match(
+        events(h, "examiner-early-closing")[3].detail ?? "",
+        /"answered":false/,
+        "and the log says which were not",
+      );
+    });
+
+    it("leaves the closing sentence the app asked for alone", async () => {
+      // The same words, and the difference is who asked: inside a closing
+      // handshake this IS the handshake working.
+      const h = harness();
+      await intoDebate(h);
+      h.advanceClock(PHASE_DURATIONS.debate + 1);
+
+      h.session().examinerSays("Je vous remercie, l'épreuve est terminée. Au revoir.");
+      assert.deepEqual(events(h, "examiner-early-closing"), []);
+      assert.deepEqual(recoveries(h), []);
+
+      await completeClosing(h);
+      assert.equal(h.controller.getSnapshot().phase, "finished");
+    });
+  });
+});
+
 describe("where a phase started, in the transcript's own time base (#70)", () => {
   /** Preparation → monologue, clock running. */
   async function intoMonologue(h: Harness): Promise<void> {
