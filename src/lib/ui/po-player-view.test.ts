@@ -173,6 +173,27 @@ describe("the status lines", () => {
     );
   });
 
+  it("says the examiner is preparing their question, not listening, at the débat's opening", () => {
+    // The connect-and-generate window before the opening question is audible.
+    // « Vous écoute attentivement » here handed the candidate the floor over an
+    // examiner who was about to ask.
+    assert.match(
+      examinerStatus({ connected: true, connecting: false, speaking: false, opening: true }),
+      /prépare sa question/,
+    );
+    // The moment the voice starts, speaking is the truer sentence.
+    assert.match(
+      examinerStatus({ connected: true, connecting: false, speaking: true, opening: true }),
+      /intervient/,
+    );
+    // And while the socket is still connecting, that is the better explanation
+    // for the silence.
+    assert.match(
+      examinerStatus({ connected: false, connecting: true, speaking: false, opening: true }),
+      /Connexion/,
+    );
+  });
+
   it("says the examiner is finishing while the part is being closed", () => {
     // The socket is being torn down while the voice is still audible (#55), so
     // the connection's answer is the wrong one to give.

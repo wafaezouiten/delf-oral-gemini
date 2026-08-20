@@ -79,13 +79,19 @@ export const browserAudioContext: AudioContextFactory = (sampleRate) =>
 const DEFAULT_LEAD_SECONDS = 0.02;
 
 /**
- * Chunks held while the context is still opening. ~1.6 s of speech.
+ * Chunks held while the context is still opening — or suspended. ~40 s of
+ * speech, sized for the longest thing it has to survive whole: the débat's
+ * opening question arriving while the context waits on the browser (#94). It
+ * used to be 40 chunks (~1.6 s), sized for a connection race measured in
+ * milliseconds, and a suspension measured in seconds silently dropped
+ * everything past the first breath of the question.
  *
- * Bounded for the same reason the session manager bounds its send buffer: this
- * only fills when something is wrong, and an unbounded buffer turns a stall into
- * a memory leak.
+ * Still bounded, for the same reason the session manager bounds its send
+ * buffer: this only fills while something is wrong, and an unbounded buffer
+ * turns a stall into a memory leak. At ~2.5 KB of base64 per 40 ms chunk the
+ * cap is a couple of megabytes, held only for as long as the outage lasts.
  */
-const MAX_PREROLL_CHUNKS = 40;
+const MAX_PREROLL_CHUNKS = 1000;
 
 export interface ExaminerAudioPlayerCallbacks {
   /** Whether the examiner is currently audible. */
@@ -119,6 +125,11 @@ export class ExaminerAudioPlayer {
   private preroll: string[] = [];
   private prerollOverflowed = false;
   private speaking = false;
+  /** A resume kicked off by {@link enqueue} finding the context suspended.
+   *  One at a time: under autoplay policy the promise can sit unresolved until
+   *  the next user gesture, and every chunk of a held question arrives while it
+   *  does. */
+  private waking = false;
   /**
    * Set once by {@link close}, never cleared — terminal, like the session's own
    * `closed`. Without it a chunk arriving after teardown lands in the pre-roll
@@ -144,8 +155,17 @@ export class ExaminerAudioPlayer {
    */
   async resume(): Promise<void> {
     if (this.closed) return;
-    if (this.context) {
-      if (this.context.state === "suspended") await this.context.resume();
+    const context = this.context;
+    if (context) {
+      if (context.state === "suspended") {
+        await context.resume();
+        // The sitting can end, or the context be replaced, while the browser
+        // is deciding — a resume that resolves then belongs to nobody.
+        if (this.closed || this.context !== context) return;
+        // Play what the suspension held back. The cursor may still point into
+        // the frozen past; `enqueue` clamps to `currentTime + lead` on its own.
+        this.flushPreroll();
+      }
       return;
     }
     this.opening ??= this.open();
@@ -186,6 +206,26 @@ export class ExaminerAudioPlayer {
       return;
     }
     if (context.state === "closed") return;
+
+    // A suspended context is the unheard first question (#94). It accepts
+    // `start()` calls and plays nothing: its clock is frozen, so every source
+    // lands at a time that has already passed, and whenever the context does
+    // resume the whole backlog fires at once as garble. Treat it like a context
+    // that has not opened yet — hold the chunk, ask the browser to wake it —
+    // and abandon whatever was already scheduled into the frozen graph, because
+    // that cannot be replayed in order and a question restarting cleanly beats
+    // its backlog arriving as one burst.
+    if (context.state === "suspended") {
+      this.dropFrozenQueue(context);
+      this.holdForPlayback(base64);
+      this.wake();
+      return;
+    }
+
+    // Anything held for a suspension plays before the chunk in hand, or the
+    // question comes out with its middle moved to the front. Reached when the
+    // context resumed between two chunks, before `resume()`'s own flush ran.
+    this.flushPreroll();
 
     const samples = base64ToInt16(base64);
     if (samples.length === 0) return;
@@ -268,6 +308,48 @@ export class ExaminerAudioPlayer {
     if (this.speaking === next) return;
     this.speaking = next;
     this.callbacks.onSpeakingChange?.(next);
+  }
+
+  /**
+   * Stop and detach everything scheduled into a clock that is not moving.
+   *
+   * The sources' base64 is gone — a buffer handed to the graph cannot be read
+   * back into the queue — so what was scheduled-but-unplayed at the moment of
+   * suspension is lost. Bounded loss: at most the player's own lead over real
+   * time, and the alternative is the whole backlog playing at once on resume.
+   * The speaking flag comes down with it, which is the honest report — nothing
+   * is audible — and what lets the exam's silence escalation run over a
+   * speaker that is genuinely broken.
+   */
+  private dropFrozenQueue(context: AudioContextLike): void {
+    if (this.queued.size === 0) return;
+    this.callbacks.onEvent?.("playback-frozen-dropped", { sources: this.queued.size });
+    for (const source of this.queued) {
+      source.onended = null;
+      try {
+        source.stop();
+      } catch {
+        /* never started */
+      }
+      disconnectQuietly(source);
+    }
+    this.queued.clear();
+    this.cursor = context.currentTime;
+    this.setSpeaking(false);
+  }
+
+  /** Ask the browser to resume the suspended context, once per outage. The
+   *  attempt can be refused (autoplay policy wants a user gesture); the exam's
+   *  own gesture-borne `resume()` — the « Enregistrer » click — is the recovery
+   *  that cannot be, and either one flushes what was held. */
+  private wake(): void {
+    if (this.waking) return;
+    this.waking = true;
+    void this.resume()
+      .catch(() => this.callbacks.onEvent?.("playback-wake-failed"))
+      .finally(() => {
+        this.waking = false;
+      });
   }
 
   private holdForPlayback(base64: string): void {

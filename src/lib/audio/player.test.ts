@@ -259,10 +259,10 @@ describe("the playback queue", () => {
 
   it("bounds the pre-roll and says so rather than growing without limit", async () => {
     const h = harness();
-    for (let i = 0; i < 200; i += 1) h.player.enqueue(chunk(40));
+    for (let i = 0; i < 1100; i += 1) h.player.enqueue(chunk(40));
 
     await h.player.resume();
-    assert.equal(h.context().sources.length, 40, "capped");
+    assert.equal(h.context().sources.length, 1000, "capped");
     const overflow = h.events.find((e) => e.name === "playback-preroll-overflow");
     assert.ok(overflow, "and reported");
     assert.equal(
@@ -270,6 +270,83 @@ describe("the playback queue", () => {
       1,
       "once per outage, not once per dropped chunk",
     );
+  });
+});
+
+describe("a context the browser suspended (#94)", () => {
+  // The unheard first question. A suspended AudioContext accepts `start()` and
+  // plays nothing: its clock is frozen, so scheduling into it queues sources at
+  // times that have already passed — silence now, one garbled burst whenever
+  // the context finally resumes. The player must treat "suspended" the way it
+  // treats "not open yet": hold, wake, and play in order once it can.
+
+  it("holds new audio instead of scheduling it into a frozen clock", async () => {
+    const gate = deferred();
+    const h = harness();
+    await h.player.resume();
+    h.context().gate = gate.promise; // the wake attempt will hang on the browser
+    h.context().state = "suspended";
+
+    for (let i = 0; i < 3; i += 1) h.player.enqueue(chunk(100));
+
+    assert.equal(h.context().sources.length, 0, "nothing was scheduled into the frozen graph");
+    assert.deepEqual(h.speaking, [], "and nobody was told the examiner is audible");
+
+    // The browser lets the resume through — a user gesture arrived.
+    gate.resolve();
+    await h.player.resume();
+
+    const starts = h.context().sources.map((s) => s.startedAt ?? NaN);
+    assert.equal(starts.length, 3, "everything held was played");
+    approx(starts[0], h.context().currentTime + 0.02, "from now, not from the frozen past");
+    approx(starts[1], starts[0] + 0.1, "in order");
+    approx(starts[2], starts[1] + 0.1, "all of it");
+    assert.deepEqual(h.speaking, [true], "and the examiner is audible only now");
+  });
+
+  it("wakes the context on its own when a chunk finds it suspended", async () => {
+    // The fake's resume() succeeds immediately — the case where the suspension
+    // was the browser's housekeeping rather than autoplay policy, which is the
+    // one the enqueue-side attempt exists to recover without waiting for a
+    // click.
+    const h = harness();
+    await h.player.resume();
+    h.context().state = "suspended";
+
+    h.player.enqueue(chunk(100));
+    await new Promise((resolve) => setImmediate(resolve)); // let the wake's resume() settle
+
+    assert.equal(h.context().state, "running", "the enqueue asked the browser to resume");
+    assert.equal(h.context().sources.length, 1, "and the held chunk played");
+  });
+
+  it("abandons sources already scheduled into the frozen graph", async () => {
+    // Their base64 is gone — a buffer handed to the graph cannot be read back —
+    // and replaying them on resume would fire the whole backlog at once. The
+    // bounded loss is the player's lead over real time; the alternative is
+    // garble.
+    const gate = deferred();
+    const h = harness();
+    await h.player.resume();
+    for (let i = 0; i < 3; i += 1) h.player.enqueue(chunk(100));
+    assert.deepEqual(h.speaking, [true]);
+
+    h.context().gate = gate.promise;
+    h.context().state = "suspended";
+    h.player.enqueue(chunk(100));
+
+    const [first, second, third] = h.context().sources;
+    assert.equal(first.stopped && second.stopped && third.stopped, true, "the backlog is dropped");
+    assert.deepEqual(h.speaking, [true, false], "and the silence is reported honestly");
+    assert.ok(
+      h.events.some((e) => e.name === "playback-frozen-dropped"),
+      "with the drop on the record",
+    );
+
+    gate.resolve();
+    await h.player.resume();
+    assert.equal(h.context().sources.length, 4, "the held chunk still plays");
+    assert.equal(h.context().sources[3].stopped, false);
   });
 });
 

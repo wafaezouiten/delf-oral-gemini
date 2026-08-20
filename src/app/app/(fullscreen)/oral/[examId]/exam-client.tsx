@@ -488,6 +488,7 @@ export function ExamClient({ examId, topic }: { examId: string; topic: OralTopic
         remaining={state.remaining}
         recording={state.recording}
         examinerSpeaking={state.examinerSpeaking}
+        openingQuestionPending={state.openingQuestionPending}
         connected={state.connection === "connected"}
         connecting={state.connection === "connecting"}
         canAdvance={state.canAdvance}
