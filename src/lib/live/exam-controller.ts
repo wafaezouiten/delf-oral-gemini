@@ -584,9 +584,9 @@ export class ExamController {
    * Set where a controller directive is sent rather than where the relance is
    * chosen, so it covers the time cue (#85) and the answer to an early goodbye
    * as well: those are the same kind of intervention and were welded the same
-   * way. The closing handshake's own sentence is left alone — it does not go
-   * through here, and it is the last thing said in the part rather than an
-   * interruption of it.
+   * way. `beginClosingHandshake` sets it by hand for the same reason, since its
+   * directive is tolerated rather than caught and does not pass through
+   * {@link sendControllerDirective}.
    */
   private examinerTurnBreakPending = false;
 
@@ -1909,6 +1909,14 @@ export class ExamController {
     // never become true and the safety timeout — the whole reason a silent
     // examiner cannot strand anybody — was itself stranded (#65).
     const instruction = closingInstruction(this.phase);
+    // A new turn, like every other directive (#101). This one does not go
+    // through `sendControllerDirective` — it is tolerated rather than caught,
+    // for the reason above — so it sets the break itself. Being the LAST thing
+    // said in the part does not stop it merging into the entry before it: a
+    // débat that ends in an unanswered relance has an examiner turn as its last
+    // entry, and « le temps de l'épreuve est écoulé » would be read back as the
+    // tail of a question, under that question's timestamp.
+    this.examinerTurnBreakPending = true;
     this.tolerate("closing-directive", () => this.session?.sendDirective(instruction));
 
     // Stamped, not scheduled. The deadline is checked from `tick()` against the

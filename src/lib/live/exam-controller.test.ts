@@ -2581,6 +2581,40 @@ describe("breaking a silence in the débat (#84)", () => {
     );
   });
 
+  it("does not weld the closing sentence onto the relance nobody answered", async () => {
+    // The other end of the same defect, and the one this change makes likely:
+    // the relances now run right up to time-up, so the last transcript entry
+    // before the closing handshake is reliably an unanswered examiner turn.
+    // Merged, « le temps de l'épreuve est écoulé » is read back as the tail of a
+    // question, under that question's timestamp.
+    //
+    // The examiner is transcribed after each relance, which is what production
+    // does and what spends the pending break: a test where nothing answers the
+    // directives would leave the flag set and pass without proving anything.
+    const h = harness();
+    await intoSilentDebate(h);
+
+    for (let step = 0; step < 3; step += 1) {
+      h.advanceClock(11);
+      h.session().examinerSays(`Reformulons, ${step + 1}.`);
+      h.session().finishTurn();
+    }
+    h.advanceClock(PHASE_DURATIONS.debate);
+    h.session().examinerSays("Merci, le temps de l'épreuve est écoulé.");
+
+    const examiner = h.controller
+      .getSnapshot()
+      .transcript.filter((entry) => entry.phase === "debate" && entry.speaker === "examiner");
+    const last = examiner[examiner.length - 1];
+
+    assert.equal(
+      last.text,
+      "Merci, le temps de l'épreuve est écoulé.",
+      "the closing sentence is a turn, not the end of the last relance",
+    );
+    assert.equal(examiner.length, 5, "the opening question, three relances, and the closing line");
+  });
+
   it("does not spend a step into a socket that is not up", async () => {
     // `SessionManager.sendDirective` drops a directive on a down socket without
     // throwing, so a step spent mid-reconnect is spent unheard — and the check is
