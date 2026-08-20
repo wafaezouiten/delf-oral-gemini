@@ -151,6 +151,32 @@ them nothing. The briefing screen asks `isOpusEncodingSupported` and says plainl
 that the recording will not be sent, that the correction will be made without
 listening, and that the duration penalty will apply as if no recording existed.
 
+## What happens to the recording afterwards (#98)
+
+Uploaded for grading and, since #98, kept. The finish path files each phase's
+artefact in a **private Vercel Blob store** (`src/lib/storage/recording-vault.ts`)
+after the correction claim is won, writes the store's URL into
+`oral_recordings.uri`, and the correction page plays it back through
+`GET /api/exams/:examId/recordings/:phase` — a route that proves ownership
+first and streams the bytes itself, so the store's URL never reaches a browser.
+
+The rules, and where each is enforced:
+
+- **Keeping is best-effort, per artefact.** An upload the store refuses is
+  logged and that row is written transient (`uri` null, `deleted_at` stamped)
+  — losing the copy must never cost the candidate their correction
+  (`sitting-persistence.ts`, the `preserve` hook).
+- **No vault, no change.** A deployment without Blob credentials behaves
+  exactly as before #98: graded sittings, disposed rows, no players.
+- **Retention is "until the row says otherwise".** No expiry window. « Repartir
+  de zéro » archives and deletes nothing (#69), so archived corrections keep
+  playing. Any future purge speaks through `deleted_at`, which playback obeys
+  before it trusts a `uri`.
+- **Playback format is the upload format.** Ogg Opus plays in Chrome, Firefox
+  and Edge; Safari's support is unverified on the real files, so the player
+  asks `canPlayType` first and says so instead of erroring
+  (`results-client.tsx`).
+
 ## What this does not show
 
 - **A real sitting on a deployed URL.** Everything here is measured, but the

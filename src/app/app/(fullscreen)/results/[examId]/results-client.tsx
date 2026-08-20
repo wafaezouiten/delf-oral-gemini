@@ -109,6 +109,18 @@ export interface StoredResult {
   monologueSeconds: number;
   debateSeconds: number;
   reconnectCount: number;
+  /**
+   * The halves whose recording was kept and can be streamed back (#98), with
+   * the mime type each was measured to be — the player needs it to ask the
+   * browser `canPlayType` before offering a control that would only error.
+   *
+   * Optional because this object is also read back out of `sessionStorage`,
+   * where a stash from before the field existed carries nothing — and because
+   * the stash never carries it even now: the finish response holds no uris, so
+   * playback belongs to the server-read path alone. Absent or empty, the
+   * correction renders exactly as it did before #98.
+   */
+  playable?: Array<{ phase: "monologue" | "debate"; mimeType: string }>;
 }
 
 /**
@@ -302,6 +314,8 @@ export function ResultsClient({
           transcript={transcript}
           monologueSeconds={monologueSeconds}
           debateSeconds={debateSeconds}
+          examId={examId}
+          playable={result.playable ?? []}
         />
 
         <aside className="border-border bg-card flex min-h-0 flex-col border-t lg:border-t-0 lg:border-l">
@@ -445,6 +459,69 @@ export function ResultsClient({
 }
 
 /**
+ * Whether this browser can play one of the two stored formats, answered once
+ * per format and remembered — `canPlayType` is a fact about the browser, not
+ * about a render.
+ *
+ * The Ogg case is asked with its codec: bare `audio/ogg` gets "maybe" from
+ * browsers that would then fail on the Opus inside. The stored types are
+ * exactly the two `measureUploadedRecording` can admit.
+ */
+const playableTypeCache = new Map<string, boolean>();
+
+function canPlayStoredType(mimeType: string): boolean {
+  const candidate = mimeType === "audio/ogg" ? 'audio/ogg; codecs="opus"' : mimeType;
+  let known = playableTypeCache.get(candidate);
+  if (known === undefined) {
+    known = document.createElement("audio").canPlayType(candidate) !== "";
+    playableTypeCache.set(candidate, known);
+  }
+  return known;
+}
+
+/** The capability never changes while the page is open; the store API is used
+ *  for its read semantics, same as the sessionStorage read above. */
+const subscribeToNothing = () => () => {};
+
+/**
+ * One kept recording, playable under its half's heading (#98).
+ *
+ * `preload="none"`: the artefacts are around a megabyte each and most visits
+ * to a correction are to read the grade, not to re-listen — the bytes should
+ * move when the candidate presses play, not on every page load.
+ *
+ * The `canPlayType` question is a read from an external system — the server
+ * has no `<audio>` element to ask — so it goes through `useSyncExternalStore`
+ * with a server snapshot of "playable": the common browsers all pass, and a
+ * browser that cannot play the format (the exam's own encoding is Ogg Opus,
+ * which Safari historically refuses) swaps in the honest sentence on
+ * hydration instead of a control that errors on first press.
+ *
+ * `no-print`, both branches: the correction prints (#70), a player has no
+ * printed form, and the sentence about browser support is about the browser
+ * rather than the épreuve.
+ */
+function RecordingPlayer({ src, mimeType }: { src: string; mimeType: string }) {
+  const supported = useSyncExternalStore(
+    subscribeToNothing,
+    () => canPlayStoredType(mimeType),
+    () => true,
+  );
+
+  if (!supported) {
+    return (
+      <p className="no-print text-muted-foreground mt-3 text-xs leading-relaxed italic">
+        L&apos;enregistrement de cette partie est conservé, mais votre navigateur ne
+        peut pas lire son format ({mimeType === "audio/ogg" ? "Ogg Opus" : mimeType}).
+        Ouvrez cette correction dans Chrome ou Firefox pour l&apos;écouter.
+      </p>
+    );
+  }
+
+  return <audio controls preload="none" src={src} className="no-print mt-3 h-9 w-full" />;
+}
+
+/**
  * The left column: the épreuve as it was spoken, set as one printed page — in
  * the two parts it was sat in (#70).
  *
@@ -497,11 +574,15 @@ function TranscriptColumn({
   transcript,
   monologueSeconds,
   debateSeconds,
+  examId,
+  playable,
 }: {
   title: string;
   transcript: readonly TranscriptEntry[];
   monologueSeconds: number;
   debateSeconds: number;
+  examId: string;
+  playable: ReadonlyArray<{ phase: "monologue" | "debate"; mimeType: string }>;
 }) {
   const { sections, silentNotice } = correctionTranscriptView(transcript, {
     monologueSeconds,
@@ -540,6 +621,21 @@ function TranscriptColumn({
                   {section.durationLabel}
                 </span>
               </div>
+
+              {/* The half's own recording, on the line that already says how
+                  long it was (#98). Only where the bytes were kept — a sitting
+                  from before the vault, or one whose upload failed, keeps its
+                  duration and offers nothing, which is the honest rendering of
+                  a recording that existed and is gone. */}
+              {playable
+                .filter((recording) => recording.phase === section.phase)
+                .map((recording) => (
+                  <RecordingPlayer
+                    key={recording.phase}
+                    src={`/api/exams/${examId}/recordings/${section.phase}`}
+                    mimeType={recording.mimeType}
+                  />
+                ))}
 
               {section.emptyNote ? (
                 <p className="text-muted-foreground mt-3 text-xs leading-relaxed italic">

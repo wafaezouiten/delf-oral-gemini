@@ -88,6 +88,16 @@ export function fitsInOneRequest(parts: readonly number[]): boolean {
  * the honest one — the server cannot grade audio it does not have. It is a
  * reason to drop as little as possible, which is why this drops per artefact
  * rather than all-or-nothing.
+ *
+ * Since #98 a delivered recording is also *kept* — the correction plays it
+ * back — so a dropped artefact now loses the candidate a replay as well as the
+ * grading of that half. Re-read in that light, the rule above still holds:
+ * what cannot be delivered cannot be graded OR kept, both halves of the loss
+ * come from the same missing bytes, and shedding the one oversized artefact is
+ * still strictly better than a 413 that loses the sitting whole. What would
+ * not survive #98 is any scheme that widens this transport's ceiling by
+ * routing recordings around the finish request — whoever builds that must move
+ * this selection with it, not delete it.
  */
 export function selectDeliverable<T>(
   recordings: readonly T[],

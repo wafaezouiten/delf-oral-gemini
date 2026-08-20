@@ -261,26 +261,33 @@ export const oralExamPhases = pgTable(
 // =====================================================
 
 /**
- * A reference to one recording of one speaking phase — never the audio itself.
+ * One recording of one speaking phase — the row, with the bytes in a private
+ * store it points at.
  *
- * The recording is the whole point of the project (phonologie heard rather than
- * inferred from the number of "euh"s in a transcript) and simultaneously the
- * thing we are not allowed to keep: the audit's schema sketch notes that
- * `audio_url` "stays NULL: retention is forbidden", and §10 step 10 says to
- * delete the uploaded file in a `finally`.
+ * The recording is the whole point of the project (phonologie heard rather
+ * than inferred from the number of "euh"s in a transcript), and it is also the
+ * thing a candidate re-listens to — so since #98 the finish path keeps it.
+ * `uri` names the copy in the vault (`lib/storage/recording-vault.ts`; never a
+ * public URL — playback goes through our own authorised route), and
+ * `deleted_at` means exactly what it says. That reverses a decision this
+ * header used to defend: the audit's schema sketch had `audio_url` "stay NULL:
+ * retention is forbidden", and until #98 every row was written pre-disposed.
  *
- * So the row outlives the bytes on purpose. `uri` is null whenever the recording
- * was transient — the ordinary case today — while the size, the duration and
- * `deleted_at` remain as an honest record that a recording existed, how long it
- * was, and that it was disposed of. An audio-mode correction points here, which
- * is how "which artefact produced this score?" stays answerable after the
- * artefact is gone.
+ * The row still outlives the bytes wherever bytes were not, or are no longer,
+ * kept. `uri` is null on every sitting from before #98, on deployments with no
+ * vault configured, and on any upload the vault failed — there the size, the
+ * duration and `deleted_at` remain as an honest record that a recording
+ * existed, how long it was, and that it was disposed of. An audio-mode
+ * correction points here either way, which is how "which artefact produced
+ * this score?" stays answerable whether or not the artefact can still be
+ * played.
  *
  * **One row per phase, not per sitting** (Phase 6). The candidate speaks twice,
  * against two different duration floors, and one 20-minute artefact cannot say
  * which half ran short. `phase` is what makes the two rows tell those two
  * stories apart, and the unique index is what stops a repeated finish quietly
- * filing a third.
+ * filing a third. It is also why playback is two players, not one (#98): the
+ * artefacts were cut per task so each half could be re-listened to on its own.
  */
 export const oralRecordings = pgTable(
   "oral_recordings",

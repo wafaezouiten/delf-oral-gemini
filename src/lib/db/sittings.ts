@@ -142,6 +142,50 @@ function toStoredCorrection(row: EvaluationRow): StoredCorrection {
 /** `db.batch` wants a non-empty tuple; the callers below build arrays. */
 type Writes = [BatchItem<"pg">, ...BatchItem<"pg">[]];
 
+/**
+ * One phase's recording row, read for playback (#98).
+ *
+ * A standalone export rather than a `SittingStore` method: that interface is
+ * the finish path's seam — claim, correct, write — and this is a read the
+ * playback route makes with none of that policy behind it. `readSitting`
+ * already returns these columns, but it hauls the whole transcript along, and
+ * a request whose response is megabytes of audio should not start by reading
+ * two hundred thousand characters of text it will not use.
+ *
+ * The join is the scoping, as everywhere in this file: `oral_recordings` rows
+ * are addressed through the sitting and its owner, never by the recording id a
+ * request could have supplied.
+ */
+export async function findRecording(
+  ref: SittingRef,
+  phase: "monologue" | "debate",
+): Promise<{
+  uri: string | null;
+  mimeType: string;
+  byteSize: number | null;
+  deletedAt: Date | null;
+} | null> {
+  const [row] = await getDb()
+    .select({
+      uri: oralRecordings.uri,
+      mimeType: oralRecordings.mimeType,
+      byteSize: oralRecordings.byteSize,
+      deletedAt: oralRecordings.deletedAt,
+    })
+    .from(oralRecordings)
+    .innerJoin(oralExams, eq(oralRecordings.examId, oralExams.id))
+    .where(
+      and(
+        eq(oralExams.id, ref.examId),
+        eq(oralExams.userId, ref.userId),
+        eq(oralRecordings.phase, phase),
+      ),
+    )
+    .limit(1);
+
+  return row ?? null;
+}
+
 export function neonSittingStore(): SittingStore {
   const db = getDb();
 

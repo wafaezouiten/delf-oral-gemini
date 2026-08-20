@@ -25,6 +25,12 @@
  * afterwards. That move is what closed #16 and #17: the writes became one
  * batch, and the arithmetic behind them became something `node --test` can
  * reach.
+ *
+ * **And what it no longer throws away.** It used to hand the blobs to the
+ * corrector and drop them; since #98 the `preserve` hook below files them in
+ * the recording vault so the correction can play them back. Same seam as the
+ * writes: this route only says HOW to keep a recording, and
+ * `sitting-persistence.ts` decides WHEN — after the claim, by its winner.
  */
 
 import { NextResponse } from "next/server";
@@ -56,6 +62,10 @@ import {
   type EvaluationMode,
   type EvaluationResult,
 } from "@/lib/gemini/evaluate";
+// Where the recordings go to outlive this request (#98) — when a store is
+// configured, which is a real branch rather than an assumption: without one,
+// every row below is written transient, exactly as before.
+import { recordingVault } from "@/lib/storage/recording-vault";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -354,6 +364,38 @@ export async function POST(
         evaluate: async () => {
           graded = await grade();
           return toCorrectionRow(graded);
+        },
+        /**
+         * Keep the bytes the rows will point at (#98). Called by the winner of
+         * the claim, after grading — see `sitting-persistence.ts` for why that
+         * ordering — and best-effort per artefact: a phase the vault refuses is
+         * logged and written transient, because losing the copy must cost the
+         * candidate a replay button, never their correction. On a deployment
+         * with no vault this returns the empty map and nothing changes.
+         */
+        preserve: async () => {
+          const kept = new Map<OralSpeakingPhase, string>();
+          const vault = recordingVault();
+          if (!vault) return kept;
+          for (const recording of recordings) {
+            try {
+              kept.set(
+                recording.phase,
+                await vault.store(
+                  persistedExamId,
+                  recording.phase,
+                  recording.blob,
+                  recording.mimeType,
+                ),
+              );
+            } catch (error) {
+              console.error(
+                `[finish] could not keep the ${recording.phase} recording:`,
+                error,
+              );
+            }
+          }
+          return kept;
         },
         now: () => new Date(),
       },

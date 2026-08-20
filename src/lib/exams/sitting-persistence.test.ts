@@ -3,7 +3,7 @@ import { beforeEach, describe, it, mock } from "node:test";
 
 import { ORAL_CRITERIA, type OralCriterion } from "@/lib/delf/criteria";
 import { ORAL_PHASES, type OralPhase } from "@/lib/delf/phases";
-import type { EvaluationFeedback } from "@/lib/db/schema";
+import type { EvaluationFeedback, OralSpeakingPhase } from "@/lib/db/schema";
 import type { TranscriptEntry } from "@/lib/delf/transcript";
 
 import {
@@ -340,8 +340,9 @@ describe("deriving the rows", () => {
     assert.equal(write.phases[0].endedAt, null);
   });
 
-  it("records every recording as already disposed of, with no uri", () => {
-    // Retention is forbidden; the row outlives the bytes on purpose.
+  it("records a recording nothing kept as disposed of, with no uri", () => {
+    // No vault, or an upload that failed: the row outlives the bytes, which is
+    // every row this function wrote before #98 and must keep meaning the same.
     const write = deriveCorrectionWrite({
       phases: [],
       recordings: [
@@ -353,6 +354,31 @@ describe("deriving the rows", () => {
     assert.equal(write.recordings[0].uri, null);
     assert.deepEqual(write.recordings[0].deletedAt, disposedAt);
     assert.equal(write.recordings[0].durationSeconds, 403);
+  });
+
+  it("points a kept recording at its uri, and only a kept one (#98)", () => {
+    // One sitting, both artefacts uploaded, one of the two kept — the state a
+    // vault outage mid-preserve leaves. Each row must speak only for itself:
+    // the kept one is live, the lost one is honestly disposed.
+    const write = deriveCorrectionWrite({
+      phases: [],
+      recordings: [
+        { phase: "monologue", mimeType: "audio/ogg", byteSize: 210_000, durationSeconds: 402.6 },
+        { phase: "debate", mimeType: "audio/ogg", byteSize: 640_000, durationSeconds: 761.2 },
+      ],
+      correction: correction(),
+      kept: new Map<OralSpeakingPhase, string>([
+        ["monologue", "https://store.example/recordings/41/monologue.ogg"],
+      ]),
+      disposedAt,
+    });
+    assert.deepEqual(
+      write.recordings.map((row) => [row.phase, row.uri, row.deletedAt]),
+      [
+        ["monologue", "https://store.example/recordings/41/monologue.ogg", null],
+        ["debate", null, disposedAt],
+      ],
+    );
   });
 
   it("produces integers the schema's own check constraints accept", () => {
@@ -551,6 +577,88 @@ describe("correcting a sitting", () => {
     assert.equal(retry.status, "stored");
     assert.equal((await store.readSitting(REF))?.outcome, "corrected");
     assert.equal(store.evaluations.length, 1);
+  });
+
+  it("writes the uris the preserve hook kept, and stamps only the rest disposed (#98)", async () => {
+    const preserve = mock.fn(async () =>
+      new Map<OralSpeakingPhase, string>([["monologue", "https://store.example/m.ogg"]]),
+    );
+    const outcome = await correctSitting(store, REF, finishInput({ preserve }));
+
+    assert.equal(outcome.status, "stored");
+    assert.equal(preserve.mock.callCount(), 1);
+    const sitting = await store.readSitting(REF);
+    assert.deepEqual(
+      sitting?.recordings.map((row) => [row.phase, row.uri, row.deletedAt]),
+      [
+        ["monologue", "https://store.example/m.ogg", null],
+        ["debate", null, NOW],
+      ],
+      "the kept half plays back; the lost half is honestly disposed",
+    );
+  });
+
+  it("never stores bytes for a sitting that is already corrected", async () => {
+    // A duplicate finish must not file a second copy of somebody's voice next
+    // to rows it will never write — the same discipline as the model call.
+    await correctSitting(store, REF, finishInput());
+
+    const preserve = mock.fn(async () => new Map<OralSpeakingPhase, string>());
+    const second = await correctSitting(store, REF, finishInput({ preserve }));
+
+    assert.equal(second.status, "already-corrected");
+    assert.equal(preserve.mock.callCount(), 0);
+  });
+
+  it("never stores bytes when the claim is lost mid-flight", async () => {
+    // Same race as above, caught at the claim rather than the pre-check: the
+    // loser's rows are never written, so the loser's bytes must never land.
+    const preserve = mock.fn(async () => new Map<OralSpeakingPhase, string>());
+    const outcome = await correctSitting(
+      store,
+      REF,
+      finishInput({
+        preserve,
+        evaluate: async () => {
+          await store.claimForCorrection(REF, {
+            transcript: [],
+            reconnectCount: 0,
+            finishedAt: NOW,
+          });
+          await store.writeCorrection(REF, {
+            phases: [],
+            recordings: [],
+            correction: correction({ score25: 20, rawScore25: 20 }),
+          });
+          return correction();
+        },
+      }),
+    );
+
+    assert.equal(outcome.status, "already-corrected");
+    assert.equal(preserve.mock.callCount(), 0);
+  });
+
+  it("a preserve that throws costs the copies, never the correction", async () => {
+    // The hook's contract is not to throw; the second net exists because past
+    // the claim the sitting is marked finished, and surfacing an upload
+    // failure would trade a written correction for an audio copy.
+    const preserve = mock.fn(async (): Promise<ReadonlyMap<OralSpeakingPhase, string>> => {
+      throw new Error("vault down");
+    });
+    const outcome = await correctSitting(store, REF, finishInput({ preserve }));
+
+    assert.equal(outcome.status, "stored");
+    const sitting = await store.readSitting(REF);
+    assert.equal(sitting?.outcome, "corrected");
+    assert.deepEqual(
+      sitting?.recordings.map((row) => [row.uri, row.deletedAt]),
+      [
+        [null, NOW],
+        [null, NOW],
+      ],
+      "every recording reads as disposed, exactly as on a deployment with no vault",
+    );
   });
 
   it("cannot correct, or read, a neighbouring user's sitting", async () => {
