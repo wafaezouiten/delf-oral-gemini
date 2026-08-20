@@ -302,13 +302,21 @@ class FakePlayer implements PlayerLike {
     private readonly options: DeviceOptions = {},
     private readonly callbacks: { onSpeakingChange?: (speaking: boolean) => void } = {},
   ) {}
+  resumes = 0;
   async resume(): Promise<void> {
     if (this.options.gate) await this.options.gate;
     if (this.options.fail) throw this.options.fail;
     this.resumed = true;
+    this.resumes += 1;
   }
   enqueue(base64: string): void {
     this.chunks.push(base64);
+  }
+  /** Playback progressing: the real player's queue drains continuously while
+   *  audio is actually reaching the speaker, and a test that leaves the queue
+   *  frozen is describing a stalled one — see `examinerPlaybackHold`. */
+  drain(n = 1): void {
+    this.chunks.splice(0, n);
   }
   interrupt(): void {
     this.interrupts += 1;
@@ -2700,14 +2708,89 @@ describe("breaking a silence in the débat (#84, #101)", () => {
     await intoSilentDebate(h);
     const player = h.players[h.players.length - 1];
 
-    // Twenty seconds of question still queued, and nothing saying so out loud.
+    // Twenty seconds of question queued, and playing: the queue drains a
+    // second per second, which is what earns the hold.
     for (let chunk = 0; chunk < 20; chunk += 1) player.enqueue(`chunk-${chunk}`);
-    h.advanceClock(30);
-    assert.deepEqual(nudges(h), [], "the candidate is still listening to the question");
+    for (let second = 0; second < 20; second += 1) {
+      h.advanceClock(1);
+      player.drain();
+    }
+    assert.deepEqual(nudges(h), [], "the candidate was listening to the question");
 
-    player.interrupt(); // the queue runs out: the floor is theirs from here
-    h.advanceClock(11);
+    h.advanceClock(11); // the queue has run out: the floor is theirs from here
     assert.equal(presenceChecks(h).length, 1, "and the window starts when the speaker does");
+  });
+
+  it("stops waiting for queued audio that is not draining, and says so (#94)", async () => {
+    // The sitting this is written against: the question printed at 0:02,
+    // nothing in the speakers, and no nudge by 0:57. A suspended AudioContext
+    // schedules every chunk and plays none, so the speaking flag sticks on and
+    // the buffer freezes above zero — and the watch waited for that audio for
+    // the rest of the part. A frozen queue is not a candidate listening.
+    const h = harness();
+    await intoSilentDebate(h);
+    const player = h.players[h.players.length - 1];
+    const resumesBefore = player.resumes;
+
+    for (let chunk = 0; chunk < 20; chunk += 1) player.enqueue(`chunk-${chunk}`);
+    player.speak(true); // the flag sticks on too, exactly as the dead context leaves it
+
+    for (let tick = 0; tick < 8; tick += 1) h.advanceClock(1);
+    assert.equal(events(h, "examiner-playback-stalled").length, 1, "the stall is on the record");
+    assert.equal(player.resumes, resumesBefore + 1, "and a resume was attempted");
+
+    for (let tick = 0; tick < 11; tick += 1) h.advanceClock(1);
+    assert.equal(
+      presenceChecks(h).length,
+      1,
+      "then the escalation runs: « Vous m'entendez ? » is the right question for a dead speaker",
+    );
+  });
+
+  it("does not read Gemini outrunning the speaker as a stall", async () => {
+    // While a turn streams in, the queue GROWS — generation is several times
+    // faster than real time, so a 15-second question arrives in about three.
+    // The queue never drops during that burst, and the stall threshold is sized
+    // so it does not have to: the burst ends well inside it, and the draining
+    // that follows is the drop that keeps the hold honest.
+    const h = harness();
+    await intoSilentDebate(h);
+    const player = h.players[h.players.length - 1];
+
+    for (let second = 0; second < 3; second += 1) {
+      for (let chunk = 0; chunk < 5; chunk += 1) player.enqueue(`burst-${second}-${chunk}`);
+      h.advanceClock(1);
+      player.drain();
+    }
+    for (let second = 0; second < 12; second += 1) {
+      h.advanceClock(1);
+      player.drain();
+    }
+
+    assert.deepEqual(events(h, "examiner-playback-stalled"), [], "that was a turn, playing");
+    assert.deepEqual(nudges(h), []);
+  });
+
+  it("lets a drop end the stall, and growth not (#94)", async () => {
+    // Every relance sent into a stall enqueues more audio. If growth counted as
+    // recovery, the nudge would re-arm the very hold that swallowed the last
+    // one; only the thing a dead speaker cannot do — actually draining — hands
+    // the hold back.
+    const h = harness();
+    await intoSilentDebate(h);
+    const player = h.players[h.players.length - 1];
+
+    for (let chunk = 0; chunk < 5; chunk += 1) player.enqueue(`chunk-${chunk}`);
+    for (let tick = 0; tick < 8; tick += 1) h.advanceClock(1);
+    assert.equal(events(h, "examiner-playback-stalled").length, 1);
+
+    player.enqueue("the relance, into the same dead speaker");
+    h.advanceClock(11);
+    assert.deepEqual(events(h, "examiner-playback-recovered"), [], "growth is not recovery");
+
+    player.drain(2); // the context came back: audio is reaching the speaker again
+    h.advanceClock(1);
+    assert.equal(events(h, "examiner-playback-recovered").length, 1, "a drop is");
   });
 
   it("says what a nudge waited through, so a long gap can be read afterwards", async () => {

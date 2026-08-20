@@ -158,6 +158,20 @@ export interface ExamState {
    */
   status: ExamStatus;
   examinerSpeaking: boolean;
+  /**
+   * The débat has begun and the examiner's opening question has not been
+   * delivered yet — the connect-and-generate window before a word of it is
+   * audible, plus however long it takes to speak.
+   *
+   * Exposed because the floor is the examiner's for that whole window, and
+   * `examinerSpeaking` cannot say so: it reports the speaker, which is silent
+   * until the first chunk actually plays. Without this the scene opened the
+   * débat with the candidate's ring pulsing and « Vous avez la parole » under
+   * it, over an examiner who was about to talk. The transcript in this same
+   * snapshot is also held back while this is true and nothing has played yet,
+   * for the same reason — see the controller's `visibleTranscript`.
+   */
+  openingQuestionPending: boolean;
   transcript: readonly TranscriptEntry[];
   events: readonly ExamEvent[];
   reconnectCount: number;
@@ -447,6 +461,30 @@ const VOICED_SPEECH_RATIO = 0.4;
  */
 const OPENING_DRAIN_GRACE_MS = 1_000;
 
+/**
+ * How long the examiner's queued audio may sit without draining before the
+ * watch stops believing it is being heard.
+ *
+ * The two playback holds below trust the player: a speaking flag, and the
+ * seconds of audio scheduled and not yet played. Both lie the same way when the
+ * speaker itself has died — an AudioContext the browser suspended schedules
+ * every chunk and plays none of them, so the flag sticks on and the buffer
+ * freezes above zero, forever. The candidate's sitting then does this: the
+ * question prints in the feed, nothing comes out of the speakers, and the watch
+ * re-anchors on "the examiner is still audible" for the rest of the part — no
+ * relance, no « Vous m'entendez ? », no line in the log. Waiting for that audio
+ * is waiting for a bus that has been cancelled.
+ *
+ * So progress is what earns the hold: the buffer DROPPING between ticks, which
+ * is what actual playback does continuously. Six seconds without a single drop,
+ * with audio queued, is a stall — longer than the burst in which Gemini streams
+ * a whole turn into the queue (buffered grows for two or three seconds while
+ * generation outruns playback, and that must not read as a stall), and shorter
+ * than the first silence window, so a dead speaker costs seconds rather than
+ * the épreuve.
+ */
+const PLAYBACK_STALL_MS = 6_000;
+
 const SILENCE_HELD_REPORT_MS = 3 * SILENCE_STEP_MS;
 
 /**
@@ -589,6 +627,23 @@ export class ExamController {
   /** When the speaker last ran dry with the opening turn still unproven. Null
    *  whenever it is audible again, or once the turn is proven. */
   private speakerDrainedAt: number | null = null;
+  /**
+   * Playback of this session's opening turn has begun: the speaker reported
+   * itself audible at least once since the session opened.
+   *
+   * Latched rather than read live off `examinerSpeaking`, because that flag
+   * flickers false in the gap between two chunks of one question (#94), and
+   * this one answers a question that must not flicker: has the candidate heard
+   * ANY of the opening question yet? While the answer is no, the snapshot
+   * withholds the débat's examiner turns from the feed — Gemini transcribes at
+   * generation speed, several times faster than the voice, so without this the
+   * whole question is printed while the audio is still connecting and the
+   * candidate reads an objection nobody has spoken yet. `turnComplete` releases
+   * the hold too (through {@link openingQuestionPending}), so a sitting whose
+   * speaker failed still gets the question in the feed — the text is the only
+   * voice it has left.
+   */
+  private openingTurnAudible = false;
   private phaseSeconds = { monologue: 0, debate: 0 };
   /** Wall-clock stamps per speaking phase, for `oral_exam_phases`' audit trail.
    *  Null means the phase was never entered, which is the truth about an
@@ -643,6 +698,22 @@ export class ExamController {
    *  whether that has been reported. See {@link SILENCE_HELD_REPORT_MS}. */
   private silenceHolds: Record<string, number> = {};
   private silenceHeldReported = false;
+  /**
+   * The playback-progress ledger behind {@link PLAYBACK_STALL_MS}.
+   *
+   * `lastBufferedSeconds` is compared, not displayed: a drop between two ticks
+   * is proof the audio is really reaching the speaker. `playbackStalled` is
+   * sticky across enqueues on purpose — new audio landing in a dead player
+   * grows the buffer without draining it, and growth must not read as recovery
+   * or every relance sent into the stall would re-arm the very hold that
+   * swallowed the last one. Only a drop clears it. Deliberately NOT reset at a
+   * phase boundary: the player is the sitting's, and a context that died in the
+   * monologue is still dead when the débat opens.
+   */
+  private lastBufferedSeconds = 0;
+  private playbackStuckSince: number | null = null;
+  private playbackStalled = false;
+
   /** The voiced total the watch last saw and when it saw it, so growth in it can
    *  be read as a RATE — the aggregate alone cannot say who is speaking now, and
    *  a single voiced frame is not somebody answering. */
@@ -771,7 +842,8 @@ export class ExamController {
       // "recording" indicator down while it plays, which is true twice over
       // here: nothing is being captured yet either.
       examinerSpeaking: this.examinerSpeaking || this.announcementPlaying,
-      transcript: this.transcript,
+      openingQuestionPending: this.openingQuestionPending,
+      transcript: this.visibleTranscript(),
       events: this.events,
       reconnectCount: this.reconnectCount,
       // A phase cannot be ended before it has begun (#37). Until it does, its
@@ -816,6 +888,42 @@ export class ExamController {
       announcementPlaying: this.announcementPlaying,
       announcementBlocked: this.announcementBlocked,
     };
+  }
+
+  /**
+   * The débat has begun and its opening question has not been delivered yet.
+   *
+   * The window between the candidate's « Enregistrer » and the end of the
+   * examiner's first turn — connecting, generating, speaking. The floor is the
+   * examiner's for all of it: the débat opens with their question, and a scene
+   * reading `examinerSpeaking` alone put the parole on the candidate for the
+   * several seconds before the first audio chunk actually played, inviting them
+   * to answer a question that had not been asked. Ends the way the
+   * interruption guard's own hold does — `turnComplete`, or the speaker
+   * staying dry (#94) — because it is the same fact about the same turn.
+   */
+  private get openingQuestionPending(): boolean {
+    return this.phase === "debate" && this.phaseStart !== null && !this.openingTurnDelivered;
+  }
+
+  /**
+   * The transcript as the screen may show it now.
+   *
+   * The whole transcript, except while the débat's opening question is still
+   * unheard: its text arrives at generation speed and its voice at speaking
+   * speed, so until playback has begun (`openingTurnAudible`) the examiner's
+   * débat turns are withheld from the snapshot — a candidate must not read a
+   * question nobody has spoken yet. Display-only: everything recorded,
+   * persisted or sent reads `this.transcript` directly, so nothing about the
+   * sitting's record changes. Once released, the turns appear with their
+   * original timestamps — transcript timestamps are generation times, not
+   * playback times, and the correction depends on them staying that way.
+   */
+  private visibleTranscript(): readonly TranscriptEntry[] {
+    if (!this.openingQuestionPending || this.openingTurnAudible) return this.transcript;
+    return this.transcript.filter(
+      (entry) => !(entry.phase === "debate" && entry.speaker === "examiner"),
+    );
   }
 
   /**
@@ -1256,7 +1364,12 @@ export class ExamController {
           if (!speaking && this.examinerSpeaking && !this.openingTurnDelivered) {
             this.speakerDrainedAt = this.now();
           }
-          if (speaking) this.speakerDrainedAt = null;
+          if (speaking) {
+            this.speakerDrainedAt = null;
+            // The first audible moment of the session's opening turn, and the
+            // release the feed's hold is waiting on. See `openingTurnAudible`.
+            this.openingTurnAudible = true;
+          }
           this.examinerSpeaking = speaking;
           this.emit();
         },
@@ -1438,6 +1551,70 @@ export class ExamController {
   }
 
   /**
+   * Whether the examiner is audibly speaking, as far as the watch is concerned
+   * — and null the moment that claim stops being checkable.
+   *
+   * Playing audio DRAINS: `bufferedSeconds` falls between any two ticks that
+   * playback crossed. A queue that holds its level while audio is scheduled is
+   * one of two things — Gemini streaming a turn in faster than real time
+   * (buffered grows for a few seconds, then drains for the rest of the turn),
+   * or a speaker that has died and will never play what it holds. The first
+   * clears itself well inside {@link PLAYBACK_STALL_MS}; the second is declared
+   * a stall: logged once, answered with a `resume()` in case the context merely
+   * suspended, and the hold is dropped so the silence escalation runs — the
+   * question is on screen even when the room is silent, and « Vous
+   * m'entendez ? » is the precise thing to ask over a speaker that may be dead.
+   *
+   * A drop is also what ends a stall, because it is the one thing a dead
+   * speaker cannot do. Growth is not recovery: every relance sent into the
+   * stall enqueues more audio, and letting that re-arm the hold would hand the
+   * watch back to the fault it just escaped.
+   */
+  private examinerPlaybackHold(now: number): string | null {
+    const buffered = this.player?.bufferedSeconds ?? 0;
+    const dropped = buffered < this.lastBufferedSeconds;
+    this.lastBufferedSeconds = buffered;
+
+    if (dropped) {
+      this.playbackStuckSince = null;
+      if (this.playbackStalled) {
+        this.playbackStalled = false;
+        this.log("examiner-playback-recovered", { buffered: Number(buffered.toFixed(2)) });
+      }
+    }
+
+    if (!this.examinerSpeaking && buffered <= 0) {
+      this.playbackStuckSince = null;
+      return null;
+    }
+    if (this.playbackStalled) return null;
+
+    // A speaking flag with an empty queue cannot stall — it is the real
+    // player's last instant of a turn, and the fakes' whole fiction — so the
+    // clock only runs while there is audio that ought to be draining.
+    if (buffered <= 0) {
+      this.playbackStuckSince = null;
+    } else if (!dropped) {
+      this.playbackStuckSince ??= now;
+      if (now - this.playbackStuckSince >= PLAYBACK_STALL_MS) {
+        this.playbackStalled = true;
+        this.playbackStuckSince = null;
+        this.log("examiner-playback-stalled", {
+          buffered: Number(buffered.toFixed(2)),
+          speaking: this.examinerSpeaking,
+        });
+        // The one recovery the client owns: a context the browser suspended
+        // resumes on request. A context that is beyond that ignores this, and
+        // the escalation proceeds either way.
+        void this.player?.resume().catch(() => {});
+        return null;
+      }
+    }
+
+    return this.examinerSpeaking ? "examiner-speaking" : "examiner-audio-queued";
+  }
+
+  /**
    * What this nudge waited through, for the log line that announces it.
    *
    * `waited` is the whole armed stretch — from the end of the examiner's turn to
@@ -1542,30 +1719,27 @@ export class ExamController {
 
     const now = this.now();
 
-    // The examiner's own question is still coming out of the speaker. The
-    // candidate has not been silent for ten seconds; they have been listening
-    // for ten seconds. `onTurnComplete` fires when generation ends, and Gemini
-    // generates a turn faster than it is heard, so this window is several
-    // seconds wide on every single turn.
-    if (this.examinerSpeaking || this.announcementPlaying) {
-      // The microphone is hearing the examiner through the speakers while this
-      // is true, so the voiced baseline restarts with the window.
+    // A consigne is its own device and does not stall the way the player can,
+    // so it keeps the simple hold: while it plays, the candidate is listening.
+    if (this.announcementPlaying) {
       this.resetVoicedBaseline(now);
-      this.holdSilenceWatch("examiner-speaking", now);
+      this.holdSilenceWatch("announcement-playing", now);
       return;
     }
 
-    // And the same thing measured rather than reported. `examinerSpeaking` is a
-    // boolean the player pushes on a callback; this is the quantity underneath
-    // it — audio scheduled and not yet heard — and a candidate cannot answer a
-    // question that is still coming out of the speaker whatever the flag says.
-    // Worth both: a transcript showing the examiner's question at 0:02 and
-    // « Vous m'entendez ? » at 0:13 is what a window that started counting at
-    // the end of GENERATION rather than the end of the sentence looks like, and
-    // Gemini generates a turn several times faster than it is spoken.
-    if ((this.player?.bufferedSeconds ?? 0) > 0) {
+    // The examiner's own question is still coming out of the speaker — reported
+    // by the player's flag AND measured off its queue, because `onTurnComplete`
+    // fires when generation ends and Gemini generates a turn several times
+    // faster than it is spoken: a window counted from the end of GENERATION put
+    // « Vous m'entendez ? » at 0:13, inside the question it was asking about.
+    // But heard only while the queue is actually draining — see
+    // {@link examinerPlaybackHold} for the sitting where it never was.
+    const playbackHold = this.examinerPlaybackHold(now);
+    if (playbackHold) {
+      // The microphone is hearing the examiner through the speakers while this
+      // holds, so the voiced baseline restarts with the window.
       this.resetVoicedBaseline(now);
-      this.holdSilenceWatch("examiner-audio-queued", now);
+      this.holdSilenceWatch(playbackHold, now);
       return;
     }
 
@@ -2320,6 +2494,7 @@ export class ExamController {
     // {@link handleInterruption}.
     this.openingTurnDelivered = false;
     this.speakerDrainedAt = null;
+    this.openingTurnAudible = false;
 
     const callbacks: SessionManagerCallbacks = {
       onStateChange: (state) => {
