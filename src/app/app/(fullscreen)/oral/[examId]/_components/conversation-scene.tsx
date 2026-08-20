@@ -25,6 +25,14 @@ import { formatClock } from "@/lib/delf/phases";
  * the candidate is on is the reason the inner one was deleted, and none of that
  * changed.
  *
+ * **It sticks to the top of the column while the exchange scrolls (#88).** The
+ * screen kept one scroller and this row got `position: sticky` — the sujet's
+ * document scrolls away above it, the turns scroll away beneath it, and the one
+ * thing that answers « whose turn is it » stays where it can be read. The
+ * stickiness is applied where the row is placed (`passation-screen.tsx`) rather
+ * than here: this component is the two faces and their statuses, and it is the
+ * screen's business how far up the page they are.
+ *
  * **The clock here is elapsed, and that is not a duplicate of the topbar's.**
  * The ring counts down what is left; this counts up what has been used. Two
  * different questions, which is why the reference keeps both, and why printing
