@@ -386,7 +386,7 @@ const CAPTURE_STALL_MS = 4_000;
  * the top, because the relance now comes round again and a window that fires
  * early would make a candidate who is merely thinking hear the examiner twice
  * before they have begun. It is a different kind of number from
- * `silenceDurationMs` in `gemini/live-config.ts`, which is 1.2 s: that one
+ * `silenceDurationMs` in `gemini/live-config.ts`, which is 1 s: that one
  * decides when a candidate who IS speaking has finished, and it is long because
  * a B2 candidate hunting for a word must not be cut off. This one decides when a
  * candidate who has not started at all should be helped, and ten seconds of
