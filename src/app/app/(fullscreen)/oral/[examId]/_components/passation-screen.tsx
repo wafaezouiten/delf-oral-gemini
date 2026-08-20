@@ -76,6 +76,7 @@ export function PassationScreen({
   remaining,
   recording,
   examinerSpeaking,
+  openingQuestionPending = false,
   connected,
   connecting,
   canAdvance,
@@ -109,6 +110,13 @@ export function PassationScreen({
    * the only thing on that screen that says whose turn it is (#60).
    */
   examinerSpeaking: boolean;
+  /**
+   * The débat's opening question is owed and not yet delivered (`ExamState`).
+   * The floor is the examiner's for that whole window — connecting, generating,
+   * speaking — even though nothing is audible yet, so the scene must not hand
+   * the parole to the candidate off `examinerSpeaking` alone.
+   */
+  openingQuestionPending?: boolean;
   connected: boolean;
   connecting: boolean;
   canAdvance: boolean;
@@ -251,21 +259,25 @@ export function PassationScreen({
                   glance and the exchange answers "what did they just ask me",
                   which is the question a candidate actually has to answer. */}
               <ConversationScene
-                examinerSpeaking={examinerSpeaking}
+                // The floor, not the speaker: the opening question counts as
+                // the examiner's turn from the candidate's click, even while it
+                // is still being generated and nothing is audible yet.
+                examinerSpeaking={examinerSpeaking || openingQuestionPending}
                 examinerStatus={examinerStatus({
                   connected,
                   connecting,
                   speaking: examinerSpeaking,
                   announcing: awaitingConsigne,
                   closing,
+                  opening: openingQuestionPending,
                 })}
                 // Not simply `recording`: the microphone stays open while the
                 // examiner interrupts, and two rings pulsing at once says the
                 // one thing this screen exists to answer is "both of you".
-                candidateRecording={recording && !examinerSpeaking}
+                candidateRecording={recording && !examinerSpeaking && !openingQuestionPending}
                 candidateStatus={candidateStatus({
                   connected,
-                  examinerSpeaking,
+                  examinerSpeaking: examinerSpeaking || openingQuestionPending,
                   recording,
                 })}
                 candidateStatusUrgent={remaining <= 60}

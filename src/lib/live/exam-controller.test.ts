@@ -302,13 +302,21 @@ class FakePlayer implements PlayerLike {
     private readonly options: DeviceOptions = {},
     private readonly callbacks: { onSpeakingChange?: (speaking: boolean) => void } = {},
   ) {}
+  resumes = 0;
   async resume(): Promise<void> {
     if (this.options.gate) await this.options.gate;
     if (this.options.fail) throw this.options.fail;
     this.resumed = true;
+    this.resumes += 1;
   }
   enqueue(base64: string): void {
     this.chunks.push(base64);
+  }
+  /** Playback progressing: the real player's queue drains continuously while
+   *  audio is actually reaching the speaker, and a test that leaves the queue
+   *  frozen is describing a stalled one — see `examinerPlaybackHold`. */
+  drain(n = 1): void {
+    this.chunks.splice(0, n);
   }
   interrupt(): void {
     this.interrupts += 1;
@@ -2295,7 +2303,7 @@ describe("the examiner's opening question", () => {
     assert.deepEqual(player.chunks, []);
   });
 
-  it("gives way again after the speaker ran out of the opening turn", async () => {
+  it("gives way again once the speaker has stayed out of the opening turn", async () => {
     // The other release, and the one that stops this being a trap: an
     // interrupted generation is not guaranteed to be followed by a turn
     // completing, so a guard only that could open could stay shut for a whole
@@ -2306,9 +2314,189 @@ describe("the examiner's opening question", () => {
 
     player.speak(true);
     player.speak(false);
+    h.advanceClock(2); // the speaker is dry, and stays dry
     h.session().interrupts();
 
     assert.equal(player.interrupts, 1, "the question was delivered; the next one can be cut");
+  });
+
+  it("is not released by the gap between two chunks of one question (#94)", async () => {
+    // The remaining path to a question printed and never heard. A turn arrives
+    // as many chunks and the queue empties whenever one finishes before the next
+    // lands; read as "the turn is over", one moment of jitter opened the guard
+    // mid-question and the next noise in the room flushed the rest of it.
+    const h = harness();
+    await intoDebate(h);
+    const player = h.players[h.players.length - 1];
+
+    h.session().examinerVoice("the opening question, chunk one");
+    player.speak(true);
+    player.speak(false); // the stream stumbles
+    h.advanceClock(0.5); // …and picks up again well inside the grace
+    player.speak(true);
+    h.session().examinerVoice("chunk two, still the same question");
+    h.session().interrupts();
+
+    assert.equal(player.interrupts, 0, "the room did not take the question away");
+    assert.equal(player.chunks.length, 2, "both chunks are still there to hear");
+    assert.deepEqual(
+      h.controller.getSnapshot().events.filter((event) => event.name === "opening-turn-drained"),
+      [],
+      "and nothing claimed the turn was over",
+    );
+  });
+
+  it("wakes the speaker from the candidate's own « Enregistrer » click", async () => {
+    // The one guaranteed user gesture at each part's opening. A context the
+    // browser suspended since the monologue may accept a resume from nowhere
+    // else — the stall detector's attempt has no gesture behind it and autoplay
+    // policy can refuse it — and a suspended speaker at the débat's opening is
+    // the unheard first question.
+    const h = harness();
+    h.controller.start();
+    await h.controller.advanceEarly();
+    await pressRecord(h);
+    h.session().candidateSays("Le télétravail a transformé le rapport au bureau.");
+    h.advanceClock(MONOLOGUE_MIN_SECONDS + 10);
+    await h.controller.advanceEarly();
+    h.session().finishTurn(); // the monologue closes; the débat opens armed
+    await settle();
+
+    const player = h.players[h.players.length - 1];
+    const before = player.resumes;
+    h.controller.startSpeaking();
+    await settle();
+
+    assert.equal(player.resumes, before + 1, "the click reached the speaker, not only the mic");
+  });
+
+  it("holds the floor for the examiner until the question is delivered", async () => {
+    // The scene used to read `examinerSpeaking` alone, which is false for the
+    // whole connect-and-generate window — so the débat opened with the
+    // candidate's ring pulsing and « Vous avez la parole » under it, over an
+    // examiner who was about to talk.
+    const h = harness();
+    await intoDebate(h);
+    const player = h.players[h.players.length - 1];
+
+    assert.equal(
+      h.controller.getSnapshot().openingQuestionPending,
+      true,
+      "the question is owed from the candidate's own « Enregistrer »",
+    );
+
+    // Becoming audible does not end it: the floor stays the examiner's for as
+    // long as the question does.
+    player.speak(true);
+    assert.equal(h.controller.getSnapshot().openingQuestionPending, true);
+
+    h.session().finishTurn();
+    assert.equal(
+      h.controller.getSnapshot().openingQuestionPending,
+      false,
+      "the turn completing is what hands the floor over",
+    );
+  });
+
+  it("hands the floor over when the speaker stays out of the opening turn", async () => {
+    // The same second release the interruption guard has (#94), because it is
+    // the same fact about the same turn.
+    const h = harness();
+    await intoDebate(h);
+    const player = h.players[h.players.length - 1];
+
+    player.speak(true);
+    player.speak(false);
+    h.advanceClock(2); // dry, and stays dry
+
+    assert.equal(h.controller.getSnapshot().openingQuestionPending, false);
+  });
+
+  it("does not print the question before a word of it is audible", async () => {
+    // The two halves of the question travel at different speeds: the text at
+    // generation speed, the voice at speaking speed. Printed as it generates,
+    // the whole question sat in the feed while the audio was still connecting —
+    // a question shown and not heard, which is #94's report read literally.
+    const h = harness();
+    await intoDebate(h);
+    const player = h.players[h.players.length - 1];
+
+    h.session().examinerSays("Vous dites que le télétravail isole. N'est-ce pas plutôt le bureau ?");
+    h.session().examinerVoice("the opening question");
+
+    assert.equal(
+      h.controller
+        .getSnapshot()
+        .transcript.some((entry) => entry.speaker === "examiner" && entry.phase === "debate"),
+      false,
+      "the feed holds the question back while nothing has played",
+    );
+
+    // The candidate's own words are not held — the hold is about the examiner's
+    // unheard question, not about the feed.
+    h.session().candidateSays("Je peux commencer ?");
+    assert.equal(
+      h.controller.getSnapshot().transcript.some((entry) => entry.speaker === "candidate"),
+      true,
+    );
+
+    player.speak(true);
+    const heard = h.controller
+      .getSnapshot()
+      .transcript.find((entry) => entry.speaker === "examiner" && entry.phase === "debate");
+    assert.ok(heard, "playback beginning is what reveals the question");
+    assert.match(heard.text, /télétravail isole/);
+
+    // The gap between two chunks of one question (#94) must not hide it again.
+    player.speak(false);
+    assert.equal(
+      h.controller
+        .getSnapshot()
+        .transcript.some((entry) => entry.speaker === "examiner" && entry.phase === "debate"),
+      true,
+      "once heard, it stays printed",
+    );
+  });
+
+  it("prints the question at the turn's end when the speaker never played it", async () => {
+    // A sitting whose speaker failed still gets the question in the feed — the
+    // text is the only voice the examiner has left (#74). It just arrives when
+    // the turn is over, rather than while nobody is saying it.
+    const h = harness();
+    await intoDebate(h);
+
+    h.session().examinerSays("Une question que le haut-parleur n'a jamais portée.");
+    assert.equal(
+      h.controller
+        .getSnapshot()
+        .transcript.some((entry) => entry.speaker === "examiner" && entry.phase === "debate"),
+      false,
+    );
+
+    h.session().finishTurn();
+    assert.equal(
+      h.controller
+        .getSnapshot()
+        .transcript.some((entry) => entry.speaker === "examiner" && entry.phase === "debate"),
+      true,
+      "the server's word releases the hold with or without audio",
+    );
+  });
+
+  it("still opens the guard on the turn the server says is complete", async () => {
+    // `turnComplete` is the server's own word and needs no grace: it is the
+    // release that must keep working the moment it arrives, since a candidate
+    // answering a finished question should not have to wait out a timer.
+    const h = harness();
+    await intoDebate(h);
+    const player = h.players[h.players.length - 1];
+
+    h.session().examinerVoice("the opening question");
+    h.session().finishTurn();
+    h.session().examinerVoice("a second question, spoken over");
+    h.session().interrupts();
+
+    assert.equal(player.interrupts, 1);
   });
 
   it("guards each part's own opening, not the sitting's", async () => {
@@ -2342,7 +2530,7 @@ describe("the examiner's opening question", () => {
   });
 });
 
-describe("breaking a silence in the débat (#84)", () => {
+describe("breaking a silence in the débat (#84, #101)", () => {
   /** Preparation → a débat that has begun, with a microphone that works and a
    *  candidate who is not using it. `voiced.debate = 0` is the whole fiction:
    *  audio keeps arriving, so the stall watchdog stays quiet, and none of it
@@ -2362,33 +2550,63 @@ describe("breaking a silence in the débat (#84)", () => {
     h.session().finishTurn();
   }
 
+  /** One whole escalation step: the wait, then the examiner's own nudge landing
+   *  and ending, which is what re-arms the window for the next one. */
+  function silentStep(h: Harness, seconds = 16): void {
+    h.advanceClock(seconds);
+    h.session().finishTurn();
+  }
+
+  /** Both wordings, matched on what they have in common: the first relance of a
+   *  silence repeats the question and the later ones ask a new, simpler one
+   *  (#101), and both are forbidden to mention the silence. */
   const relances = (h: Harness) =>
-    h.session().directives.filter((text) => text.includes("Relance-le sur le fond"));
+    h.session().directives.filter((text) =>
+      text.includes("Ne fais aucune remarque sur son silence"),
+    );
   const presenceChecks = (h: Harness) =>
     h.session().directives.filter((text) => text.includes("Vous m'entendez"));
+  /** Everything the watch says, in one list: the débat's own opening directive
+   *  is on `directives` too and is not a nudge. */
+  const nudges = (h: Harness) => [...presenceChecks(h), ...relances(h)];
   const events = (h: Harness, name: string) =>
     h.controller.getSnapshot().events.filter((event) => event.name === name);
 
-  it("relances after eight seconds of nothing", async () => {
-    const h = harness();
-    await intoSilentDebate(h);
-
-    h.advanceClock(7);
-    assert.deepEqual(relances(h), [], "seven seconds is a candidate thinking");
-
-    h.advanceClock(2);
-    assert.equal(relances(h).length, 1, "nine is a candidate who has not started");
-    assert.equal(events(h, "silence-relance").length, 1, "and the sitting's log says so");
-  });
-
-  it("keeps relancing an unanswered question at eight-second steps, not every tick", async () => {
+  it("asks whether the candidate is there after ten seconds of nothing", async () => {
     const h = harness();
     await intoSilentDebate(h);
 
     h.advanceClock(9);
+    assert.deepEqual(presenceChecks(h), [], "nine seconds is a candidate thinking");
+
+    h.advanceClock(2);
+    assert.equal(presenceChecks(h).length, 1, "eleven is a candidate who may not have heard");
+    assert.deepEqual(relances(h), [], "and the question itself waits for the step after");
+    assert.equal(events(h, "silence-presence-check").length, 1, "the sitting's log says so");
+  });
+
+  it("repeats the question fifteen seconds after that, not ten", async () => {
+    const h = harness();
+    await intoSilentDebate(h);
+
+    silentStep(h, 11); // « Vous m'entendez ? »
+    h.advanceClock(11);
+    assert.deepEqual(relances(h), [], "the steps after the first are longer on purpose");
+
+    h.advanceClock(5);
+    assert.equal(relances(h).length, 1, "sixteen seconds of silence earns the question again");
+    assert.match(relances(h)[0], /reformule autrement ta dernière question/);
+  });
+
+  it("keeps asking at whole steps, not on every tick", async () => {
+    const h = harness();
+    await intoSilentDebate(h);
+
+    h.advanceClock(11);
     h.advanceClock(1);
     h.advanceClock(1);
-    assert.equal(relances(h).length, 1, "a directive is not a promise the model will speak");
+    assert.equal(presenceChecks(h).length, 1, "a directive is not a promise the model will speak");
+    assert.deepEqual(relances(h), []);
   });
 
   it("does not count the seconds its own question is still being heard", async () => {
@@ -2401,22 +2619,22 @@ describe("breaking a silence in the débat (#84)", () => {
 
     player.speak(true);
     h.advanceClock(30);
-    assert.deepEqual(relances(h), [], "the candidate has been listening, not silent");
+    assert.deepEqual(presenceChecks(h), [], "the candidate has been listening, not silent");
 
     player.speak(false);
-    h.advanceClock(9);
-    assert.equal(relances(h).length, 1, "the window opens when the speaker runs out");
+    h.advanceClock(11);
+    assert.equal(presenceChecks(h).length, 1, "the window opens when the speaker runs out");
   });
 
   it("does not talk over a candidate who has started answering", async () => {
     const h = harness();
     await intoSilentDebate(h);
 
-    h.advanceClock(4);
+    h.advanceClock(6);
     h.session().candidateSays("Alors, je dirais que");
-    h.advanceClock(5);
+    h.advanceClock(6);
 
-    assert.deepEqual(relances(h), [], "the answer cancelled the window it was four seconds into");
+    assert.deepEqual(nudges(h), [], "the answer cancelled the window it was in");
   });
 
   it("holds the window open on voiced audio alone, before a word is transcribed", async () => {
@@ -2429,79 +2647,122 @@ describe("breaking a silence in the débat (#84)", () => {
     h.recorder.voiced.debate = null; // speech is arriving; none of it is transcribed yet
     h.advanceClock(30);
 
-    assert.deepEqual(relances(h), [], "somebody is speaking into the microphone");
+    assert.deepEqual(nudges(h), [], "somebody is speaking into the microphone");
   });
 
-  it("escalates to a fixed « Vous m'entendez ? » when the relance also lands in silence", async () => {
+  it("is not held open by a room that is merely not silent (#101)", async () => {
+    // The reported failure: thirty seconds after a question, nothing. Any growth
+    // at all in the voiced total used to re-anchor the window, and one 40 ms
+    // frame is growth — a cough, a chair, a fan over the threshold. A room is
+    // never perfectly quiet, so the countdown never finished.
     const h = harness();
     await intoSilentDebate(h);
 
-    h.advanceClock(9);
-    // The examiner relances, and that turn ending re-arms the window.
-    h.session().finishTurn();
-    h.advanceClock(9);
+    h.recorder.voiced.debate = 0.08; // two frames in eleven seconds
+    h.advanceClock(11);
 
-    assert.equal(relances(h).length, 1, "the relance is not repeated");
-    assert.equal(presenceChecks(h).length, 1, "the second step is the technical check");
-    assert.match(
-      presenceChecks(h)[0],
-      /mot pour mot/,
-      "and unlike the relance its wording is fixed, because it is not part of the débat",
+    assert.equal(presenceChecks(h).length, 1, "two clicks in eleven seconds is not an answer");
+  });
+
+  it("is still held open by somebody actually speaking through it", async () => {
+    const h = harness();
+    await intoSilentDebate(h);
+
+    h.recorder.voiced.debate = 8; // eight of the eleven seconds carried speech
+    h.advanceClock(11);
+
+    assert.deepEqual(nudges(h), [], "that is an answer in progress, not a room");
+  });
+
+  it("goes on relancing a silent candidate, and asks about the connection once", async () => {
+    // Six steps into one silence. The escalation used to be two of them and then
+    // nothing for the rest of the débat; now only the technical check is spent,
+    // and the examiner keeps asking about the sujet.
+    const h = harness();
+    await intoSilentDebate(h);
+
+    silentStep(h, 11);
+    for (let step = 0; step < 5; step += 1) silentStep(h);
+
+    assert.equal(presenceChecks(h).length, 1, "« Vous m'entendez ? » opens the silence, once");
+    assert.equal(relances(h).length, 5, "and the question keeps coming back");
+    assert.deepEqual(
+      events(h, "silence-relance").map((event) => event.detail),
+      [1, 2, 3, 4, 5].map((attempt) => JSON.stringify({ attempt, waitedSeconds: 16 })),
+      "the log counts them and says what each one waited through, which is what"
+        + " replaced the stand-down it used to record",
     );
   });
 
-  it("stands down rather than badgering a candidate who has frozen", async () => {
-    // Six examiner turns, each landing in the same silence. The escalation is
-    // two steps and it does not come round again: only an answer restarts it, so
-    // the examiner's own turns cannot.
+  it("stops asking for a rephrasing once the relance is repeating itself", async () => {
+    // A relance that always said "reformule ta dernière question" would have the
+    // model rephrase its own rephrasing, on a context window that is sliding.
     const h = harness();
     await intoSilentDebate(h);
 
-    for (let step = 0; step < 6; step += 1) {
-      h.advanceClock(9);
-      h.session().finishTurn();
-    }
+    silentStep(h, 11);
+    silentStep(h);
+    silentStep(h);
 
-    assert.equal(relances(h).length, 1);
-    assert.equal(presenceChecks(h).length, 1);
+    assert.match(relances(h)[0], /reformule autrement ta dernière question/);
+    assert.match(relances(h)[1], /pose une question NOUVELLE/, "the next one changes the ask");
   });
 
-  it("re-arms the whole escalation once the candidate answers", async () => {
+  it("prints each nudge as its own turn, not as more of the question", async () => {
+    // The transcript coalesces consecutive fragments from one speaker, which is
+    // right for the fragments of a sentence and wrong for two interventions ten
+    // seconds apart. Welded, the candidate reads one compound question — on the
+    // live feed while it happens and on the correction afterwards.
     const h = harness();
     await intoSilentDebate(h);
 
-    h.advanceClock(9);
+    h.advanceClock(11);
+    h.session().examinerSays("Vous m'entendez ?");
+    h.session().finishTurn();
+    h.advanceClock(16);
+    h.session().examinerSays("Autrement dit :");
+    h.session().examinerSays(" y perd-on des collègues ?");
+
+    const debate = h.controller
+      .getSnapshot()
+      .transcript.filter((entry) => entry.phase === "debate" && entry.speaker === "examiner");
+
+    assert.equal(debate.length, 3, "the question, the check, and the relance are three turns");
+    assert.match(
+      debate[0].text,
+      /N'est-ce pas plutôt le bureau \?$/,
+      "the question ends where it did",
+    );
+    assert.equal(
+      debate[2].text,
+      "Autrement dit : y perd-on des collègues ?",
+      "and the relance's own fragments still merge into one turn of its own",
+    );
+    assert.ok(
+      debate[2].timestamp > debate[1].timestamp,
+      "stamped when it was spoken, not when the question was",
+    );
+  });
+
+  it("starts the escalation over once the candidate answers", async () => {
+    const h = harness();
+    await intoSilentDebate(h);
+
+    silentStep(h, 11);
     h.session().candidateSays("Pardon, je réfléchissais.");
     h.session().finishTurn();
-    h.advanceClock(9);
+    h.advanceClock(11);
 
-    assert.equal(relances(h).length, 2, "a fresh silence earns a fresh relance, not the check");
-    assert.deepEqual(presenceChecks(h), []);
-  });
-
-  it("asks whether the candidate is still there at most twice in a débat", async () => {
-    const h = harness();
-    await intoSilentDebate(h);
-
-    for (let round = 0; round < 3; round += 1) {
-      h.session().candidateSays("Oui.");
-      h.session().finishTurn();
-      h.advanceClock(9); // relance
-      h.session().finishTurn();
-      h.advanceClock(9); // « Vous m'entendez ? », while it is still allowed
-    }
-
-    assert.equal(relances(h).length, 3, "the relance itself is never rationed");
-    assert.equal(presenceChecks(h).length, 2, "the technical check is");
     assert.equal(
-      events(h, "silence-unanswered").length,
-      1,
-      "and the third silence, with nothing left to say into it, is on the record",
+      presenceChecks(h).length,
+      2,
+      "a fresh silence opens the way the first one did, ten seconds in",
     );
+    assert.deepEqual(relances(h), [], "the question itself has not been repeated yet");
   });
 
   it("gives way to the closing handshake on the tick that crosses both deadlines", async () => {
-    // The one tick where the 8 s silence window and the part's own time-up land
+    // The one tick where the silence window and the part's own time-up land
     // together. Both would speak, and two directives with no turn boundary
     // between them blend into one sentence — on the very turn the controller
     // waits for to let the candidate's last transcription arrive.
@@ -2511,6 +2772,7 @@ describe("breaking a silence in the débat (#84)", () => {
     h.advanceClock(PHASE_DURATIONS.debate);
 
     assert.deepEqual(relances(h), [], "the part is ending; this is no moment to relance");
+    assert.deepEqual(presenceChecks(h), []);
     assert.match(
       h.session().directives[h.session().directives.length - 1],
       /Le temps de l'épreuve est écoulé/,
@@ -2518,25 +2780,191 @@ describe("breaking a silence in the débat (#84)", () => {
     );
   });
 
+  it("does not weld the closing sentence onto the relance nobody answered", async () => {
+    // The other end of the same defect, and the one this change makes likely:
+    // the relances now run right up to time-up, so the last transcript entry
+    // before the closing handshake is reliably an unanswered examiner turn.
+    // Merged, « le temps de l'épreuve est écoulé » is read back as the tail of a
+    // question, under that question's timestamp.
+    //
+    // The examiner is transcribed after each nudge, which is what production
+    // does and what spends the pending break: a test where nothing answers the
+    // directives would leave the flag set and pass without proving anything.
+    const h = harness();
+    await intoSilentDebate(h);
+
+    h.advanceClock(11);
+    h.session().examinerSays("Vous m'entendez ?");
+    h.session().finishTurn();
+    for (let step = 0; step < 2; step += 1) {
+      h.advanceClock(16);
+      h.session().examinerSays(`Reformulons, ${step + 1}.`);
+      h.session().finishTurn();
+    }
+    h.advanceClock(PHASE_DURATIONS.debate);
+    h.session().examinerSays("Merci, le temps de l'épreuve est écoulé.");
+
+    const examiner = h.controller
+      .getSnapshot()
+      .transcript.filter((entry) => entry.phase === "debate" && entry.speaker === "examiner");
+    const last = examiner[examiner.length - 1];
+
+    assert.equal(
+      last.text,
+      "Merci, le temps de l'épreuve est écoulé.",
+      "the closing sentence is a turn, not the end of the last relance",
+    );
+    assert.equal(examiner.length, 5, "the question, the check, two relances, and the closing line");
+  });
+
   it("does not spend a step into a socket that is not up", async () => {
     // `SessionManager.sendDirective` drops a directive on a down socket without
-    // throwing, so a step spent mid-reconnect is spent unheard — and the check is
-    // rationed. A candidate who froze exactly as the connection dropped would
-    // have both of theirs burnt in silence.
+    // throwing, so a step spent mid-reconnect is spent unheard, and the
+    // candidate would be left with a silence nobody ever broke.
     const h = harness();
     await intoSilentDebate(h);
 
     h.session().emitStates("reconnecting");
     h.advanceClock(30);
-    assert.deepEqual(relances(h), [], "nothing was said, so nothing was spent");
+    assert.deepEqual(nudges(h), [], "nothing was said, so nothing was spent");
 
     h.session().emitStates("connected");
-    h.advanceClock(9);
-    assert.equal(relances(h).length, 1, "and the candidate gets it once they can hear it");
+    h.advanceClock(11);
+    assert.equal(presenceChecks(h).length, 1, "and the candidate gets it once they can hear it");
 
-    h.session().finishTurn();
-    h.advanceClock(9);
-    assert.equal(presenceChecks(h).length, 1, "with the whole escalation still intact");
+    silentStep(h);
+    assert.equal(relances(h).length, 1, "with the whole escalation still intact");
+  });
+
+  it("waits for the question to be heard, not for it to be generated", async () => {
+    // Gemini generates a turn several times faster than it is spoken, so the
+    // player is still working through a long question long after the socket has
+    // finished sending it. A window that opened at the end of generation put
+    // « Vous m'entendez ? » in the middle of the examiner's own sentence.
+    const h = harness();
+    await intoSilentDebate(h);
+    const player = h.players[h.players.length - 1];
+
+    // Twenty seconds of question queued, and playing: the queue drains a
+    // second per second, which is what earns the hold.
+    for (let chunk = 0; chunk < 20; chunk += 1) player.enqueue(`chunk-${chunk}`);
+    for (let second = 0; second < 20; second += 1) {
+      h.advanceClock(1);
+      player.drain();
+    }
+    assert.deepEqual(nudges(h), [], "the candidate was listening to the question");
+
+    h.advanceClock(11); // the queue has run out: the floor is theirs from here
+    assert.equal(presenceChecks(h).length, 1, "and the window starts when the speaker does");
+  });
+
+  it("stops waiting for queued audio that is not draining, and says so (#94)", async () => {
+    // The sitting this is written against: the question printed at 0:02,
+    // nothing in the speakers, and no nudge by 0:57. A suspended AudioContext
+    // schedules every chunk and plays none, so the speaking flag sticks on and
+    // the buffer freezes above zero — and the watch waited for that audio for
+    // the rest of the part. A frozen queue is not a candidate listening.
+    const h = harness();
+    await intoSilentDebate(h);
+    const player = h.players[h.players.length - 1];
+    const resumesBefore = player.resumes;
+
+    for (let chunk = 0; chunk < 20; chunk += 1) player.enqueue(`chunk-${chunk}`);
+    player.speak(true); // the flag sticks on too, exactly as the dead context leaves it
+
+    for (let tick = 0; tick < 8; tick += 1) h.advanceClock(1);
+    assert.equal(events(h, "examiner-playback-stalled").length, 1, "the stall is on the record");
+    assert.equal(player.resumes, resumesBefore + 1, "and a resume was attempted");
+
+    for (let tick = 0; tick < 11; tick += 1) h.advanceClock(1);
+    assert.equal(
+      presenceChecks(h).length,
+      1,
+      "then the escalation runs: « Vous m'entendez ? » is the right question for a dead speaker",
+    );
+  });
+
+  it("does not read Gemini outrunning the speaker as a stall", async () => {
+    // While a turn streams in, the queue GROWS — generation is several times
+    // faster than real time, so a 15-second question arrives in about three.
+    // The queue never drops during that burst, and the stall threshold is sized
+    // so it does not have to: the burst ends well inside it, and the draining
+    // that follows is the drop that keeps the hold honest.
+    const h = harness();
+    await intoSilentDebate(h);
+    const player = h.players[h.players.length - 1];
+
+    for (let second = 0; second < 3; second += 1) {
+      for (let chunk = 0; chunk < 5; chunk += 1) player.enqueue(`burst-${second}-${chunk}`);
+      h.advanceClock(1);
+      player.drain();
+    }
+    for (let second = 0; second < 12; second += 1) {
+      h.advanceClock(1);
+      player.drain();
+    }
+
+    assert.deepEqual(events(h, "examiner-playback-stalled"), [], "that was a turn, playing");
+    assert.deepEqual(nudges(h), []);
+  });
+
+  it("lets a drop end the stall, and growth not (#94)", async () => {
+    // Every relance sent into a stall enqueues more audio. If growth counted as
+    // recovery, the nudge would re-arm the very hold that swallowed the last
+    // one; only the thing a dead speaker cannot do — actually draining — hands
+    // the hold back.
+    const h = harness();
+    await intoSilentDebate(h);
+    const player = h.players[h.players.length - 1];
+
+    for (let chunk = 0; chunk < 5; chunk += 1) player.enqueue(`chunk-${chunk}`);
+    for (let tick = 0; tick < 8; tick += 1) h.advanceClock(1);
+    assert.equal(events(h, "examiner-playback-stalled").length, 1);
+
+    player.enqueue("the relance, into the same dead speaker");
+    h.advanceClock(11);
+    assert.deepEqual(events(h, "examiner-playback-recovered"), [], "growth is not recovery");
+
+    player.drain(2); // the context came back: audio is reaching the speaker again
+    h.advanceClock(1);
+    assert.equal(events(h, "examiner-playback-recovered").length, 1, "a drop is");
+  });
+
+  it("says what a nudge waited through, so a long gap can be read afterwards", async () => {
+    // The report that produced #101's second round was a transcript with fifty
+    // seconds between two examiner turns, and no way to tell which part of it
+    // was the window, which was the question still being spoken, and which was
+    // the model taking its time. The nudge now carries its own arithmetic.
+    const h = harness();
+    await intoSilentDebate(h);
+    const player = h.players[h.players.length - 1];
+
+    player.speak(true);
+    h.advanceClock(20); // the examiner's question is still coming out of the speaker
+    player.speak(false);
+    h.advanceClock(11);
+
+    const detail = events(h, "silence-presence-check")[0]?.detail ?? "";
+    assert.match(detail, /"waitedSeconds":31/, "the whole armed stretch, not just the step");
+    assert.match(detail, /"examiner-speaking":/, "and what held it for the other twenty");
+  });
+
+  it("says why it has been quiet, once, when something keeps holding the window open", async () => {
+    // The failure this could not explain: every guard here re-anchors the window
+    // silently, so a watch that is armed and says nothing for a minute leaves no
+    // trace at all. It now reports what has been holding it — diagnostics, and
+    // nothing branches on them.
+    const h = harness();
+    await intoSilentDebate(h);
+    const player = h.players[h.players.length - 1];
+
+    player.speak(true);
+    h.advanceClock(46);
+    h.advanceClock(46);
+
+    const held = events(h, "silence-watch-held");
+    assert.equal(held.length, 1, "said once per armed watch, not once per tick");
+    assert.match(held[0].detail ?? "", /"examiner-speaking":/, "and it names what held it");
   });
 
   it("says nothing over a microphone that has stopped delivering", async () => {
@@ -2545,9 +2973,9 @@ describe("breaking a silence in the débat (#84)", () => {
     const h = harness();
     await intoSilentDebate(h);
 
-    h.advanceClockSilently(9);
+    h.advanceClockSilently(11);
 
-    assert.deepEqual(relances(h), []);
+    assert.deepEqual(nudges(h), []);
     assert.ok(h.controller.getSnapshot().micError, "the candidate was told the real thing instead");
   });
 
@@ -2813,6 +3241,9 @@ describe("where a phase started, in the transcript's own time base (#70)", () =>
 
     h.advanceClock(45);
     h.session().examinerSays("Vous dites que c'est un progrès. Vraiment ?");
+    // The feed withholds an opening question nobody has heard yet, so let this
+    // one be heard — the test is about the stamp, not the hold.
+    h.players[h.players.length - 1].speak(true);
 
     const state = h.controller.getSnapshot();
     const turn = state.transcript[state.transcript.length - 1];
