@@ -112,8 +112,19 @@ export function monologueConfig({ topic, resumptionHandle }: LiveConfigOptions):
  *
  * `silenceDurationMs` is the single most consequential number in this file. The
  * documented floor is 500 ms; that is tuned for native speakers and would have
- * the examiner talking over a candidate who pauses to conjugate. 1200 ms gives a
- * B2 learner room to think without the exchange feeling sluggish.
+ * the examiner talking over a candidate who pauses to conjugate.
+ *
+ * It is also, measured, most of the reply latency (#100). `pnpm measure:live`
+ * against the real service (run of 2026-08-20, in `docs/comparison/runs`) put
+ * the median last-word-to-first-audio gap at 1.63 s with this window at 1200 ms
+ * — the model's own time to first audio was 0.43 s and flat across six turns,
+ * so roughly three quarters of what the candidate waits through is this number.
+ * 1000 ms is the shortest window the learner-protection floor in
+ * `live-config.test.ts` allows: every millisecond cut here comes straight off
+ * the reply gap, but is also a millisecond less a B2 candidate may pause
+ * mid-sentence before the examiner takes their unfinished turn. Cutting below
+ * one second would need evidence about learner pause lengths, not more latency
+ * measurements — the failure it risks is the exam's, not the transport's.
  */
 export function debateConfig({ topic, resumptionHandle }: LiveConfigOptions): LiveConnectConfig {
   return {
@@ -127,7 +138,7 @@ export function debateConfig({ topic, resumptionHandle }: LiveConfigOptions): Li
     realtimeInputConfig: {
       automaticActivityDetection: {
         prefixPaddingMs: 300,
-        silenceDurationMs: 1200,
+        silenceDurationMs: 1000,
       },
     },
     // Higher than the monologue: the examiner has to invent counter-arguments,
