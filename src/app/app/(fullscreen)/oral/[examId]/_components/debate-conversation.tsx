@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef } from "react";
 
 import { Kicker } from "@/app/_components/po/tag";
 import { cn } from "@/lib/ui/class-names";
@@ -31,46 +31,27 @@ import {
  * clock; on the correction, the section's own first turn, because nothing there
  * says when the part opened. The reasoning is in `debateTurns`.
  *
- * **It owns a scroller again (#88), and the argument that took the last one away
- * is still true.** The panel had no scrollbar of its own on purpose: a boxed
- * feed under a fixed head meant the screen had two scrollbars and the
- * conversation read itself through a letterbox, so the whole column was made to
- * scroll as one document instead. What that traded away only shows up a few
- * turns in — the two faces are the one thing on this screen answering « whose
- * turn is it », and they scrolled off the top exactly when the exchange got long
- * enough to need them. A second scrollbar is the smaller loss, so the head is
- * pinned and the exchange scrolls under it.
+ * **It has no scrollbar of its own, and that survived #88 twice.** It was once a
+ * boxed feed with its own scroller under a fixed head, which meant the screen
+ * had two scrollbars and the conversation read itself through a letterbox. The
+ * whole column scrolls instead: the sujet's title, the two faces and every turn
+ * are one document, and a candidate scrolls back through it the way they would
+ * scroll back through anything else.
  *
- * The letterbox is answered by giving the box a screen big enough for it, and
- * the arrangement is not one invented here. PORT NOTE:
- * `components/po/po-preparation-screen.tsx:77` and `po-briefing-screen.tsx:196`
- * — the reference locks its frame and hands each panel its own scroller
- * (`overflow-y-auto … lg:overflow-hidden`, then `lg:min-h-0 lg:overflow-y-auto`
- * on the panels), and lets the whole page scroll otherwise. This screen does
- * exactly that, under the `roomy:` variant: where the viewport can afford it the
- * head is pinned and the exchange takes the pixels the screen has left — a good
- * deal more than the 20rem the #48 version was squeezed into — and where it
- * cannot, the column scrolls as one document and the head goes with it, which is
- * the #48 arrangement and the honest answer on a phone or a short laptop.
+ * #88 was the objection to that — the two faces are the one thing on this screen
+ * answering « whose turn is it », and they left the top of the viewport exactly
+ * when the exchange got long enough to need them. It was answered first by
+ * giving this panel its scroller back, and then answered properly: the scene is
+ * `position: sticky` (`passation-screen.tsx`), so it stops at the top of the
+ * column while the turns keep going under it. Nothing here shrinks to pay for
+ * that, which is the whole argument — a boxed feed buys a fixed head out of the
+ * conversation's own height, 129px of it on a 1366×768 laptop, and sticky buys
+ * it for nothing.
  *
- * `roomy` is the reference's `lg` with a height added, and the height is this
- * project's own: see globals.css, which carries the measurements. The short
- * version is that the reference locks static cards, this locks a conversation
- * that grows for five minutes, and a locked frame on a 620px screen leaves it
- * six lines — the letterbox again, arrived at from the other side.
- *
- * So *which* box scrolls is a media query's business, and this panel asks the
- * DOM rather than repeating the query in JavaScript: `scrollerFrom` starts at
- * the feed and walks up until something has `overflow-y`, which is the feed
- * itself where the frame is locked and the screen's column everywhere else. The
- * autoscroll drives whichever it is — following the newest turn while the
- * candidate is at the bottom, holding still the moment they scroll up to re-read
- * an objection.
- *
- * « Reprendre le fil » belongs to the locked arrangement only. When the page is
- * the scroller, scrolling back down is the same gesture as scrolling anything
- * else and needs no button; when the exchange is a box under a fixed head, a
- * candidate who has scrolled up in it has no other cue that it has moved on.
+ * So the autoscroll drives a box this panel does not own; `scrollerFrom` finds
+ * it. It follows the newest turn while the candidate is at the bottom and holds
+ * still the moment they scroll up to re-read an objection — silently, because
+ * the way back to the newest turn is the same scrollbar they used to leave it.
  *
  * **Why the débat and not the exposé.** The monologue runs on manual VAD: the
  * candidate's activity is opened and never closed, and during a manual-VAD
@@ -120,176 +101,105 @@ export function DebateConversation({
    * scrolls, which is the one moment it should be doing nothing.
    */
   const following = useRef(true);
-  /**
-   * The two facts that do render, so they are state and the position is not.
-   *
-   * `owns` is whether the feed is the scroller — true where the screen's frame
-   * is locked and this panel takes its own — and `held` whether that scroller
-   * has been left behind. « Reprendre le fil » needs both, and
-   * needs a render to appear. Set from booleans rather than from the raw
-   * position on purpose: they change when the arrangement changes and when the
-   * candidate scrolls back and forth, not once a frame, and React drops a
-   * `setState` to the value already held.
-   */
-  const [owns, setOwns] = useState(false);
-  const [held, setHeld] = useState(false);
-
-  /** The newest turn, in whichever box is currently the scroller. */
+  /** The newest turn, in the box that is doing the scrolling. */
   const pin = useCallback(() => {
     const element = scrollerFrom(feed.current);
     if (element) element.scrollTop = element.scrollHeight;
   }, []);
 
-  const stickToBottom = useCallback(() => {
-    pin();
-    following.current = true;
-    setHeld(false);
-  }, [pin]);
-
-  // Which box scrolls is decided in CSS and can change under the candidate — a
-  // rotated phone crosses `roomy` mid-épreuve, and so does a laptop growing a
-  // toolbar — so the listener follows it.
+  // The scroller belongs to the screen, not to this panel, so the listener has
+  // to be attached by hand rather than declared as an `onScroll` prop.
   useEffect(() => {
-    let bound: HTMLElement | null = null;
+    const element = scrollerFrom(feed.current);
+    if (!element) return;
     const onScroll = () => {
-      if (!bound) return;
-      const near = isNearBottom(bound);
-      following.current = near;
-      setHeld(!near);
+      following.current = isNearBottom(element);
     };
-    const bind = () => {
-      const next = scrollerFrom(feed.current);
-      if (next === bound) return;
-      bound?.removeEventListener("scroll", onScroll);
-      bound = next;
-      bound?.addEventListener("scroll", onScroll, { passive: true });
-      setOwns(bound !== null && bound === feed.current);
-      // The exchange has just moved from one box into another, and a position
-      // measured in the old one says nothing about the new one. Follow again,
-      // and let the effect below put the newest turn back on screen.
-      following.current = true;
-      setHeld(false);
-    };
-    // A resize is not only a possible handover: the same turns rewrap at a new
-    // width, so the newest one moves even when the box does not change. Follow
-    // it if we were following — measured on a rotation, where the exchange grew
-    // 483px taller and left the reader that far short of the last word.
+    // A resize no longer changes which box scrolls, but it does move the newest
+    // turn: the same turns rewrap at a new width, and a rotation to 375 wide
+    // grew the exchange 483px and left a following reader that far short of the
+    // last word.
     const onResize = () => {
-      bind();
       if (following.current) pin();
     };
-    bind();
+    element.addEventListener("scroll", onScroll, { passive: true });
     window.addEventListener("resize", onResize);
     return () => {
+      element.removeEventListener("scroll", onScroll);
       window.removeEventListener("resize", onResize);
-      bound?.removeEventListener("scroll", onScroll);
     };
   }, [pin]);
 
   // Deliberately keyed on the tail's *length* as well as the count of turns: a
   // fragment usually merges into the last entry rather than adding one
   // (`appendFragment`), so a dependency on `turns.length` alone would stop
-  // following in the middle of the examiner's sentence. `owns` joins them so a
-  // change of scroller re-pins the newest turn instead of leaving the candidate
-  // wherever the other box happened to be.
+  // following in the middle of the examiner's sentence.
   const lastTurn = turns[turns.length - 1]?.entry;
   useEffect(() => {
     if (following.current) pin();
-  }, [pin, owns, turns.length, lastTurn?.text.length]);
+  }, [pin, turns.length, lastTurn?.text.length]);
 
   return (
-    // Every `roomy:` here is one half of the reference's pair, and neither half
-    // works alone: the screen's column is `roomy:overflow-hidden`, so where that
-    // holds this panel is the only thing left that can scroll and must be
-    // allowed to be shorter than the exchange (`roomy:min-h-0`, the #35 failure
-    // again). Everywhere else the whole set reverts — the panel is as tall as
-    // its turns and the column scrolls it, exactly as it did before #88.
-    <div className="border-border bg-card roomy:min-h-0 flex flex-1 flex-col rounded-lg border">
-      <div className="border-border shrink-0 border-b px-4 py-2">
+    // No height of its own, and nothing that can shrink it: the panel is as tall
+    // as the turns in it and the column scrolls the lot. Every fixed height this
+    // has been given — #48's 20rem box, #88's first two answers — was room taken
+    // off the conversation to pay for something above it.
+    <div ref={feed} className="border-border bg-card rounded-lg border">
+      <div className="border-border border-b px-4 py-2">
         <Kicker>{DEBATE_CONVERSATION_COPY.title}</Kicker>
       </div>
 
-      <div className="roomy:min-h-0 relative flex flex-1 flex-col">
-        {/* Focusable where it scrolls, and named because it is. A box that
-            scrolls and cannot be reached from the keyboard is content a keyboard
-            user cannot read at all. Where the frame is not locked this is not a
-            box and not a scroller, and a tab stop that does nothing is worse
-            than none — the page's own keys already move the exchange there. */}
-        <div
-          ref={feed}
-          role="region"
-          aria-label={DEBATE_CONVERSATION_COPY.title}
-          tabIndex={owns ? 0 : undefined}
-          className="roomy:min-h-0 roomy:flex-1 roomy:overflow-y-auto space-y-3 px-4 py-3.5"
-        >
-          {turns.length === 0 ? (
-            <div className="text-muted-foreground space-y-1.5 text-xs leading-relaxed">
-              <p>{DEBATE_CONVERSATION_COPY.empty}</p>
-              <p>{hint}</p>
-            </div>
-          ) : (
-            turns.map(({ entry, timeLabel }, index) => {
-              const mine = entry.speaker === "candidate";
-              return (
-                <div
-                  key={turnKey(entry, index)}
-                  className={cn("flex flex-col gap-1", mine ? "items-end" : "items-start")}
+      <div className="space-y-3 px-4 py-3.5">
+        {turns.length === 0 ? (
+          <div className="text-muted-foreground space-y-1.5 text-xs leading-relaxed">
+            <p>{DEBATE_CONVERSATION_COPY.empty}</p>
+            <p>{hint}</p>
+          </div>
+        ) : (
+          turns.map(({ entry, timeLabel }, index) => {
+            const mine = entry.speaker === "candidate";
+            return (
+              <div
+                key={turnKey(entry, index)}
+                className={cn("flex flex-col gap-1", mine ? "items-end" : "items-start")}
+              >
+                {/* Named as well as placed. Side and colour carry the speaker
+                    for anyone who can see them; the label is what carries it
+                    into a screen reader, and into a screenshot of a
+                    conversation with one turn in it.
+
+                    The stamp joins that line rather than taking one of its own,
+                    and sits on the outside of the label — away from the bubble
+                    on both sides, so the two columns of stamps run down the
+                    outer edges instead of meeting in the middle. */}
+                <span
+                  className={cn(
+                    "flex items-baseline gap-2 text-[0.625rem] font-semibold tracking-[0.16em] uppercase",
+                    mine && "flex-row-reverse",
+                  )}
                 >
-                  {/* Named as well as placed. Side and colour carry the speaker
-                      for anyone who can see them; the label is what carries it
-                      into a screen reader, and into a screenshot of a
-                      conversation with one turn in it.
-
-                      The stamp joins that line rather than taking one of its own,
-                      and sits on the outside of the label — away from the bubble
-                      on both sides, so the two columns of stamps run down the
-                      outer edges instead of meeting in the middle. */}
-                  <span
-                    className={cn(
-                      "flex items-baseline gap-2 text-[0.625rem] font-semibold tracking-[0.16em] uppercase",
-                      mine && "flex-row-reverse",
-                    )}
-                  >
-                    <span className="text-muted-foreground">{speakerLabel(entry.speaker)}</span>
-                    <span className="text-muted-foreground/70 tabular tracking-normal">
-                      {timeLabel}
-                    </span>
+                  <span className="text-muted-foreground">{speakerLabel(entry.speaker)}</span>
+                  <span className="text-muted-foreground/70 tabular tracking-normal">
+                    {timeLabel}
                   </span>
-                  <p
-                    className={cn(
-                      "max-w-[85%] rounded-2xl px-3.5 py-2 text-[0.8125rem] leading-relaxed",
-                      mine
-                        ? "bg-primary-subtle text-foreground rounded-br-sm"
-                        : "border-border bg-muted/50 text-foreground/90 rounded-bl-sm border",
-                    )}
-                  >
-                    {entry.text}
-                  </p>
-                </div>
-              );
-            })
-          )}
-        </div>
-
-        {/* Over the newest turn rather than after it: it belongs to the feed's
-            bottom edge, and a button inside the scroller would be one more thing
-            to have to scroll to. It exists only while this panel owns the
-            scroller and has been left behind — it is not a control the candidate
-            is looking for, it is the way back to the one thing they stopped
-            being shown, and on an unlocked frame that way back is the page's
-            own scrollbar. */}
-        {owns && held && (
-          <button
-            type="button"
-            onClick={stickToBottom}
-            className="border-border bg-card text-foreground hover:bg-muted absolute inset-x-0 bottom-2.5 mx-auto flex w-max items-center gap-1.5 rounded-full border px-3 py-1 text-[0.6875rem] font-semibold shadow-sm transition-colors"
-          >
-            <span aria-hidden>↓</span>
-            {DEBATE_CONVERSATION_COPY.resume}
-          </button>
+                </span>
+                <p
+                  className={cn(
+                    "max-w-[85%] rounded-2xl px-3.5 py-2 text-[0.8125rem] leading-relaxed",
+                    mine
+                      ? "bg-primary-subtle text-foreground rounded-br-sm"
+                      : "border-border bg-muted/50 text-foreground/90 rounded-bl-sm border",
+                  )}
+                >
+                  {entry.text}
+                </p>
+              </div>
+            );
+          })
         )}
       </div>
-      <p className="border-border text-muted-foreground shrink-0 border-t px-4 py-1.5 text-[0.625rem] leading-snug">
+
+      <p className="border-border text-muted-foreground border-t px-4 py-1.5 text-[0.625rem] leading-snug">
         {DEBATE_CONVERSATION_COPY.footnote}
       </p>
     </div>
@@ -297,16 +207,15 @@ export function DebateConversation({
 }
 
 /**
- * The box the exchange actually scrolls in: this feed where the frame is locked,
- * the screen's column everywhere else.
+ * The box this panel scrolls in, or null if nothing scrolls.
  *
- * Asked of the DOM rather than of `matchMedia`, and starting at the feed itself
- * rather than at its parent — that one difference from the #48 version of this
- * helper is what lets the same walk answer both arrangements. The check is
- * `overflow-y`, so the media query stays written once, in globals.css beside the
- * measurements that chose it. Repeating `(min-width: 64rem) and
- * (min-height: 42rem)` here would be two numbers free to drift from the ones
- * that actually lay the screen out.
+ * Walked rather than passed down as a ref: the screen above owns the scroller
+ * and could reasonably move it — the exposé and the débat already lay out
+ * differently — and a panel that asks the DOM which box it is inside keeps
+ * working when it does. The check is `overflow-y`, not a class name, so it
+ * cannot go stale against Tailwind. It starts at this element rather than at its
+ * parent, which costs nothing and leaves the walk correct if the panel is ever
+ * given a scroller of its own again.
  */
 function scrollerFrom(from: HTMLElement | null): HTMLElement | null {
   let node = from;

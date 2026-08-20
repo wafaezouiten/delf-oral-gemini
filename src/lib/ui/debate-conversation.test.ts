@@ -128,12 +128,6 @@ describe("the copy", () => {
     // panel laid over a status card that could be put back (#48 → #60).
     assert.match(DEBATE_CONVERSATION_COPY.title, /Échange/);
   });
-
-  it("offers the conversation back, not a scroll position", () => {
-    // The feed holds still when the candidate has scrolled up (#88), and the way
-    // out says what it gives back: the thread of the exchange, not « en bas ».
-    assert.match(DEBATE_CONVERSATION_COPY.resume, /fil/);
-  });
 });
 
 describe("stamping each turn with when it was said", () => {

@@ -15,8 +15,9 @@
  * two protagonists **and** the exchange, and pays for the room by dropping the
  * document — the sujet's title stays, its paragraphs go, because during the
  * débat the candidate is answering the examiner rather than reading. #88 pinned
- * those two protagonists in place and put the exchange on its own scroller
- * underneath, which is the arrangement the two of them had been arguing towards.
+ * those two protagonists to the top of the column while the exchange keeps
+ * scrolling past them, which is the arrangement both of those issues had been
+ * arguing towards — and it took nothing from the exchange to do it.
  */
 
 import { formatTurnOffset } from "@/lib/delf/phases";
@@ -37,19 +38,6 @@ export const DEBATE_CONVERSATION_COPY = {
    */
   footnote:
     "Transcription automatique : elle peut arriver avec un léger décalage sur la voix.",
-  /**
-   * Offered only while the feed has stopped following the conversation (#88).
-   *
-   * The hold is deliberate — a candidate re-reading an objection is not dragged
-   * back down by the examiner continuing to speak — but it used to be silent and
-   * could afford to be: the whole column scrolled, so scrolling back down was
-   * the same gesture as scrolling anywhere. Now the exchange scrolls inside a
-   * box under a pinned head, and a candidate who has scrolled up in it has no
-   * cue that the box is no longer showing the newest turn. « le fil » rather
-   * than « en bas » because what they want back is the conversation, not a
-   * position in a scrollbar.
-   */
-  resume: "Reprendre le fil",
 } as const;
 
 /**
@@ -80,12 +68,11 @@ export const STICK_THRESHOLD_PX = 32;
  * has scrolled up to re-read an earlier objection is not yanked back down by the
  * examiner continuing to speak.
  *
- * The rule is unchanged since #48; the box it is asked about is not. It used to
- * be the screen's own scroller, because the conversation had no scrollbar of its
- * own and the whole column scrolled. Since #88 it is the feed's own — the two
- * protagonists stay pinned above it — which changes nothing here and is worth
- * saying anyway: these are three numbers off some element, and the reason they
- * are the right three moved.
+ * The metrics are the screen's scroller rather than a box of the panel's own:
+ * the conversation has no scrollbar of its own, the whole column scrolls. #88
+ * pinned the two protagonists above it with `position: sticky` and left that
+ * sentence true, which is the argument for sticky in one line — every other
+ * answer to #88 began by taking the scrollbar back.
  */
 export function isNearBottom(
   metrics: { scrollTop: number; scrollHeight: number; clientHeight: number },

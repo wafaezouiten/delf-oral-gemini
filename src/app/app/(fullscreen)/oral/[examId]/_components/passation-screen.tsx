@@ -207,32 +207,29 @@ export function PassationScreen({
       />
 
       <main className="relative flex min-h-0 flex-1 flex-col">
-        {/* One column for both phases, and it scrolls — except during the débat
-            on a screen with room, where it locks and the exchange scrolls inside
-            itself instead (#88). PORT NOTE: the pair is the reference's,
-            `components/po/po-preparation-screen.tsx:77` and
-            `po-briefing-screen.tsx:196` — `overflow-y-auto … lg:overflow-hidden`
-            on the frame, `lg:min-h-0 lg:overflow-y-auto` on the panel that owns
-            the scrolling. `roomy` is that `lg` with a height added; globals.css
-            says why, and the short version is that the reference locks cards
-            while this locks a conversation that grows.
+        {/* One column, one scrollbar, both phases — and during the débat the
+            scene stops at the top of it instead of leaving with the rest (#88).
 
-            It buys the thing #88 asked for: the sujet's line and the two
-            protagonists are `shrink-0`, so where the frame is locked they hold
-            still and the head keeps answering « whose turn is it » however long
-            the exchange gets.
-
-            The exposé is left out of the lock rather than forgotten. Its column
-            is a document beside a plan — there is no one panel that should own
-            the scrolling, and the reference's own document screens scroll as one
-            page for the same reason. */}
+            This is `position: sticky` rather than a locked frame with a scroller
+            of its own inside it, and the difference is what the candidate gets to
+            read. A locked frame gives the exchange whatever is left after the
+            fixed parts have taken theirs — on a 1366×768 laptop that measured
+            129px, six lines, which is the letterbox #48 removed the panel's own
+            scrollbar to escape. Sticky costs nothing: the exchange is as long as
+            it is, the whole column scrolls it, and the scene stops on its way
+            past. */}
         <div
           className={cn(
-            "mx-auto flex min-h-0 w-full flex-1 flex-col gap-4 overflow-y-auto px-4 py-5 sm:px-6",
+            "mx-auto flex min-h-0 w-full flex-1 flex-col gap-4 overflow-y-auto px-4 pb-5 sm:px-6",
             // The exposé carries two columns and needs the room for them; the
             // débat is one column, and a document set in a wider measure than
             // this is harder to read, not easier.
-            phase === "monologue" ? "max-w-[64rem]" : "max-w-[47.5rem] roomy:overflow-hidden",
+            //
+            // The débat's `pt-4` is not a taste difference from the exposé's
+            // `pt-5`: it makes the column's top padding equal to its `gap-4`,
+            // which is what lets one 1rem band cover the strip above the sticky
+            // scene in both of the positions that strip can be in. See below.
+            phase === "monologue" ? "max-w-[64rem] pt-5" : "max-w-[47.5rem] pt-4",
           )}
         >
           {/* `shrink-0` because the débat's column no longer grows to fit its
@@ -261,44 +258,68 @@ export function PassationScreen({
                   is answering the examiner, not reading — the paragraphs would
                   take a third of the viewport to be looked at by nobody, and the
                   exchange is what needs that room. The line stays so the sujet
-                  being argued about is still named on screen. */}
-              {/* `compact:py-2` for the same reason the scene shrinks: this line
-                  is pinned too from `lg` up, and on a laptop its padding is
-                  conversation nobody can see. The title itself does not shrink —
-                  it is one line naming what is being argued about. */}
-              <section className="border-paper-border bg-paper compact:py-2 shrink-0 rounded-lg border px-5 py-4 sm:px-7">
+                  being argued about is still named on screen.
+
+                  It is also the one part of this screen that scrolls away (#88).
+                  A candidate looks for the sujet's name at the top, before the
+                  conversation; three turns deep, what they need on screen is who
+                  is speaking, not what the subject was called. */}
+              <section className="border-paper-border bg-paper shrink-0 rounded-lg border px-5 py-4 sm:px-7">
                 {sujetHead}
               </section>
 
               {/* Who is speaking, over what was said. The scene answers it at a
                   glance and the exchange answers "what did they just ask me",
-                  which is the question a candidate actually has to answer. */}
-              <ConversationScene
-                // The floor, not the speaker: the opening question counts as
-                // the examiner's turn from the candidate's click, even while it
-                // is still being generated and nothing is audible yet.
-                examinerSpeaking={examinerSpeaking || openingQuestionPending}
-                examinerStatus={examinerStatus({
-                  connected,
-                  connecting,
-                  speaking: examinerSpeaking,
-                  announcing: awaitingConsigne,
-                  closing,
-                  opening: openingQuestionPending,
-                })}
-                // Not simply `recording`: the microphone stays open while the
-                // examiner interrupts, and two rings pulsing at once says the
-                // one thing this screen exists to answer is "both of you".
-                candidateRecording={recording && !examinerSpeaking && !openingQuestionPending}
-                candidateStatus={candidateStatus({
-                  connected,
-                  examinerSpeaking: examinerSpeaking || openingQuestionPending,
-                  recording,
-                })}
-                candidateStatusUrgent={remaining <= 60}
-                elapsed={elapsed}
-                total={total}
-              />
+                  which is the question a candidate actually has to answer.
+
+                  Sticky at the top of the column (#88), so it stops here on its
+                  way past instead of leaving with the sujet.
+
+                  The two paint tricks are load-bearing, because a sticky element
+                  paints its own box and nothing else, and there is a strip of
+                  scrollport on each side of this one that turns would otherwise
+                  slide through in full view:
+
+                  - below, the column's `gap-4` — covered by `pb-4 -mb-4`, which
+                    paints the gap without occupying it;
+                  - above, the column's top padding, because `sticky top-0`
+                    clamps to the padding edge and not to the scrollport's. That
+                    is what `before:` covers: a 1rem band travelling with the row
+                    and sitting immediately above it. A negative top margin looks
+                    like the fix and is not — it moves the box down by exactly as
+                    much as it pulls the layout up, and the strip survives.
+
+                  Both bands are 1rem, which is why the column's `pt` was set to
+                  match its `gap` above: one measurement, two strips, no third
+                  number to keep in step. */}
+              <div className="bg-background before:bg-background sticky top-0 z-10 -mb-4 pb-4 before:absolute before:inset-x-0 before:bottom-full before:h-4">
+                <ConversationScene
+                  // The floor, not the speaker: the opening question counts as
+                  // the examiner's turn from the candidate's click, even while it
+                  // is still being generated and nothing is audible yet.
+                  examinerSpeaking={examinerSpeaking || openingQuestionPending}
+                  examinerStatus={examinerStatus({
+                    connected,
+                    connecting,
+                    speaking: examinerSpeaking,
+                    announcing: awaitingConsigne,
+                    closing,
+                    opening: openingQuestionPending,
+                  })}
+                  // Not simply `recording`: the microphone stays open while the
+                  // examiner interrupts, and two rings pulsing at once says the
+                  // one thing this screen exists to answer is "both of you".
+                  candidateRecording={recording && !examinerSpeaking && !openingQuestionPending}
+                  candidateStatus={candidateStatus({
+                    connected,
+                    examinerSpeaking: examinerSpeaking || openingQuestionPending,
+                    recording,
+                  })}
+                  candidateStatusUrgent={remaining <= 60}
+                  elapsed={elapsed}
+                  total={total}
+                />
+              </div>
 
               <DebateConversation
                 transcript={transcript}
