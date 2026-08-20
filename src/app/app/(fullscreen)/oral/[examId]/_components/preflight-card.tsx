@@ -228,7 +228,14 @@ export function PreflightCard({
           question already is. */}
       <PreflightRow
         title="Enregistrement audio"
-        detail="Votre voix sera conservée avec vos résultats."
+        // Tracks the switch: this is consent copy, and a sentence that keeps
+        // promising retention after the candidate has just refused it is the
+        // one sentence on this card that must not be false.
+        detail={
+          keepAudio
+            ? "Votre voix sera conservée avec vos résultats."
+            : "Votre voix ne sera pas conservée."
+        }
         right={
           <button
             type="button"
