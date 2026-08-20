@@ -1499,6 +1499,16 @@ export class ExamController {
     if (this.phase === "preparation") {
       const ready = await this.prepareAudio();
       if (!ready) return;
+      // The guard at the top was checked before the await, and « Commencer » is
+      // a button: a double-click puts two of these in flight on the same
+      // `prepareAudio()` promise, both having seen the préparation, and the
+      // second would advance the monologue the first had just opened — straight
+      // to the débat, past the silence hold and the five-minute floor, which
+      // were both consulted about a phase that no longer is (#104). The clock
+      // running out during the permission prompt is the same window: whoever
+      // ended the préparation first wins, and a click that arrives to find it
+      // already over means nothing more than that.
+      if (this.phase !== "preparation") return;
       await this.advance();
       return;
     }
