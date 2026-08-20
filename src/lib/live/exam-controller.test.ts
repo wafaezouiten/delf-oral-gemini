@@ -2346,6 +2346,119 @@ describe("the examiner's opening question", () => {
     );
   });
 
+  it("holds the floor for the examiner until the question is delivered", async () => {
+    // The scene used to read `examinerSpeaking` alone, which is false for the
+    // whole connect-and-generate window — so the débat opened with the
+    // candidate's ring pulsing and « Vous avez la parole » under it, over an
+    // examiner who was about to talk.
+    const h = harness();
+    await intoDebate(h);
+    const player = h.players[h.players.length - 1];
+
+    assert.equal(
+      h.controller.getSnapshot().openingQuestionPending,
+      true,
+      "the question is owed from the candidate's own « Enregistrer »",
+    );
+
+    // Becoming audible does not end it: the floor stays the examiner's for as
+    // long as the question does.
+    player.speak(true);
+    assert.equal(h.controller.getSnapshot().openingQuestionPending, true);
+
+    h.session().finishTurn();
+    assert.equal(
+      h.controller.getSnapshot().openingQuestionPending,
+      false,
+      "the turn completing is what hands the floor over",
+    );
+  });
+
+  it("hands the floor over when the speaker stays out of the opening turn", async () => {
+    // The same second release the interruption guard has (#94), because it is
+    // the same fact about the same turn.
+    const h = harness();
+    await intoDebate(h);
+    const player = h.players[h.players.length - 1];
+
+    player.speak(true);
+    player.speak(false);
+    h.advanceClock(2); // dry, and stays dry
+
+    assert.equal(h.controller.getSnapshot().openingQuestionPending, false);
+  });
+
+  it("does not print the question before a word of it is audible", async () => {
+    // The two halves of the question travel at different speeds: the text at
+    // generation speed, the voice at speaking speed. Printed as it generates,
+    // the whole question sat in the feed while the audio was still connecting —
+    // a question shown and not heard, which is #94's report read literally.
+    const h = harness();
+    await intoDebate(h);
+    const player = h.players[h.players.length - 1];
+
+    h.session().examinerSays("Vous dites que le télétravail isole. N'est-ce pas plutôt le bureau ?");
+    h.session().examinerVoice("the opening question");
+
+    assert.equal(
+      h.controller
+        .getSnapshot()
+        .transcript.some((entry) => entry.speaker === "examiner" && entry.phase === "debate"),
+      false,
+      "the feed holds the question back while nothing has played",
+    );
+
+    // The candidate's own words are not held — the hold is about the examiner's
+    // unheard question, not about the feed.
+    h.session().candidateSays("Je peux commencer ?");
+    assert.equal(
+      h.controller.getSnapshot().transcript.some((entry) => entry.speaker === "candidate"),
+      true,
+    );
+
+    player.speak(true);
+    const heard = h.controller
+      .getSnapshot()
+      .transcript.find((entry) => entry.speaker === "examiner" && entry.phase === "debate");
+    assert.ok(heard, "playback beginning is what reveals the question");
+    assert.match(heard.text, /télétravail isole/);
+
+    // The gap between two chunks of one question (#94) must not hide it again.
+    player.speak(false);
+    assert.equal(
+      h.controller
+        .getSnapshot()
+        .transcript.some((entry) => entry.speaker === "examiner" && entry.phase === "debate"),
+      true,
+      "once heard, it stays printed",
+    );
+  });
+
+  it("prints the question at the turn's end when the speaker never played it", async () => {
+    // A sitting whose speaker failed still gets the question in the feed — the
+    // text is the only voice the examiner has left (#74). It just arrives when
+    // the turn is over, rather than while nobody is saying it.
+    const h = harness();
+    await intoDebate(h);
+
+    h.session().examinerSays("Une question que le haut-parleur n'a jamais portée.");
+    assert.equal(
+      h.controller
+        .getSnapshot()
+        .transcript.some((entry) => entry.speaker === "examiner" && entry.phase === "debate"),
+      false,
+    );
+
+    h.session().finishTurn();
+    assert.equal(
+      h.controller
+        .getSnapshot()
+        .transcript.some((entry) => entry.speaker === "examiner" && entry.phase === "debate"),
+      true,
+      "the server's word releases the hold with or without audio",
+    );
+  });
+
   it("still opens the guard on the turn the server says is complete", async () => {
     // `turnComplete` is the server's own word and needs no grace: it is the
     // release that must keep working the moment it arrives, since a candidate
@@ -3104,6 +3217,9 @@ describe("where a phase started, in the transcript's own time base (#70)", () =>
 
     h.advanceClock(45);
     h.session().examinerSays("Vous dites que c'est un progrès. Vraiment ?");
+    // The feed withholds an opening question nobody has heard yet, so let this
+    // one be heard — the test is about the stamp, not the hold.
+    h.players[h.players.length - 1].speak(true);
 
     const state = h.controller.getSnapshot();
     const turn = state.transcript[state.transcript.length - 1];

@@ -2525,8 +2525,13 @@ export class ExamController {
         // finished the first thing it said on this session. This one is the
         // server's own word and needs no grace — unlike the drained speaker,
         // which #94 makes wait.
+        const openingJustDelivered = !this.openingTurnDelivered;
         this.openingTurnDelivered = true;
         this.speakerDrainedAt = null;
+        // The snapshot reads the flag twice — the floor, and the feed's hold on
+        // an unheard question — and none of the paths below is guaranteed to
+        // emit, so the delivery has to announce itself.
+        if (openingJustDelivered) this.emit();
         // The ONLY thing Gemini is allowed to influence about the exam's flow,
         // and only inside a window the app opened: once the clock has run out
         // and the closing directive has gone out, the examiner's turn ending is
