@@ -39,7 +39,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET(
-  _request: Request,
+  request: Request,
   context: { params: Promise<{ examId: string; phase: string }> },
 ) {
   const { examId, phase: phaseSegment } = await context.params;
@@ -91,7 +91,7 @@ export async function GET(
   }
 
   const opened = await recordingVault()
-    ?.open(decision.uri)
+    ?.open(decision.uri, request.headers.get("if-none-match") ?? undefined)
     .catch((error: unknown) => {
       console.error("[recordings] could not open recording", access.examId, phase, error);
       return null;
@@ -106,16 +106,32 @@ export async function GET(
     );
   }
 
+  /**
+   * `no-cache`, not a max-age, and the choice is about whose machine this is:
+   * a DELF candidate is plausibly on a shared school or library computer, and
+   * a max-age would let the next person at the same profile replay this voice
+   * straight out of the disk cache with no request — and so no `authorizeExam`
+   * — reaching this route at all. `no-cache` means every replay revalidates
+   * here; the etag is what keeps that cheap, because the bytes are immutable
+   * once kept and the common answer is the bodiless 304 below.
+   */
+  const headers: Record<string, string> = {
+    "Cache-Control": "private, no-cache",
+    ETag: opened.etag,
+    // The type is served verbatim from our own row, but the platform's own
+    // pattern for private blob delivery sets this, and it costs one line.
+    "X-Content-Type-Options": "nosniff",
+  };
+
+  if (opened.status === 304) return new Response(null, { status: 304, headers });
+
   return new Response(opened.stream, {
     headers: {
+      ...headers,
       // The measured type from the row, which is also what the vault was told
       // at upload — never anything the request influenced.
       "Content-Type": decision.mimeType,
       "Content-Length": String(opened.byteSize),
-      // Private: it is one candidate's voice. Cacheable for an hour because
-      // the bytes are immutable once kept — re-listening is the whole feature,
-      // and re-downloading 2 MB per press of play would tax exactly that.
-      "Cache-Control": "private, max-age=3600",
       "Content-Disposition": "inline",
     },
   });

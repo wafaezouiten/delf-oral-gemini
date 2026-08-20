@@ -38,14 +38,18 @@ import type { OralSpeakingPhase } from "@/lib/db/schema";
  * `deleted_at` remains the mechanism any future purge would speak through.
  */
 
-/** One stored artefact, opened for playback. */
-export interface OpenedRecording {
-  stream: ReadableStream<Uint8Array>;
-  /** What the store believes it is holding — set from the measured mime type
-   *  at upload, so it agrees with `oral_recordings.mime_type`. */
-  contentType: string;
-  byteSize: number;
-}
+/**
+ * One stored artefact, opened for playback — or confirmed unchanged.
+ *
+ * The 304 half exists because the playback route serves with
+ * `Cache-Control: private, no-cache`: every replay revalidates through
+ * `authorizeExam` rather than being served out of a disk cache a shared
+ * computer could hand to the next visitor, and the etag is what keeps that
+ * revalidation from re-downloading megabytes the browser already holds.
+ */
+export type OpenedRecording =
+  | { status: 200; stream: ReadableStream<Uint8Array>; byteSize: number; etag: string }
+  | { status: 304; etag: string };
 
 /**
  * The port. Small on purpose: store, open, and nothing about listing or
@@ -59,8 +63,11 @@ export interface RecordingVault {
    */
   store(examId: number, phase: OralSpeakingPhase, bytes: Blob, mimeType: string): Promise<string>;
 
-  /** The bytes back, or null when the store no longer has them. */
-  open(uri: string): Promise<OpenedRecording | null>;
+  /**
+   * The bytes back — or a 304 when `ifNoneMatch` names the etag the store
+   * still holds — or null when the store no longer has them.
+   */
+  open(uri: string, ifNoneMatch?: string): Promise<OpenedRecording | null>;
 
   /**
    * Drop one artefact. Nothing on the finish path calls this today — it exists
@@ -111,16 +118,15 @@ export function recordingVault(): RecordingVault | null {
       return stored.url;
     },
 
-    async open(uri) {
-      const found = await get(uri, { access: "private" });
-      // 304 is unreachable — nothing here sends `ifNoneMatch` — but the type
-      // carries it, and "no stream" must read as "no recording" rather than
-      // crash the playback route.
-      if (!found || found.stream === null) return null;
+    async open(uri, ifNoneMatch) {
+      const found = await get(uri, { access: "private", ifNoneMatch });
+      if (!found) return null;
+      if (found.statusCode === 304) return { status: 304, etag: found.blob.etag };
       return {
+        status: 200,
         stream: found.stream,
-        contentType: found.blob.contentType,
         byteSize: found.blob.size,
+        etag: found.blob.etag,
       };
     },
 
