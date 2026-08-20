@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
+import { readsAsClosing } from "./early-closing";
 import {
   EXAMINER_PROMPT_VERSION,
   buildExaminerInstruction,
   closingInstruction,
   examinerOpeningLine,
+  lastQuestionInstruction,
   presenceCheckInstruction,
   resumeDebateInstruction,
   silenceRelanceInstruction,
@@ -50,6 +52,8 @@ describe("examiner prompt", () => {
       presenceCheckInstruction(),
       timeRemainingInstruction(7),
       resumeDebateInstruction(7),
+      resumeDebateInstruction(1, true),
+      lastQuestionInstruction(),
     ]) {
       assert.ok(!text.includes("—"), "a silence directive contains an em dash");
       assert.ok(!text.includes("–"), "a silence directive contains an en dash");
@@ -175,6 +179,66 @@ describe("examiner prompt", () => {
       assert.ok(resume.includes("environ 7 minutes"));
       assert.ok(resume.includes("Enchaîne immédiatement"));
       assert.ok(resume.includes("Ne t'excuse pas"), "an apology would be about the épreuve");
+    });
+  });
+
+  describe("the last question and the call of time (#108)", () => {
+    it("has the examiner announce the end aloud, and still without a number", () => {
+      // The one moment the examiner may mention time out loud, and the
+      // permission is exactly that wide: the approaching end, never the clock.
+      const cue = lastQuestionInstruction();
+      assert.ok(cue.includes("à voix haute"));
+      assert.ok(cue.includes("dernière question"));
+      assert.ok(cue.includes("aucun chiffre"));
+    });
+
+    it("keeps the announcement from becoming a goodbye", () => {
+      // « La fin approche » is one goodbye away from #85's failure, so the
+      // directive forbids every leave-taking move by name.
+      const cue = lastQuestionInstruction();
+      assert.ok(cue.includes("PAS encore terminée"));
+      assert.ok(cue.includes("ne conclus pas"));
+      assert.ok(cue.includes("ne prends pas congé"));
+    });
+
+    it("steers an example the early-closing watch will not mistake for a goodbye", () => {
+      // The sentence the directive offers is what the model is likeliest to
+      // parrot, and `readsAsClosing` reads every examiner turn. If the example
+      // ever drifts onto that phrase list, the app would contradict the very
+      // announcement it asked for — this is the test that holds the two files
+      // apart.
+      assert.equal(
+        readsAsClosing(
+          "Nous arrivons à la fin de cet entretien. Une dernière question : le télétravail est-il vraiment un progrès ?",
+        ),
+        false,
+      );
+    });
+
+    it("carves the one exception out of the identity's time rule", () => {
+      // Without the carve-out the model is asked to do the one thing its
+      // absolute rules forbid, and an instruction-following model rightly
+      // refuses its own directive.
+      for (const phase of ["monologue", "debate"] as const) {
+        const instruction = buildExaminerInstruction(phase, TOPIC);
+        assert.ok(instruction.includes("Une seule exception"));
+        assert.ok(instruction.includes("aucun chiffre, ni minutes ni secondes"));
+      }
+      // And the débat is told the announcement will be asked for, so it does
+      // not volunteer one of its own at minute six.
+      const debate = buildExaminerInstruction("debate", TOPIC);
+      assert.ok(debate.includes("une instruction te demandera d'annoncer la dernière question"));
+    });
+
+    it("switches the goodbye recovery once the last question has been asked", () => {
+      // A recovery demanding a fresh objection after « une dernière question »
+      // is the app breaking its own promise through the examiner's mouth.
+      const after = resumeDebateInstruction(1, true);
+      assert.ok(after.includes("n'est PAS terminée"), "the goodbye is still contradicted");
+      assert.ok(after.includes("Rebondis"));
+      assert.ok(after.includes("sans poser de question entièrement nouvelle"));
+      assert.ok(!after.includes("nouvelle objection"));
+      assert.ok(after.includes("environ 1 minute de débat"), "and 1 minute agrees in number");
     });
   });
 

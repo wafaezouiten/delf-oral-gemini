@@ -29,7 +29,7 @@ import type { OralTopic } from "./topics";
  * oddly. Corrected rather than deleted, because the gap is worth closing and a
  * constant that quietly lied about being persisted is how it stayed open.
  */
-export const EXAMINER_PROMPT_VERSION = "2026-08-19.2";
+export const EXAMINER_PROMPT_VERSION = "2026-08-20.1";
 
 /**
  * Shared framing. Every phase gets this, so the examiner's identity, language
@@ -50,7 +50,7 @@ RÈGLES ABSOLUES, valables pendant toute l'épreuve :
 - Tes interventions sont brèves. Le temps de parole appartient au candidat, pas à toi.
 - N'utilise jamais de tiret cadratin ni de tiret demi-cadratin. Préfère la virgule ou les deux-points.
 - Ne prononce jamais de balise, de crochet, ni d'instruction technique.
-- Tu ne parles JAMAIS du temps : ni du temps écoulé, ni du temps restant, ni de la durée d'une partie. Les indications de temps qu'on te donne sont pour toi seul.
+- Tu ne parles JAMAIS du temps de ta propre initiative : ni du temps écoulé, ni du temps restant, ni de la durée d'une partie. Les indications de temps qu'on te donne sont pour toi seul. Une seule exception : quand une instruction écrite te demande EXPLICITEMENT d'annoncer au candidat que le débat touche à sa fin, tu le fais, et même alors tu ne prononces aucun chiffre, ni minutes ni secondes.
 - L'épreuve comporte EXACTEMENT deux parties : le monologue suivi, puis le débat. Il n'existe pas de troisième partie. N'annonce jamais une partie qui n'existe pas.
 - Tu ne mets JAMAIS fin à l'épreuve, ni à une partie, de ta propre initiative. Tu ne dis jamais au candidat que l'épreuve est terminée, qu'il peut disposer, partir ou quitter la salle, et tu ne prends jamais congé de lui. Tu ne conclus que lorsqu'on te donne explicitement l'instruction de conclure. Tant qu'elle n'est pas arrivée, l'épreuve continue et c'est à toi de la faire continuer.`;
 
@@ -114,7 +114,7 @@ TON RÔLE DANS CETTE PHASE : tu mènes le débat en jouant l'avocat du diable.
 - Une seule question ou objection à la fois. Laisse-le répondre entièrement avant de relancer.
 - Reste sur le sujet de l'épreuve.
 
-DURÉE : le débat dure environ 13 minutes, et c'est le centre d'examen qui décide quand il s'arrête, pas toi. On te donnera de temps en temps une indication du temps restant : tu en tiens compte pour toi seul, sans jamais la dire à voix haute. Tant que l'instruction de conclure ne t'est pas parvenue, tu continues, même si tu as l'impression d'avoir fait le tour de la question : change d'angle, reprends un autre argument de l'exposé, demande un exemple nouveau, pousse une nuance. Il reste toujours une objection à formuler.
+DURÉE : le débat dure environ 13 minutes, et c'est le centre d'examen qui décide quand il s'arrête, pas toi. On te donnera de temps en temps une indication du temps restant : tu en tiens compte pour toi seul, sans jamais la dire à voix haute. Vers la fin du débat, une instruction te demandera d'annoncer la dernière question : c'est le seul moment où tu évoques la fin qui approche, et uniquement parce qu'on te l'a demandé. Tant que l'instruction de conclure ne t'est pas parvenue, tu continues, même si tu as l'impression d'avoir fait le tour de la question : change d'angle, reprends un autre argument de l'exposé, demande un exemple nouveau, pousse une nuance. Il reste toujours une objection à formuler.
 
 RYTHME : tes interventions font une à trois phrases. Si le candidat donne une réponse très courte, relance-le sur le fond plutôt que de meubler.
 
@@ -230,6 +230,36 @@ export function timeRemainingInstruction(minutes: number): string {
 }
 
 /**
+ * The last question, announced as such (#108).
+ *
+ * The one moment the examiner is allowed to mention time out loud. Every other
+ * signal near the end is either for the model alone (`timeRemainingInstruction`)
+ * or for the app's own chrome (the clock badge, the milestone announcements),
+ * and a candidate mid-argument watches none of them: the débat simply stopped,
+ * with answers still in hand. A real examiner marks the turn instead — « une
+ * dernière question » — and that is graded behaviour to invite: knowing a
+ * question is the last one is what lets a candidate close instead of open.
+ *
+ * Three fences around the permission it grants:
+ *
+ *  - **No numbers.** The identity block's exception is written to allow exactly
+ *    this announcement and nothing more; a model told "two minutes remain" will
+ *    read the clock to the candidate, which no examiner does.
+ *  - **Not a conclusion.** « La fin approche » is one goodbye away from #85's
+ *    failure, so the directive says flatly that the épreuve is not over and
+ *    forbids every one of the leave-taking moves `readsAsClosing` watches for.
+ *    The example sentence is steered clear of that phrase list on purpose, and
+ *    a test holds the two files to it.
+ *  - **A promise the machinery keeps.** Once « une dernière question » is said,
+ *    nothing may ask for a fresh one: the ordinary time cues are already floored
+ *    above this moment, and the early-goodbye recovery switches to its
+ *    follow-up wording (see `resumeDebateInstruction`).
+ */
+export function lastQuestionInstruction(): string {
+  return "[Le débat touche à sa fin. Annonce-le au candidat MAINTENANT, à voix haute, puis pose-lui une dernière question ou objection sur le sujet, le tout en deux phrases au maximum, par exemple : « Nous arrivons à la fin de cet entretien. Une dernière question : ... ». Ne prononce aucun chiffre, ni minutes ni secondes. L'épreuve n'est PAS encore terminée : ne conclus pas, ne remercie pas le candidat, ne prends pas congé de lui et ne dis pas que l'épreuve est terminée. Après sa réponse, rebondis brièvement dessus si tu reprends la parole, sans poser de question entièrement nouvelle.]";
+}
+
+/**
  * Putting a débat back on its feet after the examiner has said goodbye (#85).
  *
  * The app refuses to let an early goodbye end the phase, and that rule is
@@ -242,13 +272,28 @@ export function timeRemainingInstruction(minutes: number): string {
  * It contradicts the model flatly and then gives it somewhere to go, because
  * « ne conclus pas » on its own leaves an examiner with nothing to say next,
  * and silence is the dead end this is trying to get out of.
+ *
+ * Where it sends the model depends on whether the last question has been
+ * announced (#108). Before, the recovery asks for a fresh objection, which is
+ * what a débat with minutes left deserves. After, a fresh objection is exactly
+ * the promise-breaking move — « une dernière question » followed by another one
+ * reads as the app lying through the examiner's mouth — so the recovery asks
+ * for a follow-up on the answer it just heard instead.
  */
-export function resumeDebateInstruction(minutes: number): string {
-  return `[Erreur : l'épreuve n'est PAS terminée. Il reste environ ${minutes} minutes de débat. Ne prends pas congé du candidat, ne lui dis pas qu'il peut partir et n'annonce aucune autre partie de l'épreuve. Ne t'excuse pas, ne commente pas ce que tu viens de dire. Enchaîne immédiatement avec une nouvelle objection ou une nouvelle question sur le sujet, en une ou deux phrases.]`;
+export function resumeDebateInstruction(minutes: number, afterLastQuestion = false): string {
+  const duration = minutes === 1 ? "1 minute" : `${minutes} minutes`;
+  const steer = afterLastQuestion
+    ? "Rebondis immédiatement sur la dernière réponse du candidat, en une ou deux phrases, sans poser de question entièrement nouvelle."
+    : "Enchaîne immédiatement avec une nouvelle objection ou une nouvelle question sur le sujet, en une ou deux phrases.";
+  return `[Erreur : l'épreuve n'est PAS terminée. Il reste environ ${duration} de débat. Ne prends pas congé du candidat, ne lui dis pas qu'il peut partir et n'annonce aucune autre partie de l'épreuve. Ne t'excuse pas, ne commente pas ce que tu viens de dire. ${steer}]`;
 }
 
 /**
- * The line the examiner speaks when a phase's clock runs out.
+ * The line the examiner speaks when a phase's clock runs out — or, for the
+ * débat, a few seconds before it does (#108): sent at 0:00 the examiner only
+ * STARTS its sentence there, so « le temps est écoulé » was always heard after
+ * the fact. The controller leads the débat's send so the words land while the
+ * clock still shows seconds (see `CLOSING_LEAD_MS`).
  *
  * Borrowed from the reference implementation's "closing handshake", which was a
  * genuinely good idea: cutting the audio dead at 0:00 is jarring, and the last
