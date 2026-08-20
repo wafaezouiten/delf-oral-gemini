@@ -1500,6 +1500,20 @@ export class ExamController {
       return;
     }
 
+    // And the same thing measured rather than reported. `examinerSpeaking` is a
+    // boolean the player pushes on a callback; this is the quantity underneath
+    // it — audio scheduled and not yet heard — and a candidate cannot answer a
+    // question that is still coming out of the speaker whatever the flag says.
+    // Worth both: a transcript showing the examiner's question at 0:02 and
+    // « Vous m'entendez ? » at 0:13 is what a window that started counting at
+    // the end of GENERATION rather than the end of the sentence looks like, and
+    // Gemini generates a turn several times faster than it is spoken.
+    if ((this.player?.bufferedSeconds ?? 0) > 0) {
+      this.resetVoicedBaseline(now);
+      this.holdSilenceWatch("examiner-audio-queued", now);
+      return;
+    }
+
     // A step spent into a socket that is not up is spent unheard. Worse than it
     // looks from `sendControllerDirective`'s catch: `SessionManager.sendDirective`
     // opens with `if (!this.socket) return`, so a directive during a reconnect

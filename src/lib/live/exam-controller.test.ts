@@ -2648,6 +2648,25 @@ describe("breaking a silence in the débat (#84, #101)", () => {
     assert.equal(relances(h).length, 1, "with the whole escalation still intact");
   });
 
+  it("waits for the question to be heard, not for it to be generated", async () => {
+    // Gemini generates a turn several times faster than it is spoken, so the
+    // player is still working through a long question long after the socket has
+    // finished sending it. A window that opened at the end of generation put
+    // « Vous m'entendez ? » in the middle of the examiner's own sentence.
+    const h = harness();
+    await intoSilentDebate(h);
+    const player = h.players[h.players.length - 1];
+
+    // Twenty seconds of question still queued, and nothing saying so out loud.
+    for (let chunk = 0; chunk < 20; chunk += 1) player.enqueue(`chunk-${chunk}`);
+    h.advanceClock(30);
+    assert.deepEqual(nudges(h), [], "the candidate is still listening to the question");
+
+    player.interrupt(); // the queue runs out: the floor is theirs from here
+    h.advanceClock(11);
+    assert.equal(presenceChecks(h).length, 1, "and the window starts when the speaker does");
+  });
+
   it("says what a nudge waited through, so a long gap can be read afterwards", async () => {
     // The report that produced #101's second round was a transcript with fifty
     // seconds between two examiner turns, and no way to tell which part of it
