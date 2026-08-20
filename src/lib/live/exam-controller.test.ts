@@ -636,6 +636,27 @@ describe("full DELF B2 exam, with a forced reconnect mid-debate", () => {
     assert.equal(h.sessions.length, 0);
   });
 
+  it("lands a double-click on « Commencer » in the monologue, not the débat", async () => {
+    // Both presses pass `advanceEarly()`'s guard while the phase is still the
+    // préparation, and both sit on the same `prepareAudio()` promise — so the
+    // second used to advance the monologue the first had just opened, and the
+    // candidate arrived at the débat without ever being offered the exposé
+    // (#104).
+    const h = harness();
+    h.controller.start();
+
+    const first = h.controller.advanceEarly();
+    const second = h.controller.advanceEarly();
+    await Promise.all([first, second]);
+
+    assert.equal(h.controller.getSnapshot().phase, "monologue");
+    assert.equal(h.controller.getSnapshot().awaitingStart, true, "armed, waiting for the press");
+    assert.ok(
+      !h.controller.getSnapshot().events.some((event) => event.detail === "monologue -> debate"),
+      "the second press did not end the part the first had opened",
+    );
+  });
+
   it("keeps the monologue closed to early exit before the five-minute floor", async () => {
     const h = harness();
     h.controller.start();
