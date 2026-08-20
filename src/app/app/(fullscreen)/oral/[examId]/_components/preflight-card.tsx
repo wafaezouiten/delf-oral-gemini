@@ -150,6 +150,9 @@ export function PreflightCard({
   onChooseExaminer: (model: string) => void;
 }) {
   const [micState, checkMic] = useMicCheck();
+  /** The « Enregistrement audio » consent, on by default. Local until the
+   *  historique-recordings issue gives it something to govern — see its row. */
+  const [keepAudio, setKeepAudio] = useState(true);
   // Minutes, not `formatClock`. The reference prints "7:00 sans interruption"
   // here, which works beside a single part; across the whole sitting "20:00 de
   // prise de parole" reads as a clock somebody forgot to start rather than as a
@@ -259,6 +262,40 @@ export function PreflightCard({
               Compatible
             </span>
           )
+        }
+      />
+
+      {/* Whether the candidate's voice is kept with the sitting. The switch is
+          AHEAD of its feature, on the user's call: the retention itself — the
+          recording landing on the historique page — is an issue not yet
+          started, so today this toggle holds its state in this card and
+          nothing reads it. When that issue is built, the state lifts to the
+          exam client and rides the finish request; the control is here first
+          so the consent question is asked where every other pre-flight
+          question already is. */}
+      <PreflightRow
+        title="Enregistrement audio"
+        detail="Votre voix sera conservée avec vos résultats."
+        right={
+          <button
+            type="button"
+            role="switch"
+            aria-checked={keepAudio}
+            aria-label="Conserver l'enregistrement audio"
+            onClick={() => setKeepAudio((keep) => !keep)}
+            className={cn(
+              "relative inline-flex h-5 w-9 shrink-0 items-center rounded-full border transition-colors",
+              keepAudio ? "border-primary bg-primary" : "border-border bg-muted",
+            )}
+          >
+            <span
+              aria-hidden
+              className={cn(
+                "bg-card absolute size-3.5 rounded-full shadow-sm transition-transform",
+                keepAudio ? "translate-x-[1.125rem]" : "translate-x-0.5",
+              )}
+            />
+          </button>
         }
       />
 
