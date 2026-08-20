@@ -236,6 +236,7 @@ class MemoryStore implements SittingStore {
       outcome: sittingOutcome({ finishedAt: exam.finishedAt, correction }),
       transcript: exam.transcript,
       reconnectCount: exam.reconnectCount,
+      examinerModel: null,
       startedAt: exam.startedAt,
       finishedAt: exam.finishedAt,
       phases: this.phases.filter((row) => row.examId === ref.examId),

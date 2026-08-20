@@ -64,6 +64,10 @@ export function PreparationScreen({
   onExit,
   canEncode,
   checking,
+  examinerModel,
+  examinerSaving,
+  examinerError,
+  onChooseExaminer,
   notices,
   announcement,
 }: {
@@ -76,6 +80,12 @@ export function PreparationScreen({
   /** Whether this browser can compress the recording. Null while it is being
    *  asked, and if it never answered. See `PreflightCard`. */
   canEncode: boolean | null;
+  /** The examiner this sitting will hear (#99), and the machinery to change
+   *  it. Rendered by `PreflightCard`; the choice itself lives on the sitting. */
+  examinerModel: string;
+  examinerSaving: boolean;
+  examinerError: boolean;
+  onChooseExaminer: (model: string) => void;
   /**
    * That question is still open, and the passation is held shut until it is
    * answered.
@@ -231,7 +241,14 @@ export function PreparationScreen({
               tests. What must not be missed is not in here anyway — the browser
               that cannot send a recording is a danger notice over the sujet, and
               it holds the passation button shut. */}
-          <PreflightCard canEncode={canEncode} checking={checking} />
+          <PreflightCard
+            canEncode={canEncode}
+            checking={checking}
+            examinerModel={examinerModel}
+            examinerSaving={examinerSaving}
+            examinerError={examinerError}
+            onChooseExaminer={onChooseExaminer}
+          />
 
           {/* The déroulé, off the briefing screen it was written for (#55). It is
               the only place the sitting's shape is laid out end to end, and it

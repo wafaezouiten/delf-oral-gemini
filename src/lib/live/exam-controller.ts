@@ -306,6 +306,10 @@ export interface ExamControllerDeps {
     topic: OralTopic,
     callbacks: SessionManagerCallbacks,
     history: Array<{ role: "user" | "model"; parts: Array<{ text: string }> }>,
+    /** The chosen examiner (#99), or undefined for the server's default. An
+     *  argument rather than a closure so the factory cannot capture a choice
+     *  that had not been made when the controller was built. */
+    examinerModel: string | undefined,
   ) => LiveSessionLike;
   createRecorder: (callbacks: {
     onChunk: (base64: string) => void;
@@ -620,6 +624,15 @@ export class ExamController {
   /** When the closing handshake started, for its safety deadline. See `tick()`. */
   private closingStartedAt: number | null = null;
 
+  /**
+   * The examiner chosen for this sitting (#99), handed to every session this
+   * controller opens. Held here rather than closed over by `createSession`
+   * because it can change during the préparation — after the controller is
+   * built, before any session exists — and a factory that captured it at
+   * construction would open the monologue on a stale choice.
+   */
+  private examinerModel: string | undefined;
+
   private readonly now: () => number;
 
   constructor(private readonly deps: ExamControllerDeps) {
@@ -642,6 +655,19 @@ export class ExamController {
 
   /** Identity-stable between changes, as `useSyncExternalStore` requires. */
   getSnapshot = (): ExamState => this.snapshot;
+
+  /**
+   * Name the examiner for every session opened from here on (#99).
+   *
+   * Deliberately NOT applied to a session already open: the choice is only
+   * changeable during the préparation, which opens none — and if a stray call
+   * ever landed mid-débat, restarting the socket over it would trade a voice
+   * for a dropped exam. The next session picks it up, which for the legal call
+   * pattern is the first one.
+   */
+  setExaminerModel(model: string | null): void {
+    this.examinerModel = model ?? undefined;
+  }
 
   private buildSnapshot(): ExamState {
     return {
@@ -2120,7 +2146,13 @@ export class ExamController {
     // nothing about the monologue it is supposed to challenge.
     const history = target === "debate" ? monologueAsHistory(this.transcript) : [];
 
-    const session = this.deps.createSession(target, this.deps.topic, callbacks, history);
+    const session = this.deps.createSession(
+      target,
+      this.deps.topic,
+      callbacks,
+      history,
+      this.examinerModel,
+    );
     this.session = session;
     await session.connect();
 

@@ -142,6 +142,21 @@ export const oralExams = pgTable(
     /** Where the state machine stopped. Transitions are one-way. */
     phase: oralPhase("phase").notNull().default("preparation"),
 
+    /**
+     * Which Live model played the examiner (#99) — the counterpart of
+     * `evaluations.model`, which names the corrector. Stamped with the build's
+     * default when the sitting is created, and overwritten if the candidate
+     * picks another during the préparation; the token route reads it on every
+     * mint, INCLUDING every reconnect, which is what stops a dropped connection
+     * from switching examiners mid-débat.
+     *
+     * Nullable, and null is a statement about time rather than a default: rows
+     * written before this column existed genuinely do not record which examiner
+     * spoke, and backfilling today's default onto them would be a guess wearing
+     * a provenance column. Same length as `evaluations.model`, same reason.
+     */
+    examinerModel: varchar("examiner_model", { length: 64 }),
+
     /** Phase-tagged and written once, at the end. See the header note. */
     transcript: jsonb("transcript").$type<TranscriptEntry[]>(),
 

@@ -335,6 +335,8 @@ function deferred(): { promise: Promise<void>; resolve: () => void } {
 interface Harness {
   controller: ExamController;
   sessions: FakeSession[];
+  /** The examiner each session was created for (#99), in creation order. */
+  sessionModels: Array<string | undefined>;
   /** The first microphone opened — the only one a healthy exam opens. */
   recorder: FakeRecorder;
   recorders: FakeRecorder[];
@@ -374,6 +376,7 @@ function harness(
 ): Harness {
   let now = 0;
   const sessions: FakeSession[] = [];
+  const sessionModels: Array<string | undefined> = [];
   // Built per call rather than shared, so "how many devices did this open?" is
   // a question the harness can answer.
   const recorders: FakeRecorder[] = [];
@@ -384,9 +387,10 @@ function harness(
 
   const controller = new ExamController({
     topic: TOPIC,
-    createSession: (phase, _topic, callbacks, history) => {
+    createSession: (phase, _topic, callbacks, history, examinerModel) => {
       const session = new FakeSession(phase, callbacks, history);
       sessions.push(session);
+      sessionModels.push(examinerModel);
       return session;
     },
     createRecorder: (callbacks) => {
@@ -411,6 +415,7 @@ function harness(
     controller,
     announcer: devices.announcer ?? null,
     sessions,
+    sessionModels,
     get recorder() {
       return recorders[0];
     },
@@ -2859,5 +2864,44 @@ describe("where a phase started, in the transcript's own time base (#70)", () =>
     const debate = h.controller.getSnapshot().phaseStartedAt;
     assert.notEqual(debate, null);
     assert.ok(debate! > monologue!, "the débat starts after the monologue did");
+  });
+});
+
+describe("which examiner the controller's sessions are created for (#99)", () => {
+  /** Preparation → monologue, clock running. */
+  async function intoMonologue(h: Harness): Promise<void> {
+    h.controller.start();
+    await h.controller.advanceEarly();
+    await pressRecord(h);
+    h.controller.startSpeaking();
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+
+  it("hands the choice made during the préparation to both phases' sessions", async () => {
+    // The choice lands AFTER the controller is built — the picker lives on the
+    // préparation screen — which is exactly why it is a setter and a factory
+    // argument rather than a constructor option: a closure captured at
+    // construction would open the monologue on a stale choice.
+    const h = harness();
+    h.controller.start();
+    h.controller.setExaminerModel("gemini-2.5-flash-native-audio-preview-12-2025");
+
+    await intoMonologue(h);
+    h.session().candidateSays("Le télétravail a transformé le rapport au bureau.");
+    h.advanceClock(MONOLOGUE_MIN_SECONDS + 10);
+    await h.controller.advanceEarly();
+    await completeClosing(h);
+
+    assert.equal(h.sessions.length, 2, "one session per speaking phase");
+    assert.deepEqual(h.sessionModels, [
+      "gemini-2.5-flash-native-audio-preview-12-2025",
+      "gemini-2.5-flash-native-audio-preview-12-2025",
+    ]);
+  });
+
+  it("leaves the examiner to the server when nothing was ever chosen", async () => {
+    const h = harness();
+    await intoMonologue(h);
+    assert.deepEqual(h.sessionModels, [undefined]);
   });
 });

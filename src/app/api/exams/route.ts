@@ -16,6 +16,7 @@ import { NextResponse } from "next/server";
 
 import { getDb, isDatabaseConfigured, oralExams, oralTopics } from "@/lib/db";
 import { findTopic } from "@/lib/delf/topics";
+import { LIVE_MODEL } from "@/lib/gemini/constants";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -62,7 +63,12 @@ export async function POST(request: Request) {
 
     const [exam] = await db
       .insert(oralExams)
-      .values({ userId, topicId, phase: "preparation" })
+      // The examiner is stamped at creation rather than left null-until-chosen
+      // (#99): the column answers "which model spoke?", and a candidate who
+      // never touches the picker still hears one. Stamping the default here is
+      // what keeps two untouched sittings comparable across a deploy that
+      // changes `NEXT_PUBLIC_GEMINI_LIVE_MODEL` — each row remembers its own.
+      .values({ userId, topicId, phase: "preparation", examinerModel: LIVE_MODEL })
       .returning({ id: oralExams.id });
 
     return NextResponse.json({ examId: String(exam.id), persisted: true });
