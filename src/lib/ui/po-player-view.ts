@@ -248,12 +248,23 @@ export function examinerStatus(options: {
    * are speaking, not that they have gone.
    */
   closing?: boolean;
+  /**
+   * The débat's opening question is on its way and nothing is audible yet.
+   *
+   * Below `speaking`, because the moment the voice starts, « intervient » is the
+   * truer sentence; below the connection checks, because while the socket is
+   * still connecting that is the better explanation for the silence. What it
+   * replaces is the default: « Vous écoute attentivement » over an examiner who
+   * is about to ask told the candidate the floor was theirs.
+   */
+  opening?: boolean;
 }): string {
   if (options.announcing) return "L'examinateur donne la consigne…";
   if (options.closing) return "L'examinateur conclut…";
   if (options.connecting) return "Connexion en cours…";
   if (!options.connected) return "L'examinateur n'est pas en ligne.";
   if (options.speaking) return "L'examinateur intervient…";
+  if (options.opening) return "L'examinateur prépare sa question…";
   return "Vous écoute attentivement.";
 }
 

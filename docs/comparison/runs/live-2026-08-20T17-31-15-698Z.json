@@ -1,0 +1,125 @@
+{
+  "measuredAt": "2026-08-20T17:31:15.698Z",
+  "model": "gemini-3.1-flash-live-preview",
+  "topicSlug": "teletravail",
+  "turnsAttempted": 4,
+  "turnsCompleted": 4,
+  "conversationSeconds": 161.251,
+  "candidateAudioSecondsSent": 38.403749999999995,
+  "examinerAudioChunks": 273,
+  "examinerTranscript": "Vous avez affirmé que le télétravail permettait de gagner du temps en supprimant les transports. Pourtant, ne pensez-vous pas que ce temps est souvent perdu autrement, par exemple en distractions diverses ou en réunions virtuelles trop longues, nuisant ainsi à la productivité ? Avez-vous des exemples précis de ce phénomène ?Justement, en parlant de culture managériale, comment garantir une cohésion d'équipe et l'intégration des nouveaux arrivants quand les interactions sont principalement virtuelles ? L'isolement, que certains détracteurs dénoncent, n'est-il pas un risque réel, difficile à contrer à distance ? Pouvez-vous me donner un exemple précis d'une bonne pratique dans ce domaine ?Si l'on suit votre raisonnement, le télétravail pourrait créer une fracture entre des salariés \"privilégiés\" ayant accès à cette souplesse et d'autres, comme l'infirmière que vous citiez, contraints d'être sur site. N'est-ce pas là un facteur d'inégalité qui pourrait affaiblir la cohésion sociale dans les entreprises ? Comment résoudriez-vous ce problème ?Pour en revenir à l'argument de la cohésion d'équipe, vous disiez que c'était le point qui vous gênait le plus. Si l'on considère que le télétravail réduit les interactions spontanées, comment s'assurer que la transmission des savoirs tacites, cruciale pour les plus jeunes, continue de se faire ? N'y a-t-il pas un risque de perte de compétences à long terme pour l'entreprise ? Avez-vous des pistes de solution ?",
+  "turnLatencies": [
+    {
+      "turn": 0,
+      "atSecond": 18.645,
+      "firstServerContentMs": 2862,
+      "firstAudioChunkMs": 2862,
+      "turnCompleteMs": 21362
+    },
+    {
+      "turn": 1,
+      "atSecond": 61.63,
+      "firstServerContentMs": 1335,
+      "firstAudioChunkMs": 1335,
+      "turnCompleteMs": 20546
+    },
+    {
+      "turn": 2,
+      "atSecond": 98.979,
+      "firstServerContentMs": 1284,
+      "firstAudioChunkMs": 1284,
+      "turnCompleteMs": 19730
+    },
+    {
+      "turn": 3,
+      "atSecond": 138.51,
+      "firstServerContentMs": 1353,
+      "firstAudioChunkMs": 1353,
+      "turnCompleteMs": 21964
+    }
+  ],
+  "vadSilenceDurationMs": 1000,
+  "usageIsCumulative": true,
+  "totalPromptTokens": 4599,
+  "totalResponseTokens": 523,
+  "promptByModality": {
+    "TEXT": 1694,
+    "AUDIO": 2624
+  },
+  "responseByModality": {
+    "AUDIO": 523
+  },
+  "snapshots": [
+    {
+      "turn": 0,
+      "atSecond": 40.006,
+      "promptTokens": 1828,
+      "responseTokens": 465,
+      "totalTokens": 2293,
+      "promptByModality": {
+        "TEXT": 1309,
+        "AUDIO": 492
+      },
+      "responseByModality": {
+        "AUDIO": 465
+      }
+    },
+    {
+      "turn": 1,
+      "atSecond": 82.176,
+      "promptTokens": 2767,
+      "responseTokens": 486,
+      "totalTokens": 3253,
+      "promptByModality": {
+        "TEXT": 1429,
+        "AUDIO": 1225
+      },
+      "responseByModality": {
+        "AUDIO": 486
+      }
+    },
+    {
+      "turn": 2,
+      "atSecond": 118.709,
+      "promptTokens": 3673,
+      "responseTokens": 468,
+      "totalTokens": 4141,
+      "promptByModality": {
+        "TEXT": 1559,
+        "AUDIO": 1917
+      },
+      "responseByModality": {
+        "AUDIO": 468
+      }
+    },
+    {
+      "turn": 3,
+      "atSecond": 160.474,
+      "promptTokens": 4599,
+      "responseTokens": 523,
+      "totalTokens": 5122,
+      "promptByModality": {
+        "TEXT": 1694,
+        "AUDIO": 2624
+      },
+      "responseByModality": {
+        "AUDIO": 523
+      }
+    }
+  ],
+  "derived": {
+    "medianFirstAudioChunkMs": 1335,
+    "medianModelAndNetworkMs": 335,
+    "promptTokensPerMinute": 1711.2452015801452,
+    "responseTokensPerMinute": 194.60344431972516,
+    "costPerMinuteUsd": 0.0074689769365771375,
+    "extrapolatedSittingSeconds": 1200,
+    "extrapolatedSittingCostUsd": 0.14937953873154275
+  },
+  "rates": {
+    "input": 3,
+    "output": 12,
+    "source": "https://ai.google.dev/gemini-api/docs/pricing",
+    "note": "Audio modality. Text tokens on the same session (the system instruction, the transcriptions) are billed at the model's text rate, which is why the Live measurement records the two modalities separately."
+  }
+}
