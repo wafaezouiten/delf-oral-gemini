@@ -207,21 +207,28 @@ export function PassationScreen({
       />
 
       <main className="relative flex min-h-0 flex-1 flex-col">
-        {/* One column for both phases, and it still scrolls — but during the
-            débat there is normally nothing in it to scroll (#88). The sujet's
-            line and the two protagonists are `shrink-0`, the exchange takes
-            what is left and scrolls inside itself, and the head stays where the
-            candidate can see whose turn it is. The outer scroller is what
-            happens when even that does not fit: under the feed's `min-h` this
-            column overflows and goes back to being one document, which is the
-            #48 arrangement and the right one at that height. */}
+        {/* One column for both phases, and it scrolls — except during the débat
+            from `lg` up, where it locks and the exchange scrolls inside itself
+            instead (#88). PORT NOTE: the pair is the reference's,
+            `components/po/po-preparation-screen.tsx:77` and
+            `po-briefing-screen.tsx:196` — `overflow-y-auto … lg:overflow-hidden`
+            on the frame, `lg:min-h-0 lg:overflow-y-auto` on the panel that owns
+            the scrolling. It buys the thing #88 asked for: the sujet's line and
+            the two protagonists are `shrink-0`, so from `lg` up they hold still
+            and the head keeps answering « whose turn is it » however long the
+            exchange gets.
+
+            The exposé is left out of the lock rather than forgotten. Its column
+            is a document beside a plan — there is no one panel that should own
+            the scrolling, and the reference's own document screens scroll as one
+            page for the same reason. */}
         <div
           className={cn(
             "mx-auto flex min-h-0 w-full flex-1 flex-col gap-4 overflow-y-auto px-4 py-5 sm:px-6",
             // The exposé carries two columns and needs the room for them; the
             // débat is one column, and a document set in a wider measure than
             // this is harder to read, not easier.
-            phase === "monologue" ? "max-w-[64rem]" : "max-w-[47.5rem]",
+            phase === "monologue" ? "max-w-[64rem]" : "max-w-[47.5rem] lg:overflow-hidden",
           )}
         >
           {/* `shrink-0` because the débat's column no longer grows to fit its
