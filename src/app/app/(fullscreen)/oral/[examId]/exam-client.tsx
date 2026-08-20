@@ -525,7 +525,6 @@ export function ExamClient({
           remaining={state.remaining}
           onStartExam={() => void controller.advanceEarly()}
           onExit={() => setShowExitDialog(true)}
-          canEncode={canEncode}
           checking={checkingBrowser}
           examinerModel={examinerModel}
           examinerSaving={examinerSaving}

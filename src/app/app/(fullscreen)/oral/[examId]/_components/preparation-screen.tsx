@@ -64,7 +64,6 @@ export function PreparationScreen({
   remaining,
   onStartExam,
   onExit,
-  canEncode,
   checking,
   examinerModel,
   examinerSaving,
@@ -79,9 +78,6 @@ export function PreparationScreen({
   remaining: number;
   onStartExam: () => void;
   onExit: () => void;
-  /** Whether this browser can compress the recording. Null while it is being
-   *  asked, and if it never answered. See `PreflightCard`. */
-  canEncode: boolean | null;
   /** The examiner this sitting will hear (#99), and the machinery to change
    *  it. Rendered by `PreflightCard`; the choice itself lives on the sitting. */
   examinerModel: string;
@@ -200,8 +196,6 @@ export function PreparationScreen({
               the browser that cannot send a recording is a danger notice over
               the sujet, and it holds the passation button shut. */}
           <PreflightCard
-            canEncode={canEncode}
-            checking={checking}
             examinerModel={examinerModel}
             examinerSaving={examinerSaving}
             examinerError={examinerError}
