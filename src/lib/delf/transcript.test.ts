@@ -54,6 +54,47 @@ describe("transcript", () => {
     assert.equal(entries[1].phase, "debate");
   });
 
+  it("starts a new turn for the same speaker when the caller says so (#101)", () => {
+    // The relance: the examiner asked a question, the candidate said nothing,
+    // and ten seconds later the app made the examiner speak again. Nothing in
+    // the text says those are two interventions — the controller knows.
+    let entries = build({ text: "Le télétravail isole-t-il vraiment ?", speaker: "examiner" });
+    entries = appendFragment(entries, {
+      phase: "monologue",
+      speaker: "examiner",
+      timestamp: 10_000,
+      text: "Autrement dit : y perd-on des collègues ?",
+      startsTurn: true,
+    });
+
+    assert.equal(entries.length, 2, "the nudge is not more of the question it rephrases");
+    assert.equal(entries[1].timestamp, 10_000, "and it is stamped when it was said");
+    assert.equal(
+      Object.hasOwn(entries[1], "startsTurn"),
+      false,
+      "the flag is an instruction to appendFragment, not part of a graded transcript",
+    );
+  });
+
+  it("keeps merging the rest of a turn that was told to start", () => {
+    let entries = build({ text: "Première question.", speaker: "examiner" });
+    for (const [index, text] of ["Autrement dit,", "y perd-on", "des collègues ?"].entries()) {
+      entries = appendFragment(entries, {
+        phase: "monologue",
+        speaker: "examiner",
+        timestamp: 10_000 + index,
+        // Only the first fragment of the relance carries the break, which is
+        // what the controller does: it clears the flag on the fragment that
+        // spent it.
+        text,
+        startsTurn: index === 0,
+      });
+    }
+
+    assert.equal(entries.length, 2);
+    assert.equal(entries[1].text, "Autrement dit, y perd-on des collègues ?");
+  });
+
   it("drops empty fragments instead of creating silent turns", () => {
     const entries = build({ text: "Bonjour." }, { text: "   " }, { text: "" });
     assert.equal(entries.length, 1);

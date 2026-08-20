@@ -170,9 +170,19 @@ export function examinerOpeningLine(phase: "monologue" | "debate"): string | nul
  * The controller decides WHEN this is sent, and it has to: total silence
  * produces no speech-end, so automatic voice-activity detection never gives the
  * model the floor to notice with. See `ExamController`'s silence watch.
+ *
+ * **It is sent more than once now (#101)**, and `attempt` is why this takes an
+ * argument at all. The first relance rephrases the question; a second one that
+ * said the same thing would rephrase its own rephrasing, and a model on a
+ * sliding context window does that until the question is unrecognisable. So
+ * every relance after the first is told to drop the thread and start something
+ * smaller, which is also what an examiner in the room does on the third try.
  */
-export function silenceRelanceInstruction(): string {
-  return "[Le candidat n'a rien répondu depuis plusieurs secondes. Relance-le sur le fond, en une seule phrase : reformule autrement ta dernière question, ou pose une question plus simple et plus précise sur ce qu'il a déjà dit. Ne fais aucune remarque sur son silence, ne lui demande pas s'il a compris, n'évalue pas.]";
+export function silenceRelanceInstruction(attempt = 1): string {
+  if (attempt <= 1) {
+    return "[Le candidat n'a rien répondu depuis plusieurs secondes. Relance-le sur le fond, en une seule phrase : reformule autrement ta dernière question, ou pose une question plus simple et plus précise sur ce qu'il a déjà dit. Ne fais aucune remarque sur son silence, ne lui demande pas s'il a compris, n'évalue pas.]";
+  }
+  return "[Le candidat n'a toujours rien répondu. Abandonne la question précédente : pose une question NOUVELLE et nettement plus simple sur le sujet, en une seule phrase, à laquelle on peut répondre en quelques mots. Ne reformule pas ce que tu viens de dire. Ne fais aucune remarque sur son silence, ne lui demande pas s'il a compris, n'évalue pas.]";
 }
 
 /**
@@ -184,8 +194,13 @@ export function silenceRelanceInstruction(): string {
  * part of the débat and invite an answer about the subject; four words that
  * plainly ask about the connection do not.
  *
- * Sent at most twice in a débat, and never twice without an answer in between:
- * a candidate who has genuinely frozen must not be asked five times.
+ * **It opens the silence rather than closing it** (#101). Ten seconds after a
+ * question that got nothing, the two likeliest explanations are a candidate who
+ * heard nothing and a candidate who is lost, and this serves both: it is
+ * answerable by « oui » from someone who is merely thinking, and it is the only
+ * thing worth saying to someone whose audio has died. The steps after it belong
+ * to the épreuve — the question again, then a simpler one — so this is said once
+ * per silence and never twice in a row.
  */
 export function presenceCheckInstruction(): string {
   return "[Le candidat n'a toujours rien répondu. Dis exactement ceci, mot pour mot, et rien d'autre : « Vous m'entendez ? »]";

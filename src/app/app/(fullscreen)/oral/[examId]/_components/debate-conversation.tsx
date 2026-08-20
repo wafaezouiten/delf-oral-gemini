@@ -14,7 +14,7 @@ import {
 } from "@/lib/ui/debate-conversation";
 
 /**
- * The débat's exchange, as a conversation (#48, #60).
+ * The débat's exchange, as a conversation (#48, #60, #88).
  *
  * **Turns, not a document.** The exchange used to be set like the results page's
  * transcript — speaker label in small caps over a paragraph — on the argument
@@ -31,17 +31,27 @@ import {
  * clock; on the correction, the section's own first turn, because nothing there
  * says when the part opened. The reasoning is in `debateTurns`.
  *
- * **It has no scrollbar of its own, and that is the point.** It was a boxed feed
- * with its own scroller under a fixed head, which meant the screen had two
- * scrollbars and the conversation was reading itself through a letterbox. The
- * whole page scrolls instead: the sujet's title, the two faces and every turn
- * are one column that grows, and a candidate scrolls back through it the way
- * they would scroll back through anything else.
+ * **It has no scrollbar of its own, and that survived #88 twice.** It was once a
+ * boxed feed with its own scroller under a fixed head, which meant the screen
+ * had two scrollbars and the conversation read itself through a letterbox. The
+ * whole column scrolls instead: the sujet's title, the two faces and every turn
+ * are one document, and a candidate scrolls back through it the way they would
+ * scroll back through anything else.
  *
- * That moves the autoscroll a level up. This panel does not own the scroller any
- * more, so it finds the one it is inside and drives that — following the newest
- * turn while the candidate is at the bottom, and holding still the moment they
- * scroll up to re-read an objection.
+ * #88 was the objection to that — the two faces are the one thing on this screen
+ * answering « whose turn is it », and they left the top of the viewport exactly
+ * when the exchange got long enough to need them. It was answered first by
+ * giving this panel its scroller back, and then answered properly: the scene is
+ * `position: sticky` (`passation-screen.tsx`), so it stops at the top of the
+ * column while the turns keep going under it. Nothing here shrinks to pay for
+ * that, which is the whole argument — a boxed feed buys a fixed head out of the
+ * conversation's own height, 129px of it on a 1366×768 laptop, and sticky buys
+ * it for nothing.
+ *
+ * So the autoscroll drives a box this panel does not own; `scrollerFrom` finds
+ * it. It follows the newest turn while the candidate is at the bottom and holds
+ * still the moment they scroll up to re-read an objection — silently, because
+ * the way back to the newest turn is the same scrollbar they used to leave it.
  *
  * **Why the débat and not the exposé.** The monologue runs on manual VAD: the
  * candidate's activity is opened and never closed, and during a manual-VAD
@@ -81,30 +91,44 @@ export function DebateConversation({
   hint: string;
 }) {
   const turns = debateTurns(transcript, phaseStartedAt);
-  const root = useRef<HTMLDivElement>(null);
+  const feed = useRef<HTMLDivElement>(null);
   /**
-   * Whether the page is still following the conversation.
+   * Whether the feed is still following the conversation.
    *
    * A ref rather than state: it is written from a scroll handler on every frame
-   * of a drag and read once per new fragment, and nothing renders differently
-   * for it. As state it would re-render the panel while the candidate scrolls,
-   * which is the one moment it should be doing nothing.
+   * of a drag and read once per new fragment, and no turn renders differently
+   * for it. As state it would re-render the whole exchange while the candidate
+   * scrolls, which is the one moment it should be doing nothing.
    */
   const following = useRef(true);
-
-  const scroller = useCallback(() => findScroller(root.current), []);
+  /** The newest turn, in the box that is doing the scrolling. */
+  const pin = useCallback(() => {
+    const element = scrollerFrom(feed.current);
+    if (element) element.scrollTop = element.scrollHeight;
+  }, []);
 
   // The scroller belongs to the screen, not to this panel, so the listener has
   // to be attached by hand rather than declared as an `onScroll` prop.
   useEffect(() => {
-    const element = scroller();
+    const element = scrollerFrom(feed.current);
     if (!element) return;
     const onScroll = () => {
       following.current = isNearBottom(element);
     };
+    // A resize no longer changes which box scrolls, but it does move the newest
+    // turn: the same turns rewrap at a new width, and a rotation to 375 wide
+    // grew the exchange 483px and left a following reader that far short of the
+    // last word.
+    const onResize = () => {
+      if (following.current) pin();
+    };
     element.addEventListener("scroll", onScroll, { passive: true });
-    return () => element.removeEventListener("scroll", onScroll);
-  }, [scroller]);
+    window.addEventListener("resize", onResize);
+    return () => {
+      element.removeEventListener("scroll", onScroll);
+      window.removeEventListener("resize", onResize);
+    };
+  }, [pin]);
 
   // Deliberately keyed on the tail's *length* as well as the count of turns: a
   // fragment usually merges into the last entry rather than adding one
@@ -112,13 +136,15 @@ export function DebateConversation({
   // following in the middle of the examiner's sentence.
   const lastTurn = turns[turns.length - 1]?.entry;
   useEffect(() => {
-    const element = scroller();
-    if (!element || !following.current) return;
-    element.scrollTop = element.scrollHeight;
-  }, [scroller, turns.length, lastTurn?.text.length]);
+    if (following.current) pin();
+  }, [pin, turns.length, lastTurn?.text.length]);
 
   return (
-    <div ref={root} className="border-border bg-card rounded-lg border">
+    // No height of its own, and nothing that can shrink it: the panel is as tall
+    // as the turns in it and the column scrolls the lot. Every fixed height this
+    // has been given — #48's 20rem box, #88's first two answers — was room taken
+    // off the conversation to pay for something above it.
+    <div ref={feed} className="border-border bg-card rounded-lg border">
       <div className="border-border border-b px-4 py-2">
         <Kicker>{DEBATE_CONVERSATION_COPY.title}</Kicker>
       </div>
@@ -181,16 +207,18 @@ export function DebateConversation({
 }
 
 /**
- * The scrolling ancestor this panel lives in, or null if nothing scrolls.
+ * The box this panel scrolls in, or null if nothing scrolls.
  *
  * Walked rather than passed down as a ref: the screen above owns the scroller
  * and could reasonably move it — the exposé and the débat already lay out
  * differently — and a panel that asks the DOM which box it is inside keeps
  * working when it does. The check is `overflow-y`, not a class name, so it
- * cannot go stale against Tailwind.
+ * cannot go stale against Tailwind. It starts at this element rather than at its
+ * parent, which costs nothing and leaves the walk correct if the panel is ever
+ * given a scroller of its own again.
  */
-function findScroller(from: HTMLElement | null): HTMLElement | null {
-  let node = from?.parentElement ?? null;
+function scrollerFrom(from: HTMLElement | null): HTMLElement | null {
+  let node = from;
   while (node) {
     const overflow = getComputedStyle(node).overflowY;
     if (overflow === "auto" || overflow === "scroll") return node;

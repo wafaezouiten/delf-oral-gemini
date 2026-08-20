@@ -44,6 +44,9 @@ describe("examiner prompt", () => {
     // Phase-free, because only the débat has them (#84, #85).
     for (const text of [
       silenceRelanceInstruction(),
+      // The second wording is a different string and is spoken as often as the
+      // first (#101), so it answers to the same rule.
+      silenceRelanceInstruction(2),
       presenceCheckInstruction(),
       timeRemainingInstruction(7),
       resumeDebateInstruction(7),
@@ -97,6 +100,27 @@ describe("examiner prompt", () => {
       assert.ok(relance.includes("Ne fais aucune remarque sur son silence"));
       assert.ok(relance.includes("ne lui demande pas s'il a compris"));
       assert.ok(relance.includes("n'évalue pas"));
+    });
+
+    it("stops asking for a rephrasing once the relance is repeating itself (#101)", () => {
+      // A relance that always said « reformule ta dernière question » would have
+      // the model rephrase its own rephrasing, on a context window that is
+      // sliding. From the second nudge on it is asked for a new question.
+      const again = silenceRelanceInstruction(2);
+      assert.ok(again.includes("pose une question NOUVELLE"));
+      assert.ok(!again.includes("reformule autrement"), "the old ask is dropped, not repeated");
+      assert.ok(again.includes("Ne reformule pas ce que tu viens de dire"));
+    });
+
+    it("keeps a repeated relance from turning into a reproach either", () => {
+      // The constraints are the point of the wording, not decoration on the
+      // first one: a model asked a third time is likelier, not less likely, to
+      // remark on the silence.
+      const again = silenceRelanceInstruction(2);
+      assert.ok(again.includes("Ne fais aucune remarque sur son silence"));
+      assert.ok(again.includes("ne lui demande pas s'il a compris"));
+      assert.ok(again.includes("n'évalue pas"));
+      assert.ok(!again.includes("mot pour mot"), "it is still a directive, not a line to read");
     });
 
     it("fixes the wording of the presence check, because it is a technical check", () => {

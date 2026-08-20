@@ -1,6 +1,6 @@
 /**
- * What the CONVERSATION half of a sitting costs, measured against the real
- * Gemini Live service (#12).
+ * What the CONVERSATION half of a sitting costs — and how long the examiner
+ * takes to answer — measured against the real Gemini Live service (#12, #100).
  *
  *   pnpm measure:live                  # a few débat turns
  *   pnpm measure:live -- --turns=6
@@ -23,6 +23,17 @@
  * claim to have run an exam. The candidate audio is TTS, which is cleaner and
  * more fluent than a B2 learner and therefore produces shorter examiner replies
  * than a real one would — the extrapolation is a floor.
+ *
+ * WHY IT ALSO MEASURES LATENCY (#100). In the débat the examiner cannot start
+ * its turn until the service declares end-of-speech, which with automatic VAD
+ * happens `silenceDurationMs` after the candidate's last word. Everything after
+ * that — model time-to-first-audio, network, our 20 ms playback lead — stacks on
+ * top, and the three have completely different fixes. So each turn records the
+ * moment the last chunk of candidate SPEECH goes on the socket (the trailing
+ * silence is exactly what a human's last word is followed by) and the deltas to
+ * the first server content, the first audio chunk and turn completion. The VAD
+ * window is read off the config rather than restated, so the decomposition
+ * cannot drift from the tuning it is meant to judge.
  */
 
 import { config } from "dotenv";
@@ -83,6 +94,23 @@ interface UsageSnapshot {
   responseByModality: Record<string, number>;
 }
 
+/**
+ * Reply latency for one candidate turn (#100). All deltas are milliseconds from
+ * the moment the last chunk of candidate speech was sent — the point at which a
+ * human starts waiting for an answer. `firstServerContentMs` is the first
+ * evidence the model is replying (a modelTurn part or output transcription);
+ * `firstAudioChunkMs` is when sound could start: the browser's player adds only
+ * a 20 ms scheduling lead (`src/lib/audio/player.ts`), so chunk arrival is
+ * within a frame of the first audible sample.
+ */
+interface TurnLatency {
+  turn: number;
+  atSecond: number;
+  firstServerContentMs: number | null;
+  firstAudioChunkMs: number | null;
+  turnCompleteMs: number | null;
+}
+
 function byModality(details: UsageMetadata["promptTokensDetails"]): Record<string, number> {
   const out: Record<string, number> = {};
   for (const detail of details ?? []) {
@@ -107,6 +135,14 @@ async function connect(cfg: LiveConnectConfig) {
   const ai = new GoogleGenAI({ apiKey: token.name, httpOptions: { apiVersion: "v1alpha" } });
 
   const snapshots: UsageSnapshot[] = [];
+  const latencies: TurnLatency[] = [];
+  let pending: TurnLatency | null = null;
+  // Set when a turn is given up on: a reply may still arrive LATE, and until
+  // that straggler's turnComplete flushes through, nothing is attributed to the
+  // current turn. Better a lost measurement than one that charges the previous
+  // question's answer to the next question's clock.
+  let discardingStraggler = false;
+  let speechEndedAtMs = 0;
   let turns = 0;
   let examinerAudioChunks = 0;
   let examinerText = "";
@@ -134,11 +170,37 @@ async function connect(cfg: LiveConnectConfig) {
         }
         const content = message.serverContent;
         if (!content) return;
+        const sinceSpeechEnd = Date.now() - speechEndedAtMs;
+        const attributing = !discardingStraggler;
+        if (attributing && pending && pending.firstServerContentMs === null) {
+          // Only the model's own turn counts as a reply — the echo of the
+          // candidate's input transcription arriving back is not an answer.
+          if (content.modelTurn || content.outputTranscription?.text) {
+            pending.firstServerContentMs = sinceSpeechEnd;
+          }
+        }
         for (const part of content.modelTurn?.parts ?? []) {
-          if (part.inlineData?.data) examinerAudioChunks += 1;
+          if (part.inlineData?.data) {
+            examinerAudioChunks += 1;
+            if (attributing && pending && pending.firstAudioChunkMs === null) {
+              pending.firstAudioChunkMs = sinceSpeechEnd;
+            }
+          }
         }
         if (content.outputTranscription?.text) examinerText += content.outputTranscription.text;
-        if (content.turnComplete) turns += 1;
+        if (content.turnComplete) {
+          turns += 1;
+          if (discardingStraggler) {
+            // The straggler has finished; attribution resumes for whatever the
+            // candidate asks next. If this was actually the CURRENT turn's
+            // completion (the abandoned one never answered at all), the current
+            // record is left with nulls — missing, not wrong.
+            discardingStraggler = false;
+          } else if (pending) {
+            pending.turnCompleteMs = sinceSpeechEnd;
+            pending = null;
+          }
+        }
       },
       onerror: (error) => console.error("  ws error:", String(error).slice(0, 140)),
       onclose: () => {},
@@ -148,6 +210,24 @@ async function connect(cfg: LiveConnectConfig) {
   return {
     session,
     snapshots: () => snapshots,
+    latencies: () => latencies,
+    /** The streamer calls this as the LAST chunk of speech goes out. */
+    markSpeechEnd: () => {
+      speechEndedAtMs = Date.now();
+      pending = {
+        turn: turns,
+        atSecond: (speechEndedAtMs - startedAt) / 1000,
+        firstServerContentMs: null,
+        firstAudioChunkMs: null,
+        turnCompleteMs: null,
+      };
+      latencies.push(pending);
+    },
+    /** The measurer calls this when it stops waiting for a reply. */
+    abandonTurn: () => {
+      pending = null;
+      discardingStraggler = true;
+    },
     turns: () => turns,
     examinerAudioChunks: () => examinerAudioChunks,
     examinerText: () => examinerText,
@@ -199,7 +279,12 @@ async function speak(text: string): Promise<Int16Array | null> {
  * not silence to a voice-activity detector — it is an open microphone with
  * nobody talking into it, and the examiner would never take its turn.
  */
-async function stream(session: Session, pcm: Int16Array, trailingSilenceMs = 1600) {
+async function stream(
+  session: Session,
+  pcm: Int16Array,
+  onSpeechEnd?: () => void,
+  trailingSilenceMs = 1600,
+) {
   const CHUNK = 640; // 40 ms at 16 kHz
   const send = (slice: Int16Array) =>
     session.sendRealtimeInput({
@@ -213,6 +298,9 @@ async function stream(session: Session, pcm: Int16Array, trailingSilenceMs = 160
     send(pcm.subarray(offset, Math.min(offset + CHUNK, pcm.length)));
     await wait(40);
   }
+  // The latency clock starts HERE, not after the silence: to the candidate the
+  // wait begins with their last word, and the VAD window is part of the wait.
+  onSpeechEnd?.();
   const silence = new Int16Array(CHUNK);
   for (let i = 0; i < Math.round(trailingSilenceMs / 40); i++) {
     send(silence);
@@ -230,7 +318,8 @@ async function main() {
 
   console.log(`\nMeasuring a Gemini Live débat: ${script.length} candidate turns on "${TOPIC.slug}"\n`);
 
-  const live = await connect(debateConfig({ topic: TOPIC }));
+  const liveConfig = debateConfig({ topic: TOPIC });
+  const live = await connect(liveConfig);
   let audioSecondsSent = 0;
   live.markStart();
 
@@ -247,7 +336,7 @@ async function main() {
       process.stdout.write(`${seconds.toFixed(1)}s of speech, streaming… `);
 
       const before = live.turns();
-      await stream(live.session, pcm);
+      await stream(live.session, pcm, live.markSpeechEnd);
 
       // Wait for the examiner to finish replying, then let usage settle.
       const deadline = Date.now() + 25_000;
@@ -255,11 +344,23 @@ async function main() {
       await wait(750);
 
       const latest = live.snapshots().at(-1);
-      process.stdout.write(
-        live.turns() > before
-          ? `examiner replied (cumulative ${latest?.totalTokens ?? "?"} tok)\n`
-          : "no reply within 25s\n",
-      );
+      const lag = live.latencies().at(-1);
+      if (live.turns() > before) {
+        process.stdout.write(
+          `examiner replied, first audio ${
+            lag?.firstAudioChunkMs === null || lag?.firstAudioChunkMs === undefined
+              ? "?"
+              : `${(lag.firstAudioChunkMs / 1000).toFixed(2)}s`
+          } after last word (cumulative ${latest?.totalTokens ?? "?"} tok)\n`,
+        );
+      } else {
+        // A reply may still arrive after this line is printed. Stop attributing
+        // until it has flushed through, or the straggler's audio would be
+        // recorded as the NEXT turn's latency and poison the very number this
+        // script exists to produce.
+        live.abandonTurn();
+        process.stdout.write("no reply within 25s\n");
+      }
     }
   } finally {
     live.session.close();
@@ -299,6 +400,25 @@ async function main() {
   const costPerMinute =
     (perMinuteIn * GEMINI_LIVE_AUDIO.input + perMinuteOut * GEMINI_LIVE_AUDIO.output) / 1_000_000;
 
+  // The reply-latency decomposition (#100). The VAD window is read off the same
+  // config object the session was opened with, so if the tuning moves this
+  // report moves with it. Everything above that floor is the model's time to
+  // first audio plus the network — the part no VAD tuning can touch.
+  const vadSilenceMs =
+    liveConfig.realtimeInputConfig?.automaticActivityDetection?.silenceDurationMs ?? null;
+  const latencies = live.latencies();
+  const firstAudioSamples = latencies
+    .map((l) => l.firstAudioChunkMs)
+    .filter((v): v is number => v !== null)
+    .sort((a, b) => a - b);
+  // The LOWER median for even counts, on purpose: at four or six samples an
+  // observed latency is worth more than an interpolated one, and the direction
+  // it errs in flatters the OLD tuning, never the change being argued for.
+  const medianFirstAudioMs =
+    firstAudioSamples.length === 0
+      ? null
+      : firstAudioSamples[Math.floor((firstAudioSamples.length - 1) / 2)];
+
   const record = {
     measuredAt: new Date().toISOString(),
     model: LIVE_MODEL,
@@ -309,6 +429,8 @@ async function main() {
     candidateAudioSecondsSent: audioSecondsSent,
     examinerAudioChunks: live.examinerAudioChunks(),
     examinerTranscript: live.examinerText(),
+    turnLatencies: latencies,
+    vadSilenceDurationMs: vadSilenceMs,
     usageIsCumulative: cumulative,
     totalPromptTokens: totalPrompt,
     totalResponseTokens: totalResponse,
@@ -316,6 +438,11 @@ async function main() {
     responseByModality: last.responseByModality,
     snapshots,
     derived: {
+      medianFirstAudioChunkMs: medianFirstAudioMs,
+      medianModelAndNetworkMs:
+        medianFirstAudioMs !== null && vadSilenceMs !== null
+          ? medianFirstAudioMs - vadSilenceMs
+          : null,
       promptTokensPerMinute: perMinuteIn,
       responseTokensPerMinute: perMinuteOut,
       costPerMinuteUsd: costPerMinute,
@@ -332,8 +459,20 @@ async function main() {
   const outPath = join(outDir, `live-${record.measuredAt.replace(/[:.]/g, "-")}.json`);
   writeFileSync(outPath, `${JSON.stringify(record, null, 2)}\n`, "utf8");
 
+  const latencyLines =
+    medianFirstAudioMs === null
+      ? "  reply latency            no examiner audio observed"
+      : `  reply latency            ${(medianFirstAudioMs / 1000).toFixed(2)}s median from last word to first audio chunk
+                           (${firstAudioSamples.map((v) => (v / 1000).toFixed(2)).join("s, ")}s across turns)${
+                             vadSilenceMs === null
+                               ? ""
+                               : `
+                           of which ${(vadSilenceMs / 1000).toFixed(2)}s is the VAD end-of-speech window, ${((medianFirstAudioMs - vadSilenceMs) / 1000).toFixed(2)}s model+network`
+                           }`;
+
   console.log(`
   conversation             ${conversationSeconds.toFixed(1)}s, ${live.turns()} examiner turns
+${latencyLines}
   usage reporting          ${cumulative ? "cumulative (running session total)" : "per-message"}
   prompt tokens            ${totalPrompt} (${perMinuteIn.toFixed(0)}/min)  ${JSON.stringify(last.promptByModality)}
   response tokens          ${totalResponse} (${perMinuteOut.toFixed(0)}/min) ${JSON.stringify(last.responseByModality)}
