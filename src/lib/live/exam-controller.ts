@@ -378,24 +378,58 @@ const CAPTURE_STALL_MS = 4_000;
  * nothing is well past any pause for thought while still being a silence the
  * candidate is living through.
  *
- * It is also the spacing between two nudges, not only the delay before the
- * first: every nudge re-anchors the window, and the window does not run while
- * the examiner is audible, so consecutive nudges are ten seconds of SILENCE
- * apart rather than ten seconds apart on the clock.
+ * Ten seconds buys the FIRST step of a silence — « Vous m'entendez ? ». Every
+ * step after it waits {@link SILENCE_STEP_MS}, which is longer, because by then
+ * the candidate has been spoken to and is owed room to answer.
  */
 const SILENCE_NUDGE_MS = 10_000;
 
 /**
- * How many times one débat may ask whether the candidate is still there.
+ * How long each step after the first waits.
  *
- * The relance is the épreuve doing its job and is not rationed — that is what
- * #101 makes true in the code rather than only here. This is the technical
- * check, and a candidate who has genuinely frozen — or walked out — must not be
- * asked five times whether they can hear. It stays rationed for the reason it
- * always was: « Vous m'entendez ? » is the app admitting it suspects a broken
- * connection, and repeating it teaches the candidate nothing about the sujet.
+ * Longer than the ten seconds before « Vous m'entendez ? », and deliberately:
+ * the first step asks a four-word question that is answered in one, while the
+ * second repeats the examiner's question and the ones after it ask a new one —
+ * things a candidate needs a moment to think about. Fifteen seconds of silence
+ * after being spoken to is unambiguous, and it keeps a walked-out sitting to one
+ * intervention every twenty-odd seconds rather than one every twelve.
+ *
+ * Measured in SILENCE, like the first: the window does not run while the
+ * examiner is audible, so this is fifteen seconds after the nudge was heard, not
+ * fifteen seconds after it was sent.
  */
-const MAX_PRESENCE_CHECKS = 2;
+const SILENCE_STEP_MS = 15_000;
+
+/**
+ * How much of an interval has to carry speech before the candidate counts as
+ * speaking through it.
+ *
+ * The reason a real sitting could go thirty seconds in silence and hear nothing
+ * back. This used to be any growth at all in the recorder's voiced total, which
+ * is 40 ms — ONE frame — against a window of ten thousand. A cough, a chair, a
+ * keyboard, a fan crossing −34 dBFS once every few seconds: each of them reset
+ * the whole countdown, and in a room that is never perfectly quiet the countdown
+ * never finished. The measure was built to answer "did the candidate speak at
+ * all in this phase?" (`audio/voice-activity.ts`), where a single loud frame
+ * costs nothing; read as "are they speaking right now?" it had no floor.
+ *
+ * So a tick counts as speech when at least this much of it was voiced. At the
+ * 250 ms tick that is 100 ms — two and a half frames — which a click cannot
+ * reach and a syllable comfortably does.
+ */
+const VOICED_SPEECH_RATIO = 0.4;
+
+/**
+ * How long an armed watch may say nothing at all before it explains itself.
+ *
+ * A silence that is being held open by one of the guards above produces no
+ * nudge and no log line, which is exactly the report this got: "thirty seconds
+ * and the examiner said nothing". The guards are individually right and
+ * invisible together, so once the watch has been armed for three steps without
+ * having spoken, it says once what has been holding it. Diagnostics only —
+ * nothing branches on it.
+ */
+const SILENCE_HELD_REPORT_MS = 3 * SILENCE_STEP_MS;
 
 /**
  * How often the débat tells the examiner how much of it is left (#85).
@@ -557,17 +591,31 @@ export class ExamController {
    * `silenceNudges` counts from the candidate's last answer, NOT from the
    * window. It has to: each nudge makes the examiner speak, and that turn
    * completing re-arms the window, so the count is what tells the third nudge of
-   * one silence from the first nudge of the next one. What it no longer does is
-   * end the escalation — #101 — so a silence that goes on being a silence goes
-   * on being answered. `presenceChecks` is the one thing still rationed, and it
-   * counts across the whole débat rather than across one silence.
+   * one silence from the first nudge of the next one, and what decides which of
+   * the three things gets said. What it no longer does is end the escalation —
+   * #101 — so a silence that goes on being a silence goes on being answered.
+   *
+   * `silenceArmedAt` is the same moment as `silenceSince` on the tick the watch
+   * is armed and is NOT re-anchored afterwards, which is what lets the watch
+   * notice that it has been armed for a long time and said nothing.
    */
   private silenceSince: number | null = null;
+  private silenceArmedAt: number | null = null;
   private silenceNudges = 0;
+  /** How many silences of this débat have opened with « Vous m'entendez ? ».
+   *  A tally for the log rather than a ration: the check is the first step of a
+   *  silence and there is only ever one of it per silence, so what bounds it is
+   *  how often the candidate stops answering. */
   private presenceChecks = 0;
-  /** The voiced total the watch last saw, so growth in it reads as "the
-   *  candidate is speaking right now" — the aggregate alone cannot. */
+  /** Why the window kept being re-anchored, counted per armed watch, and
+   *  whether that has been reported. See {@link SILENCE_HELD_REPORT_MS}. */
+  private silenceHolds: Record<string, number> = {};
+  private silenceHeldReported = false;
+  /** The voiced total the watch last saw and when it saw it, so growth in it can
+   *  be read as a RATE — the aggregate alone cannot say who is speaking now, and
+   *  a single voiced frame is not somebody answering. */
   private lastVoicedSeconds = 0;
+  private lastVoicedAt: number | null = null;
 
   /**
    * The next thing the examiner says is a new turn, not more of the last one
@@ -1283,8 +1331,64 @@ export class ExamController {
    */
   private armSilenceWatch(): void {
     if (this.phase !== "debate") return;
-    this.silenceSince = this.now();
+    const now = this.now();
+    this.silenceSince = now;
+    this.silenceArmedAt = now;
+    this.silenceHolds = {};
+    this.silenceHeldReported = false;
+    this.resetVoicedBaseline(now);
+  }
+
+  /** Start measuring voiced audio again from here. Called wherever the watch
+   *  declines to read a stretch of it — the examiner's own voice comes back
+   *  through the microphone, and a reconnect's backlog arrives all at once. */
+  private resetVoicedBaseline(now: number): void {
     this.lastVoicedSeconds = this.recorder?.voicedSeconds("debate") ?? 0;
+    this.lastVoicedAt = now;
+  }
+
+  /**
+   * Whether the microphone has been carrying speech since the last look.
+   *
+   * A rate, not a change. The recorder's voiced total was built to answer "did
+   * the candidate speak at all in this phase?" and one 40 ms frame moves it; the
+   * question here is whether somebody is speaking *now*, and treating any
+   * movement as an answer is what let a room with a fan in it hold the window
+   * open indefinitely. See {@link VOICED_SPEECH_RATIO}.
+   *
+   * Reads and re-baselines in one call, so the interval is always "since the
+   * last time anybody asked" and two callers cannot disagree about it.
+   */
+  private candidateIsSpeaking(now: number): boolean {
+    const voiced = this.recorder?.voicedSeconds("debate") ?? 0;
+    const grew = voiced - this.lastVoicedSeconds;
+    const since = this.lastVoicedAt;
+    this.lastVoicedSeconds = voiced;
+    this.lastVoicedAt = now;
+    if (since === null) return false;
+    const elapsed = (now - since) / 1000;
+    if (elapsed <= 0) return false;
+    return grew >= elapsed * VOICED_SPEECH_RATIO;
+  }
+
+  /**
+   * Note that the window was held open, and say so if it has been held for long
+   * enough that the candidate is entitled to wonder why nothing is happening.
+   *
+   * Once per armed watch, with every reason and its count, because the reasons
+   * compound: an examiner still audible and a socket that keeps dropping look
+   * identical from the candidate's chair, and neither leaves a trace of its own.
+   */
+  private holdSilenceWatch(reason: string, now: number): void {
+    this.silenceHolds[reason] = (this.silenceHolds[reason] ?? 0) + 1;
+    this.silenceSince = now;
+    if (this.silenceHeldReported || this.silenceArmedAt === null) return;
+    if (now - this.silenceArmedAt < SILENCE_HELD_REPORT_MS) return;
+    this.silenceHeldReported = true;
+    this.log("silence-watch-held", {
+      armedForSeconds: Math.round((now - this.silenceArmedAt) / 1000),
+      ...this.silenceHolds,
+    });
   }
 
   /**
@@ -1312,32 +1416,34 @@ export class ExamController {
    * given the floor. It is not choosing to wait, it has not been asked anything
    * — which is why this is the controller's problem and not the prompt's.
    *
-   * **What counts as "still nothing".** Recent voiced audio, plus any
-   * transcription fragment. The transcript alone would be the wrong signal:
-   * Gemini emits `onCandidateTranscript` on its own schedule, so a candidate two
-   * seconds into an answer may have produced no text yet and a relance fired
-   * then talks over them. The voiced measure is the recorder's own
-   * (`audio/voice-activity.ts`) and is read here as growth per tick rather than
-   * as the per-phase aggregate it was built for, which is what turns "did they
-   * speak at all" into "are they speaking now".
+   * **What counts as "still nothing".** A transcription fragment is an answer,
+   * and so is a stretch of voiced audio — but a stretch, not a frame. The
+   * transcript alone would be the wrong signal, since Gemini emits
+   * `onCandidateTranscript` on its own schedule and a candidate two seconds into
+   * an answer may have produced no text yet. The voiced measure is the
+   * recorder's own (`audio/voice-activity.ts`), read here as a RATE:
+   * {@link candidateIsSpeaking}, and {@link VOICED_SPEECH_RATIO} for the sitting
+   * that went thirty seconds in silence and heard nothing back because a room is
+   * never perfectly quiet.
    *
-   * **The escalation comes round again (#101).** A relance on the substance
-   * first, because that is the épreuve doing its job; a fixed « Vous m'entendez ? »
-   * as the second nudge of a silence, because by then the likely fault is
-   * technical; and then relances again, one per window, for as long as the
-   * silence lasts. It used to stop there, on the argument that anything else is
-   * badgering someone who has frozen or left — which is true of the technical
-   * check, and that one is still rationed to {@link MAX_PRESENCE_CHECKS} for the
-   * whole débat. It is not true of the relance: a candidate who is late twice in
-   * a débat was being helped once, and an examiner in the room asks again.
+   * **Three steps, and the last one repeats (#101).** Ten seconds of nothing
+   * earns « Vous m'entendez ? », because at that point the likeliest reasons are
+   * a candidate who heard nothing and a candidate who is lost, and four plain
+   * words serve both. Fifteen seconds after that, the examiner's question again.
+   * Fifteen seconds after that, a new and simpler one, and so on for as long as
+   * the silence lasts. It used to stop after two steps, on the argument that
+   * anything else is badgering someone who has frozen or left; a candidate who
+   * is late twice in a débat was then being helped once, and an examiner in the
+   * room asks again.
    *
    * What bounds it is the window rather than a counter. A nudge only goes out
-   * after ten seconds in which the examiner was not speaking, the announcement
-   * was not playing, the socket was up and no voiced audio arrived — so the
-   * spacing is ten seconds of real silence plus however long the examiner's own
-   * nudge took to say. What it costs, in the sitting where the candidate has
-   * walked out, is a model turn every fifteen-odd seconds into an empty room; the
-   * `attempt` on each logged relance is what makes that visible afterwards.
+   * after a whole step in which the examiner was not speaking, the consigne was
+   * not playing, the socket was up and nobody was speaking into the microphone —
+   * so the spacing is fifteen seconds of real silence plus however long the
+   * examiner's own nudge took to say. What it costs, in the sitting where the
+   * candidate has walked out, is a model turn every twenty-odd seconds into an
+   * empty room; the `attempt` on each logged relance is what makes that visible
+   * afterwards.
    *
    * **What it declines to notice.** A microphone that has stalled or gone away
    * produces no voiced audio either, and the candidate can see why on screen
@@ -1350,8 +1456,7 @@ export class ExamController {
     if (this.silenceSince === null) return;
     if (this.phase !== "debate" || this.closing || this.devTextMode) return;
 
-    const recorder = this.recorder;
-    if (!recorder || this.captureLost || this.captureStalled) return;
+    if (!this.recorder || this.captureLost || this.captureStalled) return;
 
     const now = this.now();
 
@@ -1361,7 +1466,10 @@ export class ExamController {
     // generates a turn faster than it is heard, so this window is several
     // seconds wide on every single turn.
     if (this.examinerSpeaking || this.announcementPlaying) {
-      this.silenceSince = now;
+      // The microphone is hearing the examiner through the speakers while this
+      // is true, so the voiced baseline restarts with the window.
+      this.resetVoicedBaseline(now);
+      this.holdSilenceWatch("examiner-speaking", now);
       return;
     }
 
@@ -1375,18 +1483,19 @@ export class ExamController {
     // socket comes back the ten seconds start again, because a relance should
     // follow a question the candidate actually heard.
     if (this.connection !== "connected") {
-      this.silenceSince = now;
+      this.resetVoicedBaseline(now);
+      this.holdSilenceWatch("not-connected", now);
       return;
     }
 
-    const voiced = recorder.voicedSeconds("debate");
-    if (voiced > this.lastVoicedSeconds) {
-      this.lastVoicedSeconds = voiced;
-      this.silenceSince = now;
+    if (this.candidateIsSpeaking(now)) {
+      this.holdSilenceWatch("candidate-speaking", now);
       return;
     }
 
-    if (now - this.silenceSince < SILENCE_NUDGE_MS) return;
+    // Ten seconds before the first step, fifteen before every one after it.
+    const due = this.silenceNudges === 0 ? SILENCE_NUDGE_MS : SILENCE_STEP_MS;
+    if (now - this.silenceSince < due) return;
 
     const nudge = (this.silenceNudges += 1);
     // Re-anchored rather than closed, and now on every step rather than only on
@@ -1401,27 +1510,29 @@ export class ExamController {
     // to keep meaning that.
     this.silenceSince = now;
 
-    // The technical check is the SECOND nudge of a silence and only ever that
-    // one. First because a candidate who has simply lost the thread deserves the
-    // question again before being asked about their equipment; second rather
-    // than last because after two unanswered nudges the fault is likelier to be
-    // the connection than the question, and there is no point asking it later
-    // when the answer would have arrived by then anyway.
-    if (nudge === 2 && this.presenceChecks < MAX_PRESENCE_CHECKS) {
+    // FIRST, at ten seconds: « Vous m'entendez ? ». Ten seconds of nothing after
+    // a question is as likely to be a candidate who heard nothing as one who has
+    // nothing to say, and four words that plainly ask about the connection are
+    // answerable by someone who is lost as well as by someone who is cut off.
+    // Once per silence and once only: the steps after it are the épreuve's, and
+    // an app that asked about the equipment twice would be talking about itself.
+    if (nudge === 1) {
       this.presenceChecks += 1;
-      this.log("silence-presence-check", { of: MAX_PRESENCE_CHECKS });
+      this.log("silence-presence-check", { inDebate: this.presenceChecks });
       this.sendControllerDirective("silence-presence-check", presenceCheckInstruction());
       return;
     }
 
-    // Everything else is a relance, including the fifth one. The attempt travels
-    // into the instruction, which stops asking for a rephrasing after the first
-    // (`silenceRelanceInstruction`), and into the log, so a sitting where the
-    // examiner had to prompt seven times says so — that used to be one
-    // `silence-unanswered` line written as the escalation gave up, and there is
-    // no giving up to write now.
-    this.log("silence-relance", { attempt: nudge });
-    this.sendControllerDirective("silence-relance", silenceRelanceInstruction(nudge));
+    // THEN the question again, and after that a new one, every fifteen seconds
+    // for as long as the silence lasts. The attempt travels into the instruction
+    // — the second nudge repeats the question, the ones after it stop asking for
+    // a rephrasing and ask something simpler (`silenceRelanceInstruction`) — and
+    // into the log, so a sitting where the examiner had to prompt seven times
+    // says so. That used to be one `silence-unanswered` line written as the
+    // escalation gave up, and there is no giving up to write now.
+    const attempt = nudge - 1;
+    this.log("silence-relance", { attempt });
+    this.sendControllerDirective("silence-relance", silenceRelanceInstruction(attempt));
   }
 
   /**

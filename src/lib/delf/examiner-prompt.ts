@@ -194,8 +194,13 @@ export function silenceRelanceInstruction(attempt = 1): string {
  * part of the débat and invite an answer about the subject; four words that
  * plainly ask about the connection do not.
  *
- * Sent at most twice in a débat, and never twice without an answer in between:
- * a candidate who has genuinely frozen must not be asked five times.
+ * **It opens the silence rather than closing it** (#101). Ten seconds after a
+ * question that got nothing, the two likeliest explanations are a candidate who
+ * heard nothing and a candidate who is lost, and this serves both: it is
+ * answerable by « oui » from someone who is merely thinking, and it is the only
+ * thing worth saying to someone whose audio has died. The steps after it belong
+ * to the épreuve — the question again, then a simpler one — so this is said once
+ * per silence and never twice in a row.
  */
 export function presenceCheckInstruction(): string {
   return "[Le candidat n'a toujours rien répondu. Dis exactement ceci, mot pour mot, et rien d'autre : « Vous m'entendez ? »]";
