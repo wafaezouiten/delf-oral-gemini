@@ -208,15 +208,19 @@ export function PassationScreen({
 
       <main className="relative flex min-h-0 flex-1 flex-col">
         {/* One column for both phases, and it scrolls — except during the débat
-            from `lg` up, where it locks and the exchange scrolls inside itself
-            instead (#88). PORT NOTE: the pair is the reference's,
+            on a screen with room, where it locks and the exchange scrolls inside
+            itself instead (#88). PORT NOTE: the pair is the reference's,
             `components/po/po-preparation-screen.tsx:77` and
             `po-briefing-screen.tsx:196` — `overflow-y-auto … lg:overflow-hidden`
             on the frame, `lg:min-h-0 lg:overflow-y-auto` on the panel that owns
-            the scrolling. It buys the thing #88 asked for: the sujet's line and
-            the two protagonists are `shrink-0`, so from `lg` up they hold still
-            and the head keeps answering « whose turn is it » however long the
-            exchange gets.
+            the scrolling. `roomy` is that `lg` with a height added; globals.css
+            says why, and the short version is that the reference locks cards
+            while this locks a conversation that grows.
+
+            It buys the thing #88 asked for: the sujet's line and the two
+            protagonists are `shrink-0`, so where the frame is locked they hold
+            still and the head keeps answering « whose turn is it » however long
+            the exchange gets.
 
             The exposé is left out of the lock rather than forgotten. Its column
             is a document beside a plan — there is no one panel that should own
@@ -228,7 +232,7 @@ export function PassationScreen({
             // The exposé carries two columns and needs the room for them; the
             // débat is one column, and a document set in a wider measure than
             // this is harder to read, not easier.
-            phase === "monologue" ? "max-w-[64rem]" : "max-w-[47.5rem] lg:overflow-hidden",
+            phase === "monologue" ? "max-w-[64rem]" : "max-w-[47.5rem] roomy:overflow-hidden",
           )}
         >
           {/* `shrink-0` because the débat's column no longer grows to fit its

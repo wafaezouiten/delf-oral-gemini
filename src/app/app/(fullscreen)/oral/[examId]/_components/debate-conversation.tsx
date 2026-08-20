@@ -41,26 +41,33 @@ import {
  * enough to need them. A second scrollbar is the smaller loss, so the head is
  * pinned and the exchange scrolls under it.
  *
- * The letterbox is answered by height and by width, and neither number was
- * invented here. PORT NOTE: `components/po/po-preparation-screen.tsx:77` and
- * `po-briefing-screen.tsx:196` — the reference locks its frame and hands each
- * panel its own scroller at `lg`, and lets the whole page scroll below it
+ * The letterbox is answered by giving the box a screen big enough for it, and
+ * the arrangement is not one invented here. PORT NOTE:
+ * `components/po/po-preparation-screen.tsx:77` and `po-briefing-screen.tsx:196`
+ * — the reference locks its frame and hands each panel its own scroller
  * (`overflow-y-auto … lg:overflow-hidden`, then `lg:min-h-0 lg:overflow-y-auto`
- * on the panels). This screen now does exactly that: from `lg` up the head is
- * pinned and the exchange takes the pixels the screen has left, which is a good
- * deal more than the 20rem the #48 version was squeezed into; below it the
- * column scrolls as one document and the head goes with it, which is the #48
- * arrangement and the honest answer for a phone — a pinned head, a control bar
- * and a footer over three lines of exchange is not worth its room.
+ * on the panels), and lets the whole page scroll otherwise. This screen does
+ * exactly that, under the `roomy:` variant: where the viewport can afford it the
+ * head is pinned and the exchange takes the pixels the screen has left — a good
+ * deal more than the 20rem the #48 version was squeezed into — and where it
+ * cannot, the column scrolls as one document and the head goes with it, which is
+ * the #48 arrangement and the honest answer on a phone or a short laptop.
+ *
+ * `roomy` is the reference's `lg` with a height added, and the height is this
+ * project's own: see globals.css, which carries the measurements. The short
+ * version is that the reference locks static cards, this locks a conversation
+ * that grows for five minutes, and a locked frame on a 620px screen leaves it
+ * six lines — the letterbox again, arrived at from the other side.
  *
  * So *which* box scrolls is a media query's business, and this panel asks the
- * DOM rather than repeating the breakpoint in JavaScript: `scrollerFrom` starts
- * at the feed and walks up until something has `overflow-y`, which is the feed
- * itself at `lg` and the screen's column below it. The autoscroll drives
- * whichever it is — following the newest turn while the candidate is at the
- * bottom, holding still the moment they scroll up to re-read an objection.
+ * DOM rather than repeating the query in JavaScript: `scrollerFrom` starts at
+ * the feed and walks up until something has `overflow-y`, which is the feed
+ * itself where the frame is locked and the screen's column everywhere else. The
+ * autoscroll drives whichever it is — following the newest turn while the
+ * candidate is at the bottom, holding still the moment they scroll up to re-read
+ * an objection.
  *
- * « Reprendre le fil » belongs to the pinned arrangement only. When the page is
+ * « Reprendre le fil » belongs to the locked arrangement only. When the page is
  * the scroller, scrolling back down is the same gesture as scrolling anything
  * else and needs no button; when the exchange is a box under a fixed head, a
  * candidate who has scrolled up in it has no other cue that it has moved on.
@@ -116,9 +123,9 @@ export function DebateConversation({
   /**
    * The two facts that do render, so they are state and the position is not.
    *
-   * `owns` is whether the feed is the scroller — true from `lg` up, where the
-   * screen's frame is locked and this panel takes its own — and `held` whether
-   * that scroller has been left behind. « Reprendre le fil » needs both, and
+   * `owns` is whether the feed is the scroller — true where the screen's frame
+   * is locked and this panel takes its own — and `held` whether that scroller
+   * has been left behind. « Reprendre le fil » needs both, and
    * needs a render to appear. Set from booleans rather than from the raw
    * position on purpose: they change when the arrangement changes and when the
    * candidate scrolls back and forth, not once a frame, and React drops a
@@ -139,8 +146,9 @@ export function DebateConversation({
     setHeld(false);
   }, [pin]);
 
-  // Which box scrolls is decided in CSS and can change under the candidate —
-  // a rotated phone crosses `lg` mid-épreuve — so the listener follows it.
+  // Which box scrolls is decided in CSS and can change under the candidate — a
+  // rotated phone crosses `roomy` mid-épreuve, and so does a laptop growing a
+  // toolbar — so the listener follows it.
   useEffect(() => {
     let bound: HTMLElement | null = null;
     const onScroll = () => {
@@ -190,29 +198,29 @@ export function DebateConversation({
   }, [pin, owns, turns.length, lastTurn?.text.length]);
 
   return (
-    // Every `lg:` here is one half of the reference's pair, and neither half
-    // works alone: the screen's column is `lg:overflow-hidden`, so from `lg` up
-    // this panel is the only thing left that can scroll and must be allowed to
-    // be shorter than the exchange (`lg:min-h-0`, the #35 failure again). Below
-    // `lg` the whole set reverts — the panel is as tall as its turns and the
-    // column scrolls it, exactly as it did before #88.
-    <div className="border-border bg-card flex flex-1 flex-col rounded-lg border lg:min-h-0">
+    // Every `roomy:` here is one half of the reference's pair, and neither half
+    // works alone: the screen's column is `roomy:overflow-hidden`, so where that
+    // holds this panel is the only thing left that can scroll and must be
+    // allowed to be shorter than the exchange (`roomy:min-h-0`, the #35 failure
+    // again). Everywhere else the whole set reverts — the panel is as tall as
+    // its turns and the column scrolls it, exactly as it did before #88.
+    <div className="border-border bg-card roomy:min-h-0 flex flex-1 flex-col rounded-lg border">
       <div className="border-border shrink-0 border-b px-4 py-2">
         <Kicker>{DEBATE_CONVERSATION_COPY.title}</Kicker>
       </div>
 
-      <div className="relative flex flex-1 flex-col lg:min-h-0">
+      <div className="roomy:min-h-0 relative flex flex-1 flex-col">
         {/* Focusable where it scrolls, and named because it is. A box that
             scrolls and cannot be reached from the keyboard is content a keyboard
-            user cannot read at all. Below `lg` it is not a box and not a
-            scroller, and a tab stop that does nothing is worse than none — the
-            page's own keys already move the exchange there. */}
+            user cannot read at all. Where the frame is not locked this is not a
+            box and not a scroller, and a tab stop that does nothing is worse
+            than none — the page's own keys already move the exchange there. */}
         <div
           ref={feed}
           role="region"
           aria-label={DEBATE_CONVERSATION_COPY.title}
           tabIndex={owns ? 0 : undefined}
-          className="space-y-3 px-4 py-3.5 lg:min-h-0 lg:flex-1 lg:overflow-y-auto"
+          className="roomy:min-h-0 roomy:flex-1 roomy:overflow-y-auto space-y-3 px-4 py-3.5"
         >
           {turns.length === 0 ? (
             <div className="text-muted-foreground space-y-1.5 text-xs leading-relaxed">
@@ -268,7 +276,8 @@ export function DebateConversation({
             to have to scroll to. It exists only while this panel owns the
             scroller and has been left behind — it is not a control the candidate
             is looking for, it is the way back to the one thing they stopped
-            being shown, and below `lg` that way back is the page's own. */}
+            being shown, and on an unlocked frame that way back is the page's
+            own scrollbar. */}
         {owns && held && (
           <button
             type="button"
@@ -288,15 +297,16 @@ export function DebateConversation({
 }
 
 /**
- * The box the exchange actually scrolls in: this feed from `lg` up, the screen's
- * column below it.
+ * The box the exchange actually scrolls in: this feed where the frame is locked,
+ * the screen's column everywhere else.
  *
  * Asked of the DOM rather than of `matchMedia`, and starting at the feed itself
  * rather than at its parent — that one difference from the #48 version of this
  * helper is what lets the same walk answer both arrangements. The check is
- * `overflow-y`, so the breakpoint stays written once, in the class list, where
- * the layout it decides is also written. A `matchMedia("(min-width: 64rem)")`
- * here would be Tailwind's `lg` copied into JavaScript, free to drift from it.
+ * `overflow-y`, so the media query stays written once, in globals.css beside the
+ * measurements that chose it. Repeating `(min-width: 64rem) and
+ * (min-height: 42rem)` here would be two numbers free to drift from the ones
+ * that actually lay the screen out.
  */
 function scrollerFrom(from: HTMLElement | null): HTMLElement | null {
   let node = from;

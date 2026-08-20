@@ -169,6 +169,36 @@
   --font-serif: var(--font-spectral);
 }
 
+/**
+ * `roomy:` — the viewport can afford a frame that does not scroll.
+ *
+ * A screen with a locked frame gives its fixed parts the top of the viewport and
+ * lets one panel scroll underneath. That is the reference's arrangement, and it
+ * is gated there on width alone: `lg:overflow-hidden` on the frame,
+ * `lg:min-h-0 lg:overflow-y-auto` on the panel that scrolls
+ * (`components/po/po-preparation-screen.tsx:77`, `po-briefing-screen.tsx:196`).
+ *
+ * The width half is reproduced as it stands. The height half is this project's,
+ * and the débat is why (#88): the reference's locked panels are static cards
+ * that fit or do not, while the débat's is a conversation that grows for five
+ * minutes, so a frame locked on a short screen leaves it reading itself through
+ * a letterbox — exactly the objection that had the panel's own scrollbar removed
+ * in the first place. Measured on that screen: the exchange gets the viewport
+ * less about 491px of chrome, so at 1366×620 a locked frame leaves it 129px,
+ * about six lines, and at 1280×500 a single line.
+ *
+ * 42rem is where that stops: the shortest viewport on which locking still leaves
+ * the scrolling panel around 11rem, which is the height that made a box worth
+ * having. Under it the frame unlocks, the page scrolls as one document and
+ * whatever was pinned scrolls away with it — the honest trade, since a head
+ * pinned over four lines is not worth its room.
+ *
+ * Both halves in one variant because both halves have to agree: the frame and
+ * the panel inside it must lock and unlock together, or the screen ends up with
+ * two scrollbars and the letterbox anyway.
+ */
+@custom-variant roomy (@media (min-width: 64rem) and (min-height: 42rem));
+
 body {
   background: var(--background);
   color: var(--foreground);
