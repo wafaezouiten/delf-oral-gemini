@@ -2500,8 +2500,9 @@ describe("breaking a silence in the débat (#84, #101)", () => {
     assert.equal(relances(h).length, 5, "and the question keeps coming back");
     assert.deepEqual(
       events(h, "silence-relance").map((event) => event.detail),
-      [1, 2, 3, 4, 5].map((attempt) => JSON.stringify({ attempt })),
-      "the log counts them, which is what replaced the stand-down it used to record",
+      [1, 2, 3, 4, 5].map((attempt) => JSON.stringify({ attempt, waitedSeconds: 16 })),
+      "the log counts them and says what each one waited through, which is what"
+        + " replaced the stand-down it used to record",
     );
   });
 
@@ -2645,6 +2646,25 @@ describe("breaking a silence in the débat (#84, #101)", () => {
 
     silentStep(h);
     assert.equal(relances(h).length, 1, "with the whole escalation still intact");
+  });
+
+  it("says what a nudge waited through, so a long gap can be read afterwards", async () => {
+    // The report that produced #101's second round was a transcript with fifty
+    // seconds between two examiner turns, and no way to tell which part of it
+    // was the window, which was the question still being spoken, and which was
+    // the model taking its time. The nudge now carries its own arithmetic.
+    const h = harness();
+    await intoSilentDebate(h);
+    const player = h.players[h.players.length - 1];
+
+    player.speak(true);
+    h.advanceClock(20); // the examiner's question is still coming out of the speaker
+    player.speak(false);
+    h.advanceClock(11);
+
+    const detail = events(h, "silence-presence-check")[0]?.detail ?? "";
+    assert.match(detail, /"waitedSeconds":31/, "the whole armed stretch, not just the step");
+    assert.match(detail, /"examiner-speaking":/, "and what held it for the other twenty");
   });
 
   it("says why it has been quiet, once, when something keeps holding the window open", async () => {

@@ -36,6 +36,7 @@ import { DEV_TOOLS_ENABLED } from "@/lib/dev-tools";
 import { ANNOUNCEMENTS, type AnnouncementId } from "@/lib/delf/announcements";
 import {
   canAdvanceEarly,
+  formatClock,
   isPhaseTimeUp,
   monologueWasSilent,
   nextPhase,
@@ -833,20 +834,30 @@ export class ExamController {
   }
 
   private log(name: string, detail?: unknown): void {
+    const at = this.examStart ? this.now() - this.examStart : 0;
+    const printable =
+      detail === undefined
+        ? undefined
+        : typeof detail === "object"
+          ? JSON.stringify(detail)
+          : String(detail);
     this.events = [
       ...this.events.slice(-199),
-      {
-        at: this.examStart ? this.now() - this.examStart : 0,
-        phase: this.phase,
-        name,
-        detail:
-          detail === undefined
-            ? undefined
-            : typeof detail === "object"
-              ? JSON.stringify(detail)
-              : String(detail),
-      },
+      { at, phase: this.phase, name, detail: printable },
     ];
+    // Nothing reads `events` outside this class — not the screen, not the finish
+    // payload — so a sitting that behaved oddly used to leave the person who sat
+    // it with nothing to look at, and a report like "thirty seconds and the
+    // examiner said nothing" could not be checked against anything. Where the
+    // development tooling is on (local, staging, previews — never production,
+    // see `dev-tools.ts`) the same lines go to the console, which is somewhere a
+    // person can actually read them while the épreuve is running.
+    // `window`, because this is for the browser's console and `node --test` also
+    // counts as a development environment: without it the unit suite prints
+    // every event of every simulated sitting.
+    if (DEV_TOOLS_ENABLED && typeof window !== "undefined") {
+      console.info(`[exam ${formatClock(Math.round(at / 1000))}] ${name}`, printable ?? "");
+    }
     this.emit();
   }
 
@@ -1372,6 +1383,22 @@ export class ExamController {
   }
 
   /**
+   * What this nudge waited through, for the log line that announces it.
+   *
+   * `waited` is the whole armed stretch — from the end of the examiner's turn to
+   * this moment — and the step it was due after is the constant. The two differ
+   * by whatever held the window open, and the holds say what that was. It is the
+   * number to look at first when a sitting reports "thirty seconds and nothing":
+   * a wait of eleven seconds means the watch did its job and the delay was
+   * elsewhere (the question is long, the model is slow to answer), while a wait
+   * of forty with `candidate-speaking` beside it means the room was talking.
+   */
+  private waitReport(now: number): Record<string, number> {
+    const waited = this.silenceArmedAt === null ? 0 : Math.round((now - this.silenceArmedAt) / 1000);
+    return { waitedSeconds: waited, ...this.silenceHolds };
+  }
+
+  /**
    * Note that the window was held open, and say so if it has been held for long
    * enough that the candidate is entitled to wonder why nothing is happening.
    *
@@ -1518,7 +1545,7 @@ export class ExamController {
     // an app that asked about the equipment twice would be talking about itself.
     if (nudge === 1) {
       this.presenceChecks += 1;
-      this.log("silence-presence-check", { inDebate: this.presenceChecks });
+      this.log("silence-presence-check", { inDebate: this.presenceChecks, ...this.waitReport(now) });
       this.sendControllerDirective("silence-presence-check", presenceCheckInstruction());
       return;
     }
@@ -1531,7 +1558,7 @@ export class ExamController {
     // says so. That used to be one `silence-unanswered` line written as the
     // escalation gave up, and there is no giving up to write now.
     const attempt = nudge - 1;
-    this.log("silence-relance", { attempt });
+    this.log("silence-relance", { attempt, ...this.waitReport(now) });
     this.sendControllerDirective("silence-relance", silenceRelanceInstruction(attempt));
   }
 
