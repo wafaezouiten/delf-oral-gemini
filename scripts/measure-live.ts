@@ -137,6 +137,11 @@ async function connect(cfg: LiveConnectConfig) {
   const snapshots: UsageSnapshot[] = [];
   const latencies: TurnLatency[] = [];
   let pending: TurnLatency | null = null;
+  // Set when a turn is given up on: a reply may still arrive LATE, and until
+  // that straggler's turnComplete flushes through, nothing is attributed to the
+  // current turn. Better a lost measurement than one that charges the previous
+  // question's answer to the next question's clock.
+  let discardingStraggler = false;
   let speechEndedAtMs = 0;
   let turns = 0;
   let examinerAudioChunks = 0;
@@ -166,7 +171,8 @@ async function connect(cfg: LiveConnectConfig) {
         const content = message.serverContent;
         if (!content) return;
         const sinceSpeechEnd = Date.now() - speechEndedAtMs;
-        if (pending && pending.firstServerContentMs === null) {
+        const attributing = !discardingStraggler;
+        if (attributing && pending && pending.firstServerContentMs === null) {
           // Only the model's own turn counts as a reply — the echo of the
           // candidate's input transcription arriving back is not an answer.
           if (content.modelTurn || content.outputTranscription?.text) {
@@ -176,7 +182,7 @@ async function connect(cfg: LiveConnectConfig) {
         for (const part of content.modelTurn?.parts ?? []) {
           if (part.inlineData?.data) {
             examinerAudioChunks += 1;
-            if (pending && pending.firstAudioChunkMs === null) {
+            if (attributing && pending && pending.firstAudioChunkMs === null) {
               pending.firstAudioChunkMs = sinceSpeechEnd;
             }
           }
@@ -184,7 +190,13 @@ async function connect(cfg: LiveConnectConfig) {
         if (content.outputTranscription?.text) examinerText += content.outputTranscription.text;
         if (content.turnComplete) {
           turns += 1;
-          if (pending) {
+          if (discardingStraggler) {
+            // The straggler has finished; attribution resumes for whatever the
+            // candidate asks next. If this was actually the CURRENT turn's
+            // completion (the abandoned one never answered at all), the current
+            // record is left with nulls — missing, not wrong.
+            discardingStraggler = false;
+          } else if (pending) {
             pending.turnCompleteMs = sinceSpeechEnd;
             pending = null;
           }
@@ -210,6 +222,11 @@ async function connect(cfg: LiveConnectConfig) {
         turnCompleteMs: null,
       };
       latencies.push(pending);
+    },
+    /** The measurer calls this when it stops waiting for a reply. */
+    abandonTurn: () => {
+      pending = null;
+      discardingStraggler = true;
     },
     turns: () => turns,
     examinerAudioChunks: () => examinerAudioChunks,
@@ -328,15 +345,22 @@ async function main() {
 
       const latest = live.snapshots().at(-1);
       const lag = live.latencies().at(-1);
-      process.stdout.write(
-        live.turns() > before
-          ? `examiner replied, first audio ${
-              lag?.firstAudioChunkMs === null || lag?.firstAudioChunkMs === undefined
-                ? "?"
-                : `${(lag.firstAudioChunkMs / 1000).toFixed(2)}s`
-            } after last word (cumulative ${latest?.totalTokens ?? "?"} tok)\n`
-          : "no reply within 25s\n",
-      );
+      if (live.turns() > before) {
+        process.stdout.write(
+          `examiner replied, first audio ${
+            lag?.firstAudioChunkMs === null || lag?.firstAudioChunkMs === undefined
+              ? "?"
+              : `${(lag.firstAudioChunkMs / 1000).toFixed(2)}s`
+          } after last word (cumulative ${latest?.totalTokens ?? "?"} tok)\n`,
+        );
+      } else {
+        // A reply may still arrive after this line is printed. Stop attributing
+        // until it has flushed through, or the straggler's audio would be
+        // recorded as the NEXT turn's latency and poison the very number this
+        // script exists to produce.
+        live.abandonTurn();
+        process.stdout.write("no reply within 25s\n");
+      }
     }
   } finally {
     live.session.close();
@@ -387,6 +411,9 @@ async function main() {
     .map((l) => l.firstAudioChunkMs)
     .filter((v): v is number => v !== null)
     .sort((a, b) => a - b);
+  // The LOWER median for even counts, on purpose: at four or six samples an
+  // observed latency is worth more than an interpolated one, and the direction
+  // it errs in flatters the OLD tuning, never the change being argued for.
   const medianFirstAudioMs =
     firstAudioSamples.length === 0
       ? null

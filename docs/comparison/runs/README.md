@@ -10,7 +10,7 @@ contents rather than their names:
 | Pattern | Produced by | Contains |
 | --- | --- | --- |
 | `<iso-timestamp>.json` | `pnpm compare` | every correction both systems returned for every sitting, including the ones that failed |
-| `live-<iso-timestamp>.json` | `pnpm measure:live` | one real Gemini Live session's `usageMetadata`, turn by turn |
+| `live-<iso-timestamp>.json` | `pnpm measure:live` | one real Gemini Live session's `usageMetadata`, turn by turn, plus per-turn reply latency (#100): `turnLatencies`, the `vadSilenceDurationMs` the session was opened with, and `derived.medianFirstAudioChunkMs` / `derived.medianModelAndNetworkMs` |
 
 Reproducing a run:
 
