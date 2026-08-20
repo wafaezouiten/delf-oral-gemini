@@ -25,6 +25,13 @@ import { formatClock } from "@/lib/delf/phases";
  * the candidate is on is the reason the inner one was deleted, and none of that
  * changed.
  *
+ * **It is pinned, so on a short screen it is smaller (#88).** From `lg` up the
+ * scene and the sujet's line hold still while the exchange scrolls under them,
+ * and every pixel this row takes is a pixel of conversation nobody can see. Under
+ * `compact` (globals.css) the avatars and the padding shrink and nothing else
+ * does: the names, the status lines and the clock are what the row is *for*, and
+ * a cheaper head that no longer says whose turn it is would be no head at all.
+ *
  * **The clock here is elapsed, and that is not a duplicate of the topbar's.**
  * The ring counts down what is left; this counts up what has been used. Two
  * different questions, which is why the reference keeps both, and why printing
@@ -67,7 +74,7 @@ export function ConversationScene({
       : examinerStatus;
 
   return (
-    <div className="border-border bg-card flex shrink-0 items-center gap-3 rounded-lg border p-4 sm:gap-4 sm:px-5">
+    <div className="border-border bg-card compact:py-2 flex shrink-0 items-center gap-3 rounded-lg border p-4 sm:gap-4 sm:px-5">
       <span aria-live="polite" className="sr-only">
         {turnAnnouncement}
       </span>
@@ -136,7 +143,7 @@ function SpeakerFace({
   tone: "examiner" | "candidate";
 }) {
   return (
-    <span className="relative size-11 shrink-0 sm:size-[2.875rem]" aria-hidden>
+    <span className="compact:size-8 relative size-11 shrink-0" aria-hidden>
       {active && (
         <span
           className={cn(
@@ -159,7 +166,7 @@ function SpeakerFace({
               : "bg-muted text-muted-foreground",
         )}
       >
-        <UserIcon className="size-5" />
+        <UserIcon className="compact:size-4 size-5" />
       </span>
     </span>
   );

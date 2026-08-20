@@ -187,17 +187,42 @@
  * less about 491px of chrome, so at 1366×620 a locked frame leaves it 129px,
  * about six lines, and at 1280×500 a single line.
  *
- * 42rem is where that stops: the shortest viewport on which locking still leaves
- * the scrolling panel around 11rem, which is the height that made a box worth
- * having. Under it the frame unlocks, the page scrolls as one document and
- * whatever was pinned scrolls away with it — the honest trade, since a head
- * pinned over four lines is not worth its room.
+ * The height was 42rem — the shortest viewport on which locking still left the
+ * scrolling panel around 11rem — and it is 34rem because that reasoning had the
+ * priority backwards. A laptop is the common case, not the exception: a 1366×768
+ * screen gives a browser about 620px, which is under 42rem, so the arrangement
+ * this was all built for was switching itself off on the machine most candidates
+ * sit at. The panel gets its 11rem there by making the head cheaper (`compact:`,
+ * below) rather than by giving up on pinning it.
+ *
+ * So 34rem is now a floor rather than a preference: under it there is no head
+ * worth pinning at any size, the frame unlocks and the page scrolls as one
+ * document. Between 34 and 42 the frame is locked *and* the head is compact,
+ * which is the case this variant exists to serve.
  *
  * Both halves in one variant because both halves have to agree: the frame and
  * the panel inside it must lock and unlock together, or the screen ends up with
  * two scrollbars and the letterbox anyway.
  */
-@custom-variant roomy (@media (min-width: 64rem) and (min-height: 42rem));
+@custom-variant roomy (@media (min-width: 64rem) and (min-height: 34rem));
+
+/**
+ * `compact:` — the screen is short, so anything pinned to it must cost less.
+ *
+ * The counterpart to `roomy`: that one decides *whether* the frame is locked,
+ * this one decides what the locked parts are allowed to take while it is. A head
+ * that answers « whose turn is it » is worth pinning on a laptop; the same head
+ * at full size is worth about six lines of the conversation it sits over, which
+ * is not a trade anybody would make on purpose.
+ *
+ * What gives: the avatars drop from 2.75rem to 2rem and the padding around them
+ * halves, on the scene and on the sujet's line — about 44px back, which is two
+ * more turns visible. What does not give: the two names, the two status lines
+ * and the clock. They are the only *visible* statement of who holds the floor
+ * and how long is left, and dropping them would leave a pinned head that is
+ * cheaper because it no longer says anything.
+ */
+@custom-variant compact (@media (max-height: 42rem));
 
 body {
   background: var(--background);

@@ -262,7 +262,11 @@ export function PassationScreen({
                   take a third of the viewport to be looked at by nobody, and the
                   exchange is what needs that room. The line stays so the sujet
                   being argued about is still named on screen. */}
-              <section className="border-paper-border bg-paper shrink-0 rounded-lg border px-5 py-4 sm:px-7">
+              {/* `compact:py-2` for the same reason the scene shrinks: this line
+                  is pinned too from `lg` up, and on a laptop its padding is
+                  conversation nobody can see. The title itself does not shrink —
+                  it is one line naming what is being argued about. */}
+              <section className="border-paper-border bg-paper compact:py-2 shrink-0 rounded-lg border px-5 py-4 sm:px-7">
                 {sujetHead}
               </section>
 
