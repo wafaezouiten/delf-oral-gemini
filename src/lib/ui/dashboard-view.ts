@@ -96,6 +96,18 @@ export interface DashboardSitting {
    * to know which is which.
    */
   archivedAt: Date | null;
+  /**
+   * The halves whose recording was kept and can be streamed back (#98), with
+   * the mime type each was measured to be — the player asks the browser
+   * `canPlayType` before offering a control that would only error.
+   *
+   * Like `archivedAt`, nothing in this module reads it: it travels on the row
+   * for the historique, which is the issue's other surface — one row, up to
+   * two players, the monologue and the débat separately. Empty on abandoned
+   * sittings, on sittings from before the vault existed, and on deployments
+   * without one, all of which render exactly as they did before #98.
+   */
+  playable: Array<{ phase: "monologue" | "debate"; mimeType: string }>;
 }
 
 /** The zero an abandoned sitting scores, on every criterion. */

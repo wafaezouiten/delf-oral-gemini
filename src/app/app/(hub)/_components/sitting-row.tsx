@@ -1,5 +1,6 @@
 import Link from "next/link";
 
+import { RecordingPlayer } from "@/app/_components/recording-player";
 import { Tag } from "@/app/_components/po/tag";
 import { ScoreTag } from "@/app/_components/score-band";
 import { COMPETENCY_MAX } from "@/lib/delf/constants";
@@ -16,16 +17,23 @@ import {
  * list and the historique's full one.
  *
  * The two differ only in how much they say — `detailed` turns on the fuller
- * timestamp, the speaking time and the sentence describing what happened — so
- * they are one component rather than two that drift. A score printed one way on
- * the dashboard and another in the history is the kind of difference nobody
- * notices until a candidate asks which one is right.
+ * timestamp, the speaking time, the sentence describing what happened, and the
+ * kept recordings (#98) — so they are one component rather than two that
+ * drift. A score printed one way on the dashboard and another in the history
+ * is the kind of difference nobody notices until a candidate asks which one is
+ * right.
+ *
+ * The players ride `detailed` with the rest: the historique is where the issue
+ * asks for them — one row, the monologue and the débat separately — while the
+ * tableau de bord's short list stays the glanceable summary it is, and its
+ * rows already link to the correction, where the same two players live.
  *
  * An abandoned sitting has no correction to open, so it is not a link. That is
  * deliberate and not an oversight: a `/app/results/:id` for a walk-out would
  * render the "Résultat introuvable" card, which reads as a bug rather than as
  * the truth that there is nothing to show.
  */
+const PLAYER_LABELS = { monologue: "Monologue", debate: "Débat" } as const;
 export function SittingRow({
   sitting,
   detailed = false,
@@ -66,6 +74,27 @@ export function SittingRow({
           {!detailed && sitting.mode === "text" && " · corrigée sans l'audio"}
           {!detailed && abandoned && " · abandonnée"}
         </p>
+
+        {/* The kept recordings, one player per half (#98). Only what exists:
+            a sitting from before the vault, a text-mode sitting or a walk-out
+            has an empty list and keeps the row it always had — no dead
+            controls, no sentence about what is missing in a list this long. */}
+        {detailed && sitting.playable.length > 0 && (
+          <div className="no-print mt-2.5 grid max-w-xl gap-x-4 gap-y-2 sm:grid-cols-2">
+            {sitting.playable.map((recording) => (
+              <div key={recording.phase} className="min-w-0">
+                <p className="text-muted-foreground text-[0.625rem] font-semibold tracking-[0.08em] uppercase">
+                  {PLAYER_LABELS[recording.phase]}
+                </p>
+                <RecordingPlayer
+                  src={`/api/exams/${sitting.examId}/recordings/${recording.phase}`}
+                  mimeType={recording.mimeType}
+                  className="mt-1 h-8 w-full"
+                />
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* The mark and the word, never the tint alone: an abandoned zero and a
