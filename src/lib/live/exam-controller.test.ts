@@ -2346,6 +2346,30 @@ describe("the examiner's opening question", () => {
     );
   });
 
+  it("wakes the speaker from the candidate's own « Enregistrer » click", async () => {
+    // The one guaranteed user gesture at each part's opening. A context the
+    // browser suspended since the monologue may accept a resume from nowhere
+    // else — the stall detector's attempt has no gesture behind it and autoplay
+    // policy can refuse it — and a suspended speaker at the débat's opening is
+    // the unheard first question.
+    const h = harness();
+    h.controller.start();
+    await h.controller.advanceEarly();
+    await pressRecord(h);
+    h.session().candidateSays("Le télétravail a transformé le rapport au bureau.");
+    h.advanceClock(MONOLOGUE_MIN_SECONDS + 10);
+    await h.controller.advanceEarly();
+    h.session().finishTurn(); // the monologue closes; the débat opens armed
+    await settle();
+
+    const player = h.players[h.players.length - 1];
+    const before = player.resumes;
+    h.controller.startSpeaking();
+    await settle();
+
+    assert.equal(player.resumes, before + 1, "the click reached the speaker, not only the mic");
+  });
+
   it("holds the floor for the examiner until the question is delivered", async () => {
     // The scene used to read `examinerSpeaking` alone, which is false for the
     // whole connect-and-generate window — so the débat opened with the

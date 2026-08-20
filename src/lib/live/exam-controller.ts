@@ -1351,7 +1351,17 @@ export class ExamController {
    * is the leak the two devices were bundled together to avoid.
    */
   private async openPlayer(): Promise<boolean> {
-    if (this.player) return true;
+    if (this.player) {
+      // Reused across parts, so entering one must also wake it: the browser
+      // can suspend a context that sat quiet through a seven-minute monologue,
+      // and a suspended speaker at the débat's opening is the unheard first
+      // question (#94). Not awaited — under autoplay policy this promise can
+      // sit unresolved until the candidate's next click, and `advance()` must
+      // not hang on it; the gesture-borne resume in `startSpeaking` is the one
+      // that cannot be refused.
+      void this.player.resume().catch(() => {});
+      return true;
+    }
 
     let player: PlayerLike | null = null;
     try {
@@ -1967,6 +1977,14 @@ export class ExamController {
     if (this.destroyed) return;
 
     const phase = this.phase;
+    // This click is the one user gesture this part is guaranteed, and a
+    // suspended AudioContext may accept a resume from nowhere else: the stall
+    // detector's own attempt (`examinerPlaybackHold`) has no gesture behind it
+    // and autoplay policy can refuse it. `resume()` reaches the context's own
+    // `resume()` synchronously, inside the gesture, which is what makes the
+    // browser honour it — and a speaker that was quietly suspended since the
+    // last part is the unheard first question (#94).
+    void this.player?.resume().catch(() => {});
     this.phaseStart = this.now();
     this.log("phase-started", phase);
     this.emit();
