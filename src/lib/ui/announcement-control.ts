@@ -30,15 +30,16 @@
 
 /**
  * What the control is doing, or `null` when there is nothing to draw — which is
- * every moment except the seconds a consigne is audible or held.
+ * every moment except the seconds a consigne is audible.
  *
- * `held` is the one that is not a button on its own. It means the browser refused
- * to autoplay: nothing is audible, the phase's clock is at its full length,
- * nothing is being recorded and the épreuve is waiting on the candidate. A lone
- * « Passer » there would offer to skip a silence and leave a frozen timer
- * unexplained, so that state keeps a sentence and names both ways out.
+ * There used to be a second mode, `held`: the browser had refused to autoplay
+ * and the phase waited on a click, behind a panel explaining the frozen clock
+ * and offering « Écouter la consigne » / « Commencer sans écouter ». That whole
+ * state is gone on the user's call — a consigne the browser will not play is
+ * forfeited by the controller and the épreuve carries on — so the one thing
+ * this control can be is the « Passer » button, for as long as the voice lasts.
  */
-export type AnnouncementControlMode = "playing" | "held";
+export type AnnouncementControlMode = "playing";
 
 export const ANNOUNCEMENT_COPY = {
   /**
@@ -47,19 +48,6 @@ export const ANNOUNCEMENT_COPY = {
    * control on this screen whose effect outlived the phase it was clicked in.
    */
   skip: "Passer",
-  /** After the browser refused to autoplay: the way to hear it after all. */
-  play: "Écouter la consigne",
-  /**
-   * Shown with the two buttons below, and it has to explain a hold rather than
-   * label a control. The phase genuinely has not started — the clock is at its
-   * full length and nothing is being recorded — and a candidate who is not told
-   * that reads the frozen timer as a bug.
-   */
-  blocked:
-    "Votre navigateur n'a pas autorisé la lecture automatique. L'épreuve attend : écoutez la consigne, ou passez à la suite sans l'écouter.",
-  /** The other way out of a hold. Names what it starts, so it cannot be read as
-   *  the audio-only skip above. */
-  blockedSkip: "Commencer sans écouter",
   /**
    * Said once, politely, while the clip plays.
    *
@@ -71,18 +59,9 @@ export const ANNOUNCEMENT_COPY = {
   speaking: "L'examinateur donne la consigne.",
 } as const;
 
-/**
- * What to draw for the controller's current announcement state.
- *
- * `held` outranks `playing` deliberately: the two flags can both be set for a
- * tick around a refusal, and the state that matters is the one the épreuve is
- * waiting in.
- */
+/** What to draw for the controller's current announcement state. */
 export function announcementControl(state: {
   announcementPlaying: boolean;
-  announcementBlocked: boolean;
 }): AnnouncementControlMode | null {
-  if (state.announcementBlocked) return "held";
-  if (state.announcementPlaying) return "playing";
-  return null;
+  return state.announcementPlaying ? "playing" : null;
 }

@@ -456,29 +456,25 @@ export function ExamClient({
   );
 
   /**
-   * The phase is open but has not begun: the consigne is playing, or is held
-   * waiting for a click the browser's autoplay policy made necessary (#37).
-   *
-   * Derived here rather than added to `ExamState`, because it is exactly the two
-   * flags below in the two phases this branch renders — and the screens it feeds
-   * need it to keep from printing "you are being recorded and your time has
-   * started" over a phase where neither is true yet.
+   * The phase is open but has not begun: the consigne is playing (#37). A
+   * consigne the browser refused to autoplay no longer holds a phase — the
+   * controller forfeits it and moves on — so this is one flag now, kept under
+   * its own name because the screens it feeds read it as a statement about the
+   * phase, not about audio.
    */
-  const awaitingConsigne = state.announcementPlaying || state.announcementBlocked;
+  const awaitingConsigne = state.announcementPlaying;
 
   /**
    * The examiner's spoken consigne, on every screen it can appear on (#37, #59).
    *
    * One element handed to whichever screen is up, rather than each screen
    * building its own: the control has to survive the préparation → monologue
-   * boundary looking like the same control, and the two controller calls behind
-   * it should not be written down twice.
+   * boundary looking like the same control, and the controller call behind it
+   * should not be written down twice.
    */
   const announcement = (
     <AnnouncementControl
       playing={state.announcementPlaying}
-      blocked={state.announcementBlocked}
-      onPlay={() => controller.playAnnouncement()}
       onSkip={() => controller.skipAnnouncement()}
     />
   );
