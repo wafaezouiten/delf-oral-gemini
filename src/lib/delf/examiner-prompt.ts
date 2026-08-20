@@ -170,9 +170,19 @@ export function examinerOpeningLine(phase: "monologue" | "debate"): string | nul
  * The controller decides WHEN this is sent, and it has to: total silence
  * produces no speech-end, so automatic voice-activity detection never gives the
  * model the floor to notice with. See `ExamController`'s silence watch.
+ *
+ * **It is sent more than once now (#101)**, and `attempt` is why this takes an
+ * argument at all. The first relance rephrases the question; a second one that
+ * said the same thing would rephrase its own rephrasing, and a model on a
+ * sliding context window does that until the question is unrecognisable. So
+ * every relance after the first is told to drop the thread and start something
+ * smaller, which is also what an examiner in the room does on the third try.
  */
-export function silenceRelanceInstruction(): string {
-  return "[Le candidat n'a rien répondu depuis plusieurs secondes. Relance-le sur le fond, en une seule phrase : reformule autrement ta dernière question, ou pose une question plus simple et plus précise sur ce qu'il a déjà dit. Ne fais aucune remarque sur son silence, ne lui demande pas s'il a compris, n'évalue pas.]";
+export function silenceRelanceInstruction(attempt = 1): string {
+  if (attempt <= 1) {
+    return "[Le candidat n'a rien répondu depuis plusieurs secondes. Relance-le sur le fond, en une seule phrase : reformule autrement ta dernière question, ou pose une question plus simple et plus précise sur ce qu'il a déjà dit. Ne fais aucune remarque sur son silence, ne lui demande pas s'il a compris, n'évalue pas.]";
+  }
+  return "[Le candidat n'a toujours rien répondu. Abandonne la question précédente : pose une question NOUVELLE et nettement plus simple sur le sujet, en une seule phrase, à laquelle on peut répondre en quelques mots. Ne reformule pas ce que tu viens de dire. Ne fais aucune remarque sur son silence, ne lui demande pas s'il a compris, n'évalue pas.]";
 }
 
 /**

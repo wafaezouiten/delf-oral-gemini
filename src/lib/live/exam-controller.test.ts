@@ -2362,30 +2362,35 @@ describe("breaking a silence in the débat (#84)", () => {
     h.session().finishTurn();
   }
 
+  /** Both wordings, matched on what they have in common: the first relance of a
+   *  silence asks for a rephrasing and the later ones ask for a new, simpler
+   *  question (#101), and both are forbidden to mention the silence. */
   const relances = (h: Harness) =>
-    h.session().directives.filter((text) => text.includes("Relance-le sur le fond"));
+    h.session().directives.filter((text) =>
+      text.includes("Ne fais aucune remarque sur son silence"),
+    );
   const presenceChecks = (h: Harness) =>
     h.session().directives.filter((text) => text.includes("Vous m'entendez"));
   const events = (h: Harness, name: string) =>
     h.controller.getSnapshot().events.filter((event) => event.name === name);
 
-  it("relances after eight seconds of nothing", async () => {
-    const h = harness();
-    await intoSilentDebate(h);
-
-    h.advanceClock(7);
-    assert.deepEqual(relances(h), [], "seven seconds is a candidate thinking");
-
-    h.advanceClock(2);
-    assert.equal(relances(h).length, 1, "nine is a candidate who has not started");
-    assert.equal(events(h, "silence-relance").length, 1, "and the sitting's log says so");
-  });
-
-  it("keeps relancing an unanswered question at eight-second steps, not every tick", async () => {
+  it("relances after ten seconds of nothing", async () => {
     const h = harness();
     await intoSilentDebate(h);
 
     h.advanceClock(9);
+    assert.deepEqual(relances(h), [], "nine seconds is a candidate thinking");
+
+    h.advanceClock(2);
+    assert.equal(relances(h).length, 1, "eleven is a candidate who has not started");
+    assert.equal(events(h, "silence-relance").length, 1, "and the sitting's log says so");
+  });
+
+  it("keeps relancing an unanswered question at ten-second steps, not every tick", async () => {
+    const h = harness();
+    await intoSilentDebate(h);
+
+    h.advanceClock(11);
     h.advanceClock(1);
     h.advanceClock(1);
     assert.equal(relances(h).length, 1, "a directive is not a promise the model will speak");
@@ -2404,7 +2409,7 @@ describe("breaking a silence in the débat (#84)", () => {
     assert.deepEqual(relances(h), [], "the candidate has been listening, not silent");
 
     player.speak(false);
-    h.advanceClock(9);
+    h.advanceClock(11);
     assert.equal(relances(h).length, 1, "the window opens when the speaker runs out");
   });
 
@@ -2412,11 +2417,11 @@ describe("breaking a silence in the débat (#84)", () => {
     const h = harness();
     await intoSilentDebate(h);
 
-    h.advanceClock(4);
+    h.advanceClock(6);
     h.session().candidateSays("Alors, je dirais que");
-    h.advanceClock(5);
+    h.advanceClock(6);
 
-    assert.deepEqual(relances(h), [], "the answer cancelled the window it was four seconds into");
+    assert.deepEqual(relances(h), [], "the answer cancelled the window it was six seconds into");
   });
 
   it("holds the window open on voiced audio alone, before a word is transcribed", async () => {
@@ -2436,13 +2441,13 @@ describe("breaking a silence in the débat (#84)", () => {
     const h = harness();
     await intoSilentDebate(h);
 
-    h.advanceClock(9);
+    h.advanceClock(11);
     // The examiner relances, and that turn ending re-arms the window.
     h.session().finishTurn();
-    h.advanceClock(9);
+    h.advanceClock(11);
 
-    assert.equal(relances(h).length, 1, "the relance is not repeated");
-    assert.equal(presenceChecks(h).length, 1, "the second step is the technical check");
+    assert.equal(relances(h).length, 1, "the second step is not another relance");
+    assert.equal(presenceChecks(h).length, 1, "it is the technical check");
     assert.match(
       presenceChecks(h)[0],
       /mot pour mot/,
@@ -2450,30 +2455,89 @@ describe("breaking a silence in the débat (#84)", () => {
     );
   });
 
-  it("stands down rather than badgering a candidate who has frozen", async () => {
-    // Six examiner turns, each landing in the same silence. The escalation is
-    // two steps and it does not come round again: only an answer restarts it, so
-    // the examiner's own turns cannot.
+  it("goes on relancing a silent candidate, and asks about the connection once (#101)", async () => {
+    // Six examiner turns, each landing in the same silence. The escalation used
+    // to be two steps and then nothing for the rest of the débat; now only the
+    // technical check is spent, and the examiner keeps asking about the sujet.
     const h = harness();
     await intoSilentDebate(h);
 
     for (let step = 0; step < 6; step += 1) {
-      h.advanceClock(9);
+      h.advanceClock(11);
       h.session().finishTurn();
     }
 
-    assert.equal(relances(h).length, 1);
-    assert.equal(presenceChecks(h).length, 1);
+    assert.equal(relances(h).length, 5, "one per window, minus the one spent on the check");
+    assert.equal(presenceChecks(h).length, 1, "and « Vous m'entendez ? » is asked once");
+    assert.deepEqual(
+      events(h, "silence-relance").map((event) => event.detail),
+      [
+        JSON.stringify({ attempt: 1 }),
+        JSON.stringify({ attempt: 3 }),
+        JSON.stringify({ attempt: 4 }),
+        JSON.stringify({ attempt: 5 }),
+        JSON.stringify({ attempt: 6 }),
+      ],
+      "and the log counts them, which is what replaced the stand-down it used to record",
+    );
+  });
+
+  it("stops asking for a rephrasing once the relance is repeating itself", async () => {
+    // A relance that always said "reformule ta dernière question" would have the
+    // model rephrase its own rephrasing, on a context window that is sliding.
+    const h = harness();
+    await intoSilentDebate(h);
+
+    for (let step = 0; step < 3; step += 1) {
+      h.advanceClock(11);
+      h.session().finishTurn();
+    }
+
+    assert.match(relances(h)[0], /reformule autrement ta dernière question/);
+    assert.match(relances(h)[1], /pose une question NOUVELLE/, "the third nudge changes the ask");
+  });
+
+  it("prints the relance as its own turn, not as more of the question (#101)", async () => {
+    // The transcript coalesces consecutive fragments from one speaker, which is
+    // right for the fragments of a sentence and wrong for two interventions ten
+    // seconds apart. Welded, the candidate reads one compound question — on the
+    // live feed while it happens and on the correction afterwards.
+    const h = harness();
+    await intoSilentDebate(h);
+
+    h.advanceClock(11);
+    h.session().examinerSays("Autrement dit :");
+    h.session().examinerSays(" y perd-on des collègues ?");
+
+    const debate = h.controller
+      .getSnapshot()
+      .transcript.filter((entry) => entry.phase === "debate" && entry.speaker === "examiner");
+
+    assert.equal(debate.length, 2, "the opening question and the relance are two turns");
+    assert.match(
+      debate[0].text,
+      /N'est-ce pas plutôt le bureau \?$/,
+      "the question ends where it did",
+    );
+    assert.equal(
+      debate[1].text,
+      "Autrement dit : y perd-on des collègues ?",
+      "and the relance's own fragments still merge into one turn of its own",
+    );
+    assert.ok(
+      debate[1].timestamp > debate[0].timestamp,
+      "stamped when it was spoken, not when the question was",
+    );
   });
 
   it("re-arms the whole escalation once the candidate answers", async () => {
     const h = harness();
     await intoSilentDebate(h);
 
-    h.advanceClock(9);
+    h.advanceClock(11);
     h.session().candidateSays("Pardon, je réfléchissais.");
     h.session().finishTurn();
-    h.advanceClock(9);
+    h.advanceClock(11);
 
     assert.equal(relances(h).length, 2, "a fresh silence earns a fresh relance, not the check");
     assert.deepEqual(presenceChecks(h), []);
@@ -2486,22 +2550,21 @@ describe("breaking a silence in the débat (#84)", () => {
     for (let round = 0; round < 3; round += 1) {
       h.session().candidateSays("Oui.");
       h.session().finishTurn();
-      h.advanceClock(9); // relance
+      h.advanceClock(11); // relance
       h.session().finishTurn();
-      h.advanceClock(9); // « Vous m'entendez ? », while it is still allowed
+      h.advanceClock(11); // « Vous m'entendez ? », while it is still allowed
     }
 
-    assert.equal(relances(h).length, 3, "the relance itself is never rationed");
-    assert.equal(presenceChecks(h).length, 2, "the technical check is");
+    assert.equal(presenceChecks(h).length, 2, "the technical check is rationed");
     assert.equal(
-      events(h, "silence-unanswered").length,
-      1,
-      "and the third silence, with nothing left to say into it, is on the record",
+      relances(h).length,
+      4,
+      "and the silence whose check is spent gets a relance instead of nothing at all",
     );
   });
 
   it("gives way to the closing handshake on the tick that crosses both deadlines", async () => {
-    // The one tick where the 8 s silence window and the part's own time-up land
+    // The one tick where the 10 s silence window and the part's own time-up land
     // together. Both would speak, and two directives with no turn boundary
     // between them blend into one sentence — on the very turn the controller
     // waits for to let the candidate's last transcription arrive.
@@ -2531,11 +2594,11 @@ describe("breaking a silence in the débat (#84)", () => {
     assert.deepEqual(relances(h), [], "nothing was said, so nothing was spent");
 
     h.session().emitStates("connected");
-    h.advanceClock(9);
+    h.advanceClock(11);
     assert.equal(relances(h).length, 1, "and the candidate gets it once they can hear it");
 
     h.session().finishTurn();
-    h.advanceClock(9);
+    h.advanceClock(11);
     assert.equal(presenceChecks(h).length, 1, "with the whole escalation still intact");
   });
 
@@ -2545,7 +2608,7 @@ describe("breaking a silence in the débat (#84)", () => {
     const h = harness();
     await intoSilentDebate(h);
 
-    h.advanceClockSilently(9);
+    h.advanceClockSilently(11);
 
     assert.deepEqual(relances(h), []);
     assert.ok(h.controller.getSnapshot().micError, "the candidate was told the real thing instead");
