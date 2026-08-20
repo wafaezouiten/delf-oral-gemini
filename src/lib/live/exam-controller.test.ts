@@ -2295,7 +2295,7 @@ describe("the examiner's opening question", () => {
     assert.deepEqual(player.chunks, []);
   });
 
-  it("gives way again after the speaker ran out of the opening turn", async () => {
+  it("gives way again once the speaker has stayed out of the opening turn", async () => {
     // The other release, and the one that stops this being a trap: an
     // interrupted generation is not guaranteed to be followed by a turn
     // completing, so a guard only that could open could stay shut for a whole
@@ -2306,9 +2306,52 @@ describe("the examiner's opening question", () => {
 
     player.speak(true);
     player.speak(false);
+    h.advanceClock(2); // the speaker is dry, and stays dry
     h.session().interrupts();
 
     assert.equal(player.interrupts, 1, "the question was delivered; the next one can be cut");
+  });
+
+  it("is not released by the gap between two chunks of one question (#94)", async () => {
+    // The remaining path to a question printed and never heard. A turn arrives
+    // as many chunks and the queue empties whenever one finishes before the next
+    // lands; read as "the turn is over", one moment of jitter opened the guard
+    // mid-question and the next noise in the room flushed the rest of it.
+    const h = harness();
+    await intoDebate(h);
+    const player = h.players[h.players.length - 1];
+
+    h.session().examinerVoice("the opening question, chunk one");
+    player.speak(true);
+    player.speak(false); // the stream stumbles
+    h.advanceClock(0.5); // …and picks up again well inside the grace
+    player.speak(true);
+    h.session().examinerVoice("chunk two, still the same question");
+    h.session().interrupts();
+
+    assert.equal(player.interrupts, 0, "the room did not take the question away");
+    assert.equal(player.chunks.length, 2, "both chunks are still there to hear");
+    assert.deepEqual(
+      h.controller.getSnapshot().events.filter((event) => event.name === "opening-turn-drained"),
+      [],
+      "and nothing claimed the turn was over",
+    );
+  });
+
+  it("still opens the guard on the turn the server says is complete", async () => {
+    // `turnComplete` is the server's own word and needs no grace: it is the
+    // release that must keep working the moment it arrives, since a candidate
+    // answering a finished question should not have to wait out a timer.
+    const h = harness();
+    await intoDebate(h);
+    const player = h.players[h.players.length - 1];
+
+    h.session().examinerVoice("the opening question");
+    h.session().finishTurn();
+    h.session().examinerVoice("a second question, spoken over");
+    h.session().interrupts();
+
+    assert.equal(player.interrupts, 1);
   });
 
   it("guards each part's own opening, not the sitting's", async () => {

@@ -430,6 +430,23 @@ const VOICED_SPEECH_RATIO = 0.4;
  * having spoken, it says once what has been holding it. Diagnostics only —
  * nothing branches on it.
  */
+/**
+ * How long the speaker must stay dry before that counts as the examiner having
+ * finished its opening turn (#94).
+ *
+ * A turn arrives as many chunks and the player's queue empties whenever one
+ * finishes before the next lands. That gap is network jitter, not the end of a
+ * sentence, and treating it as the end of a sentence is what let the rest of an
+ * opening question be flushed by the first noise in the room.
+ *
+ * A second is longer than any gap a working stream produces and short enough to
+ * be invisible at the end of a real turn: what it costs is that a candidate who
+ * barges in during that second is refused the interruption — the examiner keeps
+ * talking for up to a second longer — and nothing about what is recorded or
+ * transcribed changes.
+ */
+const OPENING_DRAIN_GRACE_MS = 1_000;
+
 const SILENCE_HELD_REPORT_MS = 3 * SILENCE_STEP_MS;
 
 /**
@@ -554,10 +571,24 @@ export class ExamController {
    * The examiner's opening turn of this phase has been delivered.
    *
    * False from the moment a session opens until the examiner has finished its
-   * first turn on it, or the speaker has run out of that turn. While it is
-   * false an interruption is refused — see {@link handleInterruption}.
+   * first turn on it, or the speaker has run out of that turn AND STAYED THAT
+   * WAY. While it is false an interruption is refused — see
+   * {@link handleInterruption}.
+   *
+   * The second half of that sentence is #94. A turn arrives as many chunks, and
+   * the player's queue empties whenever one chunk finishes before the next one
+   * lands — ordinary network jitter, several times in a long question. Read as
+   * "the turn is over", a single such gap opened the guard mid-question, and the
+   * next thing automatic voice-activity detection heard in the room flushed
+   * everything still queued: the question printed in full and never heard, which
+   * is the failure #74 was filed about, reached through the door opened to keep
+   * the guard from jamming shut. A drain that PERSISTS is a different claim from
+   * a drain observed once, and `speakerDrainedAt` is what tells them apart.
    */
   private openingTurnDelivered = false;
+  /** When the speaker last ran dry with the opening turn still unproven. Null
+   *  whenever it is audible again, or once the turn is proven. */
+  private speakerDrainedAt: number | null = null;
   private phaseSeconds = { monologue: 0, debate: 0 };
   /** Wall-clock stamps per speaking phase, for `oral_exam_phases`' audit trail.
    *  Null means the phase was never entered, which is the truth about an
@@ -1219,9 +1250,13 @@ export class ExamController {
       player = this.deps.createPlayer({
         onSpeakingChange: (speaking) => {
           // The speaker running out of the examiner's turn is one of the two
-          // things that prove the opening question was delivered. See
-          // {@link handleInterruption}.
-          if (!speaking && this.examinerSpeaking) this.openingTurnDelivered = true;
+          // things that prove the opening question was delivered — but only if
+          // it stays run out (#94). Timed rather than believed: `tick()` is what
+          // decides, once the drain has lasted longer than a gap between chunks.
+          if (!speaking && this.examinerSpeaking && !this.openingTurnDelivered) {
+            this.speakerDrainedAt = this.now();
+          }
+          if (speaking) this.speakerDrainedAt = null;
           this.examinerSpeaking = speaking;
           this.emit();
         },
@@ -1322,6 +1357,26 @@ export class ExamController {
       this.log("capture-stalled", { recordedSeconds: Number(seconds.toFixed(2)) });
       this.emit();
     }
+  }
+
+  /**
+   * The examiner's opening turn is over because the speaker has been quiet, not
+   * because it was quiet for an instant (#94).
+   *
+   * The stamp is taken on the callback and spent here, on the exam's own
+   * heartbeat, so the claim being made is "dry for a whole second" rather than
+   * "dry at the moment somebody looked". While it is unspent the interruption
+   * guard stays shut and the rest of the question survives the room.
+   */
+  private checkOpeningTurnDrained(): void {
+    if (this.openingTurnDelivered || this.speakerDrainedAt === null) return;
+    if (this.examinerSpeaking) return;
+    if (this.now() - this.speakerDrainedAt < OPENING_DRAIN_GRACE_MS) return;
+    this.speakerDrainedAt = null;
+    this.openingTurnDelivered = true;
+    // Worth a line of its own: this release is the one that has been wrong
+    // twice, and a sitting where it fired says which of the two proved the turn.
+    this.log("opening-turn-drained");
   }
 
   /**
@@ -2264,6 +2319,7 @@ export class ExamController {
     // session's, not the one the previous phase finished. See
     // {@link handleInterruption}.
     this.openingTurnDelivered = false;
+    this.speakerDrainedAt = null;
 
     const callbacks: SessionManagerCallbacks = {
       onStateChange: (state) => {
@@ -2291,8 +2347,11 @@ export class ExamController {
       onInterrupted: () => this.handleInterruption(),
       onTurnComplete: () => {
         // Whatever else this turn ending means below, it means the examiner has
-        // finished the first thing it said on this session.
+        // finished the first thing it said on this session. This one is the
+        // server's own word and needs no grace — unlike the drained speaker,
+        // which #94 makes wait.
         this.openingTurnDelivered = true;
+        this.speakerDrainedAt = null;
         // The ONLY thing Gemini is allowed to influence about the exam's flow,
         // and only inside a window the app opened: once the clock has run out
         // and the closing directive has gone out, the examiner's turn ending is
@@ -2572,6 +2631,10 @@ export class ExamController {
     // already has one heartbeat driven by the injected clock, and a recording
     // that has stopped growing is exactly the kind of fact it should notice.
     this.checkCaptureAlive();
+
+    // Same heartbeat, same reason: whether the speaker has been dry long enough
+    // for the opening turn to count as delivered (#94).
+    this.checkOpeningTurnDrained();
 
     // The examiner was asked for one closing sentence and never delivered it.
     // Advancing anyway is what stops a silent model stranding the candidate on
