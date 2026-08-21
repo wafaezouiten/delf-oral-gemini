@@ -17,6 +17,7 @@ import {
   type LiveSocketCallbacks,
   type LiveTokenClientRequest,
   type LiveTransport,
+  type MintedLiveToken,
   type SessionManagerCallbacks,
   type SessionTimers,
 } from "./session-manager";
@@ -110,6 +111,9 @@ class FakeTransport implements LiveTransport {
   sockets: FakeSocket[] = [];
   /** Number of upcoming mints that should fail, simulating a token route outage. */
   failMints = 0;
+  /** When set, mints answer with THIS model regardless of the request — the
+   *  sitting's stored choice outranking the client's, as the real gate does. */
+  mintModel: string | null = null;
   private minted = 0;
   private mintGate: MintGate | null = null;
   private openGate: Promise<void> | null = null;
@@ -146,7 +150,7 @@ class FakeTransport implements LiveTransport {
     };
   }
 
-  async mintToken(request: LiveTokenClientRequest): Promise<string> {
+  async mintToken(request: LiveTokenClientRequest): Promise<MintedLiveToken> {
     this.tokenRequests.push({ ...request });
     const gate = this.mintGate;
     if (gate) {
@@ -158,7 +162,9 @@ class FakeTransport implements LiveTransport {
       throw new Error("token route unavailable");
     }
     this.minted += 1;
-    return `token-${this.minted}`;
+    // As the real route does: the requested model when one arrives, the
+    // default otherwise — and the session must open with what came BACK.
+    return { token: `token-${this.minted}`, model: this.mintModel ?? request.model ?? LIVE_MODEL };
   }
 
   async open(params: {
@@ -273,6 +279,7 @@ interface Harness {
 function harness(
   overrides: {
     phase?: "monologue" | "debate";
+    model?: string;
     initialHistory?: Array<{ role: "user" | "model"; parts: Array<{ text: string }> }>;
     maxReconnectAttempts?: number;
   } = {},
@@ -285,6 +292,7 @@ function harness(
     examId: "42",
     phase: overrides.phase ?? "debate",
     topic: TOPIC,
+    model: overrides.model,
     callbacks,
     initialHistory: overrides.initialHistory,
     transport,
@@ -317,6 +325,9 @@ describe("session creation", () => {
       examId: "42",
       phase: "monologue",
       topicSlug: TOPIC.slug,
+      // Absent when the candidate never chose an examiner: the server decides,
+      // exactly as it did before the picker existed (#99).
+      model: undefined,
       // Absent on a first connect: there is nothing to resume yet, and its
       // absence is what makes this a `connecting` rather than a `resuming`.
       resumptionHandle: undefined,
@@ -325,6 +336,29 @@ describe("session creation", () => {
     assert.equal(h.transport.opens[0].token, "token-1", "the minted token opens the socket");
     assert.equal(h.transport.opens[0].model, LIVE_MODEL);
     assert.equal(h.session.connectionState, "connected");
+  });
+
+  it("opens the socket with the model the SERVER minted, not its own idea of it", async () => {
+    // The token's constraint pins one model; a connect naming another is a
+    // dead session. So the chosen examiner travels UP with every mint, and
+    // whatever the server decided travels BACK and names the socket (#99).
+    const h = harness({ model: "gemini-2.5-flash-native-audio-preview-12-2025" });
+    await h.session.connect();
+
+    assert.equal(h.transport.tokenRequests[0].model, "gemini-2.5-flash-native-audio-preview-12-2025");
+    assert.equal(h.transport.opens[0].model, "gemini-2.5-flash-native-audio-preview-12-2025");
+  });
+
+  it("defers to the server when its decision differs from the session's own", async () => {
+    // The sitting's stored choice outranks whatever this tab believes — the
+    // row is the record of what the candidate heard, and the token was minted
+    // for the row's examiner. Opening with the local one would be a session
+    // the constraint refuses.
+    const h = harness({ model: "gemini-2.5-flash-native-audio-preview-12-2025" });
+    h.transport.mintModel = LIVE_MODEL;
+    await h.session.connect();
+
+    assert.equal(h.transport.opens[0].model, LIVE_MODEL);
   });
 
   it("reports idle, connecting, connected, in that order", async () => {

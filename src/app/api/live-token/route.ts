@@ -38,7 +38,6 @@ import { NextResponse } from "next/server";
 
 import { authorizeExam } from "@/lib/auth/exam-guard";
 import { findTopic } from "@/lib/delf/topics";
-import { LIVE_MODEL } from "@/lib/gemini/constants";
 import { liveConfigForPhase } from "@/lib/gemini/live-config";
 import { gateLiveToken, parseLiveTokenRequest } from "@/lib/gemini/live-token-request";
 
@@ -68,16 +67,27 @@ export async function POST(request: Request) {
   if (!parsed.ok) {
     return NextResponse.json({ error: parsed.error }, { status: parsed.status });
   }
-  const { phase, examId, requestedTopicSlug, resumptionHandle } = parsed.request;
+  const { phase, examId, requestedTopicSlug, requestedModel, resumptionHandle } = parsed.request;
 
   // One query, and it answers both halves: who owns the sitting, and what it is
   // about. It used to be two sequential round trips to the same row — see
   // `findExamOwner` — which a bad-network episode multiplied by five.
   const access = await authorizeExam(examId);
 
-  const gate = gateLiveToken({ access, requestedTopicSlug });
+  const gate = gateLiveToken({ access, requestedTopicSlug, requestedModel });
   if (gate.decision === "deny") {
     return NextResponse.json({ error: gate.error }, { status: gate.status });
+  }
+
+  // A sitting that names an examiner the allow-list no longer carries has been
+  // silently moved to the default — the épreuve runs, but the row and the
+  // session now disagree, and that is an incident to fix in the catalogue, not
+  // a debugging session to leave someone. See `gateLiveToken`.
+  if (access.status === "owned" && access.examinerModel && gate.modelSource === "default") {
+    console.error(
+      "[live-token] sitting names an examiner outside the allow-list, minting the default:",
+      access.examinerModel,
+    );
   }
 
   // The gate hands back a slug, never a topic: it is pure, and the catalogue
@@ -114,7 +124,7 @@ export async function POST(request: Request) {
         expireTime: new Date(now + TOKEN_TTL_MINUTES * 60_000).toISOString(),
         newSessionExpireTime: new Date(now + NEW_SESSION_WINDOW_MINUTES * 60_000).toISOString(),
         liveConnectConstraints: {
-          model: LIVE_MODEL,
+          model: gate.model,
           // Both fields are required. Model alone => 1011 on connect.
           config: liveConfigForPhase(phase, { topic, resumptionHandle }),
         },
@@ -125,7 +135,12 @@ export async function POST(request: Request) {
       throw new Error("authTokens.create returned no token name");
     }
 
-    return NextResponse.json({ token: token.name });
+    // The model rides back with the token, and the client connects with THIS
+    // one rather than its own idea of the choice (#99). The constraint pins
+    // the model, so a client naming a different one on `live.connect()` is a
+    // failed session; returning the decision is what makes the two agree by
+    // construction instead of by hope.
+    return NextResponse.json({ token: token.name, model: gate.model });
   } catch (error) {
     // The message can carry the API key in some failure modes — log server-side,
     // return something generic.

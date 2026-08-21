@@ -35,6 +35,14 @@ export interface ExamOwnerRow {
   id: number;
   userId: string;
   topicSlug: string | null;
+  /**
+   * Which Live model plays this sitting's examiner (#99). Rides the same read
+   * for the same reason as `topicSlug`: the token route needs it on every
+   * mint, and a second query per reconnect is what #22 removed. Null on rows
+   * from before the column existed; like the subject, it gets no vote on
+   * ownership.
+   */
+  examinerModel: string | null;
 }
 
 /**
@@ -48,6 +56,8 @@ export interface OwnedSitting {
   examId: number;
   /** The subject recorded on the row. Null when it named none we could read. */
   topicSlug: string | null;
+  /** The examiner recorded on the row. Null on rows that predate the choice. */
+  examinerModel: string | null;
 }
 
 /** Reads one sitting by id, or nothing. Rejects if the database cannot answer. */
@@ -146,7 +156,13 @@ export async function resolveExamAccess({
   // that cannot resolve a subject has its own answer for that — the token route
   // mints for the requested one, the exam page falls back to the query string.
   // Folding the join in must not turn a missing subject into a missing sitting.
-  return { status: "owned", userId, examId: row.id, topicSlug: row.topicSlug };
+  return {
+    status: "owned",
+    userId,
+    examId: row.id,
+    topicSlug: row.topicSlug,
+    examinerModel: row.examinerModel,
+  };
 }
 
 /** What a page should do with an outcome. */

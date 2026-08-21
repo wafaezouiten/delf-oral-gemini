@@ -1,0 +1,1 @@
+ALTER TABLE "oral_exams" ADD COLUMN "examiner_model" varchar(64);

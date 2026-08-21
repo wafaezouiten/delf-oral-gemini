@@ -43,6 +43,13 @@
       "when": 1787067717175,
       "tag": "0005_reset_record",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1787250087205,
+      "tag": "0006_examiner_model",
+      "breakpoints": true
     }
   ]
 }

@@ -142,6 +142,41 @@ function toStoredCorrection(row: EvaluationRow): StoredCorrection {
 /** `db.batch` wants a non-empty tuple; the callers below build arrays. */
 type Writes = [BatchItem<"pg">, ...BatchItem<"pg">[]];
 
+/**
+ * Record which Live model will play this sitting's examiner (#99).
+ *
+ * A standalone export rather than a `SittingStore` method: that interface is
+ * the finish path's seam — claim, correct, write — and this is a préparation
+ * write with none of that policy behind it.
+ *
+ * One statement, idempotence in the WHERE as everywhere in this file, and the
+ * `phase = 'preparation'` clause is the one that carries meaning: the choice
+ * exists so a sitting can answer "which examiner spoke?", so it must become
+ * immutable the moment anyone has spoken. Once the monologue starts — or the
+ * sitting is finished, which the phase also implies — a write matches nothing,
+ * and a stale tab cannot rename the examiner out from under a débat that
+ * reconnects through the token route.
+ *
+ * `false` means "written nothing", which the route reports without alarm: the
+ * ordinary causes are a replayed request after the passation started, and a
+ * sitting that was never persisted.
+ */
+export async function chooseExaminerModel(ref: SittingRef, model: string): Promise<boolean> {
+  const chosen = await getDb()
+    .update(oralExams)
+    .set({ examinerModel: model })
+    .where(
+      and(
+        eq(oralExams.id, ref.examId),
+        eq(oralExams.userId, ref.userId),
+        eq(oralExams.phase, "preparation"),
+      ),
+    )
+    .returning({ id: oralExams.id });
+
+  return chosen.length > 0;
+}
+
 export function neonSittingStore(): SittingStore {
   const db = getDb();
 
@@ -366,6 +401,7 @@ export function neonSittingStore(): SittingStore {
             phase: oralExams.phase,
             transcript: oralExams.transcript,
             reconnectCount: oralExams.reconnectCount,
+            examinerModel: oralExams.examinerModel,
             startedAt: oralExams.startedAt,
             finishedAt: oralExams.finishedAt,
           })
@@ -423,6 +459,7 @@ export function neonSittingStore(): SittingStore {
         outcome: sittingOutcome({ finishedAt: sitting.finishedAt, correction }),
         transcript: sitting.transcript ?? [],
         reconnectCount: sitting.reconnectCount,
+        examinerModel: sitting.examinerModel,
         startedAt: sitting.startedAt,
         finishedAt: sitting.finishedAt,
         phases: phases.map((row) => ({

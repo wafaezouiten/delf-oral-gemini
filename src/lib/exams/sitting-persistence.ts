@@ -179,6 +179,9 @@ export interface StoredSitting {
   outcome: SittingOutcome;
   transcript: TranscriptEntry[];
   reconnectCount: number;
+  /** Which Live model played the examiner (#99). Null on rows that predate the
+   *  column — genuinely unrecorded, not defaulted after the fact. */
+  examinerModel: string | null;
   startedAt: Date;
   finishedAt: Date | null;
   phases: PhaseRow[];

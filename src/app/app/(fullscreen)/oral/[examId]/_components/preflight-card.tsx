@@ -6,6 +6,7 @@ import { AudioBars } from "@/app/_components/po/audio-bars";
 import { CheckCircleIcon } from "@/app/_components/po/icons";
 import { cn } from "@/lib/ui/class-names";
 import { PHASE_DURATIONS } from "@/lib/delf/phases";
+import { liveModelChoices } from "@/lib/gemini/constants";
 
 /**
  * « Avant de commencer » — the card that answers "can I do this now?".
@@ -114,14 +115,39 @@ const MIC_COPY: Record<MicState, string> = {
   failed: "Autorisez le micro, puis réessayez.",
 };
 
+/**
+ * The examiners on offer (#99). Computed once: the list is a build-time fact —
+ * the verified allow-list, with the configured default first — and it cannot
+ * change under a mounted card.
+ */
+const EXAMINER_CHOICES = liveModelChoices();
+
 export function PreflightCard({
   canEncode,
   checking,
+  examinerModel,
+  examinerSaving,
+  examinerError,
+  onChooseExaminer,
 }: {
   /** Null while the browser is still being asked, and if it never answered. */
   canEncode: boolean | null;
   /** Whether that question is still open. */
   checking: boolean;
+  /**
+   * The examiner this sitting will hear, and the machinery to change it (#99).
+   *
+   * A pre-flight concern, which is why it lives on this card beside the
+   * microphone rather than anywhere near the clock: it is decided before the
+   * passation and immutable after it — the server refuses the write once the
+   * préparation ends. The value only advances when the row was written (or
+   * provably has no row), so what this shows is what will actually speak.
+   */
+  examinerModel: string;
+  examinerSaving: boolean;
+  /** The last change did not take; the shown model is still the sitting's. */
+  examinerError: boolean;
+  onChooseExaminer: (model: string) => void;
 }) {
   const [micState, checkMic] = useMicCheck();
   // Minutes, not `formatClock`. The reference prints "7:00 sans interruption"
@@ -157,6 +183,46 @@ export function PreflightCard({
               {micState === "failed" ? "Réessayer" : "Tester"}
             </button>
           )
+        }
+      />
+
+      {/* The examiner, under the microphone: the two decisions a candidate can
+          actually take on this card, together at its head. The <select> shows
+          readable names; the raw model id is the option's value, the row's
+          tooltip, and what the correction will print — a label alone would
+          hide which model actually ran (#99). The row never advances on a
+          failed write: what it shows is always what the sitting will hear. */}
+      <PreflightRow
+        title="Examinateur"
+        detail={
+          examinerError
+            ? "Le choix n'a pas pu être enregistré, réessayez."
+            : examinerSaving
+              ? "Enregistrement du choix…"
+              : (EXAMINER_CHOICES.find((choice) => choice.id === examinerModel)?.detail ??
+                examinerModel)
+        }
+        right={
+          <select
+            value={examinerModel}
+            onChange={(event) => onChooseExaminer(event.target.value)}
+            disabled={examinerSaving}
+            aria-label="Modèle de l'examinateur"
+            title={examinerModel}
+            className="border-border bg-card hover:bg-muted max-w-[11rem] shrink rounded-md border px-2 py-1.5 text-xs font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {EXAMINER_CHOICES.map((choice) => (
+              <option key={choice.id} value={choice.id}>
+                {choice.label}
+              </option>
+            ))}
+            {/* A sitting can name a model the list no longer carries — the row
+                outlives the catalogue. Shown under its raw id rather than
+                snapped to an option it never was. */}
+            {!EXAMINER_CHOICES.some((choice) => choice.id === examinerModel) && (
+              <option value={examinerModel}>{examinerModel}</option>
+            )}
+          </select>
         }
       />
 
