@@ -32,8 +32,11 @@ import {
   criterionJustifications,
   criterionScores,
   parseEvaluationResponse,
+  type EvaluationResponse,
 } from "./evaluation-response";
+import { EvaluationFailure } from "./evaluation-failure";
 import { readEvaluationUsage, type EvaluationUsage } from "./evaluation-usage";
+import { waitForFileActive } from "./file-activation";
 import { withTransientRetry } from "./transient";
 import { candidateWordCount, formatTranscript, type TranscriptEntry } from "@/lib/delf/transcript";
 import type { OralTopic } from "@/lib/delf/topics";
@@ -410,23 +413,61 @@ export async function evaluateExam(params: EvaluateParams): Promise<EvaluationRe
     // fan-out here is bounded at the two speaking phases, and a candidate is
     // sitting at « Épreuve terminée » for the whole of this — `uploadSeconds`
     // below is what says how much the change bought. A 429, if one ever
-    // arrives, surfaces to the candidate exactly as it did sequentially — the
-    // route's 502 and the retry button — though `Promise.all` fails fast, so
-    // the sibling upload is abandoned mid-flight rather than never started; a
-    // small quota waste on a partial failure, cleaned up by the Files API's
-    // own TTL. `map` preserves exam order, which the prompt promises the model
-    // about the files it is handed.
+    // arrives, gets the one extra attempt below before it surfaces to the
+    // candidate as it did sequentially — the route's 502 and the retry button —
+    // though `Promise.all` fails fast, so the sibling upload is abandoned
+    // mid-flight rather than never started; a small quota waste on a partial
+    // failure, cleaned up by the Files API's own TTL. `map` preserves exam
+    // order, which the prompt promises the model about the files it is handed.
+    //
+    // Three additions since #73, each answering one way the old code turned an
+    // explainable failure into « sometimes »:
+    //
+    //  1. **The upload is retried once**, transient statuses only — the same
+    //     policy the corrector call rides on, held to two attempts because the
+    //     re-send is the expensive half and `maxDuration` has to fit the model
+    //     call after it.
+    //  2. **The file is waited into `ACTIVE`** before it is referenced. The
+    //     upload resolving does not mean the service has finished with the
+    //     bytes, and referencing a `PROCESSING` file is refused — that race is
+    //     the best fit for #73's intermittence. See `file-activation.ts`.
+    //  3. **Whatever fails in here is tagged `upload`**, so the route's 502 can
+    //     say which part of the pipeline died instead of only that one did.
     parts.push(
       ...(await Promise.all(
         recordings.map(async (recording) => {
-          const uploaded = await ai.files.upload({
-            file: recording.blob,
-            config: { mimeType: recording.mimeType },
-          });
-          if (!uploaded.uri || !uploaded.mimeType) {
-            throw new Error("File upload returned no usable URI");
+          const label = recording.phase ?? "sitting";
+          try {
+            const uploaded = await withTransientRetry(
+              () =>
+                ai.files.upload({
+                  file: recording.blob,
+                  config: { mimeType: recording.mimeType },
+                }),
+              {
+                attempts: 2,
+                onRetry: (error, attempt, delayMs) =>
+                  console.warn(
+                    `[evaluate] ${label} upload attempt ${attempt} failed ` +
+                      `(${(error as { status?: number }).status}), retrying in ${delayMs}ms`,
+                  ),
+              },
+            );
+            const active = await waitForFileActive(uploaded, (name) => ai.files.get({ name }), {
+              onPoll: (state, poll) =>
+                console.info(`[evaluate] ${label} recording is ${state}, poll ${poll}`),
+            });
+            if (!active.uri || !active.mimeType) {
+              throw new Error("File upload returned no usable URI");
+            }
+            return createPartFromUri(active.uri, active.mimeType);
+          } catch (error) {
+            throw new EvaluationFailure(
+              "upload",
+              `The ${label} recording could not be made available to the corrector`,
+              { cause: error },
+            );
           }
-          return createPartFromUri(uploaded.uri, uploaded.mimeType);
         }),
       )),
     );
@@ -469,7 +510,11 @@ export async function evaluateExam(params: EvaluateParams): Promise<EvaluationRe
             `retrying in ${delayMs}ms`,
         ),
     },
-  );
+  ).catch((error) => {
+    // Tagged after the retry, not inside it: what reaches here is a corrector
+    // that genuinely would not answer, and the original error rides in `cause`.
+    throw new EvaluationFailure("model", "The corrector did not answer", { cause: error });
+  });
 
   const modelSeconds = (Date.now() - modelStartedAt) / 1000;
   // The split #86 asked for, where an operator will actually see it: which half
@@ -482,12 +527,19 @@ export async function evaluateExam(params: EvaluateParams): Promise<EvaluationRe
   );
 
   const text = response.text;
-  if (!text) throw new Error("The evaluator returned no output");
+  if (!text) throw new EvaluationFailure("empty", "The evaluator returned no output");
 
   // Checked, not coerced. The previous reading defaulted a missing criterion to
   // zero, so a truncated or refused generation cost the candidate five points
   // silently; a breach of the contract now throws and the caller can retry.
-  const raw = parseEvaluationResponse(text);
+  let raw: EvaluationResponse;
+  try {
+    raw = parseEvaluationResponse(text);
+  } catch (error) {
+    throw new EvaluationFailure("contract", "The evaluator's reply was not a complete correction", {
+      cause: error,
+    });
+  }
   const rawCriteria = criterionScores(raw);
 
   // The whole rubric, in one call. Snapping, the sum, the per-part duration
