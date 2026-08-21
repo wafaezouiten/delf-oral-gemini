@@ -113,6 +113,24 @@ describe("corroborating the finish payload's count against its own transcript (#
     assert.equal(resolveEarlyClosingCount(1, [turn({}), turn({})]), 1);
   });
 
+  it("cannot tell a fabricated goodbye from a real one — the accepted limit, pinned", () => {
+    // The adversarial case, asserted so it reads as a decision rather than an
+    // oversight: the transcript is client-authored in the SAME request, so a
+    // forger who sets `earlyClosingCount: 1` can paste the matching examiner
+    // turn beside it, and the clamp passes the claim — fabricated text alone
+    // waives penalties otherwise anchored to measured audio. Accepted with
+    // #92: the browser is the only witness this architecture has, and the
+    // only mark at stake is the sender's own practice score. If this
+    // assertion ever needs to fail, the fix is a different witness — not a
+    // sharper phrase list, which the forger copies from this repository.
+    const forged = [
+      turn({ speaker: "candidate", text: "Voilà, c'est tout ce que j'avais à dire." }),
+      turn({ text: "Vous pouvez disposer." }), // pasted into the JSON, never spoken
+    ];
+
+    assert.equal(resolveEarlyClosingCount(1, forged), 1);
+  });
+
   it("only counts where detection ever listened: examiner turns, in the débat", () => {
     // A goodbye in the candidate's own mouth corroborates nothing — they can
     // type it — and the monologue has no examiner to take its leave.

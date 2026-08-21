@@ -21,6 +21,17 @@
  *  - **A false positive costs one directive**, telling an examiner that was not
  *    concluding to carry on with the débat, which is what it was doing anyway.
  *    A false negative costs the candidate the rest of their épreuve.
+ *
+ * That pricing predates #92, which raised the stake: the count this detection
+ * feeds now waives the débat's penalties, so a false positive — an examiner
+ * whose « merci de votre participation » was praise rather than dismissal —
+ * also excuses a débat that then falls short, of a halving or a −3 it would
+ * otherwise have taken. Chosen knowingly when the waiver was decided (#92):
+ * the borderline sitting is one where the examiner said something a candidate
+ * could reasonably hear as the end, and pricing that doubt against the
+ * candidate is the mistake the waiver exists to stop. The list stays broad;
+ * what changed is that additions to it should now weigh a waived penalty, not
+ * just a spare directive.
  */
 
 import type { TranscriptEntry } from "./transcript";
@@ -106,11 +117,9 @@ export function countClosingTurns(
  * The finish route's corroboration of the client's `earlyClosingCount` claim
  * (#92): the claim, clamped to what the transcript beside it can witness.
  *
- * The claim waives the débat's penalties — including the duration penalty the
- * route measures out of the uploaded bytes precisely so no client claim can
- * reach it — and it is stored on the sitting as the record of how often the
- * examiner misbehaves. So a raw number in a payload is not taken alone, on
- * either axis:
+ * The claim waives the débat's penalties and is stored on the sitting as the
+ * record of how often the examiner misbehaves. So a raw number in a payload is
+ * not taken alone, on either axis:
  *
  *  - **Zero matching turns zeroes the claim.** A genuine count ALWAYS has its
  *    turn to show, because the controller read the goodbye off the very
@@ -133,14 +142,23 @@ export function countClosingTurns(
  * which is all the waiver and the candidate's note read, and "at most what the
  * transcript shows" is the honest server-derivable magnitude.
  *
- * And be honest about what none of this can buy. `closing` does not survive
- * into the transcript, so a matching turn cannot be told from the legitimate
- * closing sentence the app itself asked for at the end of most sittings — and
- * the transcript is an artefact the client authors anyway. This is a
- * consistency floor, not a proof: it stops a claim that did not even bother to
- * tell a coherent story, and a client that miscounts through a bug. The
- * unforgeable record of the incident remains the audio, which the corrector
- * hears.
+ * WHAT THIS DOES NOT DO: stop a forger. The transcript is client-authored in
+ * the same request, so whoever sets `earlyClosingCount: 1` can paste the
+ * matching examiner turn beside it, and this function will pass the claim —
+ * fabricated text alone waives penalties otherwise anchored to measured audio.
+ * That is ACCEPTED with #92, not overlooked, for two reasons. First, there is
+ * no stronger witness to check against: the browser is the only observer of
+ * the Live session — transcript, recordings and clocks all originate there —
+ * and moving the count to a mid-sitting progress write would be the same
+ * client asserting the same fact earlier, an effort bar rather than ground
+ * truth. Second, the blast radius is the sender's own practice score: this is
+ * a self-study tool, not a certification body, and every write is scoped to
+ * the candidate's own sitting. What the clamp actually buys is narrower and
+ * real — a claim must tell a coherent story (which also catches a client that
+ * miscounts through a bug), and the stored figure is bounded. A test pins the
+ * forgeable case by name, so a future reader finds a decision here, not a gap;
+ * if that guarantee is ever needed, the fix is a different witness, not a
+ * sharper phrase list.
  */
 export function resolveEarlyClosingCount(
   claimed: number,

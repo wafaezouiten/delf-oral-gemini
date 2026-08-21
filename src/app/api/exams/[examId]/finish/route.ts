@@ -15,7 +15,13 @@
  * that arrived, so it is measured HERE, out of the uploaded file, and that is
  * the number the DELF duration penalty is computed from. A client that
  * miscounts, or an upload that truncates, then produces a short recording rather
- * than a long claim.
+ * than a long claim. One deliberate exception since #92: a payload can EXCUSE
+ * the débat from that penalty by reporting the examiner closed the épreuve
+ * early, and the report rests on the client-authored transcript — a forgeable
+ * claim, accepted knowingly because the browser is the only witness this
+ * architecture has and the only mark at stake is the sender's own. The
+ * decision, and what the clamp on it does and does not buy, live on
+ * `resolveEarlyClosingCount`.
  *
  * **What this route no longer does.** Since Phase 8 it does not write anything
  * itself. It reads the request, decides what the correction should be graded
@@ -290,11 +296,11 @@ export async function POST(request: Request, context: { params: Promise<{ examId
 
   /**
    * The examiner's early goodbyes (#92) — the client's count, clamped to what
-   * the transcript beside it can witness. Everything about the clamp — why a
-   * genuine claim always corroborates, why the magnitude is capped and not
-   * just the presence checked, and what none of it can prove — lives on
-   * `resolveEarlyClosingCount`, where `node --test` can reach it; this route
-   * only owes it the payload.
+   * the transcript beside it shows. NOT an anti-forgery check: the transcript
+   * arrives in the same request, so the clamp bounds an incoherent or buggy
+   * claim, never a fabricated one — see the header above for why that trust
+   * is accepted, and `resolveEarlyClosingCount` for the whole decision, where
+   * `node --test` can reach it; this route only owes it the payload.
    *
    * Resolved ONCE, here, for every consumer downstream — the corrector's
    * paragraph, the rubric's waiver, the stored column and the note the
