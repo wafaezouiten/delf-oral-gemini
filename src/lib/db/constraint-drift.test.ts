@@ -233,12 +233,17 @@ describe("the probe, end to end against a fake database (#125)", () => {
     catalog?: Array<{ table_name: string; constraint_name: string; definition: string }>;
     failCatalog?: Error;
     failDrops?: boolean;
+    /** What the reaper's sweep finds already sitting in the schema. */
+    leftovers?: string[];
   }) {
     const statements: string[] = [];
     const execute = async (statement: string) => {
       statements.push(statement);
       if (statement.startsWith("drop table") && options.failDrops) {
         throw new Error("drop refused");
+      }
+      if (statement.includes("like 'verify_constraints_%'")) {
+        return (options.leftovers ?? []).map((relname) => ({ relname }));
       }
       if (statement.includes("pg_constraint")) {
         if (options.failCatalog) throw options.failCatalog;
@@ -304,15 +309,67 @@ describe("the probe, end to end against a fake database (#125)", () => {
     // A drop that fails after a failed read must not replace the error that
     // says what actually went wrong; after a clean read it must not turn a
     // healthy database into a red build over a stranded, inert mirror.
+    const silent = { onCleanupFailure: () => undefined };
     const broken = fakeDatabase({ failCatalog: new Error("the real failure"), failDrops: true });
-    await assert.rejects(probeConstraintDrift(broken.execute, SUFFIX), /the real failure/);
+    await assert.rejects(probeConstraintDrift(broken.execute, SUFFIX, silent), /the real failure/);
 
     const clean = fakeDatabase({
       catalog: agreeingCatalog((name) => `CHECK (${name})`),
       failDrops: true,
     });
-    const outcome = await probeConstraintDrift(clean.execute, SUFFIX);
+    const outcome = await probeConstraintDrift(clean.execute, SUFFIX, silent);
     assert.deepEqual(outcome.drift, []);
+  });
+
+  it("reports every drop it could not perform, instead of leaking mirrors silently", async () => {
+    // Tolerated is not ignored: a database that refuses drops would strand one
+    // inert mirror per run, and the only thing standing between that and
+    // nobody ever knowing is this callback.
+    const reported: string[] = [];
+    const db = fakeDatabase({
+      catalog: agreeingCatalog((name) => `CHECK (${name})`),
+      failDrops: true,
+    });
+
+    const outcome = await probeConstraintDrift(db.execute, SUFFIX, {
+      onCleanupFailure: (mirrorName) => reported.push(mirrorName),
+    });
+
+    assert.deepEqual(outcome.drift, [], "the failed cleanup did not fail the run");
+    assert.deepEqual(
+      reported.sort(),
+      constraintMirrors(SUFFIX)
+        .map((m) => m.mirrorName)
+        .sort(),
+    );
+  });
+
+  it("reaps a stale mirror from a killed run, and touches nothing fresh or strange", async () => {
+    // A cancelled CI job dies without reaching its own cleanup, so its mirrors
+    // outlive it. The next probe sweeps them by AGE — a concurrent run's fresh
+    // mirrors and any name whose suffix does not parse as a timestamp are left
+    // exactly where they are.
+    const now = 10_000_000_000;
+    const stale = `verify_constraints_evaluations_${now - 2 * 60 * 60 * 1000}`;
+    const fresh = `verify_constraints_evaluations_${now - 60 * 1000}`;
+    const strange = "verify_constraints_evaluations_notatimestamp";
+    const db = fakeDatabase({
+      catalog: agreeingCatalog((name) => `CHECK (${name})`),
+      leftovers: [stale, fresh, strange],
+    });
+
+    await probeConstraintDrift(db.execute, SUFFIX, { now: () => now });
+
+    const reaped = db.statements.filter(
+      (s) => s.startsWith("drop table if exists") && !s.includes(SUFFIX),
+    );
+    assert.deepEqual(reaped, [`drop table if exists "${stale}"`]);
+    // And the sweep runs before this run builds anything, so it can never
+    // read its own mirrors as somebody else's leftovers.
+    assert.ok(
+      db.statements.findIndex((s) => s.includes("like 'verify_constraints_%'")) <
+        db.statements.findIndex((s) => s.startsWith("create table")),
+    );
   });
 
   it("reports a database with no mirrored rows as zero declared, for the caller to refuse", async () => {

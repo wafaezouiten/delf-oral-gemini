@@ -211,9 +211,81 @@ export function diffConstraintDefinitions(
   return drift;
 }
 
-/** One SQL statement, executed for its rows. The probe's whole connection
- *  surface — injected so `node --test` can stand a database in with a map. */
+/**
+ * One SQL statement, executed for its rows. The probe's whole connection
+ * surface — injected so `node --test` can stand a database in with a map.
+ *
+ * Statements are TEXT, so nothing at this boundary can bind a parameter. That
+ * makes the bare-identifier regexes in this file LOAD-BEARING against SQL
+ * injection, not decoration: every name that reaches a statement — mirror
+ * names via {@link constraintMirrors}'s suffix guard, table names via the
+ * check inside {@link probeConstraintDrift}, reaped names via the pattern in
+ * {@link reapStaleMirrors} — is proven identifier-shaped first. Anyone
+ * reusing this executor shape for less trusted input must keep that chain,
+ * or restore the parameterised query this replaced.
+ */
 export type SqlExecutor = (statement: string) => Promise<Array<Record<string, unknown>>>;
+
+export interface ConstraintProbeOptions {
+  /**
+   * Where a failed cleanup goes instead of nowhere. A drop that fails must
+   * neither mask the probe's own error nor fail a clean run — but swallowing
+   * it silently would let a database that refuses drops leak one inert mirror
+   * per run with no signal at all. Defaults to `console.warn`.
+   */
+  onCleanupFailure?: (mirrorName: string, error: unknown) => void;
+  /** Injectable clock for the reaper's staleness arithmetic. */
+  now?: () => number;
+}
+
+/**
+ * How old a leftover mirror must be before the next run reaps it.
+ *
+ * Leftovers are real: a cancelled CI job is killed, not thrown at, so the
+ * probe's `finally` never runs and its mirrors stay behind — and two quick
+ * pushes to one ref is exactly what the workflow's `cancel-in-progress`
+ * produces. One hour is far past any probe's lifetime, so a concurrent run's
+ * fresh mirrors are never touched, while a cancelled run's debris survives
+ * only until the next probe of the same database.
+ */
+export const MIRROR_REAP_AGE_MS = 60 * 60 * 1000;
+
+const warnCleanupFailure = (mirrorName: string, error: unknown) =>
+  console.warn(`[constraint-drift] could not drop mirror "${mirrorName}":`, error);
+
+/**
+ * Drop mirrors stranded by runs that never got to their own cleanup.
+ *
+ * Only names wearing this module's exact shape with a TIMESTAMP suffix are
+ * candidates — both scripts suffix with `Date.now()` — and only when that
+ * timestamp is at least {@link MIRROR_REAP_AGE_MS} old. A name whose suffix
+ * does not parse is left alone rather than guessed about.
+ */
+async function reapStaleMirrors(
+  execute: SqlExecutor,
+  nowMs: number,
+  onCleanupFailure: (mirrorName: string, error: unknown) => void,
+): Promise<void> {
+  const rows = await execute(
+    `select rel.relname as relname
+     from pg_class rel
+     join pg_namespace nsp on nsp.oid = rel.relnamespace
+     where nsp.nspname = current_schema()
+       and rel.relkind = 'r'
+       and rel.relname like 'verify_constraints_%'`,
+  );
+  for (const row of rows as Array<{ relname: string }>) {
+    // The pattern is the injection guard for the drop below as well as the
+    // staleness key: nothing that fails it reaches a statement.
+    const match = /^verify_constraints_[a-z0-9_]*_(\d+)$/.exec(row.relname);
+    if (!match) continue;
+    const age = nowMs - Number(match[1]);
+    if (!(age >= MIRROR_REAP_AGE_MS)) continue;
+    await execute(`drop table if exists "${row.relname}"`).catch((error) =>
+      onCleanupFailure(row.relname, error),
+    );
+  }
+}
 
 export interface ConstraintProbeOutcome {
   /** How many declared constraints the catalog reported back off the mirrors.
@@ -241,9 +313,17 @@ export interface ConstraintProbeOutcome {
 export async function probeConstraintDrift(
   execute: SqlExecutor,
   suffix: string,
+  options: ConstraintProbeOptions = {},
 ): Promise<ConstraintProbeOutcome> {
+  const onCleanupFailure = options.onCleanupFailure ?? warnCleanupFailure;
   const mirrors = constraintMirrors(suffix);
   try {
+    // Before this run builds anything: sweep up what a killed run left. A
+    // cancelled CI job never reaches its `finally`, so its mirrors are the
+    // previous tenant's furniture — reaped by age, never by name collision,
+    // which is what keeps a concurrent run's fresh mirrors safe.
+    await reapStaleMirrors(execute, (options.now ?? Date.now)(), onCleanupFailure);
+
     for (const mirror of mirrors) await execute(mirror.createSql);
 
     const names = [...schemaTableNames(), ...mirrors.map((mirror) => mirror.mirrorName)];
@@ -288,9 +368,14 @@ export async function probeConstraintDrift(
     for (const mirror of mirrors) {
       // Best-effort, each on its own: one failed drop must not strand the
       // rest, and a cleanup error must not mask the probe's — which is the one
-      // that says what actually went wrong. A stranded mirror is inert and
-      // uniquely suffixed; the next run neither collides with nor trusts it.
-      await execute(`drop table if exists "${mirror.mirrorName}"`).catch(() => undefined);
+      // that says what actually went wrong. But reported, never swallowed: a
+      // database that refuses drops would otherwise leak one inert mirror per
+      // run with no signal until someone counted tables. What does get
+      // stranded — here, or by a killed process that never reaches this line —
+      // is reaped by the next run's sweep above.
+      await execute(`drop table if exists "${mirror.mirrorName}"`).catch((error) =>
+        onCleanupFailure(mirror.mirrorName, error),
+      );
     }
   }
 }

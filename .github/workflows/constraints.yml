@@ -37,6 +37,12 @@ concurrency:
   group: constraints-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# The job reads a secret and a checkout and publishes nothing, so it gets the
+# narrowest grant. (`build.yml` predates this convention; deviating in the
+# safe direction here is deliberate.)
+permissions:
+  contents: read
+
 jobs:
   drift:
     if: github.event_name == 'push' || github.event.pull_request.draft == false
@@ -56,7 +62,11 @@ jobs:
       # this workflow exists to retire. The secret should point at a standing
       # development branch — never production; the probe creates and drops
       # uniquely-suffixed mirror tables and reads the catalog, nothing else,
-      # so concurrent runs against the same branch do not collide.
+      # so concurrent runs against the same branch do not collide. A CANCELLED
+      # run is the other case — `cancel-in-progress` above kills the process,
+      # so its own cleanup never runs — and its stranded mirrors are inert,
+      # collide with nothing, and are reaped by the next probe's age-based
+      # sweep (see `reapStaleMirrors` in `constraint-drift.ts`).
       - name: Probe the live constraints
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
