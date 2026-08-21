@@ -431,6 +431,12 @@ export async function evaluateExam(params: EvaluateParams): Promise<EvaluationRe
     //     upload resolving does not mean the service has finished with the
     //     bytes, and referencing a `PROCESSING` file is refused — that race is
     //     the best fit for #73's intermittence. See `file-activation.ts`.
+    //     The wait sits OUTSIDE the retry on purpose, so a file that ends
+    //     `FAILED` fails once, with its own status, rather than buying a
+    //     re-upload: processing rejected these exact bytes, re-sending them is
+    //     the expensive half `transient.ts` already argues against spending
+    //     twice, and #73's own ask is to surface the file's verdict — the
+    //     candidate's retry button re-runs the whole sequence anyway.
     //  3. **Whatever fails in here is tagged `upload`**, so the route's 502 can
     //     say which part of the pipeline died instead of only that one did.
     parts.push(
