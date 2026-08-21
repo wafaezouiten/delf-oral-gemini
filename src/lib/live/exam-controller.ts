@@ -2063,6 +2063,12 @@ export class ExamController {
    * trapped forever — someone whose microphone is delivering sound that is not
    * their voice can still let the clock run out and be carried into the débat by
    * `isPhaseTimeUp`. What restarting removes is the *shortcut*, not the exit.
+   *
+   * **A restart does not un-type the phase** (dev only, #51). Only the clock is
+   * rewound: a typed turn stays in the transcript, its claimed seconds stay
+   * counted, and the `typedPhases` mark stays with them — so a phase typed
+   * into, restarted, and then spoken in full still drops its recording at the
+   * boundary. The mark follows the content, and the content survived.
    */
   restartMonologue(): void {
     if (this.phase !== "monologue" || this.closing) return;
