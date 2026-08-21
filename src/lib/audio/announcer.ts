@@ -14,10 +14,11 @@
  *
  *  - `played` — the candidate heard it, and the phase may now start.
  *  - `skipped` — they silenced it. Same thing as far as the exam is concerned.
- *  - `blocked` — the browser refused to autoplay. NOT the same thing: nothing was
- *    heard and a gesture would fix it, so the controller holds the phase and puts
- *    a button on screen rather than starting a recording the consigne would then
- *    be played into. See `ExamController.announce`.
+ *  - `blocked` — the browser refused to autoplay. Reported apart from `skipped`
+ *    because it is a different fact about the sitting — nothing was heard and
+ *    nobody chose that — but the controller treats it as a forfeit: the refusal
+ *    is logged and the phase gets on with it. The hold-and-ask behaviour this
+ *    outcome used to trigger is gone. See `ExamController.announce`.
  *  - `failed` — the file is missing or undecodable. Nothing to be done, and the
  *    épreuve is still worth sitting: the text is on screen either way.
  *

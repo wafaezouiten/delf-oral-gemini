@@ -122,6 +122,13 @@ export interface StoredResult {
    * correction renders exactly as it did before #98.
    */
   playable?: Array<{ phase: "monologue" | "debate"; mimeType: string; durationSeconds: number }>;
+  /**
+   * Which Live model played the examiner (#99). Optional for the same reason
+   * `durationPenalty` is: this object also comes back out of `sessionStorage`,
+   * where a sitting finished before the picker existed carries no such field.
+   * Absent or null, the provenance line names the corrector alone.
+   */
+  examinerModel?: string | null;
 }
 
 /**
@@ -452,6 +459,22 @@ export function ResultsClient({
                 {COMPETENCY_MAX}).
               </p>
             )}
+
+            {/* Provenance, at the foot of the rail and on the printed sheet:
+                which model spoke and which one graded (#99). Raw ids on
+                purpose — a readable label here would make two sittings on the
+                same sujet quietly incomparable, which is the thing this line
+                exists to prevent. The examiner is omitted rather than guessed
+                on sittings from before it was recorded. */}
+            <p className="text-muted-foreground border-border mt-4 border-t px-1 pt-3 text-[0.65625rem] leading-relaxed">
+              {result.examinerModel && (
+                <>
+                  Examinateur&nbsp;: <span className="tabular">{result.examinerModel}</span>
+                  {" · "}
+                </>
+              )}
+              Correcteur&nbsp;: <span className="tabular">{evaluation.model}</span>
+            </p>
           </div>
         </aside>
       </div>

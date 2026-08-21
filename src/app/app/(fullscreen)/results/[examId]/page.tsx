@@ -119,6 +119,11 @@ export default async function ResultsPage({ params }: PageProps<"/app/results/[e
     debateSeconds: measured("debate"),
     reconnectCount: sitting.reconnectCount,
     playable,
+    // Which model spoke (#99) — the counterpart of `evaluation.model`, which
+    // names the one that graded. Null on sittings from before the column, and
+    // shown as nothing rather than guessed: today's default is not evidence
+    // about which examiner an old sitting heard.
+    examinerModel: sitting.examinerModel,
   };
 
   return <ResultsClient examId={examId} initial={initial} />;

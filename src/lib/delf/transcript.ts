@@ -39,22 +39,52 @@ export interface TranscriptEntry {
  * the same phase; otherwise it starts a new turn. Blank fragments are dropped —
  * Gemini emits them at turn boundaries and they would otherwise create empty
  * turns that the evaluator reads as silence.
+ *
+ * `startsTurn` is the one way to say "this is a new turn even though the same
+ * speaker said the last one" (#101). Coalescing is right for the fragments of
+ * one spoken sentence and wrong for two: when the app makes the examiner speak
+ * again into a silence, the relance is a separate intervention, ten seconds
+ * after the question it is rephrasing, and merging it welds the two into one
+ * compound question under the earlier one's timestamp. Nothing here can tell
+ * those apart from the text — the caller knows, and says so.
  */
 export function appendFragment(
   entries: readonly TranscriptEntry[],
-  fragment: { phase: TranscriptPhase; speaker: TranscriptSpeaker; timestamp: number; text: string },
+  fragment: {
+    phase: TranscriptPhase;
+    speaker: TranscriptSpeaker;
+    timestamp: number;
+    text: string;
+    startsTurn?: boolean;
+  },
 ): TranscriptEntry[] {
   if (!fragment.text.trim()) return entries as TranscriptEntry[];
 
   const last = entries[entries.length - 1];
-  const continuesTurn = last && last.phase === fragment.phase && last.speaker === fragment.speaker;
+  const continuesTurn =
+    !fragment.startsTurn &&
+    last &&
+    last.phase === fragment.phase &&
+    last.speaker === fragment.speaker;
 
   if (continuesTurn) {
     const merged: TranscriptEntry = { ...last, text: joinFragments(last.text, fragment.text) };
     return [...entries.slice(0, -1), merged];
   }
 
-  return [...entries, { ...fragment, text: fragment.text.trim() }];
+  // Field by field rather than spread: `startsTurn` is an instruction to this
+  // function, not part of a turn, and a transcript is serialised, stored and
+  // graded — an entry carrying it would put the app's own bookkeeping in front
+  // of the corrector.
+  return [
+    ...entries,
+    {
+      phase: fragment.phase,
+      speaker: fragment.speaker,
+      timestamp: fragment.timestamp,
+      text: fragment.text.trim(),
+    },
+  ];
 }
 
 /**

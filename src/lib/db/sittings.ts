@@ -143,14 +143,50 @@ function toStoredCorrection(row: EvaluationRow): StoredCorrection {
 type Writes = [BatchItem<"pg">, ...BatchItem<"pg">[]];
 
 /**
- * One phase's recording row, read for playback (#98).
+ * Record which Live model will play this sitting's examiner (#99).
  *
  * A standalone export rather than a `SittingStore` method: that interface is
- * the finish path's seam — claim, correct, write — and this is a read the
- * playback route makes with none of that policy behind it. `readSitting`
- * already returns these columns, but it hauls the whole transcript along, and
- * a request whose response is megabytes of audio should not start by reading
- * two hundred thousand characters of text it will not use.
+ * the finish path's seam — claim, correct, write — and this is a préparation
+ * write with none of that policy behind it.
+ *
+ * One statement, idempotence in the WHERE as everywhere in this file, and the
+ * `phase = 'preparation'` clause is the one that carries meaning: the choice
+ * exists so a sitting can answer "which examiner spoke?", so it must become
+ * immutable the moment anyone has spoken. Once the monologue starts — or the
+ * sitting is finished, which the phase also implies — a write matches nothing,
+ * and a stale tab cannot rename the examiner out from under a débat that
+ * reconnects through the token route.
+ *
+ * `false` means "written nothing", which the route reports without alarm: the
+ * ordinary causes are a replayed request after the passation started, and a
+ * sitting that was never persisted.
+ */
+export async function chooseExaminerModel(ref: SittingRef, model: string): Promise<boolean> {
+  const chosen = await getDb()
+    .update(oralExams)
+    .set({ examinerModel: model })
+    .where(
+      and(
+        eq(oralExams.id, ref.examId),
+        eq(oralExams.userId, ref.userId),
+        eq(oralExams.phase, "preparation"),
+      ),
+    )
+    .returning({ id: oralExams.id });
+
+  return chosen.length > 0;
+}
+
+/**
+ * One phase's recording row, read for playback (#98).
+ *
+ * A standalone export for `chooseExaminerModel`'s reason: the `SittingStore`
+ * interface is the finish path's seam — claim, correct, write — and this is a
+ * read the playback route makes with none of that policy behind it.
+ * `readSitting` already returns these columns, but it hauls the whole
+ * transcript along, and a request whose response is megabytes of audio should
+ * not start by reading two hundred thousand characters of text it will not
+ * use.
  *
  * The join is the scoping, as everywhere in this file: `oral_recordings` rows
  * are addressed through the sitting and its owner, never by the recording id a
@@ -457,6 +493,7 @@ export function neonSittingStore(): SittingStore {
             phase: oralExams.phase,
             transcript: oralExams.transcript,
             reconnectCount: oralExams.reconnectCount,
+            examinerModel: oralExams.examinerModel,
             startedAt: oralExams.startedAt,
             finishedAt: oralExams.finishedAt,
           })
@@ -514,6 +551,7 @@ export function neonSittingStore(): SittingStore {
         outcome: sittingOutcome({ finishedAt: sitting.finishedAt, correction }),
         transcript: sitting.transcript ?? [],
         reconnectCount: sitting.reconnectCount,
+        examinerModel: sitting.examinerModel,
         startedAt: sitting.startedAt,
         finishedAt: sitting.finishedAt,
         phases: phases.map((row) => ({

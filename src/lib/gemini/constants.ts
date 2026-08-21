@@ -18,6 +18,81 @@ import { Modality, type LiveConnectConfig } from "@google/genai";
 export const LIVE_MODEL =
   process.env.NEXT_PUBLIC_GEMINI_LIVE_MODEL ?? "gemini-3.1-flash-live-preview";
 
+/** One examiner the candidate may choose (#99). */
+export interface LiveModelOption {
+  /** The raw model id — what is stored, minted and connected with. */
+  id: string;
+  /** The readable name the picker shows. The id stays visible beside it: a
+   *  label alone would hide which model actually ran. */
+  label: string;
+  /** What choosing it changes, in one candidate-facing French clause. */
+  detail: string;
+}
+
+/**
+ * The examiners a candidate may choose between (#99) — and, server-side, the
+ * allow-list a requested model id is checked against before it reaches Google.
+ *
+ * Membership here is a claim about the REAL service, not about the catalogue:
+ * every id was verified by minting a constrained token and opening a session
+ * (run of 2026-08-20). That check is what keeps trap 4 of #99 out of the
+ * picker — a listed model can still be unrunnable, and both failure shapes are
+ * silent at the point of choice: `gemini-2.5-flash-native-audio-preview-09-2025`
+ * opens a socket and never speaks, and a retired id dies at the handshake with
+ * 1011 and no diagnostic. Nothing goes in this list without a probe.
+ *
+ * `gemini-2.5-flash-native-audio-latest` also ran, and is left out on purpose:
+ * it is a moving alias, and a sitting that stores it cannot answer "which
+ * examiner graded this?" once the alias moves — which is the whole reason the
+ * choice is stored.
+ */
+export const LIVE_MODEL_OPTIONS: readonly LiveModelOption[] = [
+  {
+    id: "gemini-3.1-flash-live-preview",
+    label: "Gemini 3.1 Flash Live",
+    detail: "L'examinateur habituel : réactif et éprouvé sur l'épreuve entière.",
+  },
+  {
+    id: "gemini-2.5-flash-native-audio-preview-12-2025",
+    label: "Gemini 2.5 Native Audio",
+    detail: "Voix plus naturelle, génération précédente : le débit peut varier.",
+  },
+];
+
+/**
+ * Whether an id may run an examiner session.
+ *
+ * The env-configured default passes even when it is not in the option list:
+ * `NEXT_PUBLIC_GEMINI_LIVE_MODEL` exists so an operator can outrun a preview
+ * rename without a code change, and an override that the allow-list then
+ * refused would break every untouched sitting.
+ */
+export function isSelectableLiveModel(id: string): boolean {
+  return id === LIVE_MODEL || LIVE_MODEL_OPTIONS.some((option) => option.id === id);
+}
+
+/**
+ * What the picker renders: the verified options, with the configured default
+ * first. When the env override names a model outside the list, it is prepended
+ * under its raw id — unreadable, but honest, and the candidate who touches
+ * nothing must be able to see what they are getting.
+ */
+export function liveModelChoices(): LiveModelOption[] {
+  const options = [...LIVE_MODEL_OPTIONS];
+  const defaultIndex = options.findIndex((option) => option.id === LIVE_MODEL);
+  if (defaultIndex > 0) {
+    const [fallback] = options.splice(defaultIndex, 1);
+    options.unshift(fallback);
+  } else if (defaultIndex === -1) {
+    options.unshift({
+      id: LIVE_MODEL,
+      label: LIVE_MODEL,
+      detail: "Modèle configuré par défaut.",
+    });
+  }
+  return options;
+}
+
 /** Gemini Live audio contract: 16 kHz PCM16 in, 24 kHz PCM16 out. */
 export const INPUT_SAMPLE_RATE = 16000;
 export const OUTPUT_SAMPLE_RATE = 24000;

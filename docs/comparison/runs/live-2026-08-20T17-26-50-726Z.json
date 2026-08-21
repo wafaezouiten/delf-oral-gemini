@@ -1,0 +1,167 @@
+{
+  "measuredAt": "2026-08-20T17:26:50.726Z",
+  "model": "gemini-3.1-flash-live-preview",
+  "topicSlug": "teletravail",
+  "turnsAttempted": 6,
+  "turnsCompleted": 6,
+  "conversationSeconds": 225.475,
+  "candidateAudioSecondsSent": 57.905625,
+  "examinerAudioChunks": 355,
+  "examinerTranscript": "Vous avez affirmé que le télétravail permet de rendre du temps aux salariés, notamment en supprimant les transports. Mais ce temps gagné n'est-il pas rapidement grignoté par des sollicitations professionnelles continues, rendant la déconnexion plus difficile? Pourriez-vous me donner un exemple précis de situation dans laquelle cette frontière s'estompe?Admettons que la culture managériale joue un rôle. Cependant, le télétravail n'accentue-t-il pas l'isolement de certains salariés, en particulier les plus jeunes, qui ont besoin d'apprendre au contact des autres? Comment recréer ce collectif de travail à distance, avec de nouveaux exemples?Mais justement, si le télétravail n'est pas accessible à tous, ne risque-t-il pas de créer une forme d'inégalité entre salariés, voire de fracture sociale dans l'entreprise? Quel exemple concret pourriez-vous apporter à ce sujet?Vous évoquez la mesure de la productivité et des baux immobiliers. Cependant, la présence sur site n'est-elle pas aussi essentielle pour stimuler la créativité et l'innovation spontanée, ce qui ne se mesure pas directement? Comment remplacer ces interactions informelles?Le modèle hybride semble faire consensus mais ne risque-t-il pas de créer des frustrations si l'accès au télétravail n'est pas le même pour tous, selon le poste ou l'ancienneté? Et comment s'assurer que les moments de présence sur site soient véritablement collaboratifs et non subis? Avez-vous un exemple précis d'une telle organisation réussie?Je n'ai pas dit qu'il fallait refuser cette avancée, mais plutôt que les limites devaient être prises en compte. Si le télétravail n'est pas une solution universelle, sur quels autres aspects de la vie professionnelle faudrait-il travailler pour rendre le travail plus attractif et épanouissant pour tous, là encore, en dehors des transports? Avez-vous en tête un exemple précis?",
+  "turnLatencies": [
+    {
+      "turn": 0,
+      "atSecond": 17.703,
+      "firstServerContentMs": 1935,
+      "firstAudioChunkMs": 1935,
+      "turnCompleteMs": 20272
+    },
+    {
+      "turn": 1,
+      "atSecond": 60.705,
+      "firstServerContentMs": 1625,
+      "firstAudioChunkMs": 1625,
+      "turnCompleteMs": 16820
+    },
+    {
+      "turn": 2,
+      "atSecond": 93.991,
+      "firstServerContentMs": 1628,
+      "firstAudioChunkMs": 1628,
+      "turnCompleteMs": 14250
+    },
+    {
+      "turn": 3,
+      "atSecond": 130.543,
+      "firstServerContentMs": 1701,
+      "firstAudioChunkMs": 1701,
+      "turnCompleteMs": 16136
+    },
+    {
+      "turn": 4,
+      "atSecond": 167.249,
+      "firstServerContentMs": 1664,
+      "firstAudioChunkMs": 1664,
+      "turnCompleteMs": 19335
+    },
+    {
+      "turn": 5,
+      "atSecond": 204.256,
+      "firstServerContentMs": 1633,
+      "firstAudioChunkMs": 1633,
+      "turnCompleteMs": 20295
+    }
+  ],
+  "vadSilenceDurationMs": 1200,
+  "usageIsCumulative": true,
+  "totalPromptTokens": 5931,
+  "totalResponseTokens": 473,
+  "promptByModality": {
+    "TEXT": 1870,
+    "AUDIO": 3678
+  },
+  "responseByModality": {
+    "AUDIO": 473
+  },
+  "snapshots": [
+    {
+      "turn": 0,
+      "atSecond": 37.974,
+      "promptTokens": 1815,
+      "responseTokens": 463,
+      "totalTokens": 2278,
+      "promptByModality": {
+        "TEXT": 1309,
+        "AUDIO": 479
+      },
+      "responseByModality": {
+        "AUDIO": 463
+      }
+    },
+    {
+      "turn": 1,
+      "atSecond": 77.525,
+      "promptTokens": 2779,
+      "responseTokens": 385,
+      "totalTokens": 3164,
+      "promptByModality": {
+        "TEXT": 1438,
+        "AUDIO": 1234
+      },
+      "responseByModality": {
+        "AUDIO": 385
+      }
+    },
+    {
+      "turn": 2,
+      "atSecond": 108.241,
+      "promptTokens": 3556,
+      "responseTokens": 321,
+      "totalTokens": 3877,
+      "promptByModality": {
+        "TEXT": 1553,
+        "AUDIO": 1828
+      },
+      "responseByModality": {
+        "AUDIO": 321
+      }
+    },
+    {
+      "turn": 3,
+      "atSecond": 146.679,
+      "promptTokens": 4284,
+      "responseTokens": 366,
+      "totalTokens": 4650,
+      "promptByModality": {
+        "TEXT": 1648,
+        "AUDIO": 2403
+      },
+      "responseByModality": {
+        "AUDIO": 366
+      }
+    },
+    {
+      "turn": 4,
+      "atSecond": 186.584,
+      "promptTokens": 5058,
+      "responseTokens": 447,
+      "totalTokens": 5505,
+      "promptByModality": {
+        "TEXT": 1753,
+        "AUDIO": 3006
+      },
+      "responseByModality": {
+        "AUDIO": 447
+      }
+    },
+    {
+      "turn": 5,
+      "atSecond": 224.551,
+      "promptTokens": 5931,
+      "responseTokens": 473,
+      "totalTokens": 6404,
+      "promptByModality": {
+        "TEXT": 1870,
+        "AUDIO": 3678
+      },
+      "responseByModality": {
+        "AUDIO": 473
+      }
+    }
+  ],
+  "derived": {
+    "medianFirstAudioChunkMs": 1633,
+    "medianModelAndNetworkMs": 433,
+    "promptTokensPerMinute": 1578.26810067635,
+    "responseTokensPerMinute": 125.86761281738552,
+    "costPerMinuteUsd": 0.006245215655837675,
+    "extrapolatedSittingSeconds": 1200,
+    "extrapolatedSittingCostUsd": 0.1249043131167535
+  },
+  "rates": {
+    "input": 3,
+    "output": 12,
+    "source": "https://ai.google.dev/gemini-api/docs/pricing",
+    "note": "Audio modality. Text tokens on the same session (the system instruction, the transcriptions) are billed at the model's text rate, which is why the Live measurement records the two modalities separately."
+  }
+}

@@ -11,6 +11,8 @@ import type { ExamFinishedPayload } from "@/lib/live/exam-controller";
 import { isOpusEncodingSupported } from "@/lib/audio/opus-encoder";
 import { selectDeliverable } from "@/lib/exams/uploaded-recording";
 import { requestAbandon } from "@/lib/exams/abandon";
+import { requestExaminerChoice } from "@/lib/exams/examiner-choice";
+import { LIVE_MODEL } from "@/lib/gemini/constants";
 import { describeFinishFailure, type FinishFailure } from "@/lib/ui/finish-failure";
 import type { OralTopic } from "@/lib/delf/topics";
 import { AnnouncementControl } from "./_components/announcement-control";
@@ -51,7 +53,17 @@ import { FinishedScreen } from "./_components/finished-screen";
  */
 const BROWSER_CHECK_TIMEOUT_MS = 3_000;
 
-export function ExamClient({ examId, topic }: { examId: string; topic: OralTopic }) {
+export function ExamClient({
+  examId,
+  topic,
+  storedExaminerModel,
+}: {
+  examId: string;
+  topic: OralTopic;
+  /** The examiner on the sitting's row, or null where no row (or no choice)
+   *  exists. The picker's starting point, so a reload shows what will run. */
+  storedExaminerModel: string | null;
+}) {
   const router = useRouter();
   const [notes, setNotes] = useState("");
   const [notesOpen, setNotesOpen] = useState(false);
@@ -85,6 +97,47 @@ export function ExamClient({ examId, topic }: { examId: string; topic: OralTopic
    * the screen navigates away.
    */
   const finishedPayload = useRef<ExamFinishedPayload | null>(null);
+
+  /**
+   * The examiner for this sitting (#99): what the row says, or the build
+   * default for a row that never chose (and for the degraded ids that have no
+   * row). Held here rather than in the picker because three consumers need it —
+   * the préparation rail renders it, every token mint forwards it, and the
+   * finish stash records it for the results page.
+   *
+   * The state only moves when the server has agreed. `requestExaminerChoice`
+   * returns `applied: false` whenever the row was not proven written, and the
+   * row is what the token route mints from — advancing the picker on an
+   * unwritten row would promise a voice the épreuve will not use.
+   */
+  const [examinerModel, setExaminerModel] = useState(storedExaminerModel ?? LIVE_MODEL);
+  const [examinerSaving, setExaminerSaving] = useState(false);
+  const [examinerError, setExaminerError] = useState(false);
+  /**
+   * Read by `onFinished` through a ref, NOT captured: `onFinished` is a
+   * dependency of the controller memo in `useExamController`, and a callback
+   * whose identity moved with the picker would rebuild the controller — and
+   * restart the épreuve — on every change of examiner.
+   */
+  const examinerModelRef = useRef(examinerModel);
+  useEffect(() => {
+    examinerModelRef.current = examinerModel;
+  }, [examinerModel]);
+  const chooseExaminer = useCallback(
+    async (model: string) => {
+      if (examinerSaving || model === examinerModel) return;
+      setExaminerSaving(true);
+      setExaminerError(false);
+      const outcome = await requestExaminerChoice(examId, model);
+      if (outcome.applied) {
+        setExaminerModel(model);
+      } else {
+        setExaminerError(true);
+      }
+      setExaminerSaving(false);
+    },
+    [examId, examinerSaving, examinerModel],
+  );
 
   /**
    * Ship the finished exam for grading. The evaluation is stashed in
@@ -192,6 +245,10 @@ export function ExamClient({ examId, topic }: { examId: string; topic: OralTopic
             monologueSeconds: recordedSeconds("monologue"),
             debateSeconds: recordedSeconds("debate"),
             reconnectCount: payload.reconnectCount,
+            // Which model spoke (#99). The database copy reads it off the row;
+            // this is the fallback copy for a sitting that was never persisted,
+            // so it carries the same fact. Through the ref — see its comment.
+            examinerModel: examinerModelRef.current,
           }),
         );
         router.push(`/app/results/${examId}`);
@@ -209,7 +266,7 @@ export function ExamClient({ examId, topic }: { examId: string; topic: OralTopic
     [examId, topic, router],
   );
 
-  const { state, controller } = useExamController({ examId, topic, onFinished });
+  const { state, controller } = useExamController({ examId, topic, examinerModel, onFinished });
 
   /**
    * Start the épreuve on arrival (#55).
@@ -399,29 +456,25 @@ export function ExamClient({ examId, topic }: { examId: string; topic: OralTopic
   );
 
   /**
-   * The phase is open but has not begun: the consigne is playing, or is held
-   * waiting for a click the browser's autoplay policy made necessary (#37).
-   *
-   * Derived here rather than added to `ExamState`, because it is exactly the two
-   * flags below in the two phases this branch renders — and the screens it feeds
-   * need it to keep from printing "you are being recorded and your time has
-   * started" over a phase where neither is true yet.
+   * The phase is open but has not begun: the consigne is playing (#37). A
+   * consigne the browser refused to autoplay no longer holds a phase — the
+   * controller forfeits it and moves on — so this is one flag now, kept under
+   * its own name because the screens it feeds read it as a statement about the
+   * phase, not about audio.
    */
-  const awaitingConsigne = state.announcementPlaying || state.announcementBlocked;
+  const awaitingConsigne = state.announcementPlaying;
 
   /**
    * The examiner's spoken consigne, on every screen it can appear on (#37, #59).
    *
    * One element handed to whichever screen is up, rather than each screen
    * building its own: the control has to survive the préparation → monologue
-   * boundary looking like the same control, and the two controller calls behind
-   * it should not be written down twice.
+   * boundary looking like the same control, and the controller call behind it
+   * should not be written down twice.
    */
   const announcement = (
     <AnnouncementControl
       playing={state.announcementPlaying}
-      blocked={state.announcementBlocked}
-      onPlay={() => controller.playAnnouncement()}
       onSkip={() => controller.skipAnnouncement()}
     />
   );
@@ -468,8 +521,11 @@ export function ExamClient({ examId, topic }: { examId: string; topic: OralTopic
           remaining={state.remaining}
           onStartExam={() => void controller.advanceEarly()}
           onExit={() => setShowExitDialog(true)}
-          canEncode={canEncode}
           checking={checkingBrowser}
+          examinerModel={examinerModel}
+          examinerSaving={examinerSaving}
+          examinerError={examinerError}
+          onChooseExaminer={(model) => void chooseExaminer(model)}
           notices={hasNotices || canEncode === false ? preparationNotices : undefined}
           announcement={announcement}
         />
@@ -488,6 +544,7 @@ export function ExamClient({ examId, topic }: { examId: string; topic: OralTopic
         remaining={state.remaining}
         recording={state.recording}
         examinerSpeaking={state.examinerSpeaking}
+        openingQuestionPending={state.openingQuestionPending}
         connected={state.connection === "connected"}
         connecting={state.connection === "connecting"}
         canAdvance={state.canAdvance}
