@@ -101,6 +101,20 @@ export class PhaseArchive {
   private open: RecordedPhase | null = null;
   /** Samples that arrived while no phase was open. Reported, not filed. */
   private discardedSamples = 0;
+  /**
+   * Encodes already made, one per phase, keyed by how many samples they cover.
+   *
+   * What this buys is #86: the monologue's samples are final the moment the
+   * débat begins, so the controller asks for its artefact then — thirteen
+   * minutes before anyone is waiting on it — and the finish finds the work
+   * already done. The sample count is what makes the reuse honest: a phase
+   * re-opened and appended to (the monologue restart, #39) no longer matches
+   * its cached count, and is encoded afresh from everything it now holds.
+   */
+  private readonly encoded = new Map<
+    RecordedPhase,
+    { sampleCount: number; artefact: Promise<PhaseRecording> }
+  >();
 
   constructor(
     readonly sampleRate: number = INPUT_SAMPLE_RATE,
@@ -223,6 +237,25 @@ export class PhaseArchive {
     const segment = this.segments.get(phase);
     if (!segment || segment.samples === 0) return null;
 
+    // One encode per (phase, sample count), however many callers ask — the
+    // in-flight promise is shared, so an early request (#86) and the finish
+    // asking moments later wait on the same work instead of doubling it.
+    const cached = this.encoded.get(phase);
+    if (cached && cached.sampleCount === segment.samples) return cached.artefact;
+
+    const artefact = this.encodePhase(phase, segment);
+    this.encoded.set(phase, { sampleCount: segment.samples, artefact });
+    // A failed encode must not be sticky: whoever asked gets the rejection to
+    // report, and the next request encodes afresh instead of replaying it. The
+    // handler also keeps a fire-and-forget early encode from surfacing as an
+    // unhandled rejection — the finish will meet the same failure for itself.
+    artefact.catch(() => {
+      if (this.encoded.get(phase)?.artefact === artefact) this.encoded.delete(phase);
+    });
+    return artefact;
+  }
+
+  private async encodePhase(phase: RecordedPhase, segment: Segment): Promise<PhaseRecording> {
     const pcm = new Int16Array(segment.samples);
     let offset = 0;
     for (const frame of segment.frames) {
@@ -248,7 +281,10 @@ export class PhaseArchive {
    *
    * One phase at a time rather than both at once: the encoder is a device with a
    * queue, and handing it a whole sitting in parallel buys nothing on the one
-   * thread it drains on.
+   * thread it drains on. That guarantee is per-call, not global — since #86 the
+   * controller may already have an encode in flight from its early request, and
+   * this walk meeting one simply awaits the shared memoized promise rather than
+   * queuing a second compression.
    */
   async all(): Promise<PhaseRecording[]> {
     const recordings: PhaseRecording[] = [];
@@ -269,6 +305,7 @@ export class PhaseArchive {
    */
   clear(): void {
     this.segments.clear();
+    this.encoded.clear();
     this.open = null;
     this.discardedSamples = 0;
   }

@@ -10,12 +10,14 @@ import { QuitPreparationDialog } from "@/app/_components/po/quit-preparation-dia
 import { useExamController } from "@/lib/live/use-exam-controller";
 import type { ExamFinishedPayload } from "@/lib/live/exam-controller";
 import { isOpusEncodingSupported } from "@/lib/audio/opus-encoder";
+import { postFinishRequest } from "@/lib/exams/finish-request";
 import { selectDeliverable } from "@/lib/exams/uploaded-recording";
 import { requestAbandon } from "@/lib/exams/abandon";
 import { requestPreparationExit } from "@/lib/exams/preparation-exit";
 import { requestExaminerChoice } from "@/lib/exams/examiner-choice";
 import { LIVE_MODEL } from "@/lib/gemini/constants";
 import { describeFinishFailure, type FinishFailure } from "@/lib/ui/finish-failure";
+import { finishStage } from "@/lib/ui/finish-progress";
 import type { OralTopic } from "@/lib/delf/topics";
 import { AnnouncementControl } from "./_components/announcement-control";
 import { DEV_TOOLS_ENABLED } from "@/lib/dev-tools";
@@ -76,6 +78,14 @@ export function ExamClient({
   const [quittingPreparation, setQuittingPreparation] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<FinishFailure | null>(null);
+  /**
+   * How much of the finish request's body has left the tab, as the transport
+   * reports it (#86) — null before the first progress event and on every
+   * retry, exactly 1 once the upload is done. What lets the finished screen
+   * say « Envoi… » with a bar and then « en cours de correction », instead of
+   * one spinner over a chain of segments of very different lengths.
+   */
+  const [uploadFraction, setUploadFraction] = useState<number | null>(null);
   const submittedRef = useRef(false);
 
   /**
@@ -160,6 +170,7 @@ export function ExamClient({
       finishedPayload.current = payload;
       setSubmitting(true);
       setSubmitError(null);
+      setUploadFraction(null);
 
       const form = new FormData();
       const json = JSON.stringify({
@@ -226,20 +237,33 @@ export function ExamClient({
         payload.phases.find((report) => report.phase === phase)?.recordedSeconds ?? 0;
 
       try {
-        const response = await fetch(`/api/exams/${examId}/finish`, {
-          method: "POST",
-          body: form,
-        });
-        // A platform error is an HTML page, not this route's JSON, so parsing is
-        // allowed to fail without losing the status — which is the half of the
-        // failure that decides whether a retry is worth offering.
-        const body = await response.json().catch(() => null);
-        if (!response.ok) {
-          setSubmitError(describeFinishFailure(response.status, body?.error));
+        // Over XHR rather than fetch, for the one thing fetch cannot do: report
+        // how much of the upload has left the tab (#86). The answer contract is
+        // the same — a platform error is an HTML page, not this route's JSON,
+        // so the body parses to null without losing the status, which is the
+        // half of the failure that decides whether a retry is worth offering.
+        const requestStartedAt = Date.now();
+        const { status, body } = await postFinishRequest(
+          `/api/exams/${examId}/finish`,
+          form,
+          setUploadFraction,
+        );
+        if (DEV_TOOLS_ENABLED) {
+          // The client's half of #86's instrumentation: the whole round trip,
+          // to read against the segments the server logs for the same request.
+          console.info(
+            `[finish] answered ${status} in ${((Date.now() - requestStartedAt) / 1000).toFixed(1)}s`,
+          );
+        }
+        if (status < 200 || status >= 300) {
+          setSubmitError(describeFinishFailure(status, body?.error));
           setSubmitting(false);
           submittedRef.current = false;
           return;
         }
+        // A 200 whose body did not parse is not a result the candidate can be
+        // navigated to; the catch below turns it into the retryable message.
+        if (body === null) throw new Error("the finish route answered 200 without JSON");
 
         sessionStorage.setItem(
           `delf-eval-${examId}`,
@@ -263,9 +287,11 @@ export function ExamClient({
         );
         router.push(`/app/results/${examId}`);
       } catch (error) {
-        // The request never got an answer — offline, DNS, a dropped upload. The
-        // exception's own words ("Failed to fetch") are for the console; the
-        // candidate gets a sentence and a retry, because nothing was refused.
+        // Almost always: the request never got an answer — offline, DNS, a
+        // dropped upload. The one other arrival is the throw above, a 200
+        // whose body was not JSON. Both end the same way on purpose: the
+        // exception's own words are for the console, and the candidate gets a
+        // sentence and a retry, because nothing was refused.
         console.error(error);
         setSubmitError(describeFinishFailure(null, null));
         setSubmitting(false);
@@ -523,7 +549,7 @@ export function ExamClient({
   if (state.phase === "finished") {
     return (
       <FinishedScreen
-        submitting={submitting}
+        stage={finishStage(submitting, uploadFraction)}
         submitError={submitError}
         droppedPhases={droppedPhases}
         onRetry={() => {

@@ -101,6 +101,18 @@ export interface RecorderLike {
    *  them is what makes a sitting small enough to upload, and it is not
    *  instant — see `audio/opus-encoder.ts`. */
   recordings(): Promise<PhaseRecording[]>;
+  /**
+   * One phase's artefact on its own, or null where it captured nothing.
+   *
+   * One caller wants it: the controller asks for the monologue's artefact the
+   * moment the débat begins (#86), so the compression runs while the candidate
+   * debates instead of while they wait at « Épreuve terminée ». The archive
+   * memoizes the result, which is what makes the early call worth making —
+   * `recordings()` then finds the work already done. Required rather than
+   * optional, because an implementation that forgot it would lose the early
+   * encode silently; a compile error is the honest price.
+   */
+  recordingFor(phase: RecordedPhase): Promise<PhaseRecording | null>;
   /** Release the recording's memory once the blobs are cut. */
   discard(): void;
 }
@@ -2401,6 +2413,32 @@ export class ExamController {
       this.tolerate("end-phase", () => this.recorder?.endPhase());
     }
 
+    /**
+     * Compress the monologue now, not at the finish (#86).
+     *
+     * Its samples are final — `endPhase()` above flushed the framer's tail, and
+     * nothing re-opens the monologue once the débat exists — and the candidate
+     * is about to spend thirteen minutes debating, which is exactly when a slow
+     * compression cannot be perceived. Fire-and-forget on purpose: the artefact
+     * is memoized by the archive, so the finish reuses it if it succeeded and
+     * simply encodes afresh if it did not. Nothing here may hold the débat's
+     * consigne behind a codec.
+     */
+    const recorder = this.recorder;
+    if (current === "monologue" && target === "debate" && recorder) {
+      const encodeStart = this.now();
+      recorder.recordingFor("monologue").then(
+        (recording) => {
+          if (!recording) return;
+          this.log("monologue-preencoded", {
+            ms: this.now() - encodeStart,
+            bytes: recording.byteSize,
+          });
+        },
+        (error) => this.log("monologue-preencode-failed", String(error)),
+      );
+    }
+
     this.log("phase-transition", `${current} -> ${target}`);
 
     if (current === "monologue") {
@@ -2745,8 +2783,13 @@ export class ExamController {
     this.recorder = null;
     await recorder?.stop();
     // Awaited: the artefacts are compressed on the way out of the archive, so
-    // this is where a 38 MB sitting becomes a 2.4 MB upload (#24).
+    // this is where a 38 MB sitting becomes a 2.4 MB upload (#24). Timed,
+    // because it is the first segment of the wait #86 is about — and since the
+    // monologue was compressed during the débat, what is measured here should
+    // be the débat's encode alone.
+    const encodeStart = this.now();
     const recordings = (await recorder?.recordings()) ?? [];
+    const encodeMs = this.now() - encodeStart;
     const phases = this.phaseReports(recorder);
     // The blobs are cut and own their bytes; the PCM behind them is a second
     // copy of a sitting, and this tab is about to load a results page.
@@ -2764,6 +2807,9 @@ export class ExamController {
       })),
       reconnects: this.reconnectCount,
       earlyClosings: this.earlyClosingCount,
+      // What the candidate spent at « Épreuve terminée » waiting on the codec
+      // (#86). Near zero when the monologue was pre-encoded during the débat.
+      encodeMs,
     });
 
     // See the top of the method: the voice must not outlive the screen.
