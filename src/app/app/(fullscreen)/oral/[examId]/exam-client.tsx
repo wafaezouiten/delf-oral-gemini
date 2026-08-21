@@ -287,9 +287,11 @@ export function ExamClient({
         );
         router.push(`/app/results/${examId}`);
       } catch (error) {
-        // The request never got an answer — offline, DNS, a dropped upload. The
-        // exception's own words ("Failed to fetch") are for the console; the
-        // candidate gets a sentence and a retry, because nothing was refused.
+        // Almost always: the request never got an answer — offline, DNS, a
+        // dropped upload. The one other arrival is the throw above, a 200
+        // whose body was not JSON. Both end the same way on purpose: the
+        // exception's own words are for the console, and the candidate gets a
+        // sentence and a retry, because nothing was refused.
         console.error(error);
         setSubmitError(describeFinishFailure(null, null));
         setSubmitting(false);

@@ -281,7 +281,10 @@ export class PhaseArchive {
    *
    * One phase at a time rather than both at once: the encoder is a device with a
    * queue, and handing it a whole sitting in parallel buys nothing on the one
-   * thread it drains on.
+   * thread it drains on. That guarantee is per-call, not global — since #86 the
+   * controller may already have an encode in flight from its early request, and
+   * this walk meeting one simply awaits the shared memoized promise rather than
+   * queuing a second compression.
    */
   async all(): Promise<PhaseRecording[]> {
     const recordings: PhaseRecording[] = [];

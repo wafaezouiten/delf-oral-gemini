@@ -410,9 +410,12 @@ export async function evaluateExam(params: EvaluateParams): Promise<EvaluationRe
     // fan-out here is bounded at the two speaking phases, and a candidate is
     // sitting at « Épreuve terminée » for the whole of this — `uploadSeconds`
     // below is what says how much the change bought. A 429, if one ever
-    // arrives, surfaces exactly as it did sequentially: the route's 502 and
-    // the retry button. `map` preserves exam order, which the prompt promises
-    // the model about the files it is handed.
+    // arrives, surfaces to the candidate exactly as it did sequentially — the
+    // route's 502 and the retry button — though `Promise.all` fails fast, so
+    // the sibling upload is abandoned mid-flight rather than never started; a
+    // small quota waste on a partial failure, cleaned up by the Files API's
+    // own TTL. `map` preserves exam order, which the prompt promises the model
+    // about the files it is handed.
     parts.push(
       ...(await Promise.all(
         recordings.map(async (recording) => {
