@@ -41,7 +41,14 @@ const PACKETS_PER_PAGE = 255;
  * covers 10/20/40/60 ms and CELT 2.5/5/10/20, which is where these come from.
  */
 function packet(ms: number, bytes = 40): Uint8Array {
-  const config: Record<string, number> = { "2.5": 16, "5": 17, "10": 18, "20": 19, "40": 10, "60": 11 };
+  const config: Record<string, number> = {
+    "2.5": 16,
+    "5": 17,
+    "10": 18,
+    "20": 19,
+    "40": 10,
+    "60": 11,
+  };
   const chosen = config[String(ms)];
   assert.ok(chosen !== undefined, `no config for ${ms} ms`);
 
@@ -163,10 +170,7 @@ describe("a muxed stream", () => {
     const oneMinute = await bytesOf(packets(3_000));
 
     assert.equal(readOggOpus(oneMinute)?.durationSeconds, 60);
-    assert.ok(
-      oneMinute.byteLength < 60 * 4_000,
-      `a minute muxed to ${oneMinute.byteLength} bytes`,
-    );
+    assert.ok(oneMinute.byteLength < 60 * 4_000, `a minute muxed to ${oneMinute.byteLength} bytes`);
   });
 });
 
@@ -242,7 +246,10 @@ describe("a stream whose two accounts of its length disagree", () => {
     let start = -1;
     for (let i = bytes.length - 4; i >= 0; i -= 1) {
       const isMagic =
-        bytes[i] === 0x4f && bytes[i + 1] === 0x67 && bytes[i + 2] === 0x67 && bytes[i + 3] === 0x53;
+        bytes[i] === 0x4f &&
+        bytes[i + 1] === 0x67 &&
+        bytes[i + 2] === 0x67 &&
+        bytes[i + 3] === 0x53;
       if (isMagic) {
         start = i;
         break;

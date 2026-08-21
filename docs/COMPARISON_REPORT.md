@@ -6,10 +6,10 @@ latency measured rather than asserted.
 
 Everything below rests on two recorded runs, both in `docs/comparison/runs/`:
 
-| Run | What | Command |
-| --- | --- | --- |
-| `2026-08-16T09-49-57-032Z.json` | 6 sittings × 2 repeats, both correctors | `pnpm compare -- --repeats=2` |
-| `live-2026-08-16T09-57-43-573Z.json` | a real Gemini Live débat, 4 turns | `pnpm measure:live -- --turns=4` |
+| Run                                  | What                                    | Command                          |
+| ------------------------------------ | --------------------------------------- | -------------------------------- |
+| `2026-08-16T09-49-57-032Z.json`      | 6 sittings × 2 repeats, both correctors | `pnpm compare -- --repeats=2`    |
+| `live-2026-08-16T09-57-43-573Z.json` | a real Gemini Live débat, 4 turns       | `pnpm measure:live -- --turns=4` |
 
 Both are re-runnable. `pnpm compare:summarise` regenerates every table in
 §[Criterion by criterion](#criterion-by-criterion) from the run file, so no number
@@ -22,10 +22,10 @@ here is transcribed by hand.
 The two systems do not produce the same kind of object, and no amount of harness
 design makes them.
 
-**This system** corrects a *sitting*: the monologue suivi and the débat are one
+**This system** corrects a _sitting_: the monologue suivi and the débat are one
 épreuve, one transcript and one mark out of 25.
 
-**The incumbent** corrects a *tâche*. Its simulator practises one part at a time,
+**The incumbent** corrects a _tâche_. Its simulator practises one part at a time,
 `evaluateOralPerformance` takes a single `tache` number, and each correction
 carries its own /25. A candidate over there sits a full B2 oral as two separate
 runs and receives two separate marks that are never combined.
@@ -58,14 +58,14 @@ sabotage exactly one criterion, make the other four conspicuously strong, so a
 corrector forming a single global impression is distinguishable from one applying
 the grille.
 
-| Sitting | Designed weakness |
-| --- | --- |
-| `b2-solide` | none — the control |
-| `morphosyntaxe-faible` | strong argument, agrammatical French |
-| `interaction-faible` | excellent monologue, folds completely under contradiction |
-| `lexique-pauvre` | ideas and structure fine, vocabulary systematically poor |
-| `hors-sujet` | rich fluent French that never takes a position |
-| `candidat-quasi-muet` | barely speaks; both parts under their duration floor |
+| Sitting                | Designed weakness                                         |
+| ---------------------- | --------------------------------------------------------- |
+| `b2-solide`            | none — the control                                        |
+| `morphosyntaxe-faible` | strong argument, agrammatical French                      |
+| `interaction-faible`   | excellent monologue, folds completely under contradiction |
+| `lexique-pauvre`       | ideas and structure fine, vocabulary systematically poor  |
+| `hors-sujet`           | rich fluent French that never takes a position            |
+| `candidat-quasi-muet`  | barely speaks; both parts under their duration floor      |
 
 The incumbent's existing ten-fixture suite (`delf-preps/src/lib/orale-eval/fixtures.ts`)
 could not be reused, and the reason is the unit problem again: each of its
@@ -82,38 +82,38 @@ diverged for reasons about the harness rather than about either corrector.
 
 Run: 2026-08-16T09:49:57.032Z · commit `dce121b8` · 6 sittings × 2 runs · incumbent model `openai/gpt-5.4` · this system `gemini-3.6-flash`, prompt `2026-08-15.0`
 
-| Sitting | Criterion | This system | Incumbent (t1 · monologue) | Incumbent (t2 · débat) | Δ |
-| --- | --- | --- | --- | --- | --- |
-| b2-solide | realisationTache | 5 | 3/5 ← ~ | 5 | +1.0 |
-| b2-solide | interaction | 5 | 1 | 5 ← | 0 |
-| b2-solide | lexique | 5 | 5 | 5 | 0 |
-| b2-solide | morphosyntaxe | 5 | 5 | 5 | 0 |
-| b2-solide | phonologie | 5 | 3 | 3 | +2.0 |
-| morphosyntaxe-faible | realisationTache | 5 | 3 ← | 3/5 ~ | +2.0 |
-| morphosyntaxe-faible | interaction | 5 | 1 | 5 ← | 0 |
-| morphosyntaxe-faible | lexique | 5 | 3 | 3 | +2.0 |
-| morphosyntaxe-faible | morphosyntaxe | 3 | 1 | 1/3 ~ | +1.5 |
-| morphosyntaxe-faible | phonologie | 5 | 1/3 ~ | 3 | +2.5 |
-| interaction-faible | realisationTache | 5 | 5 ← | 1 | 0 |
-| interaction-faible | interaction | 1 | 1 | 1 ← | 0 |
-| interaction-faible | lexique | 3 | 5 | 1/3 ~ | -0.5 |
-| interaction-faible | morphosyntaxe | 5 | 5 | 3 | +1.0 |
-| interaction-faible | phonologie | 3 | 3 | 1/3 ~ | +0.5 |
-| lexique-pauvre | realisationTache | 3 | 3 ← | 3 | 0 |
-| lexique-pauvre | interaction | 5 | 1 | 3 ← | +2.0 |
-| lexique-pauvre | lexique | 1 | 1 | 1 | 0 |
-| lexique-pauvre | morphosyntaxe | 1 | 1 | 1 | 0 |
-| lexique-pauvre | phonologie | 5 | 1/3 ~ | 3 | +2.5 |
-| hors-sujet | realisationTache | 1 | 1 ← | 1 | 0 |
-| hors-sujet | interaction | 1 | 0/1 ~ | 1 ← | 0 |
-| hors-sujet | lexique | 5 | 5 | 3/5 ~ | +0.5 |
-| hors-sujet | morphosyntaxe | 5 | 5 | 3/5 ~ | +0.5 |
-| hors-sujet | phonologie | 5 | 3 | 1/3 ~ | +2.5 |
-| candidat-quasi-muet | realisationTache | 0 | 1 ← | 1 | -1.0 |
-| candidat-quasi-muet | interaction | 0 | 1 | 1 ← | -1.0 |
-| candidat-quasi-muet | lexique | 0 | 1 | 1 | -1.0 |
-| candidat-quasi-muet | morphosyntaxe | 0 | 1 | 1 | -1.0 |
-| candidat-quasi-muet | phonologie | 0 | 1 | 1 | -1.0 |
+| Sitting              | Criterion        | This system | Incumbent (t1 · monologue) | Incumbent (t2 · débat) | Δ    |
+| -------------------- | ---------------- | ----------- | -------------------------- | ---------------------- | ---- |
+| b2-solide            | realisationTache | 5           | 3/5 ← ~                    | 5                      | +1.0 |
+| b2-solide            | interaction      | 5           | 1                          | 5 ←                    | 0    |
+| b2-solide            | lexique          | 5           | 5                          | 5                      | 0    |
+| b2-solide            | morphosyntaxe    | 5           | 5                          | 5                      | 0    |
+| b2-solide            | phonologie       | 5           | 3                          | 3                      | +2.0 |
+| morphosyntaxe-faible | realisationTache | 5           | 3 ←                        | 3/5 ~                  | +2.0 |
+| morphosyntaxe-faible | interaction      | 5           | 1                          | 5 ←                    | 0    |
+| morphosyntaxe-faible | lexique          | 5           | 3                          | 3                      | +2.0 |
+| morphosyntaxe-faible | morphosyntaxe    | 3           | 1                          | 1/3 ~                  | +1.5 |
+| morphosyntaxe-faible | phonologie       | 5           | 1/3 ~                      | 3                      | +2.5 |
+| interaction-faible   | realisationTache | 5           | 5 ←                        | 1                      | 0    |
+| interaction-faible   | interaction      | 1           | 1                          | 1 ←                    | 0    |
+| interaction-faible   | lexique          | 3           | 5                          | 1/3 ~                  | -0.5 |
+| interaction-faible   | morphosyntaxe    | 5           | 5                          | 3                      | +1.0 |
+| interaction-faible   | phonologie       | 3           | 3                          | 1/3 ~                  | +0.5 |
+| lexique-pauvre       | realisationTache | 3           | 3 ←                        | 3                      | 0    |
+| lexique-pauvre       | interaction      | 5           | 1                          | 3 ←                    | +2.0 |
+| lexique-pauvre       | lexique          | 1           | 1                          | 1                      | 0    |
+| lexique-pauvre       | morphosyntaxe    | 1           | 1                          | 1                      | 0    |
+| lexique-pauvre       | phonologie       | 5           | 1/3 ~                      | 3                      | +2.5 |
+| hors-sujet           | realisationTache | 1           | 1 ←                        | 1                      | 0    |
+| hors-sujet           | interaction      | 1           | 0/1 ~                      | 1 ←                    | 0    |
+| hors-sujet           | lexique          | 5           | 5                          | 3/5 ~                  | +0.5 |
+| hors-sujet           | morphosyntaxe    | 5           | 5                          | 3/5 ~                  | +0.5 |
+| hors-sujet           | phonologie       | 5           | 3                          | 1/3 ~                  | +2.5 |
+| candidat-quasi-muet  | realisationTache | 0           | 1 ←                        | 1                      | -1.0 |
+| candidat-quasi-muet  | interaction      | 0           | 1                          | 1 ←                    | -1.0 |
+| candidat-quasi-muet  | lexique          | 0           | 1                          | 1                      | -1.0 |
+| candidat-quasi-muet  | morphosyntaxe    | 0           | 1                          | 1                      | -1.0 |
+| candidat-quasi-muet  | phonologie       | 0           | 1                          | 1                      | -1.0 |
 
 `←` marks the correction the Δ is taken against. `~` marks a criterion whose two
 repeats disagreed with each other, which is sampling and not disagreement. `a/b`
@@ -121,14 +121,14 @@ lists every distinct band the repeats produced.
 
 ### Totals
 
-| Sitting | Designed weakness | Ours /25 | Incumbent t1 /25 | Incumbent t2 /25 | Ours: penalty | Ours: floor |
-| --- | --- | --- | --- | --- | --- | --- |
-| b2-solide | control | 25 | 17/19 | 23 | 0 | clears |
-| morphosyntaxe-faible | morphosyntaxe | 23 | 9/11 | 15/19 | 0 | clears |
-| interaction-faible | interaction | 17 | 19 | 7/11 | 0 | clears |
-| lexique-pauvre | lexique | 15 | 7/9 | 11 | 0 | clears |
-| hors-sujet | realisationTache | 17 | 14/15 | 9/15 | 0 | clears |
-| candidat-quasi-muet | control | 0 | 2 | 2 | 3 (monologue, débat) | below |
+| Sitting              | Designed weakness | Ours /25 | Incumbent t1 /25 | Incumbent t2 /25 | Ours: penalty        | Ours: floor |
+| -------------------- | ----------------- | -------- | ---------------- | ---------------- | -------------------- | ----------- |
+| b2-solide            | control           | 25       | 17/19            | 23               | 0                    | clears      |
+| morphosyntaxe-faible | morphosyntaxe     | 23       | 9/11             | 15/19            | 0                    | clears      |
+| interaction-faible   | interaction       | 17       | 19               | 7/11             | 0                    | clears      |
+| lexique-pauvre       | lexique           | 15       | 7/9              | 11               | 0                    | clears      |
+| hors-sujet           | realisationTache  | 17       | 14/15            | 9/15             | 0                    | clears      |
+| candidat-quasi-muet  | control           | 0        | 2                | 2                | 3 (monologue, débat) | below       |
 
 **Both correctors find the sabotage.** Every designed weakness was located by both
 systems: `morphosyntaxe` 3 vs 5 elsewhere, `interaction` 1/5, `lexique` 1/5,
@@ -151,14 +151,13 @@ about the incumbent, or a defect — and the defect is filed.
 > system's /25 totals in §2 is now 2 points lower on the four sittings that scored
 > phonologie 5.
 
-
 The largest and most systematic divergence: +2.0, +2.5, +2.5, +2.5 on four of six
 sittings. Both correctors were reading text.
 
-| | `phonologieNonEvaluable: true` | Bands awarded |
-| --- | --- | --- |
-| This system | 2 / 11 | 5 on seven of eleven |
-| Incumbent | **24 / 24** | never above 3 |
+|             | `phonologieNonEvaluable: true` | Bands awarded        |
+| ----------- | ------------------------------ | -------------------- |
+| This system | 2 / 11                         | 5 on seven of eleven |
+| Incumbent   | **24 / 24**                    | never above 3        |
 
 The incumbent declared phonologie unassessable on **every single correction** and
 capped itself at 3. This system awarded 5/5 seven times — including to
@@ -172,7 +171,7 @@ compensate for having none. That decision stands.
 
 What the audit did not decide is what the **fallback** does when the audio is
 missing, and the replacement (`phonology-instruction.ts`, `TEXT_INSTRUCTION`) was
-*more* confident than the thing it replaced — in the one mode with strictly less
+_more_ confident than the thing it replaced — in the one mode with strictly less
 evidence. `finish/route.ts` selects text mode whenever both recordings fail to
 upload, so this was reachable in production and inflated a stored,
 candidate-visible mark by up to 2 bands.
@@ -245,10 +244,10 @@ not share.
 
 Repeating every correction twice:
 
-| | Criterion readings compared | Moved between runs |
-| --- | --- | --- |
-| This system | 25 (5 sittings × 5 criteria) | **0** |
-| Incumbent | 60 (6 sittings × 2 tâches × 5) | **11 (18%)** |
+|             | Criterion readings compared    | Moved between runs |
+| ----------- | ------------------------------ | ------------------ |
+| This system | 25 (5 sittings × 5 criteria)   | **0**              |
+| Incumbent   | 60 (6 sittings × 2 tâches × 5) | **11 (18%)**       |
 
 Every one of the eleven unstable readings is the incumbent's. Its /25 swung by up
 to 6 points on identical input — `hors-sujet` tâche 2 scored 15 then 9,
@@ -274,7 +273,7 @@ and 23. Roughly 2 of those points are §3.1's phonologie. The rest is the
 measured reason (`docs/EVALUATION_FINDINGS.md`: without it the corrector put 3 on
 everything). It may simply be tuned a notch generous.
 
-Not filed, because this corpus cannot settle it: `b2-solide` was *written* to be
+Not filed, because this corpus cannot settle it: `b2-solide` was _written_ to be
 a strong performance, and no sitting in it is designed to land at a uniform 3. See
 §7.
 
@@ -284,10 +283,10 @@ a strong performance, and no sitting in it is designed to land at a uniform 3. S
 
 ### The correction
 
-| Correction | Calls | Median latency | Slowest | Mean input tok | Mean output tok | Cost per sitting |
-| --- | --- | --- | --- | --- | --- | --- |
-| This system (1 call/sitting) | 11 | 15.8s | 24.4s | 2 006 | 2 331 | **$0.0102** |
-| Incumbent (2 calls/sitting) | 24 | 12.8s | 15.0s | 1 913 | 1 022 | **$0.0402** |
+| Correction                   | Calls | Median latency | Slowest | Mean input tok | Mean output tok | Cost per sitting |
+| ---------------------------- | ----- | -------------- | ------- | -------------- | --------------- | ---------------- |
+| This system (1 call/sitting) | 11    | 15.8s          | 24.4s   | 2 006          | 2 331           | **$0.0102**      |
+| Incumbent (2 calls/sitting)  | 24    | 12.8s          | 15.0s   | 1 913          | 1 022           | **$0.0402**      |
 
 Token counts are measured. Prices are quoted from published rate cards
 (`scripts/comparison/pricing.ts`), read 2026-08-16.
@@ -314,10 +313,10 @@ A correction is seconds. A sitting is twenty minutes of live audio, and that is
 where the money is. Measured against the real service — a genuine Live débat
 session, four turns, 157.6 s (`pnpm measure:live`):
 
-| | Measured | Per 20-min sitting |
-| --- | --- | --- |
-| This system — Gemini Live | 3 960 prompt + 524 response tokens over 157.6 s → 1 507 and 199 tok/min → **$0.0069/min** | **≈ $0.14** (extrapolated) |
-| Incumbent — ElevenLabs agent | *not measured* | **≈ $2.00** at the published $0.10/min |
+|                              | Measured                                                                                  | Per 20-min sitting                     |
+| ---------------------------- | ----------------------------------------------------------------------------------------- | -------------------------------------- |
+| This system — Gemini Live    | 3 960 prompt + 524 response tokens over 157.6 s → 1 507 and 199 tok/min → **$0.0069/min** | **≈ $0.14** (extrapolated)             |
+| Incumbent — ElevenLabs agent | _not measured_                                                                            | **≈ $2.00** at the published $0.10/min |
 
 Read the qualifiers, because they run in opposite directions:
 
@@ -337,10 +336,10 @@ Read the qualifiers, because they run in opposite directions:
 
 ### Together
 
-| | Conversation | Correction | Total per sitting |
-| --- | --- | --- | --- |
-| This system | ≈ $0.14 | $0.0102 | **≈ $0.15** |
-| Incumbent | ≈ $2.00 | $0.0402 | **≈ $2.04** |
+|             | Conversation | Correction | Total per sitting |
+| ----------- | ------------ | ---------- | ----------------- |
+| This system | ≈ $0.14      | $0.0102    | **≈ $0.15**       |
+| Incumbent   | ≈ $2.00      | $0.0402    | **≈ $2.04**       |
 
 Roughly **13× cheaper per sitting**, and the ratio is driven almost entirely by
 the conversation, not the grading. The single largest caveat in this report sits
@@ -350,7 +349,7 @@ on the largest number in it: $2.00 of the incumbent's $2.04 is a rate card.
 
 ## 5. Latency
 
-Per correction the incumbent is *faster* — 12.8 s median against 15.8 s — which is
+Per correction the incumbent is _faster_ — 12.8 s median against 15.8 s — which is
 what more reasoning buys. Per sitting it is slower, because a sitting there is two
 corrections: **25.5 s against 15.8 s**.
 
@@ -362,10 +361,10 @@ change a decision.
 
 ## 6. Failure modes, and what the candidate sees
 
-| System | Calls | Failures | Rate |
-| --- | --- | --- | --- |
-| This system | 12 | 1 | **8.3%** |
-| Incumbent | 24 | 0 | 0% |
+| System      | Calls | Failures | Rate     |
+| ----------- | ----- | -------- | -------- |
+| This system | 12    | 1        | **8.3%** |
+| Incumbent   | 24    | 0        | 0%       |
 
 The one failure was a Gemini **503, "This model is currently experiencing high
 demand"**, after 5.3 s — a free-tier capacity refusal, not a bug. It is the
@@ -411,7 +410,7 @@ Stated plainly, because several of them bound the conclusions above.
 4. **`lexique-pauvre` has n=1 on this side** — its first correction was the 503.
 5. **The corpus has no mid-band sitting.** Marks here cluster at 0, 15, 17, 17, 23,
    25 by design. §3.6's leniency question needs a sitting written to be uniformly
-   *adequate*, and there isn't one.
+   _adequate_, and there isn't one.
 6. **Prices are quoted, and one whole leg is unmeasured.** The ElevenLabs $2.00 is
    a rate card. Vercel's AI Gateway is a reseller, so the incumbent's correction
    cost is a floor rather than its invoice. Gemini's rate is introductory and
@@ -465,7 +464,7 @@ until they are met:
 
 ### What this report does not claim
 
-That either corrector is *right*. There is no human DELF examiner's mark anywhere
+That either corrector is _right_. There is no human DELF examiner's mark anywhere
 in this comparison — the two systems are measured against each other and against
 the designed weakness of each sitting, never against a jury. Agreement between
 them is not accuracy, and this reproduction has never had a ground truth.

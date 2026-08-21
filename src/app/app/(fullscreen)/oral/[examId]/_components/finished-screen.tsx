@@ -7,9 +7,10 @@ import { dangerButton, secondaryButton } from "@/app/_components/button-styles";
 import { AlertIcon, LoadingIcon } from "@/app/_components/po/icons";
 import { Kicker } from "@/app/_components/po/tag";
 import type { FinishFailure } from "@/lib/ui/finish-failure";
+import { finishStageMessage, uploadPercent, type FinishStage } from "@/lib/ui/finish-progress";
 
 /**
- * The end of the épreuve — which is three states, not one.
+ * The end of the épreuve — which is four states, not one.
  *
  * PORT NOTE: the reference's `LoadingCard` and `ErrorCard` from
  * `evaluation-resultats.tsx`: a centred card on the fullscreen shell, a spinner
@@ -17,12 +18,16 @@ import type { FinishFailure } from "@/lib/ui/finish-failure";
  * frame; what fills it is this project's, and it is more than the reference has
  * to say, because the reference never uploads anything and so cannot fail to.
  *
- * The three states are: compressing (before the request is even built), sending
- * and being corrected, and failing to send. The third is the one worth writing
- * carefully. The audio exists only in this tab, so the message says so, and the
- * retry is offered **before** the way out — a candidate who reads "retour au
- * tableau de bord" first and clicks it has thrown away twenty minutes of
- * recording.
+ * The happy path is three sentences rather than one (#86): compressing (before
+ * the request is even built), the upload leaving the tab — with a bar, since
+ * that is the one segment whose remainder the client can honestly draw — and
+ * the correction itself. The words live in `lib/ui/finish-progress.ts` where
+ * `node --test` can hold them to their states.
+ *
+ * The fourth state, failing to send, is the one worth writing carefully. The
+ * audio exists only in this tab, so the message says so, and the retry is
+ * offered **before** the way out — a candidate who reads "retour au tableau de
+ * bord" first and clicks it has thrown away twenty minutes of recording.
  */
 
 const PHASE_LABEL_FR: Record<"monologue" | "debate", string> = {
@@ -31,14 +36,16 @@ const PHASE_LABEL_FR: Record<"monologue" | "debate", string> = {
 };
 
 export function FinishedScreen({
-  submitting,
+  stage,
   submitError,
   droppedPhases,
   onRetry,
   onLeave,
   announcement,
 }: {
-  submitting: boolean;
+  /** Where the wait has got to — compressing, uploading, being corrected. The
+   *  orchestrator derives it (`finishStage`); this screen only says it. */
+  stage: FinishStage;
   submitError: FinishFailure | null;
   droppedPhases: Array<"monologue" | "debate">;
   onRetry: () => void;
@@ -55,6 +62,10 @@ export function FinishedScreen({
    */
   announcement?: ReactNode;
 }) {
+  // No `submitError` guard: every path that sets the error also drops
+  // `submitting`, so the stage is back to compressing and this is already null.
+  const percent = uploadPercent(stage);
+
   return (
     <main className="bg-background flex h-full items-center justify-center overflow-y-auto p-6">
       <div className="w-full max-w-xl space-y-5 py-10">
@@ -68,8 +79,8 @@ export function FinishedScreen({
           )}
 
           <Kicker className="mt-6">DELF B2 · Production orale</Kicker>
-          <h1 className="font-serif mt-1 text-2xl font-semibold">
-            {submitError ? "Correction interrompue" : "Épreuve terminée"}
+          <h1 className="mt-1 font-serif text-2xl font-semibold">
+            {submitError ? (submitError.heading ?? "Correction interrompue") : "Épreuve terminée"}
           </h1>
 
           {/* A live region only while there is no failure. Once `submitError` is
@@ -82,28 +93,52 @@ export function FinishedScreen({
             className="text-muted-foreground mt-3 max-w-[42ch] text-sm leading-relaxed"
             role={submitError ? undefined : "status"}
           >
-            {submitting
-              ? "L'examinateur analyse votre passation selon la grille officielle du DELF B2. Cela peut prendre une minute ; ne fermez pas cet onglet."
-              : submitError
-                ? submitError.retryable
+            {submitError
+              ? (submitError.lede ??
+                (submitError.retryable
                   ? "Votre prestation attend d'être envoyée."
-                  : "Votre prestation a bien été enregistrée, mais elle n'a pas pu être corrigée."
-                : // Not idle: the recordings are being compressed before they
-                  // are sent, which takes a few seconds for a full sitting.
-                  "Préparation de votre enregistrement…"}
+                  : "Votre prestation a bien été enregistrée, mais elle n'a pas pu être corrigée."))
+              : finishStageMessage(stage)}
           </p>
+
+          {/* The one segment whose remainder the client can honestly draw: the
+              upload's own bytes. Silent to screen readers on purpose — the live
+              paragraph above already said « Envoi… », and a figure that moves
+              several times a second would announce itself as a metronome. */}
+          {percent !== null && (
+            <div
+              aria-hidden="true"
+              className="bg-primary/15 mt-4 h-1.5 w-56 overflow-hidden rounded-full"
+            >
+              <div
+                className="bg-primary h-full rounded-full transition-[width] duration-300"
+                style={{ width: `${percent}%` }}
+              />
+            </div>
+          )}
         </div>
 
         {announcement}
+
+        {/* The awaiting sentence says the tab is disposable; this is the
+            sentence made actionable (#86). Leaving unmounts the screen, which
+            cancels the poll — the correction finishes on the server either
+            way, and the historique is where the sentence promised it. */}
+        {stage.kind === "awaiting" && !submitError && (
+          <div className="flex justify-center">
+            <button type="button" onClick={onLeave} className={secondaryButton}>
+              Revenir au tableau de bord
+            </button>
+          </div>
+        )}
 
         {droppedPhases.length > 0 && (
           <Notice tone="warning" title="Un enregistrement n'a pas pu être envoyé">
             {droppedPhases.length === 2
               ? "Vos deux prises de parole étaient trop volumineuses pour être envoyées."
               : `Votre ${PHASE_LABEL_FR[droppedPhases[0]]} était trop volumineux pour être envoyé.`}{" "}
-            Cette partie sera corrigée à partir de sa transcription seule, sans
-            écoute de votre prononciation, et comptera comme une durée de zéro
-            seconde dans la pénalité de durée.
+            Cette partie sera corrigée à partir de sa transcription seule, sans écoute de votre
+            prononciation, et comptera comme une durée de zéro seconde dans la pénalité de durée.
           </Notice>
         )}
 
@@ -111,9 +146,13 @@ export function FinishedScreen({
           <Notice
             tone="danger"
             title={
-              submitError.retryable
+              // The override exists for the one failure the defaults would lie
+              // about (#86): a correction that timed out after a successful
+              // envoi must not be headlined « L'envoi a échoué ».
+              submitError.title ??
+              (submitError.retryable
                 ? "L'envoi a échoué"
-                : "Cette épreuve ne peut pas être corrigée"
+                : "Cette épreuve ne peut pas être corrigée")
             }
             action={
               <div className="flex flex-wrap gap-2">
@@ -126,9 +165,13 @@ export function FinishedScreen({
                   </button>
                 )}
                 <button type="button" onClick={onLeave} className={secondaryButton}>
-                  {submitError.retryable
-                    ? "Abandonner et revenir au tableau de bord"
-                    : "Revenir au tableau de bord"}
+                  {/* « Abandonner » only where leaving actually abandons the
+                      épreuve — the timeout's override drops the word, because
+                      its sitting is accepted and may yet correct itself (#86). */}
+                  {submitError.leaveLabel ??
+                    (submitError.retryable
+                      ? "Abandonner et revenir au tableau de bord"
+                      : "Revenir au tableau de bord")}
                 </button>
               </div>
             }

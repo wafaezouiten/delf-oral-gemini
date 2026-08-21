@@ -92,6 +92,12 @@ export interface RecorderLike {
   resume(): void;
   /** Seconds of audio recorded for one phase, measured from the samples. */
   measuredSeconds(phase: RecordedPhase): number;
+  /** Discard one phase's recording entirely (#51). Called at the phase
+   *  boundary for a phase whose content was typed, so its captured room tone
+   *  never leaves the tab dressed as the task. Required rather than optional
+   *  for the same reason `recordingFor` is: an implementation that forgot it
+   *  would upload the stub silently. */
+  dropPhase(phase: RecordedPhase): void;
   /** Of those, the seconds that carried speech. The two differ exactly when a
    *  microphone worked and the candidate did not speak into it. */
   voicedSeconds(phase: RecordedPhase): number;
@@ -102,6 +108,18 @@ export interface RecorderLike {
    *  them is what makes a sitting small enough to upload, and it is not
    *  instant — see `audio/opus-encoder.ts`. */
   recordings(): Promise<PhaseRecording[]>;
+  /**
+   * One phase's artefact on its own, or null where it captured nothing.
+   *
+   * One caller wants it: the controller asks for the monologue's artefact the
+   * moment the débat begins (#86), so the compression runs while the candidate
+   * debates instead of while they wait at « Épreuve terminée ». The archive
+   * memoizes the result, which is what makes the early call worth making —
+   * `recordings()` then finds the work already done. Required rather than
+   * optional, because an implementation that forgot it would lose the early
+   * encode silently; a compile error is the honest price.
+   */
+  recordingFor(phase: RecordedPhase): Promise<PhaseRecording | null>;
   /** Release the recording's memory once the blobs are cut. */
   discard(): void;
 }
@@ -222,11 +240,8 @@ export interface ExamState {
    *
    * It outlives its own playback, and since #59 nothing on screen does: the
    * consigne's control is a « Passer » button that exists for as long as the
-   * voice does, and it reads the two flags below rather than this. What is left
-   * here is the snapshot's record of which consigne the phase opened with — the
-   * clip {@link ExamController.playAnnouncement} would play again out of a hold,
-   * and the one thing that says *which* boundary a held or playing state belongs
-   * to.
+   * voice does, and it reads `announcementPlaying` rather than this. What is
+   * left here is the snapshot's record of which consigne the phase opened with.
    */
   announcement: AnnouncementId | null;
   /**
@@ -240,15 +255,6 @@ export interface ExamState {
   awaitingStart: boolean;
   /** A consigne is audible right now. */
   announcementPlaying: boolean;
-  /**
-   * The browser refused to play the consigne and a gesture would fix it.
-   *
-   * Distinct from "not playing", and the distinction decides whether the exam
-   * moves: while this is true a speaking phase is **held** — its clock has not
-   * started and nothing is being recorded — because the alternative is starting
-   * the recording and then playing the consigne into it. See {@link announce}.
-   */
-  announcementBlocked: boolean;
 }
 
 /**
@@ -309,6 +315,13 @@ export interface ExamFinishedPayload {
   phases: PhaseReport[];
   reconnectCount: number;
   /**
+   * How many goodbyes the examiner said mid-débat, outside a closing handshake
+   * (#92) — the count behind every `examiner-early-closing` event, carried out
+   * of the tab the way `reconnectCount` is, because the event log itself dies
+   * with the page. Zero on the ordinary sitting.
+   */
+  earlyClosingCount: number;
+  /**
    * DEVELOPMENT ONLY — the seconds typed phases claim to have lasted (#36).
    * Undefined on every real sitting. See `ExamController`'s `devSeconds`.
    */
@@ -322,6 +335,10 @@ export interface ExamControllerDeps {
     topic: OralTopic,
     callbacks: SessionManagerCallbacks,
     history: Array<{ role: "user" | "model"; parts: Array<{ text: string }> }>,
+    /** The chosen examiner (#99), or undefined for the server's default. An
+     *  argument rather than a closure so the factory cannot capture a choice
+     *  that had not been made when the controller was built. */
+    examinerModel: string | undefined,
   ) => LiveSessionLike;
   createRecorder: (callbacks: {
     onChunk: (base64: string) => void;
@@ -622,6 +639,22 @@ export class ExamController {
    */
   private devSeconds: Record<RecordedPhase, number> = { monologue: 0, debate: 0 };
 
+  /**
+   * DEVELOPMENT ONLY — the phases whose content was typed rather than spoken
+   * (#51). Empty on every real sitting and every production build, because
+   * `injectCandidateSpeech` is the only writer and it returns before reaching
+   * this there.
+   *
+   * What membership costs: the phase's recording is dropped at its boundary
+   * (see `advance()`), so a typed phase NEVER leaves the tab with an audio
+   * file attached. The few seconds an open microphone captured around the
+   * typing — room tone before the panel opened, mostly — were what made the
+   * same typed sitting grade differently run to run: the stub flipped the
+   * grading mode to audio, displaced the typed duration claim, and handed
+   * the corrector silence labelled as the exposé.
+   */
+  private readonly typedPhases = new Set<RecordedPhase>();
+
   private transcript: TranscriptEntry[] = [];
   private events: ExamEvent[] = [];
   private connection: ConnectionState = "idle";
@@ -818,6 +851,30 @@ export class ExamController {
    */
   private earlyClosingHeard = false;
   private earlyClosingRecoveries = 0;
+  /**
+   * Every goodbye heard, answered or not — where `earlyClosingRecoveries` stops
+   * counting at the recovery cap, this keeps going, because the third goodbye
+   * the app gave up contradicting is still a fact about the sitting (#92).
+   * Never reset: sitting-level, like `reconnectCount`, and it leaves the tab
+   * the same way — on the finish payload, into `oral_exams.early_closing_count`.
+   */
+  private earlyClosingCount = 0;
+  /**
+   * How far into which transcript entry the counted goodbye reaches (#92).
+   *
+   * `earlyClosingHeard` guards re-matching only until the turn boundary clears
+   * it — and a goodbye's entry can GROW past its boundary: beyond the recovery
+   * cap nothing is sent, so no turn break is pending, and an examiner that
+   * simply keeps talking with no candidate in between coalesces into the same
+   * entry. Re-scanning the merged text would then re-count the goodbye already
+   * on the record off text that contains no new one. So the watch matches only
+   * the text that arrived since this mark, and the turn boundary advances the
+   * mark over the whole spoken turn — one turn, one count, however its
+   * fragments landed — while a REPEATED goodbye in the continuation is new
+   * text, still matches, and still counts, which is what #91's every-one-on-
+   * the-record test has always asserted.
+   */
+  private countedGoodbye: { index: number; textLength: number } | null = null;
 
   /**
    * The consigne being spoken, and everything the candidate can do about it (#37).
@@ -832,14 +889,7 @@ export class ExamController {
   private announcer: AnnouncerLike | null = null;
   private announcementId: AnnouncementId | null = null;
   private announcementPlaying = false;
-  private announcementBlocked = false;
   private announceToken = 0;
-  /** The same guard for candidate-initiated playback. See {@link playAnnouncement}
-   *  for why it cannot share `announceToken`. */
-  private playbackToken = 0;
-  /** Resolves the hold a blocked consigne puts on a phase, when the candidate
-   *  either plays it or gives up on it. Null when nothing is held. */
-  private announcementHold: ((outcome: AnnouncementOutcome) => void) | null = null;
 
   private session: LiveSessionLike | null = null;
   private recorder: RecorderLike | null = null;
@@ -854,6 +904,15 @@ export class ExamController {
   private ticker: ReturnType<typeof setInterval> | null = null;
   /** When the closing handshake started, for its safety deadline. See `tick()`. */
   private closingStartedAt: number | null = null;
+
+  /**
+   * The examiner chosen for this sitting (#99), handed to every session this
+   * controller opens. Held here rather than closed over by `createSession`
+   * because it can change during the préparation — after the controller is
+   * built, before any session exists — and a factory that captured it at
+   * construction would open the monologue on a stale choice.
+   */
+  private examinerModel: string | undefined;
 
   private readonly now: () => number;
 
@@ -877,6 +936,19 @@ export class ExamController {
 
   /** Identity-stable between changes, as `useSyncExternalStore` requires. */
   getSnapshot = (): ExamState => this.snapshot;
+
+  /**
+   * Name the examiner for every session opened from here on (#99).
+   *
+   * Deliberately NOT applied to a session already open: the choice is only
+   * changeable during the préparation, which opens none — and if a stray call
+   * ever landed mid-débat, restarting the socket over it would trade a voice
+   * for a dropped exam. The next session picks it up, which for the legal call
+   * pattern is the first one.
+   */
+  setExaminerModel(model: string | null): void {
+    this.examinerModel = model ?? undefined;
+  }
 
   private buildSnapshot(): ExamState {
     return {
@@ -932,10 +1004,8 @@ export class ExamController {
       announcement: this.announcementId,
       // Armed and waiting for the click — as distinct from waiting for the
       // consigne to finish, which is the consigne control's business.
-      awaitingStart:
-        this.phaseAwaitingStart && !this.announcementPlaying && !this.announcementBlocked,
+      awaitingStart: this.phaseAwaitingStart && !this.announcementPlaying,
       announcementPlaying: this.announcementPlaying,
-      announcementBlocked: this.announcementBlocked,
     };
   }
 
@@ -1029,10 +1099,7 @@ export class ExamController {
         : typeof detail === "object"
           ? JSON.stringify(detail)
           : String(detail);
-    this.events = [
-      ...this.events.slice(-199),
-      { at, phase: this.phase, name, detail: printable },
-    ];
+    this.events = [...this.events.slice(-199), { at, phase: this.phase, name, detail: printable }];
     // Nothing reads `events` outside this class — not the screen, not the finish
     // payload — so a sitting that behaved oddly used to leave the person who sat
     // it with nothing to look at, and a report like "thirty seconds and the
@@ -1091,7 +1158,11 @@ export class ExamController {
    *
    * The turn accumulated so far is what is matched, not the fragment that just
    * arrived: Gemini splits a sentence wherever it likes, and half a goodbye in
-   * each of two fragments is still a goodbye.
+   * each of two fragments is still a goodbye. Since #92 that accumulation runs
+   * from the last COUNTED goodbye rather than from the top of the entry — a
+   * turn's entry can keep growing past its boundary when nothing was sent to
+   * break it, and re-reading the whole merged text would count the same
+   * goodbye twice off its own stale words (see `countedGoodbye`).
    *
    * Nothing is sent from here. The examiner is still mid-turn, and a directive
    * arriving now would blend into the sentence it is answering — the hazard
@@ -1099,9 +1170,26 @@ export class ExamController {
    */
   private watchForEarlyClosing(): void {
     if (this.phase !== "debate" || this.closing || this.earlyClosingHeard) return;
-    const turn = this.transcript[this.transcript.length - 1];
-    if (!turn || turn.speaker !== "examiner" || !readsAsClosing(turn.text)) return;
+    const index = this.transcript.length - 1;
+    const turn = this.transcript[index];
+    if (!turn || turn.speaker !== "examiner") return;
+    // Only the text that arrived since this entry's counted goodbye, when it
+    // has one — the entry can outlive its turn boundary (see `countedGoodbye`),
+    // and the goodbye before the mark is on the record already. Entries are
+    // append-only and coalescing replaces in place, so the index names the
+    // same logical turn across every re-read.
+    const unscanned =
+      this.countedGoodbye?.index === index
+        ? turn.text.slice(this.countedGoodbye.textLength)
+        : turn.text;
+    if (!readsAsClosing(unscanned)) return;
     this.earlyClosingHeard = true;
+    this.countedGoodbye = { index, textLength: turn.text.length };
+    // Counted at detection, not at the answer: the branch in
+    // `answerEarlyClosing` where the clock ran out first still heard a goodbye
+    // said with time on the clock, and the count is the record of the fault
+    // rather than of the recovery (#92).
+    this.earlyClosingCount += 1;
     // Logged whether or not it will be answered, and with what is left on the
     // clock: a débat where the examiner tried to leave at 6:00 is a fact about
     // the sitting, and one the transcript alone states only by implication.
@@ -1123,6 +1211,16 @@ export class ExamController {
   private answerEarlyClosing(): boolean {
     if (!this.earlyClosingHeard) return false;
     this.earlyClosingHeard = false;
+    // The turn is now wholly spoken, so the mark advances over all of it:
+    // fragments that landed after the counted phrase were part of the same
+    // goodbye, and only text arriving after THIS point can be a new one. The
+    // index check matters — mid-turn candidate speech can have pushed the
+    // goodbye's entry off the end, and a mark advanced over the wrong entry
+    // would swallow real text.
+    const index = this.transcript.length - 1;
+    if (this.countedGoodbye?.index === index) {
+      this.countedGoodbye = { index, textLength: this.transcript[index].text.length };
+    }
     // The clock ran out between the goodbye and this boundary, so the épreuve
     // really is ending and the model was merely early. Nothing to contradict.
     if (this.phase !== "debate" || this.closing) return false;
@@ -1159,89 +1257,36 @@ export class ExamController {
    *    monologue, and the DELF's duration floor is graded. The phase's clock is
    *    anchored by the caller *after* this resolves.
    *
-   * A `blocked` outcome is the one that does not resolve straight through.
-   * Browsers refuse to autoplay without a recent gesture, and while the two
-   * click-driven boundaries are safe, preparation's clock simply running out is
-   * not: nothing has been clicked for thirty minutes. Returning there would start
-   * a recording and leave a consigne that plays into it the moment the candidate
-   * finds the button, so instead the phase is held and the screen offers the
-   * choice. Both ways out are one click, nothing is being spent while it waits,
-   * and `destroy()` releases it.
+   * A `blocked` outcome — the browser refusing to autoplay without a recent
+   * gesture — is treated as a skip, on the user's call. The épreuve used to be
+   * HELD on it: the phase waited on a click, behind a panel explaining the
+   * frozen clock and offering « Écouter la consigne » / « Commencer sans
+   * écouter ». That panel is gone; a consigne the browser will not play is
+   * forfeited, and the phase gets on with it. The ordering guarantees above
+   * survive intact — the phase still arms only after this resolves, nothing is
+   * recorded before the candidate's own « Enregistrer » — what changed is that
+   * nobody is asked to click their way out of a silence. The refusal is still
+   * logged, because "the candidate never heard the consigne" is a fact worth
+   * keeping about a sitting.
    */
   private async announce(id: AnnouncementId): Promise<AnnouncementOutcome> {
     const announcer = this.announcer;
     if (!announcer) return "skipped";
 
-    // A hold left over from an earlier consigne. Reachable because the
-    // préparation's briefing is spoken without being awaited: if the browser
-    // refused it and the candidate then pressed « Passer et commencer
-    // maintenant », that hold has no reader and this consigne is about to
-    // overwrite its resolver. Released rather than dropped, so no promise is left
-    // pending forever with a listener attached to it.
-    this.releaseAnnouncementHold("skipped");
-
     const token = (this.announceToken += 1);
     this.announcementId = id;
     this.announcementPlaying = true;
-    this.announcementBlocked = false;
     this.emit();
 
-    let outcome = await announcer.play(ANNOUNCEMENTS[id].src);
+    const outcome = await announcer.play(ANNOUNCEMENTS[id].src);
 
     // Superseded — a later boundary is already speaking. Its state is the state.
     if (token !== this.announceToken) return outcome;
 
-    if (outcome === "blocked") {
-      this.announcementPlaying = false;
-      this.announcementBlocked = true;
-      this.log("announcement-held", id);
-      this.emit();
-      outcome = await new Promise<AnnouncementOutcome>((resolve) => {
-        this.announcementHold = resolve;
-      });
-      if (token !== this.announceToken) return outcome;
-    }
-
     this.announcementPlaying = false;
-    this.announcementBlocked = false;
     this.log("announcement", { id, outcome });
     this.emit();
     return outcome;
-  }
-
-  /**
-   * Play the phase's consigne now, on the candidate's own click.
-   *
-   * One button since #59: « Écouter la consigne », which answers a browser that
-   * refused to autoplay. The « Réécouter » that shared this method went with the
-   * card, and with it every case where a phase was *not* waiting on the answer —
-   * which {@link releaseAnnouncementHold} handles either way.
-   *
-   * Being a click is what makes it work: the autoplay policy this exists to
-   * survive is satisfied by the gesture that called it.
-   */
-  playAnnouncement(): void {
-    const id = this.announcementId;
-    const announcer = this.announcer;
-    if (!id || !announcer) return;
-
-    // Its own counter, not `announceToken`: this playback must not supersede the
-    // `announce()` parked on the hold it is answering, only another of its own.
-    // Without it a double-clicked « Écouter la consigne » has the first click's
-    // playback report itself finished while the second one is still audible, and
-    // the control disappears over the sound of the examiner talking.
-    const token = (this.playbackToken += 1);
-
-    this.announcementPlaying = true;
-    this.announcementBlocked = false;
-    this.emit();
-
-    void announcer.play(ANNOUNCEMENTS[id].src).then((outcome) => {
-      if (token !== this.playbackToken) return;
-      this.announcementPlaying = false;
-      this.emit();
-      this.releaseAnnouncementHold(outcome);
-    });
   }
 
   /**
@@ -1264,16 +1309,6 @@ export class ExamController {
     // The clip stops synchronously, so a snapshot taken in the same tick that
     // still said "playing" would be describing a silence.
     this.announcementPlaying = false;
-    this.releaseAnnouncementHold("skipped");
-  }
-
-  /** Let a held phase continue. Releases nothing when nothing is held — a skip
-   *  landing after the clip finished on its own — but still emits, because the
-   *  caller has just changed what the control should be drawing. */
-  private releaseAnnouncementHold(outcome: AnnouncementOutcome): void {
-    const hold = this.announcementHold;
-    this.announcementHold = null;
-    hold?.(outcome);
     this.emit();
   }
 
@@ -1298,8 +1333,8 @@ export class ExamController {
    * now. The clip still plays on the ordinary path because entering the épreuve
    * is a client-side navigation: the document keeps the sticky activation the
    * candidate's click gave it. A hard load of the same URL has no activation, and
-   * `announce()` already answers for that — the phase is not held, the card
-   * carries the text, and « Écouter la consigne » is one click.
+   * `announce()` already answers for that — the refusal is logged and the
+   * consigne is forfeited, so the préparation carries on in silence.
    *
    * Refused after `destroy()`, which is not hypothetical: this is now called from
    * an effect rather than a click, and a controller torn down between the two
@@ -1691,7 +1726,8 @@ export class ExamController {
    * of forty with `candidate-speaking` beside it means the room was talking.
    */
   private waitReport(now: number): Record<string, number> {
-    const waited = this.silenceArmedAt === null ? 0 : Math.round((now - this.silenceArmedAt) / 1000);
+    const waited =
+      this.silenceArmedAt === null ? 0 : Math.round((now - this.silenceArmedAt) / 1000);
     return { waitedSeconds: waited, ...this.silenceHolds };
   }
 
@@ -1853,7 +1889,10 @@ export class ExamController {
     // an app that asked about the equipment twice would be talking about itself.
     if (nudge === 1) {
       this.presenceChecks += 1;
-      this.log("silence-presence-check", { inDebate: this.presenceChecks, ...this.waitReport(now) });
+      this.log("silence-presence-check", {
+        inDebate: this.presenceChecks,
+        ...this.waitReport(now),
+      });
       this.sendControllerDirective("silence-presence-check", presenceCheckInstruction());
       return;
     }
@@ -1916,7 +1955,8 @@ export class ExamController {
     if (this.connection !== "connected") return false;
 
     const remaining = remainingSeconds("debate", this.elapsed);
-    if (remaining * 1000 < TIME_CUE_FLOOR_MS) return this.checkLastQuestionCue(now, quiet, remaining);
+    if (remaining * 1000 < TIME_CUE_FLOOR_MS)
+      return this.checkLastQuestionCue(now, quiet, remaining);
 
     // An index into the three-minute grid, not a count: a cue held back while
     // the candidate was speaking coalesces with the next one rather than
@@ -1994,7 +2034,8 @@ export class ExamController {
    */
   private floorIsQuiet(now: number): boolean {
     const voiced = this.recorder?.voicedSeconds("debate") ?? 0;
-    const busy = this.examinerSpeaking || this.announcementPlaying || voiced > this.cueVoicedSeconds;
+    const busy =
+      this.examinerSpeaking || this.announcementPlaying || voiced > this.cueVoicedSeconds;
     this.cueVoicedSeconds = voiced;
     if (busy) {
       this.floorQuietSince = null;
@@ -2081,7 +2122,7 @@ export class ExamController {
   startSpeaking(): void {
     if (this.phase !== "monologue" && this.phase !== "debate") return;
     if (this.phaseStart !== null) return;
-    if (this.announcementPlaying || this.announcementBlocked) return;
+    if (this.announcementPlaying) return;
     if (this.destroyed) return;
 
     const phase = this.phase;
@@ -2121,6 +2162,16 @@ export class ExamController {
    * trapped forever — someone whose microphone is delivering sound that is not
    * their voice can still let the clock run out and be carried into the débat by
    * `isPhaseTimeUp`. What restarting removes is the *shortcut*, not the exit.
+   *
+   * **A restart does not un-type the phase** (dev only, #51). Only the clock is
+   * rewound: a typed turn stays in the transcript, its claimed seconds stay
+   * counted, and the `typedPhases` mark stays with them — so a phase typed
+   * into, restarted, and then spoken in full still drops its recording at the
+   * boundary. The mark follows the content, and the content survived — not as
+   * a policy that could have gone the other way, but because nothing can
+   * un-write a typed turn: `addFragment` only appends, so "typed a fragment,
+   * deleted it, spoke the rest" is not a state this controller can reach, and
+   * a mark that outlives its content cannot happen either.
    */
   restartMonologue(): void {
     if (this.phase !== "monologue" || this.closing) return;
@@ -2174,10 +2225,18 @@ export class ExamController {
    *
    * What it does NOT do:
    *
-   *  - **It does not discard what was already captured.** Audio recorded before
-   *    the mode went on belongs to the phase and stays in the artefact. The
-   *    duration penalty is then computed from a genuinely shorter recording,
-   *    which is the truth about a phase that was half spoken and half typed.
+   *  - **It does not discard what was already captured — but typing does.**
+   *    Toggling the mode on and off again leaves the phase's audio exactly as
+   *    it was: the toggle is about the microphone, not the artefact. What
+   *    costs a phase its recording is CONTENT arriving as text — the moment
+   *    `injectCandidateSpeech` writes a typed turn, the phase is marked and
+   *    its artefact is dropped whole at the boundary (see `typedPhases` and
+   *    `advance()`). That reverses this comment's earlier promise, and #51 is
+   *    why: the promise protected a phase half spoken and half typed, and what
+   *    it delivered in the ordinary flow was a stub of room tone uploaded in
+   *    front of every typed exposé, grading the same sitting differently run
+   *    to run. A typed phase now measures zero seconds every time, and the
+   *    panel's claimed duration is what the penalty is computed from.
    *  - **It does not run in production.** Same guard, and the same reason, as
    *    {@link injectCandidateSpeech}: two independent checks of the same flag,
    *    because
@@ -2249,6 +2308,9 @@ export class ExamController {
     if (Number.isFinite(seconds) && seconds > 0) {
       this.devSeconds[this.phase] += Math.round(seconds);
     }
+    // The phase's content is now (at least partly) typed, which costs it its
+    // recording at the boundary — see `typedPhases` for the decision.
+    this.typedPhases.add(this.phase);
 
     this.addFragment("candidate", trimmed);
     // The examiner has to hear it too, or the débat argues with silence.
@@ -2349,7 +2411,7 @@ export class ExamController {
    */
   private anchorTypedMonologue(): boolean {
     if (this.phase !== "monologue" || this.phaseStart !== null) return false;
-    if (this.announcementPlaying || this.announcementBlocked) return false;
+    if (this.announcementPlaying) return false;
     if (this.destroyed) return false;
 
     this.phaseStart = this.now();
@@ -2491,6 +2553,46 @@ export class ExamController {
       }
       this.phaseStamps[current].endedAt = this.now();
       this.tolerate("end-phase", () => this.recorder?.endPhase());
+
+      // DEVELOPMENT ONLY — a typed phase leaves no artefact (#51). Decided at
+      // the boundary rather than when the text arrived, because until the
+      // phase ends the developer can still speak into it; and BEFORE the
+      // pre-encode below, which would otherwise spend the débat compressing a
+      // recording this sitting has just decided against. Reverses the earlier
+      // "audio captured before the mode went on stays in the artefact" rule —
+      // see `setDevTextMode` for what that rule protected and why the typed
+      // phase's determinism won: the duration penalty is then computed from
+      // the panel's claim, the same way every run, instead of from however
+      // many seconds of room tone the panel took to open.
+      if (this.typedPhases.has(current)) {
+        this.tolerate("drop-typed-recording", () => this.recorder?.dropPhase(current));
+      }
+    }
+
+    /**
+     * Compress the monologue now, not at the finish (#86).
+     *
+     * Its samples are final — `endPhase()` above flushed the framer's tail, and
+     * nothing re-opens the monologue once the débat exists — and the candidate
+     * is about to spend thirteen minutes debating, which is exactly when a slow
+     * compression cannot be perceived. Fire-and-forget on purpose: the artefact
+     * is memoized by the archive, so the finish reuses it if it succeeded and
+     * simply encodes afresh if it did not. Nothing here may hold the débat's
+     * consigne behind a codec.
+     */
+    const recorder = this.recorder;
+    if (current === "monologue" && target === "debate" && recorder) {
+      const encodeStart = this.now();
+      recorder.recordingFor("monologue").then(
+        (recording) => {
+          if (!recording) return;
+          this.log("monologue-preencoded", {
+            ms: this.now() - encodeStart,
+            bytes: recording.byteSize,
+          });
+        },
+        (error) => this.log("monologue-preencode-failed", String(error)),
+      );
     }
 
     this.log("phase-transition", `${current} -> ${target}`);
@@ -2687,7 +2789,13 @@ export class ExamController {
     // nothing about the monologue it is supposed to challenge.
     const history = target === "debate" ? monologueAsHistory(this.transcript) : [];
 
-    const session = this.deps.createSession(target, this.deps.topic, callbacks, history);
+    const session = this.deps.createSession(
+      target,
+      this.deps.topic,
+      callbacks,
+      history,
+      this.examinerModel,
+    );
     this.session = session;
     await session.connect();
 
@@ -2831,8 +2939,13 @@ export class ExamController {
     this.recorder = null;
     await recorder?.stop();
     // Awaited: the artefacts are compressed on the way out of the archive, so
-    // this is where a 38 MB sitting becomes a 2.4 MB upload (#24).
+    // this is where a 38 MB sitting becomes a 2.4 MB upload (#24). Timed,
+    // because it is the first segment of the wait #86 is about — and since the
+    // monologue was compressed during the débat, what is measured here should
+    // be the débat's encode alone.
+    const encodeStart = this.now();
     const recordings = (await recorder?.recordings()) ?? [];
+    const encodeMs = this.now() - encodeStart;
     const phases = this.phaseReports(recorder);
     // The blobs are cut and own their bytes; the PCM behind them is a second
     // copy of a sitting, and this tab is about to load a results page.
@@ -2849,6 +2962,10 @@ export class ExamController {
         recorded: Number(report.recordedSeconds.toFixed(2)),
       })),
       reconnects: this.reconnectCount,
+      earlyClosings: this.earlyClosingCount,
+      // What the candidate spent at « Épreuve terminée » waiting on the codec
+      // (#86). Near zero when the monologue was pre-encoded during the débat.
+      encodeMs,
     });
 
     // See the top of the method: the voice must not outlive the screen.
@@ -2859,6 +2976,7 @@ export class ExamController {
       recordings,
       phases,
       reconnectCount: this.reconnectCount,
+      earlyClosingCount: this.earlyClosingCount,
       // Only when something was actually typed, so a real sitting sends no such
       // field at all rather than a pair of zeroes the route has to interpret.
       devSeconds:
@@ -3003,14 +3121,11 @@ export class ExamController {
     this.destroyed = true;
     this.stopTicker();
     this.clearClosingTimer();
-    // Before anything is awaited. A phase held open by a consigne the browser
-    // refused to play is waiting on a promise only a click resolves, and the
-    // click cannot arrive on a page that is going away — `advance()` would keep
-    // this controller, its microphone and its socket alive forever waiting for
-    // one. Released as skipped, and `advance()` checks `destroyed` on the far
-    // side rather than starting a phase nobody is in.
+    // Before anything is awaited: `close()` resolves any in-flight `play()` as
+    // skipped, so an `announce()` a phase boundary is awaiting cannot strand
+    // that boundary on a page that is going away — and `advance()` checks
+    // `destroyed` on the far side rather than starting a phase nobody is in.
     this.announcer?.close();
-    this.releaseAnnouncementHold("skipped");
     this.closeSession();
     const recorder = this.recorder;
     this.recorder = null;

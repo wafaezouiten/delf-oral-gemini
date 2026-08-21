@@ -78,12 +78,7 @@ import type { TranscriptEntry } from "@/lib/delf/transcript";
  * whatever later reads it. `schema.test.ts` asserts these values stay identical
  * to `ORAL_PHASES` — the enum is a mirror of the machine, never a second opinion.
  */
-export const oralPhase = pgEnum("oral_phase", [
-  "preparation",
-  "monologue",
-  "debate",
-  "finished",
-]);
+export const oralPhase = pgEnum("oral_phase", ["preparation", "monologue", "debate", "finished"]);
 
 /**
  * The two phases the candidate actually speaks in, and therefore the only two
@@ -142,6 +137,21 @@ export const oralExams = pgTable(
     /** Where the state machine stopped. Transitions are one-way. */
     phase: oralPhase("phase").notNull().default("preparation"),
 
+    /**
+     * Which Live model played the examiner (#99) — the counterpart of
+     * `evaluations.model`, which names the corrector. Stamped with the build's
+     * default when the sitting is created, and overwritten if the candidate
+     * picks another during the préparation; the token route reads it on every
+     * mint, INCLUDING every reconnect, which is what stops a dropped connection
+     * from switching examiners mid-débat.
+     *
+     * Nullable, and null is a statement about time rather than a default: rows
+     * written before this column existed genuinely do not record which examiner
+     * spoke, and backfilling today's default onto them would be a guess wearing
+     * a provenance column. Same length as `evaluations.model`, same reason.
+     */
+    examinerModel: varchar("examiner_model", { length: 64 }),
+
     /** Phase-tagged and written once, at the end. See the header note. */
     transcript: jsonb("transcript").$type<TranscriptEntry[]>(),
 
@@ -152,6 +162,27 @@ export const oralExams = pgTable(
      * per-phase column would be a number nobody can honestly fill in.
      */
     reconnectCount: integer("reconnect_count").notNull().default(0),
+
+    /**
+     * How many times the examiner tried to end the épreuve early — a goodbye
+     * heard mid-débat, outside any closing handshake the app opened (#92).
+     *
+     * The same shape as `reconnect_count`, deliberately and for the same
+     * reason: a reliability fact about the sitting, counted by the controller
+     * (`ExamController.earlyClosingCount`), written once at finish. A count
+     * rather than timestamps because a count is what the questions this column
+     * answers actually need — "was this correction graded around an examiner
+     * fault?" and "how often does the examiner still try to leave?" — and
+     * `reconnect_count` already settled that a per-event record is a place for
+     * facts to go unread.
+     *
+     * `default(0)` is a truthful backfill: rows from before the column were
+     * graded by a corrector that was never told, and their penalties stood.
+     * Everything that reads this column — the corrector's prompt line, the
+     * débat penalty waiver, the note on the correction — therefore keys on it
+     * being positive, so an old row keeps meaning exactly what it meant.
+     */
+    earlyClosingCount: integer("early_closing_count").notNull().default(0),
 
     startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
     finishedAt: timestamp("finished_at", { withTimezone: true }),
@@ -199,6 +230,12 @@ export const oralExams = pgTable(
      * new record, and archiving it would file a correction that has not landed
      * yet: the candidate would sit an épreuve *after* resetting and never see it
      * counted. See `archiveCandidateRecord`.
+     *
+     * One other writer since #113: quitting during the préparation stamps this
+     * same column on that one sitting (`archivePreparationExit`). The meaning is
+     * the reset's — off the record by the candidate's own decision — applied to
+     * a sitting that was never going to be on it; the stamp is what tells a
+     * deliberate exit apart from a crashed tab.
      *
      * No index of its own: every read that filters on it also filters on
      * `user_id`, and one candidate's sittings are already few enough that the
@@ -261,26 +298,33 @@ export const oralExamPhases = pgTable(
 // =====================================================
 
 /**
- * A reference to one recording of one speaking phase — never the audio itself.
+ * One recording of one speaking phase — the row, with the bytes in a private
+ * store it points at.
  *
- * The recording is the whole point of the project (phonologie heard rather than
- * inferred from the number of "euh"s in a transcript) and simultaneously the
- * thing we are not allowed to keep: the audit's schema sketch notes that
- * `audio_url` "stays NULL: retention is forbidden", and §10 step 10 says to
- * delete the uploaded file in a `finally`.
+ * The recording is the whole point of the project (phonologie heard rather
+ * than inferred from the number of "euh"s in a transcript), and it is also the
+ * thing a candidate re-listens to — so since #98 the finish path keeps it.
+ * `uri` names the copy in the vault (`lib/storage/recording-vault.ts`; never a
+ * public URL — playback goes through our own authorised route), and
+ * `deleted_at` means exactly what it says. That reverses a decision this
+ * header used to defend: the audit's schema sketch had `audio_url` "stay NULL:
+ * retention is forbidden", and until #98 every row was written pre-disposed.
  *
- * So the row outlives the bytes on purpose. `uri` is null whenever the recording
- * was transient — the ordinary case today — while the size, the duration and
- * `deleted_at` remain as an honest record that a recording existed, how long it
- * was, and that it was disposed of. An audio-mode correction points here, which
- * is how "which artefact produced this score?" stays answerable after the
- * artefact is gone.
+ * The row still outlives the bytes wherever bytes were not, or are no longer,
+ * kept. `uri` is null on every sitting from before #98, on deployments with no
+ * vault configured, and on any upload the vault failed — there the size, the
+ * duration and `deleted_at` remain as an honest record that a recording
+ * existed, how long it was, and that it was disposed of. An audio-mode
+ * correction points here either way, which is how "which artefact produced
+ * this score?" stays answerable whether or not the artefact can still be
+ * played.
  *
  * **One row per phase, not per sitting** (Phase 6). The candidate speaks twice,
  * against two different duration floors, and one 20-minute artefact cannot say
  * which half ran short. `phase` is what makes the two rows tell those two
  * stories apart, and the unique index is what stops a repeated finish quietly
- * filing a third.
+ * filing a third. It is also why playback is two players, not one (#98): the
+ * artefacts were cut per task so each half could be re-listened to on its own.
  */
 export const oralRecordings = pgTable(
   "oral_recordings",
@@ -468,6 +512,12 @@ export const evaluations = pgTable(
     // and shows them « correction perdue ». Constraint changes must be applied
     // from the generated migration; `pnpm verify:db` now writes a row with both
     // penalties non-zero, which is the only shape that notices.
+    //
+    // Since #77 this comment is no longer the only guard: `pnpm verify:db`
+    // compares every live `pg_get_constraintdef` against what this file
+    // declares (`constraint-drift.ts`) and fails loudly on any difference —
+    // so a pushed database announces its drift the first time anyone verifies
+    // it, instead of on the first row that needed the new arithmetic.
     //
     // Keeps the four score columns telling one story. Both rubric copies apply
     // the penalty the same way — subtract, floor at 0 — so this constraint is

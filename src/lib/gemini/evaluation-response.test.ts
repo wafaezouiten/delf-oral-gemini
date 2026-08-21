@@ -67,8 +67,8 @@ describe("a correction that can be trusted", () => {
         monologueWords: 400,
         debateWords: 300,
         phonologyHeard: true,
-      })
-        .criteria.lexique,
+        examinerClosedEarly: false,
+      }).criteria.lexique,
       3,
     );
   });

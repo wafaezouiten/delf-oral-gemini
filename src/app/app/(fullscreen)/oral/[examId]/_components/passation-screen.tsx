@@ -153,12 +153,7 @@ export function PassationScreen({
   devPanel?: ReactNode;
 }) {
   const total = phaseDurationSeconds(phase);
-  const status = passationStatus(
-    phase,
-    connected,
-    awaitingConsigne || awaitingStart,
-    closing,
-  );
+  const status = passationStatus(phase, connected, awaitingConsigne || awaitingStart, closing);
   const hasNotes = notes.trim().length > 0;
   const partTitle = phase === "monologue" ? MONOLOGUE_TITLE : DEBATE_TITLE;
 
@@ -175,7 +170,7 @@ export function PassationScreen({
     <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-3">
       <div className="min-w-0">
         <Kicker>{partieKicker(phase)}</Kicker>
-        <h1 className="font-serif mt-1.5 text-[1.375rem] leading-[1.25] font-semibold text-balance">
+        <h1 className="mt-1.5 font-serif text-[1.375rem] leading-[1.25] font-semibold text-balance">
           {topic.title}
         </h1>
       </div>
@@ -346,10 +341,7 @@ export function PassationScreen({
             // region instead, which is why this is the exposé's line and not a
             // shared one: two regions reporting one event is how a screen reader
             // user hears it twice.
-            <p
-              role="status"
-              className="text-muted-foreground text-center text-xs leading-relaxed"
-            >
+            <p role="status" className="text-muted-foreground text-center text-xs leading-relaxed">
               {status.body}
             </p>
           )}
@@ -378,9 +370,7 @@ export function PassationScreen({
           {SITE_FOOTER}
         </footer>
 
-        {hasNotes && (
-          <NotesDrawer open={notesOpen} notes={notes} onClose={onToggleNotes} />
-        )}
+        {hasNotes && <NotesDrawer open={notesOpen} notes={notes} onClose={onToggleNotes} />}
       </main>
     </div>
   );

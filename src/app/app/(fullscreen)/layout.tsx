@@ -25,8 +25,6 @@
  *    candidate scrolls — during the passation, where scrolling is the last thing
  *    they should be doing.
  */
-export default function FullscreenLayout({
-  children,
-}: LayoutProps<"/app">) {
+export default function FullscreenLayout({ children }: LayoutProps<"/app">) {
   return <div className="h-dvh min-h-0 overflow-hidden">{children}</div>;
 }

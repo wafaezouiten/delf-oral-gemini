@@ -62,7 +62,7 @@ export function AppSidebar() {
       <aside className="no-print bg-card border-border sticky top-0 hidden h-dvh w-52 shrink-0 flex-col border-r md:flex">
         <div className="px-5 pt-5 pb-4">
           <Link href="/app" className="block">
-            <span className="font-serif block text-base font-semibold">DELF B2</span>
+            <span className="block font-serif text-base font-semibold">DELF B2</span>
             <span className="text-muted-foreground block text-[0.6875rem] font-semibold tracking-[0.16em] uppercase">
               Production orale
             </span>

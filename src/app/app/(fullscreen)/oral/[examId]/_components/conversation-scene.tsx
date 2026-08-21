@@ -74,8 +74,11 @@ export function ConversationScene({
       ? `À vous de parler. ${candidateStatus}`
       : examinerStatus;
 
+  // `relative` on the row anchors the `sr-only` span — absolute, and without
+  // a positioned ancestor it would anchor to the document and grow the page
+  // by the column's scroll distance (#114).
   return (
-    <div className="border-border bg-card flex shrink-0 items-center gap-3 rounded-lg border p-4 sm:gap-4 sm:px-5">
+    <div className="border-border bg-card relative flex shrink-0 items-center gap-3 rounded-lg border p-4 sm:gap-4 sm:px-5">
       <span aria-live="polite" className="sr-only">
         {turnAnnouncement}
       </span>
@@ -136,13 +139,7 @@ export function ConversationScene({
  * The ring is the reference's `motion.span` as a CSS class — see `.po-ring` in
  * globals.css for why that swap is deliberate rather than a shortcut.
  */
-function SpeakerFace({
-  active,
-  tone,
-}: {
-  active: boolean;
-  tone: "examiner" | "candidate";
-}) {
+function SpeakerFace({ active, tone }: { active: boolean; tone: "examiner" | "candidate" }) {
   return (
     <span className="relative size-11 shrink-0 sm:size-[2.875rem]" aria-hidden>
       {active && (

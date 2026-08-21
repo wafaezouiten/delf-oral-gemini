@@ -5,12 +5,13 @@ import { requestAbandon } from "./abandon";
 
 /** A `fetch` that answers with a given status and body. */
 function fakeFetch(status: number, body: unknown) {
-  return mock.fn(async () =>
-    ({
-      ok: status >= 200 && status < 300,
-      status,
-      json: async () => body,
-    }) as unknown as Response,
+  return mock.fn(
+    async () =>
+      ({
+        ok: status >= 200 && status < 300,
+        status,
+        json: async () => body,
+      }) as unknown as Response,
   );
 }
 
@@ -19,10 +20,7 @@ describe("requesting an abandon", () => {
     const fetchImpl = fakeFetch(200, { abandoned: true });
     await requestAbandon("12", fetchImpl as unknown as typeof fetch);
 
-    const [url, init] = fetchImpl.mock.calls[0].arguments as unknown as [
-      string,
-      RequestInit,
-    ];
+    const [url, init] = fetchImpl.mock.calls[0].arguments as unknown as [string, RequestInit];
     assert.equal(url, "/api/exams/12/abandon");
     assert.equal(init.method, "POST");
   });
@@ -49,10 +47,7 @@ describe("requesting an abandon", () => {
 
   it("does not guess when the body is not the shape it expects", async () => {
     for (const body of [null, {}, { abandoned: "yes" }, "nonsense"]) {
-      const outcome = await requestAbandon(
-        "12",
-        fakeFetch(200, body) as unknown as typeof fetch,
-      );
+      const outcome = await requestAbandon("12", fakeFetch(200, body) as unknown as typeof fetch);
       assert.equal(outcome.recorded, false, `body ${JSON.stringify(body)}`);
     }
   });
@@ -67,14 +62,15 @@ describe("requesting an abandon", () => {
 
   it("survives a body that is not JSON at all", async () => {
     // A platform error is an HTML page, not this route's JSON.
-    const fetchImpl = mock.fn(async () =>
-      ({
-        ok: true,
-        status: 200,
-        json: async () => {
-          throw new SyntaxError("Unexpected token <");
-        },
-      }) as unknown as Response,
+    const fetchImpl = mock.fn(
+      async () =>
+        ({
+          ok: true,
+          status: 200,
+          json: async () => {
+            throw new SyntaxError("Unexpected token <");
+          },
+        }) as unknown as Response,
     );
     const outcome = await requestAbandon("12", fetchImpl as unknown as typeof fetch);
     assert.equal(outcome.recorded, false);

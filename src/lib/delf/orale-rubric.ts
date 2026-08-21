@@ -181,13 +181,19 @@ export function partsUnderFloor(durations: SittingDurations): Array<"monologue" 
  * Deliberately not zero. "Answered nothing" in practice looks like « euh… non,
  * ça va, merci », and a rule that a single « oui » defeats is a rule that
  * rewards saying one word over saying none.
+ *
+ * **Replayed against history — change it knowing that (#77).** The results
+ * page recovers which parts a STORED correction was docked for by re-running
+ * {@link partsAbsent} over the stored transcript with today's floor and
+ * today's `candidateWordCount` tokenisation, not the ones in force when the
+ * correction was charged. The mark itself cannot move — that comes from the
+ * stored `absence_penalty` — but moving this figure can make an old
+ * correction name a different part than the one it was actually docked for.
  */
 export const PARTICIPATION_WORD_FLOOR = 20;
 
 /** Which parts the candidate did not actually produce, in exam order. */
-export function partsAbsent(
-  participation: SittingParticipation,
-): Array<"monologue" | "debate"> {
+export function partsAbsent(participation: SittingParticipation): Array<"monologue" | "debate"> {
   const absent: Array<"monologue" | "debate"> = [];
   if (participation.monologueWords < PARTICIPATION_WORD_FLOOR) absent.push("monologue");
   if (participation.debateWords < PARTICIPATION_WORD_FLOOR) absent.push("debate");
@@ -236,12 +242,19 @@ export interface AbsencePenalty extends DurationPenalty {
  *
  * `absentParts` comes back for the reason `shortParts` does: "halved" and
  * "halved because you answered nothing in the débat" are different records.
+ *
+ * `excused` names the parts whose absence is not the candidate's to pay for
+ * (#92): a débat the examiner closed early is not a débat the candidate walked
+ * out of. Excused parts are removed from `absentParts` entirely rather than
+ * merely spared the halving — the array explains a charge, and a part listed in
+ * it while the penalty reads 0 would be an explanation of nothing.
  */
 export function applyAbsentPartPenalty(
   score25: number,
   participation: SittingParticipation,
+  excused: readonly ("monologue" | "debate")[] = [],
 ): AbsencePenalty {
-  const absentParts = partsAbsent(participation);
+  const absentParts = partsAbsent(participation).filter((part) => !excused.includes(part));
   if (absentParts.length === 0) return { score25, penalty: 0, absentParts };
 
   const halved = Math.floor(score25 / 2);
@@ -273,20 +286,27 @@ export interface SittingDurationPenalty extends DurationPenalty {
  * "docked 3 because the débat produced 40 seconds" are different records, and
  * only one of them can be argued with.
  *
- * `absent` names the parts {@link applyAbsentPartPenalty} has already charged
- * for, and they are dropped from consideration entirely — not merely excused
- * the −3, but removed from `shortParts` too. A part that never happened is
- * necessarily under its floor, so leaving it in would dock a candidate twice
- * for one absence and then report the second charge under the wrong reason. The
- * rule still fires on the *other* part: an abandoned débat after a
- * ninety-second monologue is halved, and then docked 3 for the monologue.
+ * `excluded` names the parts this rule may not consider, and they are dropped
+ * entirely — not merely excused the −3, but removed from `shortParts` too,
+ * because the array explains the charge and must not name a part that was not
+ * charged. Two kinds of part land in it, for two different reasons:
+ *
+ *   - **Parts {@link applyAbsentPartPenalty} has already charged for.** A part
+ *     that never happened is necessarily under its floor, so leaving it in
+ *     would dock a candidate twice for one absence and then report the second
+ *     charge under the wrong reason. The rule still fires on the *other* part:
+ *     an abandoned débat after a ninety-second monologue is halved, and then
+ *     docked 3 for the monologue.
+ *   - **Parts the examiner cut short (#92).** A débat that ran four minutes
+ *     because the examiner dismissed the candidate at four minutes is a
+ *     shortfall, but not the candidate's.
  */
 export function applySittingDurationPenalty(
   score25: number,
   durations: SittingDurations,
-  absent: readonly ("monologue" | "debate")[] = [],
+  excluded: readonly ("monologue" | "debate")[] = [],
 ): SittingDurationPenalty {
-  const shortParts = partsUnderFloor(durations).filter((part) => !absent.includes(part));
+  const shortParts = partsUnderFloor(durations).filter((part) => !excluded.includes(part));
   if (shortParts.length === 0) return { score25, penalty: 0, shortParts };
 
   // Delegated with the first short part's own measurement against its own floor
@@ -390,6 +410,21 @@ export interface SittingConditions extends SittingDurations, SittingParticipatio
    * defaulting it false silently caps corrections that did hear the candidate.
    */
   phonologyHeard: boolean;
+  /**
+   * Whether the examiner tried to end the épreuve mid-débat (#92) — a goodbye
+   * heard outside any closing handshake the app opened. When true, the débat is
+   * excused from both penalties: a candidate told they may leave the room stops
+   * talking, and the halving and the −3 exist to charge a candidate's own
+   * shortfall, not the examiner's.
+   *
+   * Required, with no default, for {@link phonologyHeard}'s reason: defaulting
+   * it false reinstates exactly the charge #92 exists to lift for any caller
+   * who forgets, and defaulting it true waives real walk-outs. Like the word
+   * counts, it arrives as a fact about the épreuve rather than as the stored
+   * count it is derived from — this module must not learn a column's shape to
+   * apply a rule.
+   */
+  examinerClosedEarly: boolean;
 }
 
 /** Everything the rubric has to say about one sitting. */
@@ -412,6 +447,15 @@ export interface SittingScore {
    * part listed in {@link absentParts} — absence supersedes shortfall.
    */
   shortParts: Array<"monologue" | "debate">;
+  /**
+   * Which parts a penalty would have reached and did not, because the examiner
+   * closed the épreuve early (#92). Empty on the ordinary sitting — including
+   * the recovered one, where the examiner said goodbye, was contradicted, and
+   * the candidate talked the débat to its full length: nothing fell short
+   * there, so nothing was excused. Reported for {@link shortParts}'s reason: a
+   * full mark over a four-minute débat is a record someone will ask about.
+   */
+  excusedParts: Array<"monologue" | "debate">;
   /**
    * Whether « phonologie » was held down because the correction had no audio —
    * true only when the band actually moved. Reported for the same reason as
@@ -452,16 +496,22 @@ export function scoreSitting(
   const criteria = capUnheardPhonology(snapped, conditions.phonologyHeard);
   const rawScore25 = criteriaToScore25(criteria);
 
+  // The examiner's fault, taken off the table before either penalty looks
+  // (#92). Only the débat can be excused: the goodbye is only ever detected
+  // mid-débat, so the monologue's penalties are the candidate's whatever the
+  // examiner did afterwards.
+  const excused: Array<"monologue" | "debate"> = conditions.examinerClosedEarly ? ["debate"] : [];
+
   // Halve first, dock second. The order is the decision: a candidate who
   // produced half an épreuve is marked on half the scale, and the shortfall
   // rule then applies to what is left. Reversing it would charge the flat 3
   // against the full mark and then halve the remainder, which quietly makes the
   // duration penalty worth 1.5 points on exactly the sittings that earned it.
-  const absence = applyAbsentPartPenalty(rawScore25, conditions);
+  const absence = applyAbsentPartPenalty(rawScore25, conditions, excused);
   const { score25, penalty, shortParts } = applySittingDurationPenalty(
     absence.score25,
     conditions,
-    absence.absentParts,
+    [...absence.absentParts, ...excused],
   );
 
   return {
@@ -471,6 +521,14 @@ export function scoreSitting(
     absentParts: absence.absentParts,
     durationPenalty: penalty,
     shortParts,
+    // Excused, in the reported sense: a penalty would actually have reached it.
+    // `excused` above is broader — it silences the rules whether or not they
+    // had anything to say — and reporting that would label every recovered
+    // sitting with a waiver that changed nothing.
+    excusedParts: excused.filter(
+      (part) =>
+        partsAbsent(conditions).includes(part) || partsUnderFloor(conditions).includes(part),
+    ),
     phonologyCapped: criteria.phonologie !== snapped.phonologie,
     score25,
     meetsFloor: meetsCompetencyFloor(score25),

@@ -21,13 +21,8 @@
  * definition of done for logic.
  */
 
-import { ORAL_PARTS_B2, getOralPartSpec } from "@/lib/delf/constants";
-import {
-  MONOLOGUE_MIN_SECONDS,
-  PHASE_DURATIONS,
-  formatClock,
-  type OralPhase,
-} from "@/lib/delf/phases";
+import { ORAL_PARTS_B2 } from "@/lib/delf/constants";
+import { MONOLOGUE_MIN_SECONDS, type OralPhase } from "@/lib/delf/phases";
 
 /** The phases the candidate actually speaks in — the two that have a mic. */
 export type SpeakingPhase = "monologue" | "debate";
@@ -60,68 +55,13 @@ export function shortPartLabel(title: string): string {
  * préparation prints the sujet's own title rather than the part's.
  */
 
-// =====================================================
-// THE DÉROULÉ
-// =====================================================
-
-/** One phase of the épreuve, as the préparation rail's numbered list prints it. */
-export interface PoDerouleStep {
-  /** 1-based position, printed in the numbered chip. */
-  n: number;
-  title: string;
-  /** "30:00", "7:00" — never a bare constant. */
-  durationLabel: string;
-  caption: string;
-}
-
-/**
- * The ordered phases of the épreuve, for the préparation rail.
- *
- * Built from `PHASE_DURATIONS` rather than from an `OralPartSpec` the way the
- * reference does it, because the durations the candidate is about to live
- * through are the state machine's, and those are what the clocks will count.
- * Reading them from anywhere else is how a briefing ends up promising seven
- * minutes of a monologue the timer gives five.
- *
- * The captions are the part descriptions' first clause, same as the reference.
+/*
+ * `buildDeroule` — the numbered "Déroulé de la séance" list — is gone with its
+ * card. It survived the briefing screen's deletion (#55) by moving to the
+ * préparation rail; the rail was reordered on the user's call and the card
+ * dropped, so the list's durations now live in exactly one place the candidate
+ * meets them: the sujet's launch dialog.
  */
-export function buildDeroule(): PoDerouleStep[] {
-  return [
-    {
-      n: 1,
-      title: "Préparation",
-      durationLabel: formatClock(PHASE_DURATIONS.preparation),
-      caption: "Sujet en main, notes autorisées",
-    },
-    {
-      n: 2,
-      title: "Monologue suivi",
-      durationLabel: formatClock(PHASE_DURATIONS.monologue),
-      caption: firstClause(partDescription(1)),
-    },
-    {
-      n: 3,
-      title: "Débat",
-      durationLabel: formatClock(PHASE_DURATIONS.debate),
-      caption: "L'examinateur conteste votre position ; défendez-la.",
-    },
-  ];
-}
-
-function partDescription(tache: number): string {
-  return getOralPartSpec(tache)?.description ?? "";
-}
-
-/**
- * First sentence of a description, trimmed for a one-line caption, with a
- * trailing parenthetical duration hint ("(~5–7 min)") dropped — the duration is
- * already the row's right-hand column, and printing it twice on one line is how
- * the reference's caption used to read.
- */
-function firstClause(text: string): string {
-  const sentence = text.split(/[.!?]/)[0]?.trim() ?? text.trim();
-  return sentence.replace(/\s*\([^)]*\)\s*$/, "").trim();
-}
 
 // =====================================================
 // THE PRÉPARATION RAIL

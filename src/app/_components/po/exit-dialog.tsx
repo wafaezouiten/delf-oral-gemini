@@ -7,8 +7,15 @@ import { dangerButton, secondaryButton } from "@/app/_components/button-styles";
 import { AlertIcon } from "./icons";
 
 /**
- * "Quitter l'épreuve ?" — the confirmation behind Retour, once the clock has
- * started.
+ * "Quitter l'épreuve ?" — the confirmation behind Retour, from the exposé
+ * onwards.
+ *
+ * Onwards, not "once the clock has started": the préparation's Retour used to
+ * land here too, and charged a candidate who had not said a word the same zero
+ * as one who walked out mid-débat (#113). The préparation now opens
+ * `QuitPreparationDialog` instead — this dialog's copy promises a zero, and
+ * before the exposé that is a warning the product would not honour, which is
+ * exactly what this dialog was built not to be (see below).
  *
  * PORT NOTE: the reference's `ExamDialog` (shadcn `AlertDialog` underneath),
  * reproduced on the native `<dialog>` element. That is not a downgrade: a modal
@@ -88,24 +95,23 @@ export function ExitDialog({
             reads none of it. What they need to know is the number. */}
         <div className="border-danger/40 bg-danger-subtle text-danger flex items-center gap-2.5 border p-3.5">
           <AlertIcon className="size-4 shrink-0" />
-          <p className="text-sm font-semibold">
-            Vous aurez 0/{COMPETENCY_MAX} à cette épreuve.
-          </p>
+          <p className="text-sm font-semibold">Vous aurez 0/{COMPETENCY_MAX} à cette épreuve.</p>
         </div>
 
         <p className="text-muted-foreground text-sm leading-relaxed">
-          Votre enregistrement sera perdu et l&apos;épreuve ne pourra pas être
-          corrigée.
+          Votre enregistrement sera perdu et l&apos;épreuve ne pourra pas être corrigée.
         </p>
 
         {/* The promise could not be kept, and saying nothing would make that the
             second broken promise of one click. Assertive, because the candidate
             is on their way out and will not come looking for it. */}
         {failed && (
-          <p role="alert" className="border-border bg-muted text-foreground border p-3 text-sm leading-relaxed">
-            L&apos;abandon n&apos;a pas pu être enregistré. Vous pouvez réessayer,
-            ou quitter quand même — cette épreuve restera alors en cours et ne
-            comptera pas.
+          <p
+            role="alert"
+            className="border-border bg-muted text-foreground border p-3 text-sm leading-relaxed"
+          >
+            L&apos;abandon n&apos;a pas pu être enregistré. Vous pouvez réessayer, ou quitter quand
+            même — cette épreuve restera alors en cours et ne comptera pas.
           </p>
         )}
 
@@ -127,12 +133,7 @@ export function ExitDialog({
               Quitter quand même
             </button>
           )}
-          <button
-            type="button"
-            onClick={onConfirm}
-            disabled={pending}
-            className={dangerButton}
-          >
+          <button type="button" onClick={onConfirm} disabled={pending} className={dangerButton}>
             {pending ? "Abandon en cours…" : failed ? "Réessayer" : "Abandonner"}
           </button>
         </div>

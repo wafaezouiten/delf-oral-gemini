@@ -10,11 +10,11 @@ Issue [#24](https://github.com/wafaezouiten/delf-oral-gemini/issues/24).
 one multipart request. A serverless function accepts a **4.5 MB** body. The
 recordings were 16 kHz mono PCM16 — 32 kB a second — so:
 
-| Artefact | Length | As WAV |
-| --- | --- | --- |
-| monologue | ~7 min | 13.4 MB |
-| débat | ~13 min | 25.0 MB |
-| **request** | | **38.4 MB** |
+| Artefact    | Length  | As WAV      |
+| ----------- | ------- | ----------- |
+| monologue   | ~7 min  | 13.4 MB     |
+| débat       | ~13 min | 25.0 MB     |
+| **request** |         | **38.4 MB** |
 
 Roughly **8x over the ceiling**, and it had been that way since the first
 version, which posted the same bytes as one whole-sitting field. Nothing had ever
@@ -59,7 +59,7 @@ smaller, because half the débat is the candidate listening. But #24 is what
 happens when a size is assumed rather than computed, and at 16 kbit/s constant
 the size of a sitting is arithmetic: 2 kB a second, 2.4 MB for twenty minutes,
 whatever the candidate says. A browser that declines the mode falls back to
-variable rather than to nothing — measured 13 % *smaller* on this signal, but
+variable rather than to nothing — measured 13 % _smaller_ on this signal, but
 without the guarantee, which is why the ceiling has a megabyte and a half of room
 above the constant-rate figure rather than being trimmed to it.
 
@@ -72,7 +72,7 @@ the stream's last granule position against that sum, refusing a file whose two
 accounts of its own length disagree. Page checksums are verified; a page that
 fails ends the walk, so a truncated upload measures as the audio that arrived.
 
-What compression does cost is the *plausibility* bound: 38 MB of WAV cannot claim
+What compression does cost is the _plausibility_ bound: 38 MB of WAV cannot claim
 to be more than about twenty minutes, while 2 kB of Opus could claim an hour of
 silence. That bound was never load-bearing — twenty minutes of zeroes was always
 uploadable — and the property that matters survives intact: the duration is
@@ -85,10 +85,10 @@ Run in Chromium 148 (the in-app browser), against `speechLike` synthetic speech
 at 16 kHz, through the shipped `PhaseArchive` → `opusRecordingEncoder` path.
 Sizes are the artefact as it would be posted.
 
-| Input | As WAV | As Opus | Bytes/s | Encode | Measured back |
-| --- | --- | --- | --- | --- | --- |
-| 30 s | 960 kB | 61.8 kB | 2 060 | 234 ms | 30.02 s |
-| 60 s (through the archive) | 1.9 MB | 123 kB | 2 058 | — | 60.02 s |
+| Input                        | As WAV      | As Opus     | Bytes/s   | Encode     | Measured back  |
+| ---------------------------- | ----------- | ----------- | --------- | ---------- | -------------- |
+| 30 s                         | 960 kB      | 61.8 kB     | 2 060     | 234 ms     | 30.02 s        |
+| 60 s (through the archive)   | 1.9 MB      | 123 kB      | 2 058     | —          | 60.02 s        |
 | **1 200 s (a full sitting)** | **38.4 MB** | **2.47 MB** | **2 055** | **5.95 s** | **1 200.02 s** |
 
 - `AudioEncoder.isConfigSupported` accepts mono at 16 kHz, and accepts
@@ -132,8 +132,8 @@ So: the Files API takes `audio/ogg`, the model hears French through it at
 When an artefact cannot be delivered, the client attaches what it can and sends
 the rest as transcript alone. `selectDeliverable` applies both of the route's
 limits — each file against `MAX_RECORDING_BYTES`, then the survivors against the
-request — because the route refuses an oversized *file* with a 413 for the
-*whole request*, and a 413 does not degrade: the exam is one-way, a retry
+request — because the route refuses an oversized _file_ with a 413 for the
+_whole request_, and a 413 does not degrade: the exam is one-way, a retry
 re-sends the same bytes, and the sitting is gone. Dropping is per artefact, so a
 phase that encoded fine is still graded from audio when the other one did not.
 
@@ -145,11 +145,41 @@ microphone never worked meets, and it is the only honest one available: the
 server cannot measure audio it was not given, and taking the browser's word for
 the length is exactly what the measured duration exists to avoid.
 
-What follows from that is that the candidate has to be told *before* the
+What follows from that is that the candidate has to be told _before_ the
 épreuve, not after, which is the only point at which switching browsers costs
 them nothing. The briefing screen asks `isOpusEncodingSupported` and says plainly
 that the recording will not be sent, that the correction will be made without
 listening, and that the duration penalty will apply as if no recording existed.
+
+## What happens to the recording afterwards (#98)
+
+Uploaded for grading and, since #98, kept. The finish path files each phase's
+artefact in a **private Vercel Blob store** (`src/lib/storage/recording-vault.ts`)
+after the correction claim is won, writes the store's URL into
+`oral_recordings.uri`, and the correction page plays it back through
+`GET /api/exams/:examId/recordings/:phase` — a route that proves ownership
+first and streams the bytes itself, so the store's URL never reaches a browser.
+
+The rules, and where each is enforced:
+
+- **Keeping is best-effort, per artefact.** An upload the store refuses is
+  logged and that row is written transient (`uri` null, `deleted_at` stamped)
+  — losing the copy must never cost the candidate their correction
+  (`sitting-persistence.ts`, the `preserve` hook).
+- **No vault, no change.** A deployment without Blob credentials behaves
+  exactly as before #98: graded sittings, disposed rows, no players.
+- **Retention is "until the row says otherwise".** No expiry window. « Repartir
+  de zéro » archives and deletes nothing (#69), so archived corrections keep
+  playing. The one purge that exists is the candidate's own: the player's
+  « Supprimer » (`DELETE` on the same route, after an inline confirmation)
+  stamps `deleted_at` first and clears the store second — playback obeys the
+  stamp before it trusts a `uri`, so a crash between the two errs towards an
+  unreachable orphan, never a playable row the candidate was told was gone.
+  The row keeps its duration and size: the voice goes, the record stays.
+- **Playback format is the upload format.** Ogg Opus plays in Chrome, Firefox
+  and Edge; Safari's support is unverified on the real files, so the player
+  asks `canPlayType` first and says so instead of erroring
+  (`results-client.tsx`).
 
 ## What this does not show
 

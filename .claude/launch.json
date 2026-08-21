@@ -4,7 +4,13 @@
     {
       "name": "delf-oral-gemini",
       "runtimeExecutable": "pnpm",
-      "runtimeArgs": ["--dir", "C:\\Users\\lenovo\\Desktop\\delf-oral-gemini", "dev", "--port", "3100"],
+      "runtimeArgs": [
+        "--dir",
+        "C:\\Users\\lenovo\\Desktop\\delf-oral-gemini",
+        "dev",
+        "--port",
+        "3100"
+      ],
       "port": 3100
     }
   ]

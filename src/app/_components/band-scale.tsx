@@ -1,4 +1,10 @@
-import { BAND_LABELS, BAND_TONE, GRILLE_BANDS, type BandTone, type GrilleBand } from "@/lib/delf/grille";
+import {
+  BAND_LABELS,
+  BAND_TONE,
+  GRILLE_BANDS,
+  type BandTone,
+  type GrilleBand,
+} from "@/lib/delf/grille";
 
 /**
  * One criterion's band, drawn on the grille's own scale.
@@ -35,13 +41,17 @@ const TONE_CLASSES: Record<BandTone, { fill: string; text: string; ring: string 
 export function BandScale({ band }: { band: GrilleBand }) {
   const tone = TONE_CLASSES[BAND_TONE[band]];
 
+  // `relative`, and it is load-bearing (#114): `sr-only` is `position:
+  // absolute`, and without a positioned ancestor the hidden span anchors to
+  // the *document* — it escapes the rail's scroll container, parks itself
+  // past the page's end, and grows the page by the distance the rail was
+  // scrolled. A one-pixel invisible span was the whole dead band.
   return (
-    <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+    <div className="relative flex flex-wrap items-center gap-x-3 gap-y-1.5">
       {/* One statement for a screen reader, rather than four cells it would have
           to reassemble into one. The cells below are decoration of this text. */}
       <span className="sr-only">
-        Note {band} sur 5 : {BAND_LABELS[band]}. Échelle de la grille :{" "}
-        {GRILLE_BANDS.join(", ")}.
+        Note {band} sur 5 : {BAND_LABELS[band]}. Échelle de la grille : {GRILLE_BANDS.join(", ")}.
       </span>
 
       <div className="flex" aria-hidden>

@@ -94,11 +94,11 @@ const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, 
  * logs it, and « evaluation failed after 3 attempts: 503 » is a worse thing to
  * find in a log than the API's own error with its own message and stack.
  *
- * Note what is NOT retried by the caller: the Files API uploads that precede
- * the correction. Retrying those means re-uploading twenty minutes of audio on
- * a request that is already the slowest thing this app does, and an upload that
- * failed has left nothing behind to reuse. That is a separate decision from
- * this one and has not been made here.
+ * The Files API uploads that precede the correction ride this same policy, but
+ * on a shorter leash — two attempts, not three (#73). Re-uploading is the
+ * expensive half of the request and an upload that failed has left nothing
+ * behind to reuse, so it gets exactly one second chance; the budget argument
+ * lives at the call site in `evaluate.ts`.
  */
 export async function withTransientRetry<T>(
   task: () => Promise<T>,

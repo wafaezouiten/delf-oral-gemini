@@ -43,11 +43,7 @@ import {
 
 import { CLIENT_CONNECT_CONFIG, INPUT_MIME_TYPE, LIVE_MODEL } from "@/lib/gemini/constants";
 import type { OralTopic } from "@/lib/delf/topics";
-import {
-  canTransition,
-  describeTransition,
-  type SessionState,
-} from "./state-machine";
+import { canTransition, describeTransition, type SessionState } from "./state-machine";
 
 export type LivePhase = "monologue" | "debate";
 
@@ -100,8 +96,30 @@ export interface LiveTokenClientRequest {
   examId: string;
   phase: LivePhase;
   topicSlug: string;
+  /**
+   * The examiner the candidate chose (#99). A fallback, not the decision: the
+   * server reads the choice off the sitting and only honours this when no row
+   * can be read — which is what keeps a reconnect on the same examiner while
+   * the database is unreachable, and what makes the choice work at all with no
+   * database configured.
+   */
+  model?: string;
   /** Present on a resume. Its presence is what the server pins into the token. */
   resumptionHandle?: string;
+}
+
+/**
+ * A minted credential, and the examiner it was minted for.
+ *
+ * The model comes back from the server rather than being the client's own
+ * `model` echoed, because the token's constraint pins one and a connect naming
+ * another is a dead session (#99). Whatever the server decided — the sitting's
+ * stored choice, the request's, or the default — is what the socket must open
+ * with, so the two travel together through this seam.
+ */
+export interface MintedLiveToken {
+  token: string;
+  model: string;
 }
 
 /**
@@ -112,7 +130,7 @@ export interface LiveTokenClientRequest {
  * {@link browserLiveTransport}.
  */
 export interface LiveTransport {
-  mintToken(request: LiveTokenClientRequest): Promise<string>;
+  mintToken(request: LiveTokenClientRequest): Promise<MintedLiveToken>;
   open(params: {
     token: string;
     model: string;
@@ -160,9 +178,11 @@ export const browserLiveTransport: LiveTransport = {
       const body = await response.text().catch(() => "");
       throw new Error(`Could not mint a Gemini token (${response.status}): ${body}`);
     }
-    const { token } = (await response.json()) as { token?: string };
+    const { token, model } = (await response.json()) as { token?: string; model?: string };
     if (!token) throw new Error("Token endpoint returned no token");
-    return token;
+    // A server from before the model rode along answers with the token alone;
+    // it also pinned the build default, so that is what the socket must name.
+    return { token, model: model ?? LIVE_MODEL };
   },
 
   async open({ token, model, config, callbacks }) {
@@ -189,6 +209,9 @@ export interface ExamLiveSessionOptions {
   examId: string;
   phase: LivePhase;
   topic: OralTopic;
+  /** The candidate's chosen examiner, forwarded on every mint (#99). Absent
+   *  means "never chosen" — the server decides, exactly as before. */
+  model?: string;
   callbacks: SessionManagerCallbacks;
   /** History to seed a fresh session with (the monologue, for the débat). */
   initialHistory?: Array<{ role: "user" | "model"; parts: Array<{ text: string }> }>;
@@ -253,6 +276,7 @@ export class ExamLiveSession {
   private readonly examId: string;
   private readonly phase: LivePhase;
   private readonly topic: OralTopic;
+  private readonly model: string | undefined;
   private readonly callbacks: SessionManagerCallbacks;
   private readonly initialHistory: Array<{
     role: "user" | "model";
@@ -266,6 +290,7 @@ export class ExamLiveSession {
     this.examId = options.examId;
     this.phase = options.phase;
     this.topic = options.topic;
+    this.model = options.model;
     this.callbacks = options.callbacks;
     this.initialHistory = options.initialHistory ?? [];
     this.transport = options.transport ?? browserLiveTransport;
@@ -306,6 +331,7 @@ export class ExamLiveSession {
       examId: this.examId,
       phase: this.phase,
       topicSlug: this.topic.slug,
+      model: this.model,
       resumptionHandle: this.resumptionHandle,
     };
   }
@@ -340,14 +366,17 @@ export class ExamLiveSession {
     const isCurrent = () => generation === this.generation;
 
     try {
-      const token = await this.transport.mintToken(this.tokenRequest());
+      const minted = await this.transport.mintToken(this.tokenRequest());
       // A close (or a second reconnect) can land while the token is minting.
       // Bail before spending a socket on it.
       if (!isCurrent()) return;
 
       const socket = await this.transport.open({
-        token,
-        model: LIVE_MODEL,
+        token: minted.token,
+        // The model the SERVER pinned into the token, not this session's own
+        // `model` field: the constraint decides, and naming anything else on
+        // the connect is a dead session (#99).
+        model: minted.model,
         // Modalities only. The real config — instruction, VAD mode, resumption,
         // compression — is pinned in the token minted above. Verified: this
         // yields identical audio, transcripts and handles to sending the full
@@ -757,7 +786,9 @@ export function parseDurationMs(value: unknown): number | null {
     const seconds = Number(record.seconds ?? 0);
     const nanos = Number(record.nanos ?? 0);
     if (Number.isFinite(seconds) || Number.isFinite(nanos)) {
-      return (Number.isFinite(seconds) ? seconds : 0) * 1000 + (Number.isFinite(nanos) ? nanos : 0) / 1e6;
+      return (
+        (Number.isFinite(seconds) ? seconds : 0) * 1000 + (Number.isFinite(nanos) ? nanos : 0) / 1e6
+      );
     }
   }
   return null;

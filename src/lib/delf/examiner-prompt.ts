@@ -175,10 +175,7 @@ MÉMOIRE : tu gardes en tête tout ce qui a été dit depuis le début de l'épr
 }
 
 /** The system instruction for one phase of the exam. */
-export function buildExaminerInstruction(
-  phase: "monologue" | "debate",
-  topic: OralTopic,
-): string {
+export function buildExaminerInstruction(phase: "monologue" | "debate", topic: OralTopic): string {
   const phaseText = phase === "monologue" ? monologueInstruction(topic) : debateInstruction(topic);
   return `${EXAMINER_IDENTITY}\n\n${phaseText}`;
 }

@@ -72,8 +72,8 @@ const SLUG = "vie-professionnelle";
  * to is the one that keeps the join from getting a vote on ownership (#22).
  */
 const ROWS = [
-  { id: 41, userId: OWNER, topicSlug: SLUG },
-  { id: 42, userId: INTRUDER, topicSlug: null },
+  { id: 41, userId: OWNER, topicSlug: SLUG, examinerModel: "gemini-3.1-flash-live-preview" },
+  { id: 42, userId: INTRUDER, topicSlug: null, examinerModel: null },
 ];
 
 /**
@@ -125,7 +125,7 @@ const db = drizzle(async (sql, params) => {
   if (world.lookupFails) throw new Error("connection terminated unexpectedly");
 
   const row = ROWS.find((candidate) => candidate.id === Number(params[0]));
-  return { rows: row ? [[row.id, row.userId, row.topicSlug]] : [] };
+  return { rows: row ? [[row.id, row.userId, row.topicSlug, row.examinerModel]] : [] };
 });
 
 mockPackage("@/lib/db", {
@@ -163,7 +163,13 @@ function lastQuery() {
 describe("exam guard (API)", () => {
   it("resolves the owner's own sitting to that row, and its subject", async () => {
     const access = await guard.authorizeExam("41");
-    assert.deepEqual(access, { status: "owned", userId: OWNER, examId: 41, topicSlug: SLUG });
+    assert.deepEqual(access, {
+      status: "owned",
+      userId: OWNER,
+      examId: 41,
+      topicSlug: SLUG,
+      examinerModel: "gemini-3.1-flash-live-preview",
+    });
   });
 
   it("asks about the sitting in the URL, and only that one", async () => {
@@ -196,7 +202,13 @@ describe("exam guard (API)", () => {
     world.userId = INTRUDER;
     const access = await guard.authorizeExam("42");
 
-    assert.deepEqual(access, { status: "owned", userId: INTRUDER, examId: 42, topicSlug: null });
+    assert.deepEqual(access, {
+      status: "owned",
+      userId: INTRUDER,
+      examId: 42,
+      topicSlug: null,
+      examinerModel: null,
+    });
   });
 
   it("refuses another signed-in user's sitting as a 404", async () => {
@@ -279,7 +291,11 @@ describe("exam guard (page)", () => {
     // The subject is here so the exam page does not go back for it: it renders
     // the sujet the examiner will be arguing about, read from the same row that
     // said the candidate may sit it.
-    assert.deepEqual(await guard.requireExamAccess("41"), { examId: 41, topicSlug: SLUG });
+    assert.deepEqual(await guard.requireExamAccess("41"), {
+      examId: 41,
+      topicSlug: SLUG,
+      examinerModel: "gemini-3.1-flash-live-preview",
+    });
     assert.equal(world.queries.length, 1);
   });
 

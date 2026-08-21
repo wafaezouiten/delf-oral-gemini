@@ -141,10 +141,7 @@ describe("the dashboard view", () => {
   const today = new Date("2026-08-16T12:00:00");
 
   it("averages the /25 across corrected sittings", () => {
-    const view = buildDashboardView(
-      [sitting({ score25: 20 }), sitting({ score25: 10 })],
-      today,
-    );
+    const view = buildDashboardView([sitting({ score25: 20 }), sitting({ score25: 10 })], today);
     const moyenne = view.tiles.find((tile) => tile.key === "moyenne");
     assert.equal(moyenne?.value, "15");
   });

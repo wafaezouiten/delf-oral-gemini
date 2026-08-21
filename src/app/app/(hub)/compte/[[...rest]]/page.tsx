@@ -31,8 +31,7 @@ import { ResetRecord } from "../_components/reset-record";
 
 export const metadata: Metadata = {
   title: "Mon compte · Production orale DELF B2",
-  description:
-    "Votre compte DELF B2 : profil, sécurité, et repartir de zéro sans rien supprimer.",
+  description: "Votre compte DELF B2 : profil, sécurité, et repartir de zéro sans rien supprimer.",
 };
 
 // Per-user, and one of its controls writes to the candidate's record.
@@ -62,7 +61,7 @@ export default async function ComptePage() {
       <header className="flex w-full flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <Kicker>DELF B2 · Production orale</Kicker>
-          <h1 className="font-serif mt-1 text-2xl leading-tight font-semibold">Mon compte</h1>
+          <h1 className="mt-1 font-serif text-2xl leading-tight font-semibold">Mon compte</h1>
           <p className="text-muted-foreground mt-2 text-sm leading-relaxed">
             Votre profil, votre sécurité, et votre record d&apos;épreuves.
           </p>

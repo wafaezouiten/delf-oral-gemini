@@ -34,9 +34,7 @@ export function ExposePlan() {
             </span>
             <div className="min-w-0">
               <p className="text-[0.8125rem] font-semibold">{step.title}</p>
-              <p className="text-muted-foreground mt-0.5 text-xs leading-relaxed">
-                {step.detail}
-              </p>
+              <p className="text-muted-foreground mt-0.5 text-xs leading-relaxed">{step.detail}</p>
             </div>
           </li>
         ))}

@@ -24,16 +24,21 @@
 import { config } from "dotenv";
 config({ path: ".env.local" });
 
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 
 import { getDb, isDatabaseConfigured } from "../src/lib/db";
 import { archiveCandidateRecord } from "../src/lib/db/account";
+import { probeConstraintDrift } from "../src/lib/db/constraint-drift";
 import { readCandidateHistory } from "../src/lib/db/history";
 import { oralExams, oralTopics } from "../src/lib/db/schema";
-import { neonSittingStore } from "../src/lib/db/sittings";
+import { archivePreparationExit, neonSittingStore } from "../src/lib/db/sittings";
 import { ORAL_CRITERIA } from "../src/lib/delf/criteria";
 import { ORAL_TOPICS } from "../src/lib/delf/topics";
-import { correctSitting, type CorrectionRow } from "../src/lib/exams/sitting-persistence";
+import {
+  acceptSitting,
+  attachCorrection,
+  type CorrectionRow,
+} from "../src/lib/exams/sitting-persistence";
 import { scoreSitting } from "../src/lib/delf/orale-rubric";
 import type { TranscriptEntry } from "../src/lib/delf/transcript";
 
@@ -73,6 +78,10 @@ const scored = scoreSitting(bands, {
   monologueWords: 120,
   debateWords: 0,
   phonologyHeard: true,
+  // False on purpose: excusing the débat would zero the absence penalty, and a
+  // fixture with a penalty at zero is exactly the shape this probe exists to
+  // avoid (see the header above).
+  examinerClosedEarly: false,
 });
 
 const correction: CorrectionRow = {
@@ -110,13 +119,58 @@ const DEBATE = [turn("debate", "Je maintiens ma position.", 500_000)];
 
 let failures = 0;
 function check(what: string, ok: boolean, detail?: unknown): void {
-  console.log(`${ok ? "  ok  " : "  FAIL"}  ${what}${detail === undefined ? "" : ` — ${JSON.stringify(detail)}`}`);
+  console.log(
+    `${ok ? "  ok  " : "  FAIL"}  ${what}${detail === undefined ? "" : ` — ${JSON.stringify(detail)}`}`,
+  );
   if (!ok) failures += 1;
+}
+
+/**
+ * The push-vs-migrate footgun, checked structurally (#77).
+ *
+ * `drizzle-kit push` applies a new column and silently leaves CHECK constraints
+ * at whatever the database already had; the WARNING in `schema.ts` records the
+ * sitting that lesson cost. A comment only guards people who read it, so this
+ * compares every live `pg_get_constraintdef` against what the schema declares
+ * and fails loudly on any difference — from push, from a hand edit, from any
+ * cause at all.
+ *
+ * The mechanics (and why nothing here parses SQL) live in
+ * `src/lib/db/constraint-drift.ts`: short-lived mirror tables carry the
+ * schema's constraints into the SAME database, so both sides of the comparison
+ * come out of the same server's normaliser and bare string equality is the
+ * whole test. Runs first, before the round trip below — when a constraint has
+ * drifted, the write failures further down are symptoms, and this is the line
+ * that names their cause.
+ */
+async function verifyConstraints(db: ReturnType<typeof getDb>): Promise<void> {
+  console.log("constraints");
+  // The whole run — mirrors up, one catalog read, mirrors down — lives in
+  // `probeConstraintDrift` since #125, because CI runs the same probe through
+  // `pnpm verify:constraints` without the round trip below, and two copies of
+  // the orchestration is how they drift apart.
+  const { declared, drift } = await probeConstraintDrift(
+    async (statement) => (await db.execute(sql.raw(statement))).rows,
+    `${Date.now()}`,
+  );
+
+  // Guards the probe against itself: a refactor that stopped the mirrors
+  // being created would otherwise report a database with no declared checks
+  // as clean, which is the comment-shaped failure this section replaces.
+  check("the schema declares checks for the probe to hold", declared > 0, { declared });
+
+  check(
+    "every live CHECK matches the schema, word for word",
+    drift.length === 0,
+    drift.length > 0 ? drift : { constraints: declared },
+  );
 }
 
 async function main(): Promise<number> {
   const db = getDb();
   const store = neonSittingStore();
+
+  await verifyConstraints(db);
 
   // The catalogue row the sitting has to reference, upserted the way
   // `POST /api/exams` does it.
@@ -159,12 +213,15 @@ async function main(): Promise<number> {
       })) === false,
     );
 
-    check("the monologue is recorded", await store.appendFinalisedPhase(ref, {
-      phase: "monologue",
-      entries: MONOLOGUE,
-      startedAt: new Date(Date.now() - 900_000),
-      endedAt: new Date(Date.now() - 500_000),
-    }));
+    check(
+      "the monologue is recorded",
+      await store.appendFinalisedPhase(ref, {
+        phase: "monologue",
+        entries: MONOLOGUE,
+        startedAt: new Date(Date.now() - 900_000),
+        endedAt: new Date(Date.now() - 500_000),
+      }),
+    );
 
     check(
       "a replayed monologue writes nothing",
@@ -176,12 +233,15 @@ async function main(): Promise<number> {
       })) === false,
     );
 
-    check("the débat is recorded", await store.appendFinalisedPhase(ref, {
-      phase: "debate",
-      entries: DEBATE,
-      startedAt: new Date(Date.now() - 500_000),
-      endedAt: new Date(),
-    }));
+    check(
+      "the débat is recorded",
+      await store.appendFinalisedPhase(ref, {
+        phase: "debate",
+        entries: DEBATE,
+        startedAt: new Date(Date.now() - 500_000),
+        endedAt: new Date(),
+      }),
+    );
 
     const midway = await store.readSitting(ref);
     check("the transcript was appended once, not twice", midway?.transcript.length === 2, {
@@ -193,32 +253,98 @@ async function main(): Promise<number> {
 
     console.log("\ncorrect");
     let graded = 0;
-    const input = {
+    const reportedPhases = [
+      {
+        phase: "monologue" as const,
+        startedAt: Date.now() - 900_000,
+        endedAt: Date.now() - 500_000,
+      },
+      { phase: "debate" as const, startedAt: Date.now() - 500_000, endedAt: Date.now() },
+    ];
+    const measuredRecordings = [
+      {
+        phase: "monologue" as const,
+        mimeType: "audio/ogg",
+        byteSize: 210_000,
+        durationSeconds: 402.6,
+      },
+      {
+        phase: "debate" as const,
+        mimeType: "audio/ogg",
+        byteSize: 640_000,
+        durationSeconds: 761.2,
+      },
+    ];
+    const acceptInput = {
       transcript: [...MONOLOGUE, ...DEBATE],
       reconnectCount: 1,
-      phases: [
-        { phase: "monologue" as const, startedAt: Date.now() - 900_000, endedAt: Date.now() - 500_000 },
-        { phase: "debate" as const, startedAt: Date.now() - 500_000, endedAt: Date.now() },
-      ],
-      recordings: [
-        { phase: "monologue" as const, mimeType: "audio/ogg", byteSize: 210_000, durationSeconds: 402.6 },
-        { phase: "debate" as const, mimeType: "audio/ogg", byteSize: 640_000, durationSeconds: 761.2 },
-      ],
+      // Non-zero so the round trip proves the column takes a value, not just
+      // its default — a probe that writes 0 over DEFAULT 0 verifies nothing.
+      earlyClosingCount: 2,
+      phases: reportedPhases,
+      recordings: measuredRecordings,
+      now: () => new Date(),
+    };
+
+    // The two halves the finish route runs since #86: the accept before its
+    // response, the attach behind it. Probed in that order because the state
+    // between them — claimed, artefacts written, nothing graded — is exactly
+    // what a candidate is released on, and it has to read `uncorrected`.
+    const accepted = await acceptSitting(store, ref, acceptInput);
+    check("the sitting is accepted before any grading", accepted.status === "accepted", {
+      status: accepted.status,
+    });
+    const between = await store.readSitting(ref);
+    check(
+      "an accepted sitting reads uncorrected until the correction lands",
+      between?.outcome === "uncorrected",
+      { outcome: between?.outcome },
+    );
+
+    const attached = await attachCorrection(store, ref, {
+      phases: reportedPhases,
+      recordings: measuredRecordings,
       evaluate: async () => {
         graded += 1;
         return correction;
       },
       now: () => new Date(),
-    };
+    });
+    check("the correction is stored", attached.status === "stored", { status: attached.status });
 
-    const first = await correctSitting(store, ref, input);
-    check("the correction is stored", first.status === "stored", { status: first.status });
-
-    const second = await correctSitting(store, ref, input);
+    const second = await acceptSitting(store, ref, acceptInput);
     check("finishing twice is a no-op", second.status === "already-corrected", {
       status: second.status,
     });
     check("and the second one never graded", graded === 1, { graded });
+
+    /**
+     * The claim hold (#86), against the real clock: while a claim is younger
+     * than the grading budget and no correction exists, a second finish must
+     * be refused — that refusal is what stands between "fire the request
+     * twice" and two paid model calls — and a released claim must open the
+     * door again at once, which is the failed-accept repair path.
+     */
+    console.log("\nthe claim hold");
+    const [held] = await db
+      .insert(oralExams)
+      .values({ userId: USER, topicId, phase: "preparation" })
+      .returning({ id: oralExams.id });
+    const heldRef = { examId: held.id, userId: USER };
+
+    const heldAccept = await acceptSitting(store, heldRef, acceptInput);
+    check("a sitting nothing holds is accepted", heldAccept.status === "accepted", {
+      status: heldAccept.status,
+    });
+    const rival = await acceptSitting(store, heldRef, acceptInput);
+    check("a second finish inside the grading budget is refused", rival.status === "not-stored", {
+      status: rival.status,
+    });
+    await store.releaseClaim(heldRef);
+    const reclaimed = await acceptSitting(store, heldRef, acceptInput);
+    check("a released claim is re-acceptable at once", reclaimed.status === "accepted", {
+      status: reclaimed.status,
+    });
 
     console.log("\nread back");
     const stored = await store.readSitting(ref);
@@ -264,6 +390,7 @@ async function main(): Promise<number> {
     );
     check("the transcript is the complete one", stored?.transcript.length === 2);
     check("the reconnect count was stored", stored?.reconnectCount === 1);
+    check("the early-closing count was stored", stored?.earlyClosingCount === 2);
 
     console.log("\nownership");
     const intruder = { examId: ref.examId, userId: "verify_intruder" };
@@ -274,6 +401,7 @@ async function main(): Promise<number> {
       (await store.claimForCorrection(intruder, {
         transcript: [],
         reconnectCount: 99,
+        earlyClosingCount: 99,
         finishedAt: new Date(),
       })) === false,
     );
@@ -288,7 +416,81 @@ async function main(): Promise<number> {
     );
 
     const after = await store.readSitting(ref);
-    check("and nothing they did left a mark", after?.reconnectCount === 1 && after?.transcript.length === 2);
+    check(
+      "and nothing they did left a mark",
+      after?.reconnectCount === 1 && after?.transcript.length === 2,
+    );
+
+    /**
+     * Leaving the préparation (#113).
+     *
+     * Two clauses are worth a live probe here, because each is a boundary the
+     * unit tests cannot see. `archivePreparationExit`'s `phase = 'preparation'`
+     * is what keeps a quit from touching a sitting whose épreuve has moved on;
+     * and `abandonSitting`'s deliberate LACK of the mirror clause is what keeps
+     * a mid-monologue walk-out recordable at all — the row still reads
+     * `preparation` until the monologue's progress report lands, so a phase
+     * guard on the abandon would refuse a real walk-out.
+     */
+    console.log("\nleaving the préparation");
+    const [prep] = await db
+      .insert(oralExams)
+      .values({ userId: USER, topicId, phase: "preparation" })
+      .returning({ id: oralExams.id });
+    const prepRef = { examId: prep.id, userId: USER };
+
+    check(
+      "a stranger cannot archive it",
+      (await archivePreparationExit({ examId: prep.id, userId: "verify_intruder" }, new Date())) ===
+        false,
+    );
+    check(
+      "leaving during the préparation archives the sitting",
+      await archivePreparationExit(prepRef, new Date()),
+    );
+    check(
+      "a second leave writes nothing",
+      (await archivePreparationExit(prepRef, new Date())) === false,
+    );
+    check(
+      "and the sitting reaches no record, not even the archive",
+      (await readCandidateHistory(USER, { includeArchived: true })).every(
+        (s) => s.examId !== prep.id,
+      ),
+    );
+    check(
+      "a sitting past the préparation is not archivable this way",
+      (await archivePreparationExit(ref, new Date())) === false,
+    );
+    // The guard's mirror: a walk-out racing the exit — the dialog confirmed as
+    // the clock expired, the abandon sent from the screen that replaced it —
+    // must not stamp a zero onto a sitting the candidate was just told would
+    // never appear. This is `abandonSitting`'s `archived_at is null` clause,
+    // which #113 made newly reachable: it is the first archive on a live row.
+    check(
+      "an archived préparation cannot be walked out of afterwards",
+      (await store.abandonSitting(prepRef, new Date())) === false,
+    );
+
+    // A walk-out stamped while the row still reads `preparation` — which is
+    // every mid-monologue walk-out there is. This is the row the abandon's
+    // missing phase clause exists for.
+    const [midMonologue] = await db
+      .insert(oralExams)
+      .values({ userId: USER, topicId, phase: "preparation" })
+      .returning({ id: oralExams.id });
+    check(
+      "a walk-out lands while the row still reads préparation",
+      await store.abandonSitting({ examId: midMonologue.id, userId: USER }, new Date()),
+    );
+    check(
+      "and a walked-out sitting keeps its filing against a préparation exit",
+      (await archivePreparationExit({ examId: midMonologue.id, userId: USER }, new Date())) ===
+        false,
+    );
+    // Deleted rather than left: it is a real walk-out, and the next section
+    // counts the record it would otherwise join.
+    await db.delete(oralExams).where(eq(oralExams.id, midMonologue.id));
 
     /**
      * Starting over (#69).

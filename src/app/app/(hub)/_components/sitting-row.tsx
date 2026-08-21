@@ -21,6 +21,12 @@ import {
  * the dashboard and another in the history is the kind of difference nobody
  * notices until a candidate asks which one is right.
  *
+ * What neither shows is the kept recordings. #98 put two players on every
+ * corrected historique row and #116 took them off again: a full transport card
+ * per half turned a list of scores into a mixing desk, and the correction the
+ * title links to already carries the same two players. The link is the
+ * affordance; the row stays one reading-height tall.
+ *
  * An abandoned sitting has no correction to open, so it is not a link. That is
  * deliberate and not an oversight: a `/app/results/:id` for a walk-out would
  * render the "Résultat introuvable" card, which reads as a bug rather than as
@@ -39,9 +45,7 @@ export function SittingRow({
     <li className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2 px-6 py-3.5">
       <div className="min-w-0 flex-1">
         {abandoned ? (
-          <p className="text-muted-foreground truncate text-sm font-medium">
-            {sitting.topicTitle}
-          </p>
+          <p className="text-muted-foreground truncate text-sm font-medium">{sitting.topicTitle}</p>
         ) : (
           <Link
             href={`/app/results/${sitting.examId}`}

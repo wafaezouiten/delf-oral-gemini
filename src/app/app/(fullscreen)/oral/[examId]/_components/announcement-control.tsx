@@ -1,7 +1,5 @@
 "use client";
 
-import { PlayIcon } from "@/app/_components/po/icons";
-import { primaryButton, secondaryButton } from "@/app/_components/button-styles";
 import { ANNOUNCEMENT_COPY, announcementControl } from "@/lib/ui/announcement-control";
 
 /**
@@ -16,64 +14,30 @@ import { ANNOUNCEMENT_COPY, announcementControl } from "@/lib/ui/announcement-co
  * is nothing at all. `lib/ui/announcement-control.ts` records what that cost and
  * why it was accepted.
  *
- * **The held state is the exception, and it is not cosmetic.** A consigne the
- * browser refused to autoplay stops the phase: the clock is at its full length,
- * nothing is being recorded, and the épreuve is waiting on a click. A lone
- * « Passer » would offer to silence a silence and leave the frozen timer
- * unexplained, so that branch keeps its sentence and names both ways out.
+ * **The held panel is gone (user's call).** A consigne the browser refused to
+ * autoplay used to stop the phase behind a paragraph and two buttons; the
+ * controller now forfeits it and moves on, so the refusal never reaches this
+ * component — there is nothing playing, and nothing is drawn.
  *
  * One component for all four moments, as before: they are the same button, and
- * the two controller calls behind it should not be written down twice.
+ * the controller call behind it should not be written down twice.
  */
 export function AnnouncementControl({
   playing,
-  blocked,
-  onPlay,
   onSkip,
 }: {
   playing: boolean;
-  blocked: boolean;
-  /** « Écouter la consigne » — the way out of a hold that hears it after all. */
-  onPlay: () => void;
   /** Silences this clip. The next boundary still speaks. */
   onSkip: () => void;
 }) {
-  const mode = announcementControl({
-    announcementPlaying: playing,
-    announcementBlocked: blocked,
-  });
+  const mode = announcementControl({ announcementPlaying: playing });
   if (!mode) return null;
 
-  if (mode === "held") {
-    return (
-      <section
-        aria-label={ANNOUNCEMENT_COPY.speaking}
-        // `w-full`: this renders beside a heading, in a wrapping row, and a
-        // paragraph with two buttons under it does not belong on that line.
-        className="border-primary/40 bg-primary-subtle/40 w-full rounded-lg border p-4"
-      >
-        {/* A live status rather than a heading: there is no voice in this state,
-            being told is the whole of what the branch does, and it is what says
-            why the timer has not moved. */}
-        <p role="status" className="text-foreground/85 text-xs leading-relaxed">
-          {ANNOUNCEMENT_COPY.blocked}
-        </p>
-
-        <div className="mt-3.5 flex flex-wrap items-center gap-2">
-          <button type="button" onClick={onPlay} className={primaryButton}>
-            <PlayIcon className="size-3.5" />
-            {ANNOUNCEMENT_COPY.play}
-          </button>
-          <button type="button" onClick={onSkip} className={secondaryButton}>
-            {ANNOUNCEMENT_COPY.blockedSkip}
-          </button>
-        </div>
-      </section>
-    );
-  }
-
+  // `relative` anchors the `sr-only` span — absolute, and without a
+  // positioned ancestor it would anchor to the document and grow the page by
+  // the rail's scroll distance (#114).
   return (
-    <div className="flex shrink-0 justify-end">
+    <div className="relative flex shrink-0 justify-end">
       {/* Politely, and once. The visible button says « Passer » and names no
           speaker; this is the whole of what the card's heading used to say, in
           the place the button appears. Polite rather than assertive because the

@@ -59,9 +59,8 @@ export default function ExamError({ error, retry }: ErrorPageProps) {
           </div>
         }
       >
-        Le problème vient de notre côté, pas de votre épreuve. Réessayez : si vous
-        étiez en train de passer une épreuve, elle a été interrompue et vous
-        pourrez en commencer une nouvelle.
+        Le problème vient de notre côté, pas de votre épreuve. Réessayez : si vous étiez en train de
+        passer une épreuve, elle a été interrompue et vous pourrez en commencer une nouvelle.
       </Notice>
 
       {error.digest && (

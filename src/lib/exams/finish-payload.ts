@@ -22,11 +22,7 @@ import { z } from "zod";
 // same numbers rather than by two copies of them.
 import { transcriptSchema } from "./transcript-payload";
 
-export {
-  MAX_TRANSCRIPT_CHARS,
-  MAX_TURNS,
-  MAX_TURN_CHARS,
-} from "./transcript-payload";
+export { MAX_TRANSCRIPT_CHARS, MAX_TURNS, MAX_TURN_CHARS } from "./transcript-payload";
 
 /**
  * The longest a phase's clock may claim to have run.
@@ -90,6 +86,28 @@ export const finishPayloadSchema = z.object({
     ),
   reconnectCount: z.number().int().nonnegative(),
   /**
+   * How many times the examiner tried to close the épreuve mid-débat (#92), as
+   * `ExamController` counted it. The browser is the only witness — the goodbye
+   * happened in a Live session the server never saw — so the shape is bounded
+   * here like `reconnectCount`'s, and the VALUE is not taken alone: it is the
+   * one number in this payload that can RAISE a grade rather than lower it —
+   * positive, it waives the débat's penalties, reaching even the duration
+   * penalty that is otherwise measured server-side from the uploaded bytes.
+   * The route clamps it to the goodbyes the submitted transcript shows, which
+   * bounds an incoherent or buggy claim but not a fabricated one, because the
+   * transcript is this same payload; why that trust is accepted is
+   * `resolveEarlyClosingCount`'s to say. The clamp is also why there is no
+   * `.max()` here: it bounds the stored value by the transcript's own turn
+   * limit.
+   *
+   * Defaulted rather than required, unlike `reconnectCount`, because it is
+   * being added to a payload that already exists in the wild: a candidate
+   * mid-sitting across the deploy finishes from a page that has never heard of
+   * the field, and a 400 there costs them a twenty-minute épreuve. Zero is the
+   * truthful reading of that page — its controller predates the counter.
+   */
+  earlyClosingCount: z.number().int().nonnegative().default(0),
+  /**
    * DEVELOPMENT ONLY — the seconds a typed phase claims to have lasted (#36).
    *
    * The one number in this file that can reach a grade, which is why the bound
@@ -97,8 +115,12 @@ export const finishPayloadSchema = z.object({
    * outright in a production build, and honours it only for a phase that
    * uploaded no audio: with a recording present the recording still wins, so
    * this cannot dress a short sitting up as a long one. It exists because a
-   * typed sitting has no audio at all, and a permanent −3 makes the rubric's
-   * only interesting threshold untestable without a microphone.
+   * typed phase has no audio — an ENFORCED fact since #51, not an assumption:
+   * the controller drops a typed phase's artefact at the phase boundary, so
+   * the stub of room tone that used to ride in front of a typed exposé (and
+   * silently displace this claim) never leaves the tab. Without the claim, a
+   * permanent −3 makes the rubric's only interesting threshold untestable
+   * without a microphone.
    *
    * Validated here regardless of environment. A schema that changes shape with
    * `NODE_ENV` is a schema whose tests prove nothing about production.

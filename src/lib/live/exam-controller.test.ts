@@ -4,6 +4,7 @@ import { describe, it } from "node:test";
 import type { AnnouncementOutcome, AnnouncerLike } from "@/lib/audio/announcer";
 import type { PhaseRecording, RecordedPhase } from "@/lib/audio/archive";
 import { ANNOUNCEMENTS } from "@/lib/delf/announcements";
+import { countClosingTurns } from "@/lib/delf/early-closing";
 import { PHASE_DURATIONS, MONOLOGUE_MIN_SECONDS } from "@/lib/delf/phases";
 import type { OralTopic } from "@/lib/delf/topics";
 import type { SessionManagerCallbacks } from "./session-manager";
@@ -206,6 +207,15 @@ class FakeRecorder implements RecorderLike {
     return this.voiced[phase] ?? this.seconds[phase];
   }
 
+  /** Phases whose artefact was asked for on its own — the early encode the
+   *  controller starts as the débat opens (#86). */
+  prepared: RecordedPhase[] = [];
+
+  async recordingFor(phase: RecordedPhase): Promise<PhaseRecording | null> {
+    this.prepared.push(phase);
+    return (await this.recordings()).find((recording) => recording.phase === phase) ?? null;
+  }
+
   /** Asynchronous like the real one, which compresses on the way out. */
   async recordings(): Promise<PhaseRecording[]> {
     return (["monologue", "debate"] as const)
@@ -218,6 +228,20 @@ class FakeRecorder implements RecorderLike {
         sampleCount: this.seconds[phase] * 16000,
         byteSize: 3,
       }));
+  }
+
+  /** Phases whose recording the controller decided against (#51), in order,
+   *  and in `calls` so the ordering against `end` and the early encode is a
+   *  readable trace. */
+  droppedPhases: RecordedPhase[] = [];
+
+  dropPhase(phase: RecordedPhase): void {
+    this.calls.push(`drop:${phase}`);
+    this.droppedPhases.push(phase);
+    // As the real archive: the samples are gone, so the phase measures zero
+    // and produces no artefact from here on.
+    this.seconds[phase] = 0;
+    this.voiced[phase] = 0;
   }
 
   discard(): void {
@@ -343,6 +367,8 @@ function deferred(): { promise: Promise<void>; resolve: () => void } {
 interface Harness {
   controller: ExamController;
   sessions: FakeSession[];
+  /** The examiner each session was created for (#99), in creation order. */
+  sessionModels: Array<string | undefined>;
   /** The first microphone opened — the only one a healthy exam opens. */
   recorder: FakeRecorder;
   recorders: FakeRecorder[];
@@ -382,6 +408,7 @@ function harness(
 ): Harness {
   let now = 0;
   const sessions: FakeSession[] = [];
+  const sessionModels: Array<string | undefined> = [];
   // Built per call rather than shared, so "how many devices did this open?" is
   // a question the harness can answer.
   const recorders: FakeRecorder[] = [];
@@ -392,9 +419,10 @@ function harness(
 
   const controller = new ExamController({
     topic: TOPIC,
-    createSession: (phase, _topic, callbacks, history) => {
+    createSession: (phase, _topic, callbacks, history, examinerModel) => {
       const session = new FakeSession(phase, callbacks, history);
       sessions.push(session);
+      sessionModels.push(examinerModel);
       return session;
     },
     createRecorder: (callbacks) => {
@@ -419,6 +447,7 @@ function harness(
     controller,
     announcer: devices.announcer ?? null,
     sessions,
+    sessionModels,
     get recorder() {
       return recorders[0];
     },
@@ -437,8 +466,7 @@ function harness(
     },
     loseMicrophone: (reason = "the audio track ended") => notifyLost?.(reason),
     session: () => sessions[sessions.length - 1],
-    report: (phase: RecordedPhase) =>
-      finished[0]?.phases.find((entry) => entry.phase === phase),
+    report: (phase: RecordedPhase) => finished[0]?.phases.find((entry) => entry.phase === phase),
   };
 }
 
@@ -999,6 +1027,23 @@ describe("recording the candidate", () => {
     assert.equal(h.recorder.discarded, true, "and released, since the blobs own their bytes now");
   });
 
+  it("asks for the monologue's artefact as the débat opens, not at the finish (#86)", async () => {
+    // The samples are final once the phase closes, and the candidate is about to
+    // spend thirteen minutes debating — which is when a compression cannot be
+    // perceived. The archive memoizes what this produces, so the finish reuses
+    // it instead of holding « Épreuve terminée » behind the codec.
+    const h = harness();
+    await intoMonologue(h);
+    h.advanceClock(240);
+    await h.controller.advanceEarly();
+    h.session().finishTurn();
+    await pressRecord(h);
+
+    assert.equal(h.controller.getSnapshot().phase, "debate");
+    assert.deepEqual(h.recorder.prepared, ["monologue"], "asked for as the débat opened");
+    assert.equal(h.finished.length, 0, "long before the sitting is handed over");
+  });
+
   it("reports only the phases the candidate actually reached", async () => {
     // An abandoned sitting has a monologue and no débat, which is the truth about
     // it — better than a débat row claiming zero seconds of a task that never
@@ -1062,9 +1107,7 @@ describe("recording the candidate", () => {
       false,
       "and the indicator goes dark, because at this moment it is telling the truth",
     );
-    assert.ok(
-      h.controller.getSnapshot().events.some((event) => event.name === "capture-stalled"),
-    );
+    assert.ok(h.controller.getSnapshot().events.some((event) => event.name === "capture-stalled"));
 
     // And it clears itself when the tab comes back, rather than leaving a stale
     // warning over a working microphone for the rest of the épreuve.
@@ -1367,6 +1410,127 @@ describe("recording the candidate", () => {
       assert.deepEqual(h.finished[0]?.devSeconds, { monologue: 330, debate: 0 });
     });
 
+    it("sends no artefact for a typed phase, even when the room was recorded first (#51)", async () => {
+      // The ordinary panel flow: « Enregistrer » pressed, some seconds of room
+      // tone captured while the panel is found and opened, then the exposé
+      // typed. That stub used to ride in front of every typed exposé — a real
+      // file of nobody speaking, uploaded, graded as the monologue's audio,
+      // and displacing the typed duration claim.
+      const h = harness();
+      await intoMonologue(h);
+      h.advanceClock(8);
+      assert.equal(h.recorder.measuredSeconds("monologue"), 8, "the stub was captured");
+
+      h.controller.setDevTextMode(true);
+      h.controller.injectCandidateSpeech("Un exposé tapé.", 330);
+      await runToFinish(h, () => {});
+
+      const payload = h.finished[0];
+      assert.deepEqual(h.recorder.droppedPhases, ["monologue"]);
+      assert.deepEqual(
+        payload?.recordings.map((recording) => recording.phase),
+        ["debate"],
+        "the typed monologue left no file; the spoken débat kept its own",
+      );
+      // With the stub gone, the claim is what the route will compute the
+      // duration penalty from — nothing displaces it any more.
+      assert.deepEqual(payload?.devSeconds, { monologue: 330, debate: 0 });
+    });
+
+    it("drops the artefact at the boundary, after the phase closes and before the early encode", async () => {
+      // The order is the design: the drop must come after `endPhase()` (until
+      // the boundary the developer can still speak into the phase) and before
+      // the #86 pre-encode, which would otherwise spend the débat compressing
+      // a recording the sitting has just decided against.
+      const h = harness();
+      await intoMonologue(h);
+      h.advanceClock(8);
+      h.controller.setDevTextMode(true);
+      h.controller.injectCandidateSpeech("Un exposé tapé.", 330);
+      await runToFinish(h, () => {});
+
+      const end = h.recorder.calls.indexOf("end:monologue");
+      const drop = h.recorder.calls.indexOf("drop:monologue");
+      assert.ok(end !== -1 && drop === end + 1, "closed, then dropped, in the same breath");
+    });
+
+    it("produces the same artefacts however long the panel took to open", async () => {
+      // The issue's definition of done, item one: the same typed flow, run
+      // twice, must produce the same set of phases-with-audio. The stub's size
+      // was the run-to-run variable — however many seconds the panel took —
+      // so two runs that differ only in that must finish identically.
+      const phases = async (secondsBeforePanel: number) => {
+        const h = harness();
+        await intoMonologue(h);
+        h.advanceClock(secondsBeforePanel);
+        h.controller.setDevTextMode(true);
+        h.controller.injectCandidateSpeech("Le même exposé, tapé.", 330);
+        await runToFinish(h, () => {});
+        return h.finished[0]?.recordings.map((recording) => recording.phase);
+      };
+
+      assert.deepEqual(await phases(2), await phases(45));
+    });
+
+    it("costs the débat its recording too, when the débat is what was typed", async () => {
+      // Per phase, not per sitting: a spoken monologue keeps its artefact
+      // beside a typed débat that loses its own.
+      const h = harness();
+      await intoMonologue(h);
+      h.advanceClock(30);
+      await runToFinish(h, () => {
+        h.controller.injectCandidateSpeech("Une réponse tapée.", 60);
+      });
+
+      assert.deepEqual(h.recorder.droppedPhases, ["debate"]);
+      assert.deepEqual(
+        h.finished[0]?.recordings.map((recording) => recording.phase),
+        ["monologue"],
+      );
+    });
+
+    it("stays typed through a restart — the typed turn does too", async () => {
+      // Deliberate, not an oversight: `restartMonologue` rewinds the clock, but
+      // it removes neither the typed turn from the transcript nor the claimed
+      // seconds — so a phase that was typed into and then restarted and spoken
+      // is still a phase whose content is partly typed, and its recording goes
+      // the way every typed phase's does. Clearing the mark on restart while
+      // the typed words stayed in the transcript would re-open exactly the
+      // mixed-input coin flip #51 closed, one restart deep.
+      const h = harness();
+      await intoMonologue(h);
+      h.controller.setDevTextMode(true);
+      h.controller.injectCandidateSpeech("Un fragment tapé.", 60);
+      h.controller.setDevTextMode(false);
+
+      h.controller.restartMonologue();
+      h.advanceClock(120);
+      assert.equal(h.recorder.measuredSeconds("monologue"), 120, "the restart was spoken");
+
+      await runToFinish(h, () => {});
+
+      assert.deepEqual(h.recorder.droppedPhases, ["monologue"]);
+      assert.deepEqual(
+        h.finished[0]?.recordings.map((recording) => recording.phase),
+        ["debate"],
+      );
+    });
+
+    it("never drops anything on a sitting where nothing was typed", async () => {
+      // The guard the whole feature stands behind: a real spoken sitting's
+      // artefacts are untouched, both of them.
+      const h = harness();
+      await intoMonologue(h);
+      h.advanceClock(30);
+      await runToFinish(h, () => {});
+
+      assert.deepEqual(h.recorder.droppedPhases, []);
+      assert.deepEqual(
+        h.finished[0]?.recordings.map((recording) => recording.phase),
+        ["monologue", "debate"],
+      );
+    });
+
     it("gives the microphone back when the monologue ends, so the débat records", async () => {
       // The panel is on the exposé and nowhere else. A mode that outlived it
       // would leave the débat neither typeable nor recordable — an empty
@@ -1456,8 +1620,9 @@ describe("recording the candidate", () => {
         assert.equal(h.controller.getSnapshot().phase, "debate", "no other click required");
         assert.deepEqual(
           h.recorder.calls,
-          ["monologue", "end:monologue"],
-          "the phase's artefact was opened and closed, both in the one press",
+          ["monologue", "end:monologue", "drop:monologue"],
+          "the phase's artefact was opened, closed and — being typed — dropped (#51), " +
+            "all in the one press",
         );
       });
 
@@ -1511,7 +1676,9 @@ describe("recording the candidate", () => {
 
         const said = h.controller
           .getSnapshot()
-          .transcript.filter((entry) => entry.phase === "monologue" && entry.speaker === "candidate")
+          .transcript.filter(
+            (entry) => entry.phase === "monologue" && entry.speaker === "candidate",
+          )
           .map((entry) => entry.text)
           .join(" ");
         assert.match(said, /Le télétravail a transformé le rapport au bureau\./);
@@ -1932,74 +2099,39 @@ describe("spoken consignes", () => {
     assert.equal(h.session().directives.length, 1);
   });
 
-  it("holds a speaking phase when the browser refuses to autoplay the consigne", async () => {
-    // The time-out path into the monologue: preparation's clock simply ran out, so
-    // there has been no gesture for thirty minutes. Returning here would start the
-    // recording and leave a consigne that plays into it the moment the candidate
-    // finds the button.
+  it("forfeits a consigne the browser refuses, and arms the phase anyway", async () => {
+    // The time-out path into the monologue: preparation's clock simply ran out,
+    // so there has been no gesture for thirty minutes and autoplay is refused.
+    // This used to HOLD the phase behind a panel and two buttons; the panel is
+    // gone on the user's call, and a refused consigne is now a skipped one. The
+    // ordering guarantee survives without the hold: the phase arms rather than
+    // starts, so nothing is recorded and nothing is charged until the
+    // candidate's own « Enregistrer » — the one gate that was ever load-bearing.
     const { h, announcer } = speaking("blocked");
     h.controller.start();
     h.advanceClock(PHASE_DURATIONS.preparation);
     await settle();
+    await settle();
 
-    const held = h.controller.getSnapshot();
-    assert.equal(held.phase, "monologue");
-    // It was attempted and refused, rather than never tried: the hold is the
+    const armed = h.controller.getSnapshot();
+    assert.equal(armed.phase, "monologue");
+    // It was attempted and refused, rather than never tried: the forfeit is the
     // browser's answer, not a decision this controller made on its own.
     assert.ok(announcer.played.includes(ANNOUNCEMENTS.monologue.src));
-    assert.equal(held.announcementBlocked, true);
-    assert.equal(held.announcementPlaying, false);
-    assert.equal(held.recording, false, "nothing is recorded while the épreuve waits");
+    assert.equal(armed.announcementPlaying, false);
+    assert.equal(armed.awaitingStart, true, "armed, not held, and not started");
+    assert.equal(armed.recording, false);
     assert.deepEqual(h.recorder.calls, []);
     assert.equal(h.sessions.length, 0);
-    assert.equal(held.canAdvance, false);
 
-    // Nothing is being spent: the clock is still at the phase's full length.
+    // Nothing is being spent: the clock waits for « Enregistrer » exactly as it
+    // does after a consigne that played.
     h.advanceClock(30);
     assert.equal(h.controller.getSnapshot().remaining, PHASE_DURATIONS.monologue);
-
-    // « Commencer sans écouter » — one of the two ways out, and both are a click.
-    h.controller.skipAnnouncement();
-    await settle();
-    await settle();
-
-    assert.equal(h.controller.getSnapshot().announcementBlocked, false);
-    // Answered, so the part is armed — but still not started. The hold and the
-    // « Enregistrer » press are two separate gates, and skipping the consigne
-    // clears only the first.
-    assert.equal(h.controller.getSnapshot().awaitingStart, true);
-    assert.deepEqual(h.recorder.calls, []);
 
     await pressRecord(h);
     assert.deepEqual(h.recorder.calls, ["monologue"], "the part starts on the press");
     assert.equal(h.sessions.length, 1);
-    assert.equal(h.controller.getSnapshot().recording, true);
-  });
-
-  it("releases a held phase when the candidate plays the consigne instead", async () => {
-    const { h, announcer } = speaking("blocked");
-    h.controller.start();
-    h.advanceClock(PHASE_DURATIONS.preparation);
-    await settle();
-    assert.equal(h.controller.getSnapshot().announcementBlocked, true);
-
-    // « Écouter la consigne ». The gesture is what makes the second attempt work,
-    // so the fake stops refusing.
-    announcer.behaviour = "hold";
-    h.controller.playAnnouncement();
-    await settle();
-
-    assert.equal(h.controller.getSnapshot().announcementPlaying, true);
-    assert.equal(h.controller.getSnapshot().announcementBlocked, false);
-    assert.deepEqual(h.recorder.calls, [], "still nothing recorded: it is playing now");
-
-    announcer.reachEnd();
-    await settle();
-    await settle();
-
-    assert.equal(h.controller.getSnapshot().awaitingStart, true);
-    await pressRecord(h);
-    assert.deepEqual(h.recorder.calls, ["monologue"]);
     assert.equal(h.controller.getSnapshot().recording, true);
   });
 
@@ -2038,15 +2170,15 @@ describe("spoken consignes", () => {
     assert.equal(h.sessions.length, 1);
   });
 
-  it("releases a held phase when the sitting is destroyed", async () => {
-    // The hold is a promise only a click resolves, and the click cannot arrive on
-    // a page that is going away. Without the release, this controller, its
-    // microphone and its socket would wait for it forever.
-    const { h, announcer } = speaking("blocked");
+  it("does not start a phase whose consigne was still in flight when it was destroyed", async () => {
+    // `announcer.close()` resolves the in-flight `play()` as skipped, and the
+    // boundary checks `destroyed` on the far side of the await — so a tab that
+    // goes away mid-consigne strands nothing and starts nothing.
+    const { h, announcer } = speaking("hold");
     h.controller.start();
     h.advanceClock(PHASE_DURATIONS.preparation);
     await settle();
-    assert.equal(h.controller.getSnapshot().announcementBlocked, true);
+    assert.equal(h.controller.getSnapshot().announcementPlaying, true);
 
     h.controller.destroy();
     await settle();
@@ -2292,7 +2424,9 @@ describe("the examiner's opening question", () => {
 
     // The examiner opens the débat. Gemini reports an interruption before a word
     // of it has been answered — there is nothing yet to answer.
-    h.session().examinerSays("Vous dites que le télétravail isole. N'est-ce pas plutôt le bureau ?");
+    h.session().examinerSays(
+      "Vous dites que le télétravail isole. N'est-ce pas plutôt le bureau ?",
+    );
     h.session().examinerVoice("the opening question");
     h.session().interrupts();
 
@@ -2442,7 +2576,9 @@ describe("the examiner's opening question", () => {
     await intoDebate(h);
     const player = h.players[h.players.length - 1];
 
-    h.session().examinerSays("Vous dites que le télétravail isole. N'est-ce pas plutôt le bureau ?");
+    h.session().examinerSays(
+      "Vous dites que le télétravail isole. N'est-ce pas plutôt le bureau ?",
+    );
     h.session().examinerVoice("the opening question");
 
     assert.equal(
@@ -2567,7 +2703,9 @@ describe("breaking a silence in the débat (#84, #101)", () => {
     h.recorder.voiced.debate = 0;
     // The examiner's opening question, delivered and finished. This is what
     // opens the window: the floor is the candidate's from here.
-    h.session().examinerSays("Vous dites que le télétravail isole. N'est-ce pas plutôt le bureau ?");
+    h.session().examinerSays(
+      "Vous dites que le télétravail isole. N'est-ce pas plutôt le bureau ?",
+    );
     h.session().finishTurn();
   }
 
@@ -2582,9 +2720,9 @@ describe("breaking a silence in the débat (#84, #101)", () => {
    *  silence repeats the question and the later ones ask a new, simpler one
    *  (#101), and both are forbidden to mention the silence. */
   const relances = (h: Harness) =>
-    h.session().directives.filter((text) =>
-      text.includes("Ne fais aucune remarque sur son silence"),
-    );
+    h
+      .session()
+      .directives.filter((text) => text.includes("Ne fais aucune remarque sur son silence"));
   const presenceChecks = (h: Harness) =>
     h.session().directives.filter((text) => text.includes("Vous m'entendez"));
   /** Everything the watch says, in one list: the débat's own opening directive
@@ -2710,8 +2848,8 @@ describe("breaking a silence in the débat (#84, #101)", () => {
     assert.deepEqual(
       events(h, "silence-relance").map((event) => event.detail),
       [1, 2, 3, 4, 5].map((attempt) => JSON.stringify({ attempt, waitedSeconds: 16 })),
-      "the log counts them and says what each one waited through, which is what"
-        + " replaced the stand-down it used to record",
+      "the log counts them and says what each one waited through, which is what" +
+        " replaced the stand-down it used to record",
     );
   });
 
@@ -3150,7 +3288,11 @@ describe("an examiner that says goodbye seven minutes early (#85)", () => {
       h.advanceClock(180);
       h.advanceClock(180);
 
-      assert.deepEqual(h.session().directives, [], "the examiner listens, and that is the exercise");
+      assert.deepEqual(
+        h.session().directives,
+        [],
+        "the examiner listens, and that is the exercise",
+      );
     });
   });
 
@@ -3187,7 +3329,11 @@ describe("an examiner that says goodbye seven minutes early (#85)", () => {
       assert.deepEqual(events(h, "examiner-early-closing"), [], "half of it is not a goodbye");
       h.session().examinerSays(" quitter la salle.");
 
-      assert.equal(events(h, "examiner-early-closing").length, 1, "and the other half completes it");
+      assert.equal(
+        events(h, "examiner-early-closing").length,
+        1,
+        "and the other half completes it",
+      );
     });
 
     it("stops answering after twice, and keeps logging", async () => {
@@ -3212,6 +3358,38 @@ describe("an examiner that says goodbye seven minutes early (#85)", () => {
       );
     });
 
+    it("does not re-count a goodbye off its own stale text when the examiner merely keeps talking", async () => {
+      // The corner past the recovery cap: nothing is sent, so no turn break is
+      // pending, and an examiner that speaks again with no candidate in
+      // between coalesces into the goodbye's own entry. The watch re-reads
+      // the merged text — and the phrase it finds there must be recognised as
+      // the goodbye already counted, not a new one.
+      const h = harness();
+      await intoDebate(h);
+      h.advanceClock(360);
+
+      for (let turn = 0; turn < 3; turn += 1) {
+        h.session().examinerSays("Au revoir.");
+        h.session().finishTurn();
+      }
+      assert.equal(events(h, "examiner-early-closing").length, 3);
+      assert.equal(recoveries(h).length, 2, "the third went unanswered — no break pending");
+
+      // Coalesces into the third goodbye's entry; the merged text still
+      // contains « au revoir », but no NEW goodbye was spoken.
+      h.session().examinerSays(" Très bien, je vous écoute encore.");
+      assert.equal(
+        events(h, "examiner-early-closing").length,
+        3,
+        "stale goodbye text is not counted again",
+      );
+
+      // A repeated goodbye in the same merged entry is new text and still
+      // counts — the guarantee the every-one-on-the-record test above pins.
+      h.session().examinerSays(" Au revoir.");
+      assert.equal(events(h, "examiner-early-closing").length, 4, "a genuine repeat still counts");
+    });
+
     it("leaves the closing sentence the app asked for alone", async () => {
       // The same words, and the difference is who asked: inside a closing
       // handshake this IS the handshake working.
@@ -3225,6 +3403,47 @@ describe("an examiner that says goodbye seven minutes early (#85)", () => {
 
       await completeClosing(h);
       assert.equal(h.controller.getSnapshot().phase, "finished");
+      assert.equal(
+        h.finished[0]?.earlyClosingCount,
+        0,
+        "an ordinary sitting reports no incident (#92)",
+      );
+    });
+
+    it("carries every goodbye out of the tab on the finish payload (#92)", async () => {
+      // The event log below dies with the page; this is the number that does
+      // not. Three goodbyes, of which only two were answered — the count is of
+      // the fault, not of the recovery, so the third is in it.
+      const h = harness();
+      await intoDebate(h);
+      h.advanceClock(360);
+
+      for (let turn = 0; turn < 3; turn += 1) {
+        h.session().examinerSays("Au revoir.");
+        h.session().finishTurn();
+      }
+      assert.equal(recoveries(h).length, 2, "the third goodbye went unanswered");
+
+      // The clock runs out and the app opens the real closing — whose goodbye
+      // must NOT be counted, or every sitting would report an incident.
+      h.advanceClock(PHASE_DURATIONS.debate);
+      await completeClosing(h);
+
+      assert.equal(h.controller.getSnapshot().phase, "finished");
+      assert.equal(h.finished[0]?.earlyClosingCount, 3, "answered or not, all three are counted");
+
+      // The invariant the finish route's clamp leans on: a genuine payload's
+      // transcript backs its count in MAGNITUDE, not just in presence, because
+      // detection ran on these very turns with the same phrase list and each
+      // answered goodbye's recovery directive broke the next one into its own
+      // entry. If this ever fails, the route is shrinking genuine claims.
+      // (An UNANSWERED repeat goodbye — past the recovery cap — can coalesce
+      // into the previous entry and be under-counted; that is the clamp's
+      // documented trade, not a failure of this invariant.)
+      assert.ok(
+        countClosingTurns(h.finished[0].transcript) >= h.finished[0].earlyClosingCount,
+        "the submitted transcript backs the full count",
+      );
     });
   });
 });
@@ -3436,5 +3655,44 @@ describe("the last question and the call of time (#108)", () => {
 
     h.advanceClock(5);
     assert.equal(h.controller.getSnapshot().closing, true, "the boundary itself has not moved");
+  });
+});
+
+describe("which examiner the controller's sessions are created for (#99)", () => {
+  /** Preparation → monologue, clock running. */
+  async function intoMonologue(h: Harness): Promise<void> {
+    h.controller.start();
+    await h.controller.advanceEarly();
+    await pressRecord(h);
+    h.controller.startSpeaking();
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+
+  it("hands the choice made during the préparation to both phases' sessions", async () => {
+    // The choice lands AFTER the controller is built — the picker lives on the
+    // préparation screen — which is exactly why it is a setter and a factory
+    // argument rather than a constructor option: a closure captured at
+    // construction would open the monologue on a stale choice.
+    const h = harness();
+    h.controller.start();
+    h.controller.setExaminerModel("gemini-2.5-flash-native-audio-preview-12-2025");
+
+    await intoMonologue(h);
+    h.session().candidateSays("Le télétravail a transformé le rapport au bureau.");
+    h.advanceClock(MONOLOGUE_MIN_SECONDS + 10);
+    await h.controller.advanceEarly();
+    await completeClosing(h);
+
+    assert.equal(h.sessions.length, 2, "one session per speaking phase");
+    assert.deepEqual(h.sessionModels, [
+      "gemini-2.5-flash-native-audio-preview-12-2025",
+      "gemini-2.5-flash-native-audio-preview-12-2025",
+    ]);
+  });
+
+  it("leaves the examiner to the server when nothing was ever chosen", async () => {
+    const h = harness();
+    await intoMonologue(h);
+    assert.deepEqual(h.sessionModels, [undefined]);
   });
 });

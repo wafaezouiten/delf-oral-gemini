@@ -3,18 +3,8 @@ import { currentUser } from "@clerk/nextjs/server";
 import { requireUserId } from "@/lib/auth/exam-guard";
 import { readCandidateHistory } from "@/lib/db/history";
 import { ORAL_TOPICS } from "@/lib/delf/topics";
-import {
-  buildHubSujets,
-  buildHubView,
-  HUB_LINKS,
-  latestScoreBySujet,
-} from "@/lib/ui/epreuve-hub";
-import {
-  HubCapabilities,
-  HubFormat,
-  HubMasthead,
-  HubSujets,
-} from "./_components/hub-sections";
+import { buildHubSujets, buildHubView, HUB_LINKS, latestScoreBySujet } from "@/lib/ui/epreuve-hub";
+import { HubCapabilities, HubFormat, HubMasthead, HubSujets } from "./_components/hub-sections";
 
 /**
  * The Production orale hub.

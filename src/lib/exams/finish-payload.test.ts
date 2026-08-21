@@ -210,6 +210,28 @@ describe("keeping the audit trail worth having", () => {
     assert.equal(accepts(payload({ reconnectCount: -1 })), false);
   });
 
+  describe("the early-closing count (#92)", () => {
+    // The one number in this payload that can RAISE a grade: positive, it
+    // waives the débat's penalties. Bounded like `reconnectCount`, but with a
+    // default where that field has none — see the schema for the deploy story.
+    it("accepts what the controller counts", () => {
+      assert.equal(accepts(payload({ earlyClosingCount: 0 })), true);
+      assert.equal(accepts(payload({ earlyClosingCount: 3 })), true);
+    });
+
+    it("defaults an absent field to zero, for the sitting in flight across the deploy", () => {
+      const parsed = finishPayloadSchema.safeParse(payload());
+      assert.ok(parsed.success);
+      assert.equal(parsed.data.earlyClosingCount, 0);
+    });
+
+    it("refuses the shapes that could not have been counted", () => {
+      assert.equal(accepts(payload({ earlyClosingCount: -1 })), false);
+      assert.equal(accepts(payload({ earlyClosingCount: 1.5 })), false);
+      assert.equal(accepts(payload({ earlyClosingCount: Number.NaN })), false);
+    });
+  });
+
   describe("the development duration claim (#36)", () => {
     // The only field in this payload that can reach a mark. The schema is not
     // what stops it being abused — the route ignores it in production and lets
@@ -240,7 +262,10 @@ describe("keeping the audit trail worth having", () => {
     });
 
     it("is bounded by the same ceiling as the wall clock beside it", () => {
-      assert.equal(accepts(payload({ devSeconds: { monologue: MAX_PHASE_SECONDS, debate: 0 } })), true);
+      assert.equal(
+        accepts(payload({ devSeconds: { monologue: MAX_PHASE_SECONDS, debate: 0 } })),
+        true,
+      );
       assert.equal(
         accepts(payload({ devSeconds: { monologue: MAX_PHASE_SECONDS + 1, debate: 0 } })),
         false,

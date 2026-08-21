@@ -36,9 +36,7 @@ export function Dashboard({ view }: { view: DashboardView }) {
       <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-3">
         <div>
           <Kicker>DELF B2 · Production orale</Kicker>
-          <h1 className="font-serif mt-1 text-2xl leading-tight font-semibold">
-            Tableau de bord
-          </h1>
+          <h1 className="mt-1 font-serif text-2xl leading-tight font-semibold">Tableau de bord</h1>
         </div>
         <Link href={HUB_LINKS.sujets} className={secondaryButton}>
           Nouvelle épreuve
@@ -57,7 +55,7 @@ export function Dashboard({ view }: { view: DashboardView }) {
                 set in — tinting them would claim a 40 % pass rate was orange. */}
             <p
               className={cn(
-                "font-serif tabular mt-2 text-3xl leading-none font-semibold",
+                "tabular mt-2 font-serif text-3xl leading-none font-semibold",
                 tile.band && scoreInk(tile.band.tone),
               )}
             >
@@ -68,7 +66,7 @@ export function Dashboard({ view }: { view: DashboardView }) {
         ))}
       </ul>
 
-      <section className="border-border bg-card mt-6 sheet border">
+      <section className="border-border bg-card sheet mt-6 border">
         <div className="rule-double flex items-center gap-2 px-6 py-4">
           <ChartIcon className="text-muted-foreground size-4" />
           <h2 className="font-serif text-base font-semibold">Moyenne par critère</h2>
@@ -92,13 +90,12 @@ export function Dashboard({ view }: { view: DashboardView }) {
           ))}
         </ul>
         <p className="text-muted-foreground border-border border-t px-6 py-3 text-xs leading-relaxed">
-          Moyenne sur {view.count} épreuve{view.count > 1 ? "s" : ""}, sur
-          l&apos;échelle 0 · 1 · 3 · 5 de la grille officielle. Une épreuve
-          abandonnée compte pour 0 sur chaque critère.
+          Moyenne sur {view.count} épreuve{view.count > 1 ? "s" : ""}, sur l&apos;échelle 0 · 1 · 3
+          · 5 de la grille officielle. Une épreuve abandonnée compte pour 0 sur chaque critère.
         </p>
       </section>
 
-      <section className="border-border bg-card mt-6 sheet border">
+      <section className="border-border bg-card sheet mt-6 border">
         <div className="rule-double flex flex-wrap items-baseline justify-between gap-3 px-6 py-4">
           <h2 className="font-serif text-base font-semibold">Dernières épreuves</h2>
           {view.count > view.recent.length && (
@@ -134,14 +131,11 @@ function EmptyDashboard() {
       <span className="bg-primary-subtle text-primary mx-auto flex size-14 items-center justify-center rounded-lg">
         <MicIcon className="size-7" />
       </span>
-      <h1 className="font-serif mt-5 text-2xl font-semibold">
-        Aucune épreuve à votre actif
-      </h1>
+      <h1 className="mt-5 font-serif text-2xl font-semibold">Aucune épreuve à votre actif</h1>
       <p className="text-muted-foreground mx-auto mt-3 max-w-[48ch] text-sm leading-relaxed">
-        Passez une première production orale pour voir ici votre note sur{" "}
-        {COMPETENCY_MAX}, vos cinq critères et votre temps de parole. Une épreuve
-        en cours n&apos;apparaît pas encore ; une épreuve abandonnée, elle,
-        compte comme une tentative notée 0.
+        Passez une première production orale pour voir ici votre note sur {COMPETENCY_MAX}, vos cinq
+        critères et votre temps de parole. Une épreuve en cours n&apos;apparaît pas encore ; une
+        épreuve abandonnée, elle, compte comme une tentative notée 0.
       </p>
       <div className="mt-7">
         <Link href={HUB_LINKS.sujets} className={primaryButton}>

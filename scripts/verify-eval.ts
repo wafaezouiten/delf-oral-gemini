@@ -225,9 +225,7 @@ async function main() {
     "no 2s or 4s survived into a stored score",
   );
 
-  const arithmeticOk = [strong, weak].every(
-    (r) => criteriaToScore25(r.criteria) === r.rawScore25,
-  );
+  const arithmeticOk = [strong, weak].every((r) => criteriaToScore25(r.criteria) === r.rawScore25);
   record(
     "the /25 is recomputed from the bands, not taken from the model",
     arithmeticOk,

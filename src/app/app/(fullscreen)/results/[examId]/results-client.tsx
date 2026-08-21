@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useCallback, useState, useSyncExternalStore } from "react";
 
 import { Notice } from "@/app/_components/notice";
+import { RecordingPlayer } from "@/app/_components/recording-player";
 import { BandScale } from "@/app/_components/band-scale";
 import { secondaryButton } from "@/app/_components/button-styles";
 import {
@@ -16,7 +17,7 @@ import {
 import { Kicker, Tag } from "@/app/_components/po/tag";
 import { scoreInk } from "@/app/_components/score-band";
 import { cn } from "@/lib/ui/class-names";
-import { correctionNotices } from "@/lib/ui/correction-notices";
+import { correctionNotices, earlyClosingNotice } from "@/lib/ui/correction-notices";
 import {
   CORRECTION_TRANSCRIPT_COPY,
   correctionTranscriptView,
@@ -109,6 +110,33 @@ export interface StoredResult {
   monologueSeconds: number;
   debateSeconds: number;
   reconnectCount: number;
+  /**
+   * How many times the examiner tried to close the épreuve mid-débat (#92).
+   * Optional for the same reason `examinerModel` is: a stash from before the
+   * field existed carries nothing, and a row from before the column reads 0.
+   * Absent or zero, nothing renders — those corrections were graded by a
+   * corrector that was never told, and the note would be false above them.
+   */
+  earlyClosingCount?: number;
+  /**
+   * The halves whose recording was kept and can be streamed back (#98), with
+   * the mime type each was measured to be — the player needs it to ask the
+   * browser `canPlayType` before offering a control that would only error.
+   *
+   * Optional because this object is also read back out of `sessionStorage`,
+   * where a stash from before the field existed carries nothing — and because
+   * the stash never carries it even now: the finish response holds no uris, so
+   * playback belongs to the server-read path alone. Absent or empty, the
+   * correction renders exactly as it did before #98.
+   */
+  playable?: Array<{ phase: "monologue" | "debate"; mimeType: string; durationSeconds: number }>;
+  /**
+   * Which Live model played the examiner (#99). Optional for the same reason
+   * `durationPenalty` is: this object also comes back out of `sessionStorage`,
+   * where a sitting finished before the picker existed carries no such field.
+   * Absent or null, the provenance line names the corrector alone.
+   */
+  examinerModel?: string | null;
 }
 
 /**
@@ -242,6 +270,15 @@ export function ResultsClient({
    */
   const notices = correctionNotices(evaluation);
 
+  /**
+   * The examiner-fault note (#92) — the one sentence on this page keyed to the
+   * sitting rather than to the correction, because the count lives on
+   * `oral_exams`. It is what keeps `early_closing_count` from repeating
+   * `reconnect_count`'s fate: a column persisted, passed all the way here, and
+   * rendered nowhere.
+   */
+  const earlyClosing = earlyClosingNotice(result.earlyClosingCount);
+
   const phonoNote = evaluation.feedback.phonologieNonEvaluable
     ? "La phonologie n'a pas pu être évaluée de façon fiable sur cette production."
     : undefined;
@@ -268,9 +305,7 @@ export function ResultsClient({
           below it. `min-h-14` keeps the desktop band exactly as it was. */}
       <header className="border-border bg-card z-20 flex min-h-14 shrink-0 flex-wrap items-center gap-x-3 gap-y-2 border-b px-4 py-2 sm:flex-nowrap sm:px-5 sm:py-0">
         <div className="min-w-0">
-          <p className="truncate text-[0.84375rem] font-semibold">
-            Production orale · Correction
-          </p>
+          <p className="truncate text-[0.84375rem] font-semibold">Production orale · Correction</p>
           <p className="text-muted-foreground truncate text-[0.6875rem]">{topic.title}</p>
         </div>
         <Tag className="shrink-0">DELF B2</Tag>
@@ -302,6 +337,8 @@ export function ResultsClient({
           transcript={transcript}
           monologueSeconds={monologueSeconds}
           debateSeconds={debateSeconds}
+          examId={examId}
+          playable={result.playable ?? []}
         />
 
         <aside className="border-border bg-card flex min-h-0 flex-col border-t lg:border-t-0 lg:border-l">
@@ -310,7 +347,7 @@ export function ResultsClient({
             <div className="flex flex-wrap items-baseline gap-x-3 gap-y-2">
               <p
                 className={cn(
-                  "font-serif tabular text-[2.875rem] leading-none font-semibold",
+                  "tabular font-serif text-[2.875rem] leading-none font-semibold",
                   scoreInk(tone),
                 )}
               >
@@ -346,12 +383,16 @@ export function ResultsClient({
               </p>
             )}
 
+            {earlyClosing && (
+              <p className="text-muted-foreground mt-3 text-xs leading-relaxed">{earlyClosing}</p>
+            )}
+
             {!passed && (
               <div className="border-danger/40 bg-danger-subtle text-danger mt-3 flex items-start gap-2.5 rounded-md border p-3">
                 <AlertIcon className="mt-0.5 size-3.5 shrink-0" />
                 <span className="text-[0.71875rem] leading-snug">
-                  Une note inférieure à {COMPETENCY_FLOOR}/{COMPETENCY_MAX} est
-                  éliminatoire au DELF, quelle que soit la note globale.
+                  Une note inférieure à {COMPETENCY_FLOOR}/{COMPETENCY_MAX} est éliminatoire au
+                  DELF, quelle que soit la note globale.
                 </span>
               </div>
             )}
@@ -365,10 +406,9 @@ export function ResultsClient({
             {evaluation.mode === "text" && (
               <div className="mb-4">
                 <Notice tone="warning" title="Corrigé sans l'audio">
-                  Aucun enregistrement n&apos;a pu être joint à cette épreuve. La
-                  correction a été faite à partir de la transcription seule :
-                  votre prononciation n&apos;a pas été écoutée, et les durées
-                  affichées sont celles de l&apos;audio effectivement reçu.
+                  Aucun enregistrement n&apos;a pu être joint à cette épreuve. La correction a été
+                  faite à partir de la transcription seule : votre prononciation n&apos;a pas été
+                  écoutée, et les durées affichées sont celles de l&apos;audio effectivement reçu.
                 </Notice>
               </div>
             )}
@@ -412,7 +452,7 @@ export function ResultsClient({
             </div>
 
             {evaluation.feedback.appreciationGlobale && (
-              <div className="border-border bg-muted/40 mt-2.5 sheet border p-4">
+              <div className="border-border bg-muted/40 sheet mt-2.5 border p-4">
                 <h3 className="text-xs font-bold">Appréciation globale</h3>
                 <p className="text-muted-foreground mt-1.5 text-xs leading-relaxed">
                   {evaluation.feedback.appreciationGlobale}
@@ -421,7 +461,7 @@ export function ResultsClient({
             )}
 
             {evaluation.feedback.conseil && (
-              <div className="border-primary/30 bg-primary-subtle mt-2.5 flex items-start gap-2.5 sheet border p-4">
+              <div className="border-primary/30 bg-primary-subtle sheet mt-2.5 flex items-start gap-2.5 border p-4">
                 <IdeaIcon className="text-primary mt-0.5 size-4 shrink-0" />
                 <p className="text-foreground/85 text-xs leading-relaxed">
                   <span className="text-primary font-semibold">Conseil : </span>
@@ -433,10 +473,25 @@ export function ResultsClient({
             {passed && (
               <p className="text-muted-foreground mt-3 flex items-center gap-2 px-1 text-[0.71875rem]">
                 <CheckCircleIcon className="text-success size-3.5 shrink-0" />
-                Note au-dessus du seuil éliminatoire du DELF ({COMPETENCY_FLOOR}/
-                {COMPETENCY_MAX}).
+                Note au-dessus du seuil éliminatoire du DELF ({COMPETENCY_FLOOR}/{COMPETENCY_MAX}).
               </p>
             )}
+
+            {/* Provenance, at the foot of the rail and on the printed sheet:
+                which model spoke and which one graded (#99). Raw ids on
+                purpose — a readable label here would make two sittings on the
+                same sujet quietly incomparable, which is the thing this line
+                exists to prevent. The examiner is omitted rather than guessed
+                on sittings from before it was recorded. */}
+            <p className="text-muted-foreground border-border mt-4 border-t px-1 pt-3 text-[0.65625rem] leading-relaxed">
+              {result.examinerModel && (
+                <>
+                  Examinateur&nbsp;: <span className="tabular">{result.examinerModel}</span>
+                  {" · "}
+                </>
+              )}
+              Correcteur&nbsp;: <span className="tabular">{evaluation.model}</span>
+            </p>
           </div>
         </aside>
       </div>
@@ -497,11 +552,19 @@ function TranscriptColumn({
   transcript,
   monologueSeconds,
   debateSeconds,
+  examId,
+  playable,
 }: {
   title: string;
   transcript: readonly TranscriptEntry[];
   monologueSeconds: number;
   debateSeconds: number;
+  examId: string;
+  playable: ReadonlyArray<{
+    phase: "monologue" | "debate";
+    mimeType: string;
+    durationSeconds: number;
+  }>;
 }) {
   const { sections, silentNotice } = correctionTranscriptView(transcript, {
     monologueSeconds,
@@ -516,7 +579,7 @@ function TranscriptColumn({
             <Kicker>{CORRECTION_TRANSCRIPT_COPY.kicker}</Kicker>
           </div>
 
-          <h2 className="font-serif mt-4 text-xl leading-tight font-semibold">{title}</h2>
+          <h2 className="mt-4 font-serif text-xl leading-tight font-semibold">{title}</h2>
 
           {silentNotice && (
             <div className="border-danger/40 bg-danger-subtle mt-5 rounded-md border border-dashed p-4">
@@ -534,12 +597,30 @@ function TranscriptColumn({
                   page sends the candidate over the fold to find out which half
                   they are reading. The correction is the thing they keep, so
                   the heading travels with at least the start of its turns. */}
-              <div className="border-border flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 border-b pb-1.5 break-inside-avoid break-after-avoid">
+              <div className="border-border flex break-inside-avoid break-after-avoid flex-wrap items-baseline justify-between gap-x-3 gap-y-1 border-b pb-1.5">
                 <h3 className="text-[0.8125rem] font-semibold">{section.heading}</h3>
                 <span className="text-muted-foreground tabular shrink-0 text-[0.6875rem]">
                   {section.durationLabel}
                 </span>
               </div>
+
+              {/* The half's own recording, on the line that already says how
+                  long it was (#98). Only where the bytes were kept — a sitting
+                  from before the vault, or one whose upload failed, keeps its
+                  duration and offers nothing, which is the honest rendering of
+                  a recording that existed and is gone. */}
+              {playable
+                .filter((recording) => recording.phase === section.phase)
+                .map((recording) => (
+                  <RecordingPlayer
+                    key={recording.phase}
+                    src={`/api/exams/${examId}/recordings/${section.phase}`}
+                    deleteHref={`/api/exams/${examId}/recordings/${section.phase}`}
+                    mimeType={recording.mimeType}
+                    durationSeconds={recording.durationSeconds}
+                    className="mt-3"
+                  />
+                ))}
 
               {section.emptyNote ? (
                 <p className="text-muted-foreground mt-3 text-xs leading-relaxed italic">
@@ -563,7 +644,7 @@ function TranscriptColumn({
                          travels whole or not at all. */
                       <div
                         key={turnKey(entry, index)}
-                        className={cn("border-l-2 pl-3 break-inside-avoid", tone.rule)}
+                        className={cn("break-inside-avoid border-l-2 pl-3", tone.rule)}
                       >
                         {/* The stamp shares the name's line rather than taking
                             one of its own: it is a locator, not a heading, and a
@@ -747,14 +828,14 @@ function CentredCard({
     <main className="bg-background flex h-full items-center justify-center p-6">
       <div
         role={tone === "danger" ? "alert" : "status"}
-        className="border-border bg-card flex max-w-md flex-col items-center sheet border px-8 py-14 text-center"
+        className="border-border bg-card sheet flex max-w-md flex-col items-center border px-8 py-14 text-center"
       >
         {tone === "danger" && (
           <span className="bg-danger-subtle text-danger flex size-14 items-center justify-center rounded-full">
             <AlertIcon className="size-7" />
           </span>
         )}
-        <h1 className="font-serif mt-5 text-xl font-semibold">{title}</h1>
+        <h1 className="mt-5 font-serif text-xl font-semibold">{title}</h1>
         <p className="text-muted-foreground mt-2 text-sm leading-relaxed">{body}</p>
         {action && <div className="mt-6">{action}</div>}
       </div>

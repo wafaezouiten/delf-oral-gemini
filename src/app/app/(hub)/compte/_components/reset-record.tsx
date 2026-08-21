@@ -85,9 +85,9 @@ export function ResetRecord() {
         <div className="border-border bg-muted w-full space-y-3 border p-4 sm:w-72">
           <p className="text-sm font-semibold">Réinitialiser ma progression ?</p>
           <p className="text-muted-foreground text-sm leading-relaxed">
-            Vos scores et vos épreuves corrigées sont archivés : ils restent
-            consultables dans votre historique, mais vos tableaux de bord
-            repartent de zéro. Votre compte et vos accès ne sont pas touchés.
+            Vos scores et vos épreuves corrigées sont archivés : ils restent consultables dans votre
+            historique, mais vos tableaux de bord repartent de zéro. Votre compte et vos accès ne
+            sont pas touchés.
           </p>
 
           {failed && (

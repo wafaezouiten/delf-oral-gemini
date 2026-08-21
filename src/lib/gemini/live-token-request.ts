@@ -29,6 +29,7 @@
 import type { ExamAccess } from "@/lib/auth/exam-access";
 import { EXAM_ACCESS_DENIALS } from "@/lib/auth/exam-access";
 import { findTopic } from "@/lib/delf/topics";
+import { LIVE_MODEL, isSelectableLiveModel } from "@/lib/gemini/constants";
 
 /** The two phases that open a Live session. `preparation` is silent by design. */
 export type LiveTokenPhase = "monologue" | "debate";
@@ -49,13 +50,18 @@ export interface LiveTokenRequest {
   examId: string;
   /** What the client asked for. Only used when no sitting can be read. */
   requestedTopicSlug: string;
+  /**
+   * The examiner the client asked for (#99). Optional — an absent model means
+   * the default — and, like the slug, only used when no sitting can be read:
+   * the stored choice outranks it whenever a row answers.
+   */
+  requestedModel?: string;
   /** Present only on a reconnect. Its presence is what makes the connect a resume. */
   resumptionHandle?: string;
 }
 
 export type LiveTokenParse =
-  | { ok: true; request: LiveTokenRequest }
-  | { ok: false; status: number; error: string };
+  { ok: true; request: LiveTokenRequest } | { ok: false; status: number; error: string };
 
 /**
  * Validate the request body.
@@ -83,13 +89,26 @@ export function parseLiveTokenRequest(body: unknown): LiveTokenParse {
     return { ok: false, status: 400, error: "Sujet inconnu" };
   }
 
+  // The one part of the pinned config a client may now have an opinion on, so
+  // it is checked against the verified allow-list rather than merely
+  // type-checked (#99). Refused loudly rather than coerced: an unknown id that
+  // reached the constraint would not fail here — it would open a socket and
+  // kill it with 1011 and no diagnostic, mid-épreuve.
+  const model = input.model;
+  if (model !== undefined && (typeof model !== "string" || !isSelectableLiveModel(model))) {
+    return { ok: false, status: 400, error: "Modèle inconnu" };
+  }
+
   const handle = input.resumptionHandle;
   const resumptionHandle =
     typeof handle === "string" && handle.length > 0 && handle.length <= MAX_RESUMPTION_HANDLE_LENGTH
       ? handle
       : undefined;
 
-  return { ok: true, request: { phase, examId, requestedTopicSlug, resumptionHandle } };
+  return {
+    ok: true,
+    request: { phase, examId, requestedTopicSlug, requestedModel: model, resumptionHandle },
+  };
 }
 
 export type LiveTokenGate =
@@ -104,6 +123,17 @@ export type LiveTokenGate =
        * from `request` means persistence is degraded.
        */
       source: "sitting" | "request";
+      /** The examiner to pin into the token (#99). Always allow-listed. */
+      model: string;
+      /**
+       * Where the examiner came from. `sitting` and `request` mean what they
+       * mean for the subject. `default` is the untouched path — no row and no
+       * request — AND the one fault worth a log line: a stored model that has
+       * since left the allow-list is replaced by the default rather than
+       * minted, because a constraint naming a retired id opens a socket that
+       * dies with 1011 mid-épreuve.
+       */
+      modelSource: "sitting" | "request" | "default";
     };
 
 export interface LiveTokenGateInput {
@@ -111,11 +141,14 @@ export interface LiveTokenGateInput {
    * The ownership answer for `examId`, from `authorizeExam`. It carries the
    * sitting's subject when there is one — the route used to read that with a
    * second query and pass it in beside this, which was both a round trip and a
-   * way for the two to be about different sittings (#22).
+   * way for the two to be about different sittings (#22). Since #99 it carries
+   * the sitting's examiner on the same read, for the same reason.
    */
   access: ExamAccess;
   /** The subject the browser asked for. Already validated by {@link parseLiveTokenRequest}. */
   requestedTopicSlug: string;
+  /** The examiner the browser asked for, if any. Already allow-listed. */
+  requestedModel?: string;
 }
 
 /**
@@ -125,20 +158,60 @@ export interface LiveTokenGateInput {
  * this route is the fifth caller of that module, and a second opinion about who
  * owns a sitting is exactly the kind of drift that reopens an IDOR quietly.
  */
-export function gateLiveToken({ access, requestedTopicSlug }: LiveTokenGateInput): LiveTokenGate {
+export function gateLiveToken({
+  access,
+  requestedTopicSlug,
+  requestedModel,
+}: LiveTokenGateInput): LiveTokenGate {
   if (access.status === "denied") {
     const { status, error } = EXAM_ACCESS_DENIALS[access.reason];
     return { decision: "deny", status, error };
   }
 
+  /**
+   * The examiner, decided by the same rule as the subject: the row wins
+   * whenever there is one to read (#99). Two consequences are the point:
+   *
+   *  - a null column on an owned row means "nothing was ever chosen", so the
+   *    default runs — NOT the requested model, because the row is the record
+   *    of what the candidate heard, and honouring a request the row does not
+   *    carry would make that record a lie;
+   *  - with no row to read, the request stands, which is what keeps a
+   *    reconnect on the SAME examiner through a database blip — the client
+   *    re-sends its choice on every mint, so a mid-débat `lookup-failed` does
+   *    not switch voices.
+   *
+   * A stored model that has since left the allow-list falls back to the
+   * default: an épreuve on the wrong examiner beats one that dies at the
+   * handshake with no diagnostic. The route logs it off `modelSource`.
+   */
+  const examinerModel = (): Pick<
+    Extract<LiveTokenGate, { decision: "mint" }>,
+    "model" | "modelSource"
+  > => {
+    if (access.status === "owned") {
+      return access.examinerModel && isSelectableLiveModel(access.examinerModel)
+        ? { model: access.examinerModel, modelSource: "sitting" }
+        : { model: LIVE_MODEL, modelSource: "default" };
+    }
+    return requestedModel
+      ? { model: requestedModel, modelSource: "request" }
+      : { model: LIVE_MODEL, modelSource: "default" };
+  };
+
   // Owned, and the sitting says what was asked. The authoritative path.
   if (access.status === "owned" && access.topicSlug) {
-    return { decision: "mint", topicSlug: access.topicSlug, source: "sitting" };
+    return {
+      decision: "mint",
+      topicSlug: access.topicSlug,
+      source: "sitting",
+      ...examinerModel(),
+    };
   }
 
   // Either there is no sitting to read (no database, or a degraded `local-…`
   // id), the lookup failed, or the row exists but its subject could not be
   // joined. None of those is a reason to end an exam in progress, and none of
   // them lets the caller reach another candidate's sitting.
-  return { decision: "mint", topicSlug: requestedTopicSlug, source: "request" };
+  return { decision: "mint", topicSlug: requestedTopicSlug, source: "request", ...examinerModel() };
 }

@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 
 import type { ExamAccess } from "@/lib/auth/exam-access";
 import { ORAL_TOPICS } from "@/lib/delf/topics";
+import { LIVE_MODEL, LIVE_MODEL_OPTIONS } from "@/lib/gemini/constants";
 import {
   MAX_RESUMPTION_HANDLE_LENGTH,
   gateLiveToken,
@@ -22,6 +23,10 @@ import {
 const SLUG = ORAL_TOPICS[0].slug;
 const OTHER_SLUG = ORAL_TOPICS[1].slug;
 
+/** An allow-listed examiner that is not the default, so a test can tell "the
+ *  choice won" apart from "the default won". */
+const OTHER_MODEL = LIVE_MODEL_OPTIONS.map((option) => option.id).find((id) => id !== LIVE_MODEL)!;
+
 function body(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return { phase: "debate", examId: "42", topicSlug: SLUG, ...overrides };
 }
@@ -34,6 +39,7 @@ describe("live token request validation", () => {
       phase: "debate",
       examId: "42",
       requestedTopicSlug: SLUG,
+      requestedModel: undefined,
       resumptionHandle: "handle-one",
     });
   });
@@ -85,17 +91,50 @@ describe("live token request validation", () => {
       assert.equal(parseLiveTokenRequest(raw).ok, false);
     }
   });
+
+  it("refuses a model outside the allow-list, and loudly", () => {
+    // The one part of the pinned config the client now has an opinion on
+    // (#99). An unknown id must die HERE with a 400: passed through, it opens
+    // a socket that is killed with 1011 and no diagnostic, mid-épreuve.
+    for (const model of ["gemini-9-imaginary", "", 7, {}]) {
+      const parsed = parseLiveTokenRequest(body({ model }));
+      assert.equal(parsed.ok, false, String(model));
+      assert.equal(!parsed.ok && parsed.status, 400);
+    }
+  });
+
+  it("accepts every allow-listed model, and treats absence as no request", () => {
+    for (const { id } of LIVE_MODEL_OPTIONS) {
+      const parsed = parseLiveTokenRequest(body({ model: id }));
+      assert.equal(parsed.ok && parsed.request.requestedModel, id);
+    }
+    const absent = parseLiveTokenRequest(body());
+    assert.equal(absent.ok && absent.request.requestedModel, undefined);
+  });
 });
 
 describe("who may be minted a live token", () => {
-  /** The sitting says SLUG. Since #22 the subject arrives on the access itself. */
-  const owned: ExamAccess = { status: "owned", userId: "user_1", examId: 42, topicSlug: SLUG };
+  /** The sitting says SLUG. Since #22 the subject arrives on the access
+   *  itself; since #99 the examiner does too, and this row predates a choice. */
+  const owned: ExamAccess = {
+    status: "owned",
+    userId: "user_1",
+    examId: 42,
+    topicSlug: SLUG,
+    examinerModel: null,
+  };
 
   it("mints for the subject recorded on the sitting, not the one asked for", () => {
     // The integrity bug this closes: a candidate could sit subject A on a row
     // that says subject B, and the grade would be filed against B.
     const gate = gateLiveToken({ access: owned, requestedTopicSlug: OTHER_SLUG });
-    assert.deepEqual(gate, { decision: "mint", topicSlug: SLUG, source: "sitting" });
+    assert.deepEqual(gate, {
+      decision: "mint",
+      topicSlug: SLUG,
+      source: "sitting",
+      model: LIVE_MODEL,
+      modelSource: "default",
+    });
   });
 
   it("refuses a signed-out caller", () => {
@@ -127,7 +166,17 @@ describe("who may be minted a live token", () => {
         access: { status: "no-sitting", userId: "user_1", reason },
         requestedTopicSlug: SLUG,
       });
-      assert.deepEqual(gate, { decision: "mint", topicSlug: SLUG, source: "request" }, reason);
+      assert.deepEqual(
+        gate,
+        {
+          decision: "mint",
+          topicSlug: SLUG,
+          source: "request",
+          model: LIVE_MODEL,
+          modelSource: "default",
+        },
+        reason,
+      );
     }
   });
 
@@ -139,6 +188,91 @@ describe("who may be minted a live token", () => {
       access: { ...owned, topicSlug: null },
       requestedTopicSlug: OTHER_SLUG,
     });
-    assert.deepEqual(gate, { decision: "mint", topicSlug: OTHER_SLUG, source: "request" });
+    assert.deepEqual(gate, {
+      decision: "mint",
+      topicSlug: OTHER_SLUG,
+      source: "request",
+      model: LIVE_MODEL,
+      modelSource: "default",
+    });
+  });
+});
+
+describe("which examiner a token is minted for", () => {
+  const owned: ExamAccess = {
+    status: "owned",
+    userId: "user_1",
+    examId: 42,
+    topicSlug: SLUG,
+    examinerModel: OTHER_MODEL,
+  };
+
+  it("mints for the examiner recorded on the sitting, not the one asked for", () => {
+    // The same rule as the subject, for the same reason: the row is the record
+    // of what the candidate heard, and the request loses whenever a row
+    // answers. This is also what keeps a reload honest — the picker rerenders
+    // from the row, and the token route mints from the same place.
+    const gate = gateLiveToken({
+      access: owned,
+      requestedTopicSlug: SLUG,
+      requestedModel: LIVE_MODEL,
+    });
+    assert.equal(gate.decision === "mint" && gate.model, OTHER_MODEL);
+    assert.equal(gate.decision === "mint" && gate.modelSource, "sitting");
+  });
+
+  it("runs the default on an owned row that never chose, whatever was asked", () => {
+    // Null means "nothing was ever chosen", and the row wins even then:
+    // honouring a request the row does not carry would make the stored record
+    // a lie about which voice spoke. The picker's write goes to the row first,
+    // so a request the row disagrees with is a write that failed.
+    const gate = gateLiveToken({
+      access: { ...owned, examinerModel: null },
+      requestedTopicSlug: SLUG,
+      requestedModel: OTHER_MODEL,
+    });
+    assert.equal(gate.decision === "mint" && gate.model, LIVE_MODEL);
+    assert.equal(gate.decision === "mint" && gate.modelSource, "default");
+  });
+
+  it("keeps a reconnect on the requested examiner when no row can be read", () => {
+    // Trap 3 of #99: a token is minted on every reconnect. The client re-sends
+    // its choice each time, so a database blip mid-débat keeps the same voice
+    // instead of silently switching examiners.
+    for (const reason of ["no-database", "unpersisted-id", "lookup-failed"] as const) {
+      const gate = gateLiveToken({
+        access: { status: "no-sitting", userId: "user_1", reason },
+        requestedTopicSlug: SLUG,
+        requestedModel: OTHER_MODEL,
+      });
+      assert.equal(gate.decision === "mint" && gate.model, OTHER_MODEL, reason);
+      assert.equal(gate.decision === "mint" && gate.modelSource, "request", reason);
+    }
+  });
+
+  it("falls back to the default when the stored examiner has left the allow-list", () => {
+    // Trap 4 of #99: an id can exist, be stored, and still be unrunnable — a
+    // retired preview dies at the handshake with 1011 and no diagnostic. An
+    // épreuve on the wrong examiner beats one that cannot start; the route
+    // logs the substitution off `modelSource`.
+    const gate = gateLiveToken({
+      access: { ...owned, examinerModel: "gemini-3-pro-preview" },
+      requestedTopicSlug: SLUG,
+    });
+    assert.equal(gate.decision === "mint" && gate.model, LIVE_MODEL);
+    assert.equal(gate.decision === "mint" && gate.modelSource, "default");
+  });
+
+  it("still names the sitting's examiner when its subject could not be joined", () => {
+    // The two columns are decided independently: a broken topic join degrades
+    // the SUBJECT to the request, and says nothing about which examiner the
+    // row recorded.
+    const gate = gateLiveToken({
+      access: { ...owned, topicSlug: null },
+      requestedTopicSlug: SLUG,
+    });
+    assert.equal(gate.decision === "mint" && gate.source, "request");
+    assert.equal(gate.decision === "mint" && gate.model, OTHER_MODEL);
+    assert.equal(gate.decision === "mint" && gate.modelSource, "sitting");
   });
 });

@@ -1,0 +1,1 @@
+ALTER TABLE "oral_exams" ADD COLUMN "early_closing_count" integer DEFAULT 0 NOT NULL;

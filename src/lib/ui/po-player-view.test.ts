@@ -1,9 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { MONOLOGUE_MIN_SECONDS, PHASE_DURATIONS, formatClock } from "@/lib/delf/phases";
+import { MONOLOGUE_MIN_SECONDS } from "@/lib/delf/phases";
 import {
-  buildDeroule,
   candidateStatus,
   examinerStatus,
   micCopy,
@@ -18,10 +17,7 @@ import {
 
 describe("the masthead", () => {
   it("names the épreuve, the diploma and the part", () => {
-    assert.equal(
-      poKicker("Monologue suivi"),
-      "Production orale · DELF B2 · Monologue suivi",
-    );
+    assert.equal(poKicker("Monologue suivi"), "Production orale · DELF B2 · Monologue suivi");
   });
 
   it("cuts a part title at its separator, whichever one was typed", () => {
@@ -34,39 +30,12 @@ describe("the masthead", () => {
     assert.equal(shortPartLabel("Débat — exercice en interaction"), "Débat");
     assert.equal(shortPartLabel("Débat"), "Débat");
   });
-
 });
 
-describe("the déroulé", () => {
-  const steps = buildDeroule();
-
-  it("prints the three phases the state machine will actually run", () => {
-    assert.deepEqual(
-      steps.map((step) => step.title),
-      ["Préparation", "Monologue suivi", "Débat"],
-    );
-    assert.deepEqual(
-      steps.map((step) => step.n),
-      [1, 2, 3],
-    );
-  });
-
-  it("prints the clocks the timers will count, not a second copy of them", () => {
-    // The whole reason this is derived rather than written out: a briefing that
-    // promises seven minutes of a monologue the timer gives five is worse than
-    // no briefing.
-    assert.equal(steps[0].durationLabel, formatClock(PHASE_DURATIONS.preparation));
-    assert.equal(steps[1].durationLabel, formatClock(PHASE_DURATIONS.monologue));
-    assert.equal(steps[2].durationLabel, formatClock(PHASE_DURATIONS.debate));
-  });
-
-  it("captions the monologue without repeating the duration beside it", () => {
-    // The part description ends in "(~5–7 min)", and the row already carries a
-    // duration column.
-    assert.doesNotMatch(steps[1].caption, /min/);
-    assert.ok(steps[1].caption.length > 0);
-  });
-});
+/*
+ * "the déroulé" tests went with `buildDeroule` and its rail card: the durations
+ * the list derived are now printed once, on the sujet's launch dialog.
+ */
 
 describe("the exposé plan", () => {
   it("gives the argued arc, which is the only one B2 has a caller for", () => {
@@ -263,10 +232,7 @@ describe("the status card", () => {
   it("lets the close outrank the connection and the consigne", () => {
     // The part is ending: what the socket is doing, and what the last consigne
     // was, are both answers to a question the candidate has stopped asking.
-    assert.equal(
-      passationStatus("monologue", false, true, true).title,
-      "Fin de l'exposé",
-    );
+    assert.equal(passationStatus("monologue", false, true, true).title, "Fin de l'exposé");
   });
 });
 

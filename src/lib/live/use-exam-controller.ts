@@ -59,16 +59,29 @@ export function useExamController(options: {
    *  which has no business knowing about row ids. */
   examId: string;
   topic: OralTopic;
+  /**
+   * The examiner chosen on the préparation screen (#99), or null for the
+   * default. Forwarded on every token mint as the fallback the server honours
+   * when no sitting can be read — the stored choice outranks it otherwise.
+   */
+  examinerModel: string | null;
   onFinished: (payload: ExamFinishedPayload) => void;
 }) {
-  const { examId, topic, onFinished } = options;
+  const { examId, topic, examinerModel, onFinished } = options;
 
   const controller = useMemo(
     () =>
       new ExamController({
         topic,
-        createSession: (phase, sessionTopic, callbacks, initialHistory) =>
-          new ExamLiveSession({ examId, phase, topic: sessionTopic, callbacks, initialHistory }),
+        createSession: (phase, sessionTopic, callbacks, initialHistory, model) =>
+          new ExamLiveSession({
+            examId,
+            phase,
+            topic: sessionTopic,
+            model,
+            callbacks,
+            initialHistory,
+          }),
         createRecorder: (callbacks) => new MicRecorder(callbacks),
         createPlayer: (callbacks) => new ExaminerAudioPlayer(callbacks),
         createAnnouncer: (callbacks) => new ExaminerAnnouncer(callbacks),
@@ -77,6 +90,20 @@ export function useExamController(options: {
       }),
     [examId, topic, onFinished],
   );
+
+  /**
+   * Keep the controller's idea of the examiner current (#99).
+   *
+   * Pushed into the controller rather than listed as a dependency of the memo
+   * above, because rebuilding the controller restarts the épreuve — and the
+   * choice can legitimately change during the préparation. Sessions are only
+   * opened after the préparation ends, and this effect has run by then: it
+   * fires on mount and on every change, before the client's own `start()`
+   * effect, which is declared later in the same component.
+   */
+  useEffect(() => {
+    controller.setExaminerModel(examinerModel);
+  }, [controller, examinerModel]);
 
   /**
    * Release the microphone and the socket when the candidate leaves.

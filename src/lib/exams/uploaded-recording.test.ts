@@ -3,11 +3,13 @@ import { describe, it } from "node:test";
 
 import { muxOggOpus } from "@/lib/audio/ogg-opus";
 import { MONOLOGUE_MIN_SECONDS } from "@/lib/delf/phases";
+import { DEBATE_FLOOR_SECONDS, MONOLOGUE_FLOOR_SECONDS } from "@/lib/delf/orale-rubric";
 import { pcm16ToWav } from "@/lib/audio/pcm";
 import { INPUT_SAMPLE_RATE } from "@/lib/gemini/constants";
 import {
   MAX_RECORDING_BYTES,
   MAX_REQUEST_BYTES,
+  MIN_RECORDING_SECONDS,
   fitsInOneRequest,
   measureUploadedRecording,
   selectDeliverable,
@@ -33,10 +35,13 @@ function packet(bytes = 40): Uint8Array {
 }
 
 async function opus(seconds: number, options?: { inputSampleRate?: number; channels?: number }) {
-  const blob = muxOggOpus(Array.from({ length: Math.round(seconds * 50) }, () => packet()), {
-    inputSampleRate: options?.inputSampleRate ?? INPUT_SAMPLE_RATE,
-    channels: options?.channels ?? 1,
-  });
+  const blob = muxOggOpus(
+    Array.from({ length: Math.round(seconds * 50) }, () => packet()),
+    {
+      inputSampleRate: options?.inputSampleRate ?? INPUT_SAMPLE_RATE,
+      channels: options?.channels ?? 1,
+    },
+  );
   return blob.arrayBuffer();
 }
 
@@ -69,8 +74,14 @@ describe("measuring what was uploaded", () => {
     // Not mono at the capture rate, so not something `pcm16ToWav` or
     // `encodePcm16ToOggOpus` wrote — and measuring it would be answering a
     // question nobody asked.
-    assert.equal(measureUploadedRecording(await opus(10, { inputSampleRate: 48_000 }), INPUT_SAMPLE_RATE), null);
-    assert.equal(measureUploadedRecording(await opus(10, { channels: 2 }), INPUT_SAMPLE_RATE), null);
+    assert.equal(
+      measureUploadedRecording(await opus(10, { inputSampleRate: 48_000 }), INPUT_SAMPLE_RATE),
+      null,
+    );
+    assert.equal(
+      measureUploadedRecording(await opus(10, { channels: 2 }), INPUT_SAMPLE_RATE),
+      null,
+    );
     assert.equal(measureUploadedRecording(await wav(10, 44_100), INPUT_SAMPLE_RATE), null);
   });
 
@@ -140,7 +151,6 @@ describe("what one request may carry", () => {
     // below it, or the rejection is the platform's and carries no message.
     assert.ok(MAX_REQUEST_BYTES < 4_500_000);
   });
-
 });
 
 describe("choosing what to attach", () => {
@@ -205,5 +215,30 @@ describe("choosing what to attach", () => {
       monologue,
       debate,
     ]);
+  });
+});
+
+describe("what a stub of seconds is", () => {
+  // The decision #73 asked for, pinned where it can be argued with. The floor's
+  // safety rests on two relations to the rubric; if either moves, the floor has
+  // to be re-argued rather than silently kept.
+
+  it("sits far under both duration floors, so it can never change a mark", () => {
+    // A phase measuring under the floor is short whether it reads 8 seconds or
+    // 0 — the drop turns one already-penalised reading into the other, and
+    // nothing else. Were this floor ever to reach a part's own floor, dropping
+    // a recording could START a penalty, which is exactly what it must not do.
+    assert.ok(MIN_RECORDING_SECONDS < MONOLOGUE_FLOOR_SECONDS / 2);
+    assert.ok(MIN_RECORDING_SECONDS < DEBATE_FLOOR_SECONDS / 2);
+  });
+
+  it("still measures a stub — the floor is a decision about grading, not format", async () => {
+    // The refusals stay refusals and the stubs stay measurable: a two-second
+    // Opus file is a legal artefact the route now chooses not to attach, which
+    // is a different thing from a file it cannot read (#73 §2 vs. a 400).
+    const measured = measureUploadedRecording(await opus(2), INPUT_SAMPLE_RATE);
+
+    assert.equal(measured?.mimeType, "audio/ogg");
+    assert.ok((measured?.durationSeconds ?? NaN) < MIN_RECORDING_SECONDS);
   });
 });
