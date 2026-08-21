@@ -130,6 +130,8 @@ export interface CorrectionWrite {
 export interface SittingClaim {
   transcript: TranscriptEntry[];
   reconnectCount: number;
+  /** How many times the examiner tried to close the épreuve early (#92). */
+  earlyClosingCount: number;
   finishedAt: Date;
 }
 
@@ -179,6 +181,10 @@ export interface StoredSitting {
   outcome: SittingOutcome;
   transcript: TranscriptEntry[];
   reconnectCount: number;
+  /** How many times the examiner tried to close the épreuve early (#92). Zero
+   *  on rows that predate the column, which is also what it means: their
+   *  corrections were graded with no such fact on record. */
+  earlyClosingCount: number;
   /** Which Live model played the examiner (#99). Null on rows that predate the
    *  column — genuinely unrecorded, not defaulted after the fact. */
   examinerModel: string | null;
@@ -351,6 +357,8 @@ export type CorrectionOutcome =
 export interface CorrectSittingInput {
   transcript: TranscriptEntry[];
   reconnectCount: number;
+  /** How many times the examiner tried to close the épreuve early (#92). */
+  earlyClosingCount: number;
   phases: readonly ReportedPhase[];
   recordings: readonly MeasuredRecording[];
   /**
@@ -413,6 +421,7 @@ export async function correctSitting(
     claimed = await store.claimForCorrection(ref, {
       transcript: input.transcript,
       reconnectCount: input.reconnectCount,
+      earlyClosingCount: input.earlyClosingCount,
       finishedAt: now,
     });
   } catch (error) {

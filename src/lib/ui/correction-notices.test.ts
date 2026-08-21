@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { correctionNotices } from "./correction-notices";
+import { correctionNotices, earlyClosingNotice } from "./correction-notices";
 
 describe("the correction's penalty notices", () => {
   it("says nothing about a sitting that earned neither penalty", () => {
@@ -169,5 +169,33 @@ describe("the correction's penalty notices", () => {
 
     assert.match(notices.absence!, /Vous n'avez pas participé au débat/);
     assert.equal(notices.duration, null);
+  });
+});
+
+describe("the examiner-fault note (#92)", () => {
+  it("says nothing when nothing was heard — including on every pre-column sitting", () => {
+    // Zero, undefined and absent all read the same, and all three are real:
+    // a fresh sitting with a well-behaved examiner, a stash from before the
+    // field, a row from before the column. Their corrections were graded by a
+    // corrector that was never told, so the sentence would be false above them.
+    assert.equal(earlyClosingNotice(0), null);
+    assert.equal(earlyClosingNotice(undefined), null);
+  });
+
+  it("blames the examiner and clears the candidate", () => {
+    const notice = earlyClosingNotice(1)!;
+
+    assert.match(notice, /l'examinateur a annoncé à tort la fin de l'épreuve/);
+    assert.match(notice, /n'a pas été retenue contre vous/);
+  });
+
+  it("scopes the amnesty to the débat, where the waiver actually is", () => {
+    // The monologue's penalties still stand — the goodbye is only ever heard
+    // after the monologue is over — so the sentence must not promise more
+    // than the rubric delivers to a candidate docked for a short monologue.
+    const notice = earlyClosingNotice(2)!;
+
+    assert.match(notice, /un débat écourté par cette annonce n'a entraîné aucune pénalité/);
+    assert.doesNotMatch(notice, /monologue/);
   });
 });

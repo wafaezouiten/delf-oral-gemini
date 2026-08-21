@@ -310,6 +310,11 @@ export async function POST(request: Request, context: { params: Promise<{ examId
       transcript: payload.transcript,
       monologueSeconds,
       debateSeconds,
+      // The examiner's early goodbyes, as the controller counted them (#92).
+      // Positive, this adds the incident paragraph to the prompt and excuses
+      // the débat from both penalties — taken on trust like the transcript,
+      // and bounded the same way (see `finish-payload.ts`).
+      earlyClosingCount: payload.earlyClosingCount,
       // Labelled, not just ordered: when only one phase recorded — a microphone
       // denied before the monologue, a headset unplugged mid-débat — the
       // corrector has to be told which task it is listening to, or it assumes
@@ -347,6 +352,7 @@ export async function POST(request: Request, context: { params: Promise<{ examId
       {
         transcript: payload.transcript,
         reconnectCount: payload.reconnectCount,
+        earlyClosingCount: payload.earlyClosingCount,
         phases: payload.phases,
         recordings: recordings.map((recording) => ({
           phase: recording.phase,

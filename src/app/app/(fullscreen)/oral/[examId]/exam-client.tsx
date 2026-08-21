@@ -167,6 +167,7 @@ export function ExamClient({
         transcript: payload.transcript,
         phases: payload.phases,
         reconnectCount: payload.reconnectCount,
+        earlyClosingCount: payload.earlyClosingCount,
         // Undefined on any sitting that was actually spoken, and ignored by the
         // route in a production build (#36).
         devSeconds: payload.devSeconds,
@@ -249,6 +250,11 @@ export function ExamClient({
             monologueSeconds: recordedSeconds("monologue"),
             debateSeconds: recordedSeconds("debate"),
             reconnectCount: payload.reconnectCount,
+            // Same fallback-copy logic as `examinerModel` below: the database
+            // row carries this for a persisted sitting, and this stash is the
+            // only copy for one that was never persisted. The results page
+            // keys its examiner-fault note on it (#92).
+            earlyClosingCount: payload.earlyClosingCount,
             // Which model spoke (#99). The database copy reads it off the row;
             // this is the fallback copy for a sitting that was never persisted,
             // so it carries the same fact. Through the ref — see its comment.

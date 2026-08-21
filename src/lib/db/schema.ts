@@ -163,6 +163,27 @@ export const oralExams = pgTable(
      */
     reconnectCount: integer("reconnect_count").notNull().default(0),
 
+    /**
+     * How many times the examiner tried to end the épreuve early — a goodbye
+     * heard mid-débat, outside any closing handshake the app opened (#92).
+     *
+     * The same shape as `reconnect_count`, deliberately and for the same
+     * reason: a reliability fact about the sitting, counted by the controller
+     * (`ExamController.earlyClosingCount`), written once at finish. A count
+     * rather than timestamps because a count is what the questions this column
+     * answers actually need — "was this correction graded around an examiner
+     * fault?" and "how often does the examiner still try to leave?" — and
+     * `reconnect_count` already settled that a per-event record is a place for
+     * facts to go unread.
+     *
+     * `default(0)` is a truthful backfill: rows from before the column were
+     * graded by a corrector that was never told, and their penalties stood.
+     * Everything that reads this column — the corrector's prompt line, the
+     * débat penalty waiver, the note on the correction — therefore keys on it
+     * being positive, so an old row keeps meaning exactly what it meant.
+     */
+    earlyClosingCount: integer("early_closing_count").notNull().default(0),
+
     startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
     finishedAt: timestamp("finished_at", { withTimezone: true }),
 

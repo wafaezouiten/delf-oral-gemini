@@ -296,6 +296,13 @@ export interface ExamFinishedPayload {
   phases: PhaseReport[];
   reconnectCount: number;
   /**
+   * How many goodbyes the examiner said mid-débat, outside a closing handshake
+   * (#92) — the count behind every `examiner-early-closing` event, carried out
+   * of the tab the way `reconnectCount` is, because the event log itself dies
+   * with the page. Zero on the ordinary sitting.
+   */
+  earlyClosingCount: number;
+  /**
    * DEVELOPMENT ONLY — the seconds typed phases claim to have lasted (#36).
    * Undefined on every real sitting. See `ExamController`'s `devSeconds`.
    */
@@ -761,6 +768,14 @@ export class ExamController {
    */
   private earlyClosingHeard = false;
   private earlyClosingRecoveries = 0;
+  /**
+   * Every goodbye heard, answered or not — where `earlyClosingRecoveries` stops
+   * counting at the recovery cap, this keeps going, because the third goodbye
+   * the app gave up contradicting is still a fact about the sitting (#92).
+   * Never reset: sitting-level, like `reconnectCount`, and it leaves the tab
+   * the same way — on the finish payload, into `oral_exams.early_closing_count`.
+   */
+  private earlyClosingCount = 0;
 
   /**
    * The consigne being spoken, and everything the candidate can do about it (#37).
@@ -1055,6 +1070,11 @@ export class ExamController {
     const turn = this.transcript[this.transcript.length - 1];
     if (!turn || turn.speaker !== "examiner" || !readsAsClosing(turn.text)) return;
     this.earlyClosingHeard = true;
+    // Counted at detection, not at the answer: the branch in
+    // `answerEarlyClosing` where the clock ran out first still heard a goodbye
+    // said with time on the clock, and the count is the record of the fault
+    // rather than of the recovery (#92).
+    this.earlyClosingCount += 1;
     // Logged whether or not it will be answered, and with what is left on the
     // clock: a débat where the examiner tried to leave at 6:00 is a fact about
     // the sitting, and one the transcript alone states only by implication.
@@ -2701,6 +2721,7 @@ export class ExamController {
         recorded: Number(report.recordedSeconds.toFixed(2)),
       })),
       reconnects: this.reconnectCount,
+      earlyClosings: this.earlyClosingCount,
     });
 
     // See the top of the method: the voice must not outlive the screen.
@@ -2711,6 +2732,7 @@ export class ExamController {
       recordings,
       phases,
       reconnectCount: this.reconnectCount,
+      earlyClosingCount: this.earlyClosingCount,
       // Only when something was actually typed, so a real sitting sends no such
       // field at all rather than a pair of zeroes the route has to interpret.
       devSeconds:

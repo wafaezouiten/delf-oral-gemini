@@ -73,6 +73,10 @@ const scored = scoreSitting(bands, {
   monologueWords: 120,
   debateWords: 0,
   phonologyHeard: true,
+  // False on purpose: excusing the débat would zero the absence penalty, and a
+  // fixture with a penalty at zero is exactly the shape this probe exists to
+  // avoid (see the header above).
+  examinerClosedEarly: false,
 });
 
 const correction: CorrectionRow = {
@@ -204,6 +208,9 @@ async function main(): Promise<number> {
     const input = {
       transcript: [...MONOLOGUE, ...DEBATE],
       reconnectCount: 1,
+      // Non-zero so the round trip proves the column takes a value, not just
+      // its default — a probe that writes 0 over DEFAULT 0 verifies nothing.
+      earlyClosingCount: 2,
       phases: [
         {
           phase: "monologue" as const,
@@ -286,6 +293,7 @@ async function main(): Promise<number> {
     );
     check("the transcript is the complete one", stored?.transcript.length === 2);
     check("the reconnect count was stored", stored?.reconnectCount === 1);
+    check("the early-closing count was stored", stored?.earlyClosingCount === 2);
 
     console.log("\nownership");
     const intruder = { examId: ref.examId, userId: "verify_intruder" };
@@ -296,6 +304,7 @@ async function main(): Promise<number> {
       (await store.claimForCorrection(intruder, {
         transcript: [],
         reconnectCount: 99,
+        earlyClosingCount: 99,
         finishedAt: new Date(),
       })) === false,
     );

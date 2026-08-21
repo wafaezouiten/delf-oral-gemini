@@ -100,12 +100,19 @@ export default async function ResultsPage({ params }: PageProps<"/app/results/[e
       // Guarded on the penalty so a row written before the halving existed
       // (`absence_penalty` defaults to 0) is never labelled with a charge it
       // did not take.
+      //
+      // And minus the débat the examiner closed early (#92), exactly as the
+      // rubric dropped it at grading time: a positive count means the waiver
+      // was live (the column and the waiver shipped together, and old rows
+      // read 0), so a silent débat here was excused, not charged — leaving it
+      // in would caption a monologue-only halving as « aucune des deux
+      // parties ».
       absentParts:
         correction.absencePenalty > 0
           ? partsAbsent({
               monologueWords: candidateWordCount(sitting.transcript, "monologue"),
               debateWords: candidateWordCount(sitting.transcript, "debate"),
-            })
+            }).filter((part) => part !== "debate" || sitting.earlyClosingCount === 0)
           : [],
       model: correction.model,
       latencySeconds: correction.latencySeconds,
@@ -118,6 +125,10 @@ export default async function ResultsPage({ params }: PageProps<"/app/results/[e
     monologueSeconds: measured("monologue"),
     debateSeconds: measured("debate"),
     reconnectCount: sitting.reconnectCount,
+    // The examiner's early goodbyes (#92) — unlike `reconnectCount` above,
+    // something actually renders this: the note explaining that the fault was
+    // not held against the candidate.
+    earlyClosingCount: sitting.earlyClosingCount,
     playable,
     // Which model spoke (#99) — the counterpart of `evaluation.model`, which
     // names the one that graded. Null on sittings from before the column, and

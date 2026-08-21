@@ -86,6 +86,26 @@ export const finishPayloadSchema = z.object({
     ),
   reconnectCount: z.number().int().nonnegative(),
   /**
+   * How many times the examiner tried to close the épreuve mid-débat (#92), as
+   * `ExamController` counted it. The browser is the only witness — the goodbye
+   * happened in a Live session the server never saw — so like the transcript it
+   * is taken on trust, and the trust is bounded to the same shape as
+   * `reconnectCount`.
+   *
+   * The one number here that can RAISE a grade rather than lower it: positive,
+   * it waives the débat's penalties and tells the corrector to disregard the
+   * goodbye. A dishonest client could send it — but a dishonest client already
+   * authors the transcript wholesale, which decides far more, so this adds no
+   * trust the payload did not already extend.
+   *
+   * Defaulted rather than required, unlike `reconnectCount`, because it is
+   * being added to a payload that already exists in the wild: a candidate
+   * mid-sitting across the deploy finishes from a page that has never heard of
+   * the field, and a 400 there costs them a twenty-minute épreuve. Zero is the
+   * truthful reading of that page — its controller predates the counter.
+   */
+  earlyClosingCount: z.number().int().nonnegative().default(0),
+  /**
    * DEVELOPMENT ONLY — the seconds a typed phase claims to have lasted (#36).
    *
    * The one number in this file that can reach a grade, which is why the bound

@@ -38,6 +38,7 @@ import { withTransientRetry } from "./transient";
 import { candidateWordCount, formatTranscript, type TranscriptEntry } from "@/lib/delf/transcript";
 import type { OralTopic } from "@/lib/delf/topics";
 import type { EvaluationFeedback, EvaluationMode, OralSpeakingPhase } from "@/lib/db/schema";
+import { earlyClosingInstruction } from "./early-closing-instruction";
 import { phonologyInstruction, type AttachedRecording } from "./phonology-instruction";
 
 /**
@@ -65,8 +66,16 @@ export const EVAL_MODEL = process.env.GEMINI_EVAL_MODEL ?? "gemini-3.6-flash";
  * the ported grille text (`delf/criteria.ts`) rather than this file's
  * paraphrase of it. Scores either side of this string are not strictly
  * comparable, which is the entire reason the column exists.
+ *
+ * `2026-08-21.0` adds the early-closing paragraph (#92): a sitting where the
+ * examiner said goodbye mid-débat now tells the corrector so, instead of
+ * leaving the goodbye in the transcript as if it were the shape of the
+ * exchange. The paragraph is conditional — an ordinary sitting's prompt is
+ * byte-identical to the previous version's — but the version is bumped
+ * unconditionally, because "could this correction have carried the paragraph?"
+ * is exactly the question the column answers.
  */
-export const EVAL_PROMPT_VERSION = "2026-08-15.0";
+export const EVAL_PROMPT_VERSION = "2026-08-21.0";
 
 /** Re-exported, not redeclared: the mode is a stored column, and `evaluations.mode`
  *  is where its legal values are defined. */
@@ -129,6 +138,8 @@ function buildPrompt(params: {
   transcript: readonly TranscriptEntry[];
   monologueSeconds: number;
   debateSeconds: number;
+  /** How many times the examiner tried to close the épreuve early (#92). */
+  earlyClosingCount: number;
   /** Which tasks the attached audio actually covers. See `phonology-instruction.ts`. */
   recordings?: readonly AttachedRecording[];
 }): string {
@@ -156,7 +167,14 @@ ${EVALUATION_RULES}
 
 ${TASK_ATTRIBUTION}
 
-${phonologyInstruction(mode, params.recordings)}
+${
+  // Empty on the ordinary sitting, so the two joined this way rather than as
+  // two template slots — an unconditional slot would leave a stray blank line
+  // in every prompt that had no incident to report.
+  [phonologyInstruction(mode, params.recordings), earlyClosingInstruction(params.earlyClosingCount)]
+    .filter(Boolean)
+    .join("\n\n")
+}
 
 TRANSCRIPTION DE L'ÉPREUVE
 ${formatTranscript(transcript) || "(aucune production)"}`;
@@ -224,6 +242,13 @@ export interface EvaluationResult {
   absencePenalty: number;
   absentParts: Array<"monologue" | "debate">;
   /**
+   * Which parts a penalty would have reached and did not, because the examiner
+   * closed the épreuve early (#92). Corrector's working, like `shortParts` —
+   * no column, never stored; the persisted fact is the sitting's
+   * `early_closing_count`, which is what the results page keys its note on.
+   */
+  excusedParts: Array<"monologue" | "debate">;
+  /**
    * Whether « phonologie » was held to the ceiling because this correction had no
    * audio (#29). Surfaced so a 3 can be explained as "not heard" rather than read
    * as "heard, and merely adequate".
@@ -266,6 +291,18 @@ export interface EvaluateParams {
   transcript: readonly TranscriptEntry[];
   monologueSeconds: number;
   debateSeconds: number;
+  /**
+   * How many times the examiner tried to close the épreuve early (#92), as the
+   * controller counted it and the finish payload carried it. Positive, it adds
+   * the incident paragraph to the prompt and excuses the débat from both
+   * penalties (`SittingConditions.examinerClosedEarly`).
+   *
+   * Optional, defaulting to 0, unlike the rubric's own flag — the callers that
+   * omit it are the verification scripts and the audio-versus-text experiment,
+   * which grade artefacts no examiner ever misbehaved in, and for them "not
+   * counted" and "none heard" are honestly the same answer.
+   */
+  earlyClosingCount?: number;
   /**
    * The candidate's recording. Required for `audio` mode, ignored otherwise.
    *
@@ -333,7 +370,12 @@ export async function evaluateExam(params: EvaluateParams): Promise<EvaluationRe
           mimeType: recording.mimeType ?? mimeTypeOf(recording.blob),
         }));
 
-  const parts: Part[] = [{ text: buildPrompt({ ...params, recordings }) }];
+  // Resolved once, here, so the prompt and the rubric cannot read the default
+  // differently: the paragraph and the waiver describe one incident and must
+  // fire together or not at all.
+  const earlyClosingCount = params.earlyClosingCount ?? 0;
+
+  const parts: Part[] = [{ text: buildPrompt({ ...params, earlyClosingCount, recordings }) }];
 
   if (params.mode === "audio") {
     if (recordings.length === 0) {
@@ -420,6 +462,9 @@ export async function evaluateExam(params: EvaluateParams): Promise<EvaluationRe
     // puts the recording in front of the corrector, so it is the only one that
     // may award the top phonologie band (#29).
     phonologyHeard: params.mode === "audio",
+    // And the one place the count does (#92): the rubric takes the fact, not
+    // the figure, because one goodbye and three are the same waiver.
+    examinerClosedEarly: earlyClosingCount > 0,
   });
 
   return {
@@ -432,6 +477,7 @@ export async function evaluateExam(params: EvaluateParams): Promise<EvaluationRe
     absentParts: scored.absentParts,
     durationPenalty: scored.durationPenalty,
     shortParts: scored.shortParts,
+    excusedParts: scored.excusedParts,
     phonologyCapped: scored.phonologyCapped,
     score25: scored.score25,
     meetsFloor: scored.meetsFloor,

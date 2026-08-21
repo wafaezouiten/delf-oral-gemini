@@ -3208,6 +3208,34 @@ describe("an examiner that says goodbye seven minutes early (#85)", () => {
 
       await completeClosing(h);
       assert.equal(h.controller.getSnapshot().phase, "finished");
+      assert.equal(
+        h.finished[0]?.earlyClosingCount,
+        0,
+        "an ordinary sitting reports no incident (#92)",
+      );
+    });
+
+    it("carries every goodbye out of the tab on the finish payload (#92)", async () => {
+      // The event log below dies with the page; this is the number that does
+      // not. Three goodbyes, of which only two were answered — the count is of
+      // the fault, not of the recovery, so the third is in it.
+      const h = harness();
+      await intoDebate(h);
+      h.advanceClock(360);
+
+      for (let turn = 0; turn < 3; turn += 1) {
+        h.session().examinerSays("Au revoir.");
+        h.session().finishTurn();
+      }
+      assert.equal(recoveries(h).length, 2, "the third goodbye went unanswered");
+
+      // The clock runs out and the app opens the real closing — whose goodbye
+      // must NOT be counted, or every sitting would report an incident.
+      h.advanceClock(PHASE_DURATIONS.debate);
+      await completeClosing(h);
+
+      assert.equal(h.controller.getSnapshot().phase, "finished");
+      assert.equal(h.finished[0]?.earlyClosingCount, 3, "answered or not, all three are counted");
     });
   });
 });

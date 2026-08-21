@@ -387,6 +387,7 @@ export function neonSittingStore(): SittingStore {
           // and it is the copy the correction was actually computed from.
           transcript: claim.transcript,
           reconnectCount: claim.reconnectCount,
+          earlyClosingCount: claim.earlyClosingCount,
           finishedAt: claim.finishedAt,
         })
         .where(
@@ -561,6 +562,7 @@ export function neonSittingStore(): SittingStore {
             phase: oralExams.phase,
             transcript: oralExams.transcript,
             reconnectCount: oralExams.reconnectCount,
+            earlyClosingCount: oralExams.earlyClosingCount,
             examinerModel: oralExams.examinerModel,
             startedAt: oralExams.startedAt,
             finishedAt: oralExams.finishedAt,
@@ -619,6 +621,7 @@ export function neonSittingStore(): SittingStore {
         outcome: sittingOutcome({ finishedAt: sitting.finishedAt, correction }),
         transcript: sitting.transcript ?? [],
         reconnectCount: sitting.reconnectCount,
+        earlyClosingCount: sitting.earlyClosingCount,
         examinerModel: sitting.examinerModel,
         startedAt: sitting.startedAt,
         finishedAt: sitting.finishedAt,
