@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useCallback, useState, useSyncExternalStore } from "react";
 
 import { Notice } from "@/app/_components/notice";
+import { RecordingPlayer } from "@/app/_components/recording-player";
 import { BandScale } from "@/app/_components/band-scale";
 import { secondaryButton } from "@/app/_components/button-styles";
 import {
@@ -109,6 +110,18 @@ export interface StoredResult {
   monologueSeconds: number;
   debateSeconds: number;
   reconnectCount: number;
+  /**
+   * The halves whose recording was kept and can be streamed back (#98), with
+   * the mime type each was measured to be — the player needs it to ask the
+   * browser `canPlayType` before offering a control that would only error.
+   *
+   * Optional because this object is also read back out of `sessionStorage`,
+   * where a stash from before the field existed carries nothing — and because
+   * the stash never carries it even now: the finish response holds no uris, so
+   * playback belongs to the server-read path alone. Absent or empty, the
+   * correction renders exactly as it did before #98.
+   */
+  playable?: Array<{ phase: "monologue" | "debate"; mimeType: string; durationSeconds: number }>;
   /**
    * Which Live model played the examiner (#99). Optional for the same reason
    * `durationPenalty` is: this object also comes back out of `sessionStorage`,
@@ -309,6 +322,8 @@ export function ResultsClient({
           transcript={transcript}
           monologueSeconds={monologueSeconds}
           debateSeconds={debateSeconds}
+          examId={examId}
+          playable={result.playable ?? []}
         />
 
         <aside className="border-border bg-card flex min-h-0 flex-col border-t lg:border-t-0 lg:border-l">
@@ -520,11 +535,15 @@ function TranscriptColumn({
   transcript,
   monologueSeconds,
   debateSeconds,
+  examId,
+  playable,
 }: {
   title: string;
   transcript: readonly TranscriptEntry[];
   monologueSeconds: number;
   debateSeconds: number;
+  examId: string;
+  playable: ReadonlyArray<{ phase: "monologue" | "debate"; mimeType: string; durationSeconds: number }>;
 }) {
   const { sections, silentNotice } = correctionTranscriptView(transcript, {
     monologueSeconds,
@@ -563,6 +582,24 @@ function TranscriptColumn({
                   {section.durationLabel}
                 </span>
               </div>
+
+              {/* The half's own recording, on the line that already says how
+                  long it was (#98). Only where the bytes were kept — a sitting
+                  from before the vault, or one whose upload failed, keeps its
+                  duration and offers nothing, which is the honest rendering of
+                  a recording that existed and is gone. */}
+              {playable
+                .filter((recording) => recording.phase === section.phase)
+                .map((recording) => (
+                  <RecordingPlayer
+                    key={recording.phase}
+                    src={`/api/exams/${examId}/recordings/${section.phase}`}
+                    deleteHref={`/api/exams/${examId}/recordings/${section.phase}`}
+                    mimeType={recording.mimeType}
+                    durationSeconds={recording.durationSeconds}
+                    className="mt-3"
+                  />
+                ))}
 
               {section.emptyNote ? (
                 <p className="text-muted-foreground mt-3 text-xs leading-relaxed italic">

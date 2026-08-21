@@ -76,7 +76,7 @@ export interface PhaseRow {
   endedAt: Date | null;
 }
 
-/** One recording's row. The bytes are gone; this is the record that they were. */
+/** One recording's row: where the bytes are kept, or the record that they were. */
 export interface RecordingRow {
   phase: OralSpeakingPhase;
   uri: string | null;
@@ -270,7 +270,13 @@ export interface CorrectionInput {
   phases: readonly ReportedPhase[];
   recordings: readonly MeasuredRecording[];
   correction: CorrectionRow;
-  /** When the bytes were disposed of, which for a transient upload is now. */
+  /**
+   * Which recordings were durably kept, by the uri they were kept at (#98).
+   * Absent or missing a phase means that artefact was transient — no vault
+   * configured, or an upload that failed — and its row is stamped disposed.
+   */
+  kept?: ReadonlyMap<OralSpeakingPhase, string>;
+  /** When any transient bytes were disposed of, which is now. */
   disposedAt: Date;
 }
 
@@ -280,8 +286,8 @@ export interface CorrectionInput {
  * Pure, and exported, because this is where the arithmetic that a stored row
  * either agrees or disagrees with the correction lives (#17): `spoken_seconds`
  * comes from the measured audio rather than from the clock the browser sent, and
- * the recording rows are stamped disposed because nothing durably keeps the
- * bytes.
+ * each recording row either points at the copy the vault kept or is stamped
+ * disposed — never both, and never neither.
  *
  * Rounding is `Math.round`, matching the integer columns and their `>= 0` check
  * constraints. A negative measurement cannot reach here — `measureUploadedRecording`
@@ -302,17 +308,22 @@ export function deriveCorrectionWrite(input: CorrectionInput): CorrectionWrite {
       startedAt: new Date(report.startedAt),
       endedAt: report.endedAt === null ? null : new Date(report.endedAt),
     })),
-    recordings: input.recordings.map((recording) => ({
-      phase: recording.phase,
-      // Null on purpose, and permanently: retention is forbidden (schema
-      // header), so what survives is the honest record that a recording of this
-      // length and this size existed and is gone.
-      uri: null,
-      mimeType: recording.mimeType,
-      byteSize: recording.byteSize,
-      durationSeconds: Math.max(0, Math.round(recording.durationSeconds)),
-      deletedAt: input.disposedAt,
-    })),
+    recordings: input.recordings.map((recording) => {
+      // Where the bytes ended up. Kept, `deleted_at` stays null and the row is
+      // something the playback route can serve (#98); transient, what survives
+      // is the honest record that a recording of this length and this size
+      // existed and is gone — which is every row this function wrote before
+      // the vault existed, and still every row on a deployment without one.
+      const uri = input.kept?.get(recording.phase) ?? null;
+      return {
+        phase: recording.phase,
+        uri,
+        mimeType: recording.mimeType,
+        byteSize: recording.byteSize,
+        durationSeconds: Math.max(0, Math.round(recording.durationSeconds)),
+        deletedAt: uri === null ? input.disposedAt : null,
+      };
+    }),
     correction: input.correction,
   };
 }
@@ -353,6 +364,22 @@ export interface CorrectSittingInput {
    * never asked.
    */
   evaluate: () => Promise<CorrectionRow>;
+  /**
+   * Keep the recordings' bytes durably, returning each kept phase's uri (#98).
+   *
+   * Run lazily, and only by the caller that wins the claim — a duplicate
+   * finish, or one that loses the race inside the model, must not file a
+   * second copy of somebody's voice next to rows it will never write. The
+   * contract is best-effort: a phase the store could not keep is simply absent
+   * from the map, and its row goes down transient, exactly as every row did
+   * before the vault existed. The implementation should not throw; if it does
+   * anyway, the correction is still stored and every recording reads as
+   * disposed — losing the copy must never cost the candidate their grade.
+   *
+   * Optional because two callers have nothing to keep: a deployment without a
+   * vault, and a sitting that was never persisted.
+   */
+  preserve?: () => Promise<ReadonlyMap<OralSpeakingPhase, string>>;
   /** Injected so a test can pin the timestamps it asserts on. */
   now: () => Date;
 }
@@ -360,10 +387,10 @@ export interface CorrectSittingInput {
 /**
  * Grade and persist one finished sitting, at most once.
  *
- * The order is the design: check, grade, claim, write. Grading before the claim
- * is what keeps a crash mid-correction from marking the sitting finished with
- * nothing to show — the claim is the last cheap thing that happens, and until it
- * commits the sitting is simply still in progress.
+ * The order is the design: check, grade, claim, keep, write. Grading before the
+ * claim is what keeps a crash mid-correction from marking the sitting finished
+ * with nothing to show — and the upload sits after the claim so only the finish
+ * that will write the rows stores the bytes those rows point at.
  */
 export async function correctSitting(
   store: SittingStore,
@@ -404,6 +431,17 @@ export async function correctSitting(
       : { status: "graded-not-stored", correction, error: new Error("claim lost") };
   }
 
+  // The claim is won, so this call is the one that writes the rows — and
+  // therefore the one allowed to store the bytes they will point at. The
+  // second net around a `preserve` that breaks its own no-throw contract is
+  // deliberate: past this point the sitting is marked finished, and an upload
+  // failure surfacing as `graded-not-stored` would cost a written correction
+  // to save an audio copy nobody promised.
+  let kept: ReadonlyMap<OralSpeakingPhase, string> | undefined;
+  if (input.preserve) {
+    kept = await input.preserve().catch(() => undefined);
+  }
+
   try {
     const stored = await store.writeCorrection(
       ref,
@@ -411,6 +449,7 @@ export async function correctSitting(
         phases: input.phases,
         recordings: input.recordings,
         correction,
+        kept,
         disposedAt: now,
       }),
     );

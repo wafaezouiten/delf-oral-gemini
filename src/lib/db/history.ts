@@ -10,6 +10,7 @@ import {
   isDatabaseConfigured,
   oralExamPhases,
   oralExams,
+  oralRecordings,
   oralTopics,
 } from "./index";
 
@@ -80,6 +81,48 @@ const spokenSecondsByExam = (userId: string) =>
     .groupBy(oralExamPhases.examId)
     .as("phase_totals");
 
+/**
+ * The recordings a sitting can still play back (#98), aggregated per exam for
+ * the same reason as {@link spokenSecondsByExam}: joined raw alongside
+ * `evaluations`, two kept recordings would double every figure computed off
+ * the row. One JSON array per sitting instead — the phase and the mime type,
+ * which is all a player on the historique needs — ordered by the phase enum,
+ * so the monologue lists before the débat without knowing the exam's shape.
+ *
+ * Only rows with a `uri` and no `deleted_at`: the same test the correction
+ * page applies, and the same one `decidePlayback` re-applies when the player
+ * is actually pressed. A pre-#98 sitting aggregates to nothing and its row
+ * renders exactly as it always has.
+ */
+const playableByExam = (userId: string) =>
+  getDb()
+    .select({
+      examId: oralRecordings.examId,
+      playable: sql<
+        Array<{ phase: "monologue" | "debate"; mimeType: string; durationSeconds: number }>
+      >`
+        json_agg(
+          json_build_object(
+            'phase', ${oralRecordings.phase},
+            'mimeType', ${oralRecordings.mimeType},
+            'durationSeconds', coalesce(${oralRecordings.durationSeconds}, 0)
+          )
+          order by ${oralRecordings.phase}
+        )
+      `.as("playable"),
+    })
+    .from(oralRecordings)
+    .innerJoin(oralExams, eq(oralRecordings.examId, oralExams.id))
+    .where(
+      and(
+        eq(oralExams.userId, userId),
+        isNotNull(oralRecordings.uri),
+        isNull(oralRecordings.deletedAt),
+      ),
+    )
+    .groupBy(oralRecordings.examId)
+    .as("playable_recordings");
+
 /** What a caller can ask for beyond "this candidate's sittings". */
 export interface CandidateHistoryOptions {
   /**
@@ -117,6 +160,7 @@ export async function readCandidateHistory(
   if (!isDatabaseConfigured()) return [];
 
   const totals = spokenSecondsByExam(userId);
+  const playable = playableByExam(userId);
 
   try {
     const rows = await getDb()
@@ -132,6 +176,7 @@ export async function readCandidateHistory(
         meetsFloor: evaluations.meetsFloor,
         mode: evaluations.mode,
         spokenSeconds: totals.spokenSeconds,
+        playable: playable.playable,
         realisationTache: evaluations.realisationTache,
         interaction: evaluations.interaction,
         lexique: evaluations.lexique,
@@ -142,6 +187,7 @@ export async function readCandidateHistory(
       .leftJoin(evaluations, eq(evaluations.examId, oralExams.id))
       .innerJoin(oralTopics, eq(oralExams.topicId, oralTopics.id))
       .leftJoin(totals, eq(totals.examId, oralExams.id))
+      .leftJoin(playable, eq(playable.examId, oralExams.id))
       .where(
         and(
           eq(oralExams.userId, userId),
@@ -182,6 +228,9 @@ export async function readCandidateHistory(
         // is what lets the historique partition one list instead of running a
         // second query whose ordering could disagree with this one.
         archivedAt: row.archivedAt,
+        // Null from the left join whenever nothing was kept, which the row
+        // renders as it always has: a sitting with no players.
+        playable: row.playable ?? [],
       };
     });
   } catch (error) {

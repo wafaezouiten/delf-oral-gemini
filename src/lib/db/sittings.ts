@@ -1,7 +1,7 @@
 import "server-only";
 
 import type { BatchItem } from "drizzle-orm/batch";
-import { and, desc, eq, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, isNotNull, isNull, sql } from "drizzle-orm";
 
 import { getDb } from "./index";
 import {
@@ -175,6 +175,98 @@ export async function chooseExaminerModel(ref: SittingRef, model: string): Promi
     .returning({ id: oralExams.id });
 
   return chosen.length > 0;
+}
+
+/**
+ * One phase's recording row, read for playback (#98).
+ *
+ * A standalone export for `chooseExaminerModel`'s reason: the `SittingStore`
+ * interface is the finish path's seam — claim, correct, write — and this is a
+ * read the playback route makes with none of that policy behind it.
+ * `readSitting` already returns these columns, but it hauls the whole
+ * transcript along, and a request whose response is megabytes of audio should
+ * not start by reading two hundred thousand characters of text it will not
+ * use.
+ *
+ * The join is the scoping, as everywhere in this file: `oral_recordings` rows
+ * are addressed through the sitting and its owner, never by the recording id a
+ * request could have supplied.
+ */
+export async function findRecording(
+  ref: SittingRef,
+  phase: "monologue" | "debate",
+): Promise<{
+  uri: string | null;
+  mimeType: string;
+  byteSize: number | null;
+  deletedAt: Date | null;
+} | null> {
+  const [row] = await getDb()
+    .select({
+      uri: oralRecordings.uri,
+      mimeType: oralRecordings.mimeType,
+      byteSize: oralRecordings.byteSize,
+      deletedAt: oralRecordings.deletedAt,
+    })
+    .from(oralRecordings)
+    .innerJoin(oralExams, eq(oralRecordings.examId, oralExams.id))
+    .where(
+      and(
+        eq(oralExams.id, ref.examId),
+        eq(oralExams.userId, ref.userId),
+        eq(oralRecordings.phase, phase),
+      ),
+    )
+    .limit(1);
+
+  return row ?? null;
+}
+
+/**
+ * The candidate deletes one of their own recordings (#98) — the row is
+ * stamped, and the caller is handed the uri so it can clear the store.
+ *
+ * The stamp comes FIRST, in this statement, and the store second, in the
+ * route: `decidePlayback` trusts `deleted_at` over a uri precisely because a
+ * purge is allowed to crash between the two, and the failure that leaves an
+ * unreachable orphan is strictly better than the one that leaves a playable
+ * row pointing at bytes the candidate was told were gone.
+ *
+ * One statement, idempotence in the WHERE as everywhere in this file: only a
+ * row that still has kept bytes matches, so a double-clicked « Supprimer »
+ * stamps once and the second press deletes nothing. The uri is deliberately
+ * NOT nulled — the row keeps saying where the bytes were, `deleted_at` says
+ * they are not there any more, and `returning` can only hand back the new
+ * row, which would be a null uri and nothing for the caller to clear.
+ *
+ * The owner is in the WHERE via the sitting, as everywhere: a recording is
+ * addressed through the exam and its owner, never by an id a request chose.
+ */
+export async function disposeRecording(
+  ref: SittingRef,
+  phase: "monologue" | "debate",
+  disposedAt: Date,
+): Promise<{ uri: string } | null> {
+  const db = getDb();
+  const [row] = await db
+    .update(oralRecordings)
+    .set({ deletedAt: disposedAt })
+    .where(
+      and(
+        eq(oralRecordings.phase, phase),
+        isNotNull(oralRecordings.uri),
+        isNull(oralRecordings.deletedAt),
+        sql`${oralRecordings.examId} in (
+          select ${oralExams.id} from ${oralExams}
+          where ${oralExams.id} = ${ref.examId} and ${oralExams.userId} = ${ref.userId}
+        )`,
+      ),
+    )
+    .returning({ uri: oralRecordings.uri });
+
+  // `returning` reads the updated row, whose uri survived on purpose (see
+  // above) — non-null by the WHERE clause, narrowed for the caller.
+  return row?.uri ? { uri: row.uri } : null;
 }
 
 export function neonSittingStore(): SittingStore {

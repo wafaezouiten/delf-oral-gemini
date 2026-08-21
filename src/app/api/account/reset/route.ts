@@ -11,6 +11,15 @@
  * sitting, correction or recording is removed, `/app/results/:id` on an archived
  * épreuve keeps working, and the guard in front of it is untouched.
  *
+ * That promise now covers bytes as well as rows (#98): the recordings a sitting
+ * kept in the vault stay kept, and playback on an archived correction keeps
+ * working, because the archive hides a record rather than shortening it. The
+ * candidate who wants an old voice silenced has that as its own verb — the
+ * player's « Supprimer », one recording at a time, speaking through
+ * `oral_recordings.deleted_at` (`DELETE /api/exams/:id/recordings/:phase`) —
+ * and it is deliberately not folded into this reset: starting over and
+ * erasing a voice are different decisions, differently irreversible.
+ *
  * Two ways this differs from the sitting routes next door:
  *
  *  - **There is no id to own.** `authorizeExam` answers "is this sitting this

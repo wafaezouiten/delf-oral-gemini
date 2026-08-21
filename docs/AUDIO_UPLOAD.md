@@ -151,6 +151,36 @@ them nothing. The briefing screen asks `isOpusEncodingSupported` and says plainl
 that the recording will not be sent, that the correction will be made without
 listening, and that the duration penalty will apply as if no recording existed.
 
+## What happens to the recording afterwards (#98)
+
+Uploaded for grading and, since #98, kept. The finish path files each phase's
+artefact in a **private Vercel Blob store** (`src/lib/storage/recording-vault.ts`)
+after the correction claim is won, writes the store's URL into
+`oral_recordings.uri`, and the correction page plays it back through
+`GET /api/exams/:examId/recordings/:phase` — a route that proves ownership
+first and streams the bytes itself, so the store's URL never reaches a browser.
+
+The rules, and where each is enforced:
+
+- **Keeping is best-effort, per artefact.** An upload the store refuses is
+  logged and that row is written transient (`uri` null, `deleted_at` stamped)
+  — losing the copy must never cost the candidate their correction
+  (`sitting-persistence.ts`, the `preserve` hook).
+- **No vault, no change.** A deployment without Blob credentials behaves
+  exactly as before #98: graded sittings, disposed rows, no players.
+- **Retention is "until the row says otherwise".** No expiry window. « Repartir
+  de zéro » archives and deletes nothing (#69), so archived corrections keep
+  playing. The one purge that exists is the candidate's own: the player's
+  « Supprimer » (`DELETE` on the same route, after an inline confirmation)
+  stamps `deleted_at` first and clears the store second — playback obeys the
+  stamp before it trusts a `uri`, so a crash between the two errs towards an
+  unreachable orphan, never a playable row the candidate was told was gone.
+  The row keeps its duration and size: the voice goes, the record stays.
+- **Playback format is the upload format.** Ogg Opus plays in Chrome, Firefox
+  and Edge; Safari's support is unverified on the real files, so the player
+  asks `canPlayType` first and says so instead of erroring
+  (`results-client.tsx`).
+
 ## What this does not show
 
 - **A real sitting on a deployed URL.** Everything here is measured, but the

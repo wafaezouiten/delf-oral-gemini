@@ -67,6 +67,20 @@ export default async function ResultsPage({ params }: PageProps<"/app/results/[e
   const measured = (phase: "monologue" | "debate") =>
     sitting.recordings.find((row) => row.phase === phase)?.durationSeconds ?? 0;
 
+  // The recordings whose bytes were kept (#98): a uri to serve and no purge
+  // stamp. Everything else — pre-#98 sittings, vaultless deployments, uploads
+  // that failed — renders exactly as before, a duration with nothing to play,
+  // which is the honest sentence for a recording that existed and is gone.
+  const playable = sitting.recordings
+    .filter((row) => row.uri !== null && row.deletedAt === null)
+    .map((row) => ({
+      phase: row.phase,
+      mimeType: row.mimeType,
+      // From the row, so the player can print « 0:00 / 1:38 » before a single
+      // byte has moved — its file stays unfetched until play is pressed.
+      durationSeconds: row.durationSeconds,
+    }));
+
   const initial: StoredResult = {
     evaluation: {
       mode: correction.mode,
@@ -104,6 +118,7 @@ export default async function ResultsPage({ params }: PageProps<"/app/results/[e
     monologueSeconds: measured("monologue"),
     debateSeconds: measured("debate"),
     reconnectCount: sitting.reconnectCount,
+    playable,
     // Which model spoke (#99) — the counterpart of `evaluation.model`, which
     // names the one that graded. Null on sittings from before the column, and
     // shown as nothing rather than guessed: today's default is not evidence
