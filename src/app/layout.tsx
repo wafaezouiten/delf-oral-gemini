@@ -4,6 +4,7 @@ import { ClerkProvider } from "@clerk/nextjs";
 import { frFR } from "@clerk/localizations";
 
 import "./globals.css";
+import { DeadBandProbe } from "@/app/_components/dead-band-probe";
 
 const inter = Inter({ variable: "--font-inter", subsets: ["latin"] });
 
@@ -50,6 +51,8 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
             of <body> is a squatter someone appended (#114). */}
         <div id="app" className="contents">
           <ClerkProvider localization={frFR}>{children}</ClerkProvider>
+          {/* TEMPORARY #114 diagnostic — delete before merging. */}
+          <DeadBandProbe />
         </div>
       </body>
     </html>
