@@ -62,7 +62,9 @@ export function FinishedScreen({
    */
   announcement?: ReactNode;
 }) {
-  const percent = submitError ? null : uploadPercent(stage);
+  // No `submitError` guard: every path that sets the error also drops
+  // `submitting`, so the stage is back to compressing and this is already null.
+  const percent = uploadPercent(stage);
 
   return (
     <main className="bg-background flex h-full items-center justify-center overflow-y-auto p-6">

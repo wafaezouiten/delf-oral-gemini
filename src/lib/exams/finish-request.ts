@@ -20,8 +20,10 @@
  */
 
 /** How far the upload has got, as a fraction of its bytes — or null while the
- *  browser cannot say. Reported as exactly 1 once the body has fully left,
- *  computable or not, which is the signal the screen changes sentence on. */
+ *  browser cannot say. Progress events report whole percents, held one shy of
+ *  the top (0 to 0.99); exactly 1 comes only from the browser's own « the body
+ *  has been sent » event, computable or not, which is the signal the screen
+ *  changes sentence on. */
 export type UploadProgress = (fraction: number | null) => void;
 
 export interface FinishAnswer {
@@ -46,9 +48,17 @@ export function postFinishRequest(
       // `lengthComputable` should always hold here — the body is a FormData the
       // browser measured itself — but a null is honest where a made-up fraction
       // would draw a progress bar that lies.
-      onUploadProgress(
-        event.lengthComputable && event.total > 0 ? Math.min(event.loaded / event.total, 1) : null,
-      );
+      if (!event.lengthComputable || event.total <= 0) {
+        onUploadProgress(null);
+        return;
+      }
+      // Whole percents, held one shy of the top. Two invariants live in this
+      // line: only the browser's own « the body has been sent » event below may
+      // say 1 — the last progress event reports loaded === total when the bytes
+      // reach the socket buffer, which is not the same fact — and quantizing
+      // bounds the callback to at most a hundred distinct values, where raw
+      // fractions would fire a state update on every socket chunk.
+      onUploadProgress(Math.min(Math.floor((event.loaded / event.total) * 100), 99) / 100);
     };
     // `load` on the upload, not `loadend`: it fires only when the body has
     // actually been sent in full, whereas `loadend` also fires on the way into

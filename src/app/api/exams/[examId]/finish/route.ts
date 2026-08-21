@@ -175,8 +175,11 @@ export async function POST(request: Request, context: { params: Promise<{ examId
     return NextResponse.json({ error: "Requête trop volumineuse" }, { status: 413 });
   }
 
-  // Timed because it is not just parsing: `formData()` consumes the body, so on
-  // a slow connection this segment IS the candidate's upload arriving.
+  // Timed because it can be more than parsing: `formData()` consumes the body,
+  // so where the platform streams the request to the function, this segment is
+  // the candidate's upload arriving. A platform that buffers the body before
+  // invoking the handler books that time before `receivedAt` instead — read
+  // the number with the deployment in mind, not as the upload by definition.
   const formReadStartedAt = Date.now();
   let form: FormData;
   try {
@@ -342,13 +345,17 @@ export async function POST(request: Request, context: { params: Promise<{ examId
    * the whole route. One line per finish, so the argument about which lever to
    * pull next is an argument about numbers read off a deployment's logs.
    * `null` segments mean no fresh grading ran — a duplicate submission returns
-   * the stored correction and pays neither the uploads nor the model.
+   * the stored correction and pays neither the uploads nor the model, and a
+   * grading that threw died before it could report its split. The `mode` is
+   * carried so a text sitting's honest `uploadSeconds: 0` is not read as a
+   * measurement of uploads that never happened.
    */
   const logTimings = (evaluation: EvaluationResult | null) => {
     const seconds = (value: number) => Number(value.toFixed(2));
     console.info(
       "[finish] timings",
       JSON.stringify({
+        mode,
         formReadSeconds: seconds(formReadSeconds),
         measureSeconds: seconds(measureSeconds),
         uploadSeconds: evaluation ? seconds(evaluation.uploadSeconds) : null,
@@ -388,14 +395,19 @@ export async function POST(request: Request, context: { params: Promise<{ examId
       })),
     });
 
+  // Hoisted above the try so the catch can hand it to `logTimings`: a grading
+  // that succeeded before persistence failed still has a split worth logging,
+  // and one that threw reports null segments beside the route's own.
+  let graded: EvaluationResult | null = null;
+
   try {
     // No sitting to write to — no database, a degraded `local-…` id, or an
     // ownership question that went unanswered. Grade and hand it straight back;
     // the results page renders from the response either way.
     if (persistedExamId === null) {
-      const evaluation = await grade();
-      logTimings(evaluation);
-      return NextResponse.json({ evaluation, persisted: false });
+      graded = await grade();
+      logTimings(graded);
+      return NextResponse.json({ evaluation: graded, persisted: false });
     }
 
     /**
@@ -406,7 +418,6 @@ export async function POST(request: Request, context: { params: Promise<{ examId
      * `lib/exams/sitting-persistence.ts`, which is where it can be tested. This
      * route's remaining job is to decide what the candidate sees.
      */
-    let graded: EvaluationResult | null = null;
     const outcome = await correctSitting(
       neonSittingStore(),
       { examId: persistedExamId, userId },
@@ -486,6 +497,10 @@ export async function POST(request: Request, context: { params: Promise<{ examId
     });
   } catch (error) {
     console.error("[finish] evaluation failed:", error);
+    // The failures are the finishes most worth explaining (#86): the segments
+    // say how far the request got before it died. A grading that never
+    // finished shows null for its halves; the route's own segments are real.
+    logTimings(graded);
     return NextResponse.json(
       { error: "L'évaluation a échoué. Réessayez dans un instant." },
       { status: 502 },

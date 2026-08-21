@@ -53,8 +53,10 @@ export function finishStageMessage(stage: FinishStage): string {
 
 /** The whole percentages the progress bar shows, or null while there is no
  *  honest figure — before the first event, and on a browser that would not
- *  measure the upload. */
+ *  measure the upload. The bounds are the transport's (`UploadProgress`:
+ *  quantized whole percents, 0 to 0.99, then exactly 1), not re-clamped here —
+ *  one module owns the invariant. */
 export function uploadPercent(stage: FinishStage): number | null {
   if (stage.kind !== "uploading" || stage.fraction === null) return null;
-  return Math.min(100, Math.max(0, Math.round(stage.fraction * 100)));
+  return Math.round(stage.fraction * 100);
 }

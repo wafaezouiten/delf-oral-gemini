@@ -78,15 +78,21 @@ describe("posting the finished sitting", () => {
     assert.deepEqual(await answer, { status: 502, body: null });
   });
 
-  it("reports the upload's progress as fractions, and exactly 1 when the body has left", async () => {
+  it("reports whole percents, and says 1 only from the browser's own sent event", async () => {
+    // The last progress event reports loaded === total when the bytes reach the
+    // socket buffer — before they have actually left. Letting it say 1 would
+    // flip the screen to « en cours de correction » with the recording still
+    // draining out of the tab, so progress holds at 0.99 and the upload's
+    // `load` event is the only thing that may finish the bar.
     const fractions: Array<number | null> = [];
     const { request } = started((fraction) => fractions.push(fraction));
 
     request.upload.onprogress?.({ lengthComputable: true, loaded: 1_200_000, total: 2_400_000 });
+    request.upload.onprogress?.({ lengthComputable: true, loaded: 2_399_999, total: 2_400_000 });
     request.upload.onprogress?.({ lengthComputable: true, loaded: 2_400_000, total: 2_400_000 });
     request.upload.onload?.();
 
-    assert.deepEqual(fractions, [0.5, 1, 1]);
+    assert.deepEqual(fractions, [0.5, 0.99, 0.99, 1]);
   });
 
   it("says null rather than inventing a fraction the browser did not measure", async () => {

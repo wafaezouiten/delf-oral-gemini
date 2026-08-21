@@ -104,13 +104,15 @@ export interface RecorderLike {
   /**
    * One phase's artefact on its own, or null where it captured nothing.
    *
-   * Optional because only one caller wants it: the controller asks for the
-   * monologue's artefact the moment the débat begins (#86), so the compression
-   * runs while the candidate debates instead of while they wait at « Épreuve
-   * terminée ». The archive memoizes the result, which is what makes the early
-   * call worth making — `recordings()` then finds the work already done.
+   * One caller wants it: the controller asks for the monologue's artefact the
+   * moment the débat begins (#86), so the compression runs while the candidate
+   * debates instead of while they wait at « Épreuve terminée ». The archive
+   * memoizes the result, which is what makes the early call worth making —
+   * `recordings()` then finds the work already done. Required rather than
+   * optional, because an implementation that forgot it would lose the early
+   * encode silently; a compile error is the honest price.
    */
-  recordingFor?(phase: RecordedPhase): Promise<PhaseRecording | null>;
+  recordingFor(phase: RecordedPhase): Promise<PhaseRecording | null>;
   /** Release the recording's memory once the blobs are cut. */
   discard(): void;
 }
@@ -2423,7 +2425,7 @@ export class ExamController {
      * consigne behind a codec.
      */
     const recorder = this.recorder;
-    if (current === "monologue" && target === "debate" && recorder?.recordingFor) {
+    if (current === "monologue" && target === "debate" && recorder) {
       const encodeStart = this.now();
       recorder.recordingFor("monologue").then(
         (recording) => {
