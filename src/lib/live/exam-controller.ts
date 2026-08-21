@@ -221,11 +221,8 @@ export interface ExamState {
    *
    * It outlives its own playback, and since #59 nothing on screen does: the
    * consigne's control is a « Passer » button that exists for as long as the
-   * voice does, and it reads the two flags below rather than this. What is left
-   * here is the snapshot's record of which consigne the phase opened with — the
-   * clip {@link ExamController.playAnnouncement} would play again out of a hold,
-   * and the one thing that says *which* boundary a held or playing state belongs
-   * to.
+   * voice does, and it reads `announcementPlaying` rather than this. What is
+   * left here is the snapshot's record of which consigne the phase opened with.
    */
   announcement: AnnouncementId | null;
   /**
@@ -239,15 +236,6 @@ export interface ExamState {
   awaitingStart: boolean;
   /** A consigne is audible right now. */
   announcementPlaying: boolean;
-  /**
-   * The browser refused to play the consigne and a gesture would fix it.
-   *
-   * Distinct from "not playing", and the distinction decides whether the exam
-   * moves: while this is true a speaking phase is **held** — its clock has not
-   * started and nothing is being recorded — because the alternative is starting
-   * the recording and then playing the consigne into it. See {@link announce}.
-   */
-  announcementBlocked: boolean;
 }
 
 /**
@@ -787,14 +775,7 @@ export class ExamController {
   private announcer: AnnouncerLike | null = null;
   private announcementId: AnnouncementId | null = null;
   private announcementPlaying = false;
-  private announcementBlocked = false;
   private announceToken = 0;
-  /** The same guard for candidate-initiated playback. See {@link playAnnouncement}
-   *  for why it cannot share `announceToken`. */
-  private playbackToken = 0;
-  /** Resolves the hold a blocked consigne puts on a phase, when the candidate
-   *  either plays it or gives up on it. Null when nothing is held. */
-  private announcementHold: ((outcome: AnnouncementOutcome) => void) | null = null;
 
   private session: LiveSessionLike | null = null;
   private recorder: RecorderLike | null = null;
@@ -910,9 +891,8 @@ export class ExamController {
       // Armed and waiting for the click — as distinct from waiting for the
       // consigne to finish, which is the consigne control's business.
       awaitingStart:
-        this.phaseAwaitingStart && !this.announcementPlaying && !this.announcementBlocked,
+        this.phaseAwaitingStart && !this.announcementPlaying,
       announcementPlaying: this.announcementPlaying,
-      announcementBlocked: this.announcementBlocked,
     };
   }
 
@@ -1130,89 +1110,36 @@ export class ExamController {
    *    monologue, and the DELF's duration floor is graded. The phase's clock is
    *    anchored by the caller *after* this resolves.
    *
-   * A `blocked` outcome is the one that does not resolve straight through.
-   * Browsers refuse to autoplay without a recent gesture, and while the two
-   * click-driven boundaries are safe, preparation's clock simply running out is
-   * not: nothing has been clicked for thirty minutes. Returning there would start
-   * a recording and leave a consigne that plays into it the moment the candidate
-   * finds the button, so instead the phase is held and the screen offers the
-   * choice. Both ways out are one click, nothing is being spent while it waits,
-   * and `destroy()` releases it.
+   * A `blocked` outcome — the browser refusing to autoplay without a recent
+   * gesture — is treated as a skip, on the user's call. The épreuve used to be
+   * HELD on it: the phase waited on a click, behind a panel explaining the
+   * frozen clock and offering « Écouter la consigne » / « Commencer sans
+   * écouter ». That panel is gone; a consigne the browser will not play is
+   * forfeited, and the phase gets on with it. The ordering guarantees above
+   * survive intact — the phase still arms only after this resolves, nothing is
+   * recorded before the candidate's own « Enregistrer » — what changed is that
+   * nobody is asked to click their way out of a silence. The refusal is still
+   * logged, because "the candidate never heard the consigne" is a fact worth
+   * keeping about a sitting.
    */
   private async announce(id: AnnouncementId): Promise<AnnouncementOutcome> {
     const announcer = this.announcer;
     if (!announcer) return "skipped";
 
-    // A hold left over from an earlier consigne. Reachable because the
-    // préparation's briefing is spoken without being awaited: if the browser
-    // refused it and the candidate then pressed « Passer et commencer
-    // maintenant », that hold has no reader and this consigne is about to
-    // overwrite its resolver. Released rather than dropped, so no promise is left
-    // pending forever with a listener attached to it.
-    this.releaseAnnouncementHold("skipped");
-
     const token = (this.announceToken += 1);
     this.announcementId = id;
     this.announcementPlaying = true;
-    this.announcementBlocked = false;
     this.emit();
 
-    let outcome = await announcer.play(ANNOUNCEMENTS[id].src);
+    const outcome = await announcer.play(ANNOUNCEMENTS[id].src);
 
     // Superseded — a later boundary is already speaking. Its state is the state.
     if (token !== this.announceToken) return outcome;
 
-    if (outcome === "blocked") {
-      this.announcementPlaying = false;
-      this.announcementBlocked = true;
-      this.log("announcement-held", id);
-      this.emit();
-      outcome = await new Promise<AnnouncementOutcome>((resolve) => {
-        this.announcementHold = resolve;
-      });
-      if (token !== this.announceToken) return outcome;
-    }
-
     this.announcementPlaying = false;
-    this.announcementBlocked = false;
     this.log("announcement", { id, outcome });
     this.emit();
     return outcome;
-  }
-
-  /**
-   * Play the phase's consigne now, on the candidate's own click.
-   *
-   * One button since #59: « Écouter la consigne », which answers a browser that
-   * refused to autoplay. The « Réécouter » that shared this method went with the
-   * card, and with it every case where a phase was *not* waiting on the answer —
-   * which {@link releaseAnnouncementHold} handles either way.
-   *
-   * Being a click is what makes it work: the autoplay policy this exists to
-   * survive is satisfied by the gesture that called it.
-   */
-  playAnnouncement(): void {
-    const id = this.announcementId;
-    const announcer = this.announcer;
-    if (!id || !announcer) return;
-
-    // Its own counter, not `announceToken`: this playback must not supersede the
-    // `announce()` parked on the hold it is answering, only another of its own.
-    // Without it a double-clicked « Écouter la consigne » has the first click's
-    // playback report itself finished while the second one is still audible, and
-    // the control disappears over the sound of the examiner talking.
-    const token = (this.playbackToken += 1);
-
-    this.announcementPlaying = true;
-    this.announcementBlocked = false;
-    this.emit();
-
-    void announcer.play(ANNOUNCEMENTS[id].src).then((outcome) => {
-      if (token !== this.playbackToken) return;
-      this.announcementPlaying = false;
-      this.emit();
-      this.releaseAnnouncementHold(outcome);
-    });
   }
 
   /**
@@ -1235,16 +1162,6 @@ export class ExamController {
     // The clip stops synchronously, so a snapshot taken in the same tick that
     // still said "playing" would be describing a silence.
     this.announcementPlaying = false;
-    this.releaseAnnouncementHold("skipped");
-  }
-
-  /** Let a held phase continue. Releases nothing when nothing is held — a skip
-   *  landing after the clip finished on its own — but still emits, because the
-   *  caller has just changed what the control should be drawing. */
-  private releaseAnnouncementHold(outcome: AnnouncementOutcome): void {
-    const hold = this.announcementHold;
-    this.announcementHold = null;
-    hold?.(outcome);
     this.emit();
   }
 
@@ -1269,8 +1186,8 @@ export class ExamController {
    * now. The clip still plays on the ordinary path because entering the épreuve
    * is a client-side navigation: the document keeps the sticky activation the
    * candidate's click gave it. A hard load of the same URL has no activation, and
-   * `announce()` already answers for that — the phase is not held, the card
-   * carries the text, and « Écouter la consigne » is one click.
+   * `announce()` already answers for that — the refusal is logged and the
+   * consigne is forfeited, so the préparation carries on in silence.
    *
    * Refused after `destroy()`, which is not hypothetical: this is now called from
    * an effect rather than a click, and a controller torn down between the two
@@ -2009,7 +1926,7 @@ export class ExamController {
   startSpeaking(): void {
     if (this.phase !== "monologue" && this.phase !== "debate") return;
     if (this.phaseStart !== null) return;
-    if (this.announcementPlaying || this.announcementBlocked) return;
+    if (this.announcementPlaying) return;
     if (this.destroyed) return;
 
     const phase = this.phase;
@@ -2277,7 +2194,7 @@ export class ExamController {
    */
   private anchorTypedMonologue(): boolean {
     if (this.phase !== "monologue" || this.phaseStart !== null) return false;
-    if (this.announcementPlaying || this.announcementBlocked) return false;
+    if (this.announcementPlaying) return false;
     if (this.destroyed) return false;
 
     this.phaseStart = this.now();
@@ -2932,14 +2849,11 @@ export class ExamController {
     this.destroyed = true;
     this.stopTicker();
     this.clearClosingTimer();
-    // Before anything is awaited. A phase held open by a consigne the browser
-    // refused to play is waiting on a promise only a click resolves, and the
-    // click cannot arrive on a page that is going away — `advance()` would keep
-    // this controller, its microphone and its socket alive forever waiting for
-    // one. Released as skipped, and `advance()` checks `destroyed` on the far
-    // side rather than starting a phase nobody is in.
+    // Before anything is awaited: `close()` resolves any in-flight `play()` as
+    // skipped, so an `announce()` a phase boundary is awaiting cannot strand
+    // that boundary on a page that is going away — and `advance()` checks
+    // `destroyed` on the far side rather than starting a phase nobody is in.
     this.announcer?.close();
-    this.releaseAnnouncementHold("skipped");
     this.closeSession();
     const recorder = this.recorder;
     this.recorder = null;

@@ -1937,74 +1937,39 @@ describe("spoken consignes", () => {
     assert.equal(h.session().directives.length, 1);
   });
 
-  it("holds a speaking phase when the browser refuses to autoplay the consigne", async () => {
-    // The time-out path into the monologue: preparation's clock simply ran out, so
-    // there has been no gesture for thirty minutes. Returning here would start the
-    // recording and leave a consigne that plays into it the moment the candidate
-    // finds the button.
+  it("forfeits a consigne the browser refuses, and arms the phase anyway", async () => {
+    // The time-out path into the monologue: preparation's clock simply ran out,
+    // so there has been no gesture for thirty minutes and autoplay is refused.
+    // This used to HOLD the phase behind a panel and two buttons; the panel is
+    // gone on the user's call, and a refused consigne is now a skipped one. The
+    // ordering guarantee survives without the hold: the phase arms rather than
+    // starts, so nothing is recorded and nothing is charged until the
+    // candidate's own « Enregistrer » — the one gate that was ever load-bearing.
     const { h, announcer } = speaking("blocked");
     h.controller.start();
     h.advanceClock(PHASE_DURATIONS.preparation);
     await settle();
+    await settle();
 
-    const held = h.controller.getSnapshot();
-    assert.equal(held.phase, "monologue");
-    // It was attempted and refused, rather than never tried: the hold is the
+    const armed = h.controller.getSnapshot();
+    assert.equal(armed.phase, "monologue");
+    // It was attempted and refused, rather than never tried: the forfeit is the
     // browser's answer, not a decision this controller made on its own.
     assert.ok(announcer.played.includes(ANNOUNCEMENTS.monologue.src));
-    assert.equal(held.announcementBlocked, true);
-    assert.equal(held.announcementPlaying, false);
-    assert.equal(held.recording, false, "nothing is recorded while the épreuve waits");
+    assert.equal(armed.announcementPlaying, false);
+    assert.equal(armed.awaitingStart, true, "armed, not held, and not started");
+    assert.equal(armed.recording, false);
     assert.deepEqual(h.recorder.calls, []);
     assert.equal(h.sessions.length, 0);
-    assert.equal(held.canAdvance, false);
 
-    // Nothing is being spent: the clock is still at the phase's full length.
+    // Nothing is being spent: the clock waits for « Enregistrer » exactly as it
+    // does after a consigne that played.
     h.advanceClock(30);
     assert.equal(h.controller.getSnapshot().remaining, PHASE_DURATIONS.monologue);
-
-    // « Commencer sans écouter » — one of the two ways out, and both are a click.
-    h.controller.skipAnnouncement();
-    await settle();
-    await settle();
-
-    assert.equal(h.controller.getSnapshot().announcementBlocked, false);
-    // Answered, so the part is armed — but still not started. The hold and the
-    // « Enregistrer » press are two separate gates, and skipping the consigne
-    // clears only the first.
-    assert.equal(h.controller.getSnapshot().awaitingStart, true);
-    assert.deepEqual(h.recorder.calls, []);
 
     await pressRecord(h);
     assert.deepEqual(h.recorder.calls, ["monologue"], "the part starts on the press");
     assert.equal(h.sessions.length, 1);
-    assert.equal(h.controller.getSnapshot().recording, true);
-  });
-
-  it("releases a held phase when the candidate plays the consigne instead", async () => {
-    const { h, announcer } = speaking("blocked");
-    h.controller.start();
-    h.advanceClock(PHASE_DURATIONS.preparation);
-    await settle();
-    assert.equal(h.controller.getSnapshot().announcementBlocked, true);
-
-    // « Écouter la consigne ». The gesture is what makes the second attempt work,
-    // so the fake stops refusing.
-    announcer.behaviour = "hold";
-    h.controller.playAnnouncement();
-    await settle();
-
-    assert.equal(h.controller.getSnapshot().announcementPlaying, true);
-    assert.equal(h.controller.getSnapshot().announcementBlocked, false);
-    assert.deepEqual(h.recorder.calls, [], "still nothing recorded: it is playing now");
-
-    announcer.reachEnd();
-    await settle();
-    await settle();
-
-    assert.equal(h.controller.getSnapshot().awaitingStart, true);
-    await pressRecord(h);
-    assert.deepEqual(h.recorder.calls, ["monologue"]);
     assert.equal(h.controller.getSnapshot().recording, true);
   });
 
@@ -2043,15 +2008,15 @@ describe("spoken consignes", () => {
     assert.equal(h.sessions.length, 1);
   });
 
-  it("releases a held phase when the sitting is destroyed", async () => {
-    // The hold is a promise only a click resolves, and the click cannot arrive on
-    // a page that is going away. Without the release, this controller, its
-    // microphone and its socket would wait for it forever.
-    const { h, announcer } = speaking("blocked");
+  it("does not start a phase whose consigne was still in flight when it was destroyed", async () => {
+    // `announcer.close()` resolves the in-flight `play()` as skipped, and the
+    // boundary checks `destroyed` on the far side of the await — so a tab that
+    // goes away mid-consigne strands nothing and starts nothing.
+    const { h, announcer } = speaking("hold");
     h.controller.start();
     h.advanceClock(PHASE_DURATIONS.preparation);
     await settle();
-    assert.equal(h.controller.getSnapshot().announcementBlocked, true);
+    assert.equal(h.controller.getSnapshot().announcementPlaying, true);
 
     h.controller.destroy();
     await settle();

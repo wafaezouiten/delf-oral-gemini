@@ -8,7 +8,6 @@ import { SimulatorTopBar } from "@/app/_components/po/topbar";
 import { TimerRing } from "@/app/_components/po/timer-ring";
 import { PHASE_DURATIONS } from "@/lib/delf/phases";
 import {
-  buildDeroule,
   poKicker,
   shortPartLabel,
   topbarStep,
@@ -20,13 +19,16 @@ import { PreflightCard } from "./preflight-card";
 
 /**
  * The préparation desk: the sujet to read on the left, a rail on the right that
- * carries the notes and the plan the candidate is expected to follow. The notes
- * written here stay under the candidate's eyes through the passation, in the
- * drawer.
+ * carries the checks, the plan the candidate is expected to follow, and the
+ * notes. The notes written here stay under the candidate's eyes through the
+ * passation, in the drawer.
  *
  * PORT NOTE: `components/po/po-preparation-screen.tsx`. The rail's order was
  * reproduced whole — passation card, notes, structure attendue, a ghost
- * "commencer maintenant" at the foot — and no longer is: see the topbar, below.
+ * "commencer maintenant" at the foot — and no longer is: the passation card and
+ * the ghost went with #59, and the rest settled on the user's call at
+ * notes → checks → structure, with the déroulé card dropped entirely (its
+ * durations are already on the sujet's launch dialog).
  *
  * There is exactly ONE clock, and it lives in the topbar. The reference's own
  * header explains why at length and it is worth keeping: the rail used to carry
@@ -50,10 +52,10 @@ import { PreflightCard } from "./preflight-card";
  * « Commencer la préparation » — so a candidate who had pressed « Commencer » on
  * the sujet was asked to press it again, and the examiner's spoken consigne,
  * which the controller fires on `start()`, could not be heard until they did.
- * The screen is gone and its two useful cards moved into this rail: the checks
- * (`PreflightCard`) under the passation card, and the déroulé at the foot. What
- * is lost is nothing a candidate acted on — the déroulé's durations are already
- * on the sujet's launch dialog, and this screen prints them again.
+ * The screen is gone; of its cards, the checks (`PreflightCard`) survive in
+ * this rail, under the notes. The déroulé rode along for a while and is gone
+ * too — its durations are on the sujet's launch dialog, which every candidate
+ * has just read. What is lost is nothing a candidate acted on.
  */
 export function PreparationScreen({
   topic,
@@ -62,7 +64,6 @@ export function PreparationScreen({
   remaining,
   onStartExam,
   onExit,
-  canEncode,
   checking,
   examinerModel,
   examinerSaving,
@@ -77,9 +78,6 @@ export function PreparationScreen({
   remaining: number;
   onStartExam: () => void;
   onExit: () => void;
-  /** Whether this browser can compress the recording. Null while it is being
-   *  asked, and if it never answered. See `PreflightCard`. */
-  canEncode: boolean | null;
   /** The examiner this sitting will hear (#99), and the machinery to change
    *  it. Rendered by `PreflightCard`; the choice itself lives on the sitting. */
   examinerModel: string;
@@ -186,8 +184,18 @@ export function PreparationScreen({
           </div>
         </section>
 
-        {/* Rail */}
+        {/* Rail: notes, then the checks, then the plan — the user's order,
+            settled after trying the checks first. The notes open the column
+            and stay elastic because they are what the thirty minutes are spent
+            in; the checks sit one card down, still on screen without a scroll;
+            and the plan the exposé will be marked against closes the column.
+            What must not be missed is not in here anyway: the browser that
+            cannot send a recording is a danger notice over the sujet, and it
+            holds the passation button shut. */}
         <aside className="flex min-h-0 flex-col gap-3.5 lg:overflow-y-auto lg:pr-0.5">
+          {/* First, and elastic: `flex-1` hands the notes whatever height the
+              two fixed cards below leave, so the writing surface grows with the
+              viewport instead of the gap at the rail's foot doing it. */}
           <div className="border-border bg-card flex min-h-[13.75rem] flex-1 flex-col overflow-hidden rounded-lg border">
             <div className="border-border flex items-center gap-2 border-b px-4 py-3">
               <PencilIcon className="text-muted-foreground size-3.5" />
@@ -204,6 +212,13 @@ export function PreparationScreen({
               className="min-h-[9.375rem] flex-1 resize-none border-0 bg-transparent px-4 py-3.5 text-[0.84375rem] leading-[1.75] outline-none"
             />
           </div>
+
+          <PreflightCard
+            examinerModel={examinerModel}
+            examinerSaving={examinerSaving}
+            examinerError={examinerError}
+            onChooseExaminer={onChooseExaminer}
+          />
 
           <div className="border-border bg-card shrink-0 rounded-lg border p-4">
             {/* The same list the exposé screen prints as « Votre plan », so the
@@ -224,54 +239,6 @@ export function PreparationScreen({
                     <p className="text-foreground/85 text-xs font-semibold">{step.title}</p>
                     <p className="text-muted-foreground mt-0.5 text-[0.6875rem] leading-relaxed">
                       {step.detail}
-                    </p>
-                  </div>
-                </li>
-              ))}
-            </ol>
-          </div>
-
-          {/* The checks sit BELOW the notes, which is not where a card headed
-              « Avant de commencer » wants to be. The rail is 632px of viewport
-              against 1786px of content on a laptop, and the order is therefore a
-              ranking: the consigne is arriving now, the CTA is the way out, and
-              the notes are what the next thirty minutes are spent in. A one-time
-              microphone test above them would push the writing surface a full
-              screen down for every candidate, to save a scroll for the one who
-              tests. What must not be missed is not in here anyway — the browser
-              that cannot send a recording is a danger notice over the sujet, and
-              it holds the passation button shut. */}
-          <PreflightCard
-            canEncode={canEncode}
-            checking={checking}
-            examinerModel={examinerModel}
-            examinerSaving={examinerSaving}
-            examinerError={examinerError}
-            onChooseExaminer={onChooseExaminer}
-          />
-
-          {/* The déroulé, off the briefing screen it was written for (#55). It is
-              the only place the sitting's shape is laid out end to end, and it
-              is worth more here than it was there: a candidate deciding whether
-              to spend their remaining préparation is deciding against the 7:00
-              and the 13:00 below. */}
-          <div className="border-border bg-card shrink-0 rounded-lg border p-4">
-            <Kicker>Déroulé de la séance</Kicker>
-            <ol className="mt-1.5">
-              {buildDeroule().map((step) => (
-                <li key={step.n} className="border-border flex gap-3 border-t py-2.5 last:pb-0">
-                  <span className="text-primary tabular w-4 shrink-0 text-xs font-semibold">
-                    {step.n}
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-baseline justify-between gap-2.5">
-                      <span className="text-xs font-semibold">{step.title}</span>
-                      <span className="text-muted-foreground tabular shrink-0 text-[0.6875rem] font-medium">
-                        {step.durationLabel}
-                      </span>
-                    </div>
-                    <p className="text-muted-foreground mt-0.5 text-[0.6875rem] leading-snug">
-                      {step.caption}
                     </p>
                   </div>
                 </li>
