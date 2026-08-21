@@ -331,6 +331,15 @@ async function main(): Promise<number> {
       "a sitting past the préparation is not archivable this way",
       (await archivePreparationExit(ref, new Date())) === false,
     );
+    // The guard's mirror: a walk-out racing the exit — the dialog confirmed as
+    // the clock expired, the abandon sent from the screen that replaced it —
+    // must not stamp a zero onto a sitting the candidate was just told would
+    // never appear. This is `abandonSitting`'s `archived_at is null` clause,
+    // which #113 made newly reachable: it is the first archive on a live row.
+    check(
+      "an archived préparation cannot be walked out of afterwards",
+      (await store.abandonSitting(prepRef, new Date())) === false,
+    );
 
     // A walk-out stamped while the row still reads `preparation` — which is
     // every mid-monologue walk-out there is. This is the row the abandon's

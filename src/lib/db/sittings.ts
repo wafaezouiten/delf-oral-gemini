@@ -490,7 +490,15 @@ export function neonSittingStore(): SittingStore {
        *    again;
        *  - `not exists (…evaluations…)`, the same guard `claimForCorrection`
        *    uses, so a correction that landed while the dialog was open outranks
-       *    the walk-out. A sitting is graded or abandoned, never both.
+       *    the walk-out. A sitting is graded or abandoned, never both;
+       *  - `archived_at is null`, the mirror of the guard `archivePreparationExit`
+       *    carries against this column. Redundant for a reset's archive — those
+       *    rows were graded or abandoned first, and the clauses above already
+       *    refuse them — but a préparation exit (#113) is the first archive to
+       *    land on a live row, and a walk-out racing it would otherwise stamp a
+       *    zero onto a sitting the candidate was just told would never appear.
+       *    Left alone, that row surfaces in the historique's archive as an
+       *    abandoned 0/25 — the exact record both dialogs promised against.
        *
        * `phase` is deliberately NOT advanced to `finished`, and `finished_at`
        * is deliberately NOT stamped. Both mean "this épreuve ran its course",
@@ -517,6 +525,7 @@ export function neonSittingStore(): SittingStore {
             eq(oralExams.id, ref.examId),
             eq(oralExams.userId, ref.userId),
             isNull(oralExams.abandonedAt),
+            isNull(oralExams.archivedAt),
             sql`not exists (select 1 from ${evaluations} where ${evaluations.examId} = ${oralExams.id})`,
           ),
         )

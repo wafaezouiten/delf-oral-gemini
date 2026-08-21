@@ -2,7 +2,7 @@
 
 import { useEffect, useRef } from "react";
 
-import { dangerButton, secondaryButton } from "@/app/_components/button-styles";
+import { secondaryButton } from "@/app/_components/button-styles";
 import { AlertIcon } from "./icons";
 
 /**
@@ -98,11 +98,16 @@ export function QuitPreparationDialog({
           >
             Continuer la préparation
           </button>
+          {/* Plain, not red. `dangerButton` is reserved for the controls that
+              change a candidate's record on purpose, and this dialog's whole
+              claim is that nothing on the record is at stake — a red confirm
+              would visually re-promise the risk the copy just took away. The
+              reset flow's confirm is a plain button for the same reason. */}
           <button
             type="button"
             onClick={onConfirm}
             disabled={pending}
-            className={dangerButton}
+            className={secondaryButton}
           >
             {pending ? "Sortie…" : "Quitter"}
           </button>
