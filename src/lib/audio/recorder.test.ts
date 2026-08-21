@@ -369,6 +369,45 @@ describe("one recording per phase", () => {
     assert.equal(recordings[1].sampleCount, debateSamples);
   });
 
+  it("drops a typed phase's recording whole, and says how much it dropped (#51)", async () => {
+    // The controller's decision, the recorder's act: a phase whose content was
+    // typed loses its artefact, the other phase keeps its own, and the event
+    // names what was decided against so the session log can show it.
+    const h = harness();
+    await h.recorder.start();
+    h.recorder.beginPhase("monologue");
+    for (let i = 0; i < 50; i += 1) h.capture().emit(FRAME_SAMPLES); // two seconds
+    h.recorder.endPhase();
+    h.recorder.beginPhase("debate");
+    h.capture().emit(FRAME_SAMPLES);
+
+    h.recorder.dropPhase("monologue");
+    await h.recorder.stop();
+
+    assert.equal(h.recorder.measuredSeconds("monologue"), 0);
+    assert.deepEqual(
+      (await h.recorder.recordings()).map((recording) => recording.phase),
+      ["debate"],
+    );
+    const dropped = h.events.find((event) => event.name === "recording-dropped");
+    assert.deepEqual(dropped?.detail, { phase: "monologue", seconds: 2 });
+  });
+
+  it("says nothing when there was nothing to drop", async () => {
+    // A typed phase whose microphone never captured anything is the common
+    // case since #53 — the artefact opens paused. An event about dropping
+    // zero seconds would put a decision in the log that changed nothing.
+    const h = harness();
+    await h.recorder.start();
+
+    h.recorder.dropPhase("monologue");
+
+    assert.equal(
+      h.events.some((event) => event.name === "recording-dropped"),
+      false,
+    );
+  });
+
   it("produces a playable WAV whose header agrees with the measurement", async () => {
     // The measured duration reaches the database and the duration penalty; the
     // blob reaches a player and the evaluator. A recording whose header says
