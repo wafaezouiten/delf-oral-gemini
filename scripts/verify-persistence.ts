@@ -28,12 +28,7 @@ import { eq, sql } from "drizzle-orm";
 
 import { getDb, isDatabaseConfigured } from "../src/lib/db";
 import { archiveCandidateRecord } from "../src/lib/db/account";
-import {
-  constraintMirrors,
-  diffConstraintDefinitions,
-  schemaTableNames,
-  type LiveConstraint,
-} from "../src/lib/db/constraint-drift";
+import { probeConstraintDrift } from "../src/lib/db/constraint-drift";
 import { readCandidateHistory } from "../src/lib/db/history";
 import { oralExams, oralTopics } from "../src/lib/db/schema";
 import { archivePreparationExit, neonSittingStore } from "../src/lib/db/sittings";
@@ -146,64 +141,25 @@ function check(what: string, ok: boolean, detail?: unknown): void {
  */
 async function verifyConstraints(db: ReturnType<typeof getDb>): Promise<void> {
   console.log("constraints");
-  const mirrors = constraintMirrors(`${Date.now()}`);
-  try {
-    for (const mirror of mirrors) await db.execute(sql.raw(mirror.createSql));
+  // The whole run — mirrors up, one catalog read, mirrors down — lives in
+  // `probeConstraintDrift` since #125, because CI runs the same probe through
+  // `pnpm verify:constraints` without the round trip below, and two copies of
+  // the orchestration is how they drift apart.
+  const { declared, drift } = await probeConstraintDrift(
+    async (statement) => (await db.execute(sql.raw(statement))).rows,
+    `${Date.now()}`,
+  );
 
-    const names = [...schemaTableNames(), ...mirrors.map((mirror) => mirror.mirrorName)];
-    const result = await db.execute(sql`
-      select rel.relname as table_name,
-             con.conname as constraint_name,
-             pg_get_constraintdef(con.oid) as definition
-      from pg_constraint con
-      join pg_class rel on rel.oid = con.conrelid
-      join pg_namespace nsp on nsp.oid = rel.relnamespace
-      where con.contype = 'c'
-        and nsp.nspname = current_schema()
-        and rel.relname in (${sql.join(
-          names.map((name) => sql`${name}`),
-          sql`, `,
-        )})
-    `);
-    const rows = result.rows as Array<{
-      table_name: string;
-      constraint_name: string;
-      definition: string;
-    }>;
+  // Guards the probe against itself: a refactor that stopped the mirrors
+  // being created would otherwise report a database with no declared checks
+  // as clean, which is the comment-shaped failure this section replaces.
+  check("the schema declares checks for the probe to hold", declared > 0, { declared });
 
-    // The mirrors' rows are the expectation, mapped back to the tables they
-    // mirror; the schema tables' own rows are what the database actually holds.
-    const mirroredTable = new Map(mirrors.map((mirror) => [mirror.mirrorName, mirror.table]));
-    const expected: LiveConstraint[] = [];
-    const live: LiveConstraint[] = [];
-    for (const row of rows) {
-      const constraint = {
-        constraint: row.constraint_name,
-        definition: row.definition,
-      };
-      const table = mirroredTable.get(row.table_name);
-      if (table !== undefined) expected.push({ ...constraint, table });
-      else live.push({ ...constraint, table: row.table_name });
-    }
-
-    // Guards the probe against itself: a refactor that stopped the mirrors
-    // being created would otherwise report a database with no declared checks
-    // as clean, which is the comment-shaped failure this section replaces.
-    check("the schema declares checks for the probe to hold", expected.length > 0, {
-      declared: expected.length,
-    });
-
-    const drift = diffConstraintDefinitions(expected, live);
-    check(
-      "every live CHECK matches the schema, word for word",
-      drift.length === 0,
-      drift.length > 0 ? drift : { constraints: expected.length },
-    );
-  } finally {
-    for (const mirror of mirrors) {
-      await db.execute(sql.raw(`drop table if exists "${mirror.mirrorName}"`));
-    }
-  }
+  check(
+    "every live CHECK matches the schema, word for word",
+    drift.length === 0,
+    drift.length > 0 ? drift : { constraints: declared },
+  );
 }
 
 async function main(): Promise<number> {

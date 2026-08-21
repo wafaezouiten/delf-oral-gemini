@@ -5,6 +5,7 @@ import {
   constraintMirrors,
   declaredChecks,
   diffConstraintDefinitions,
+  probeConstraintDrift,
   schemaTableNames,
   type LiveConstraint,
 } from "./constraint-drift";
@@ -198,5 +199,132 @@ describe("the diff", () => {
       [constraint("oral_recordings", "duration_check", "CHECK (a)")],
     );
     assert.deepEqual(drift.map((entry) => entry.kind).sort(), ["missing", "undeclared"]);
+  });
+});
+
+describe("the probe, end to end against a fake database (#125)", () => {
+  const SUFFIX = "probetest";
+
+  /** The catalog rows a database whose constraints match the schema would
+   *  return: one row per declared check off its mirror, one off its table. */
+  function agreeingCatalog(definitionOf: (constraint: string) => string) {
+    const mirrors = constraintMirrors(SUFFIX);
+    const rows: Array<{ table_name: string; constraint_name: string; definition: string }> = [];
+    for (const check of declaredChecks()) {
+      const mirror = mirrors.find((entry) => entry.table === check.table);
+      assert.ok(mirror);
+      rows.push({
+        table_name: mirror.mirrorName,
+        constraint_name: check.constraint,
+        definition: definitionOf(check.constraint),
+      });
+      rows.push({
+        table_name: check.table,
+        constraint_name: check.constraint,
+        definition: definitionOf(check.constraint),
+      });
+    }
+    return rows;
+  }
+
+  /** An executor that records every statement and answers the catalog query
+   *  from a canned set of rows — the whole database, as the probe sees it. */
+  function fakeDatabase(options: {
+    catalog?: Array<{ table_name: string; constraint_name: string; definition: string }>;
+    failCatalog?: Error;
+    failDrops?: boolean;
+  }) {
+    const statements: string[] = [];
+    const execute = async (statement: string) => {
+      statements.push(statement);
+      if (statement.startsWith("drop table") && options.failDrops) {
+        throw new Error("drop refused");
+      }
+      if (statement.includes("pg_constraint")) {
+        if (options.failCatalog) throw options.failCatalog;
+        return options.catalog ?? [];
+      }
+      return [];
+    };
+    return { statements, execute };
+  }
+
+  it("creates the mirrors, reads once, drops them, and reports a clean database clean", async () => {
+    const db = fakeDatabase({ catalog: agreeingCatalog((name) => `CHECK (${name})`) });
+
+    const outcome = await probeConstraintDrift(db.execute, SUFFIX);
+
+    assert.equal(outcome.declared, declaredChecks().length);
+    assert.deepEqual(outcome.drift, []);
+
+    // The statement trace is the contract: every mirror created before the one
+    // catalog read, every mirror dropped after it.
+    const creates = db.statements.filter((s) => s.startsWith("create table"));
+    const drops = db.statements.filter((s) => s.startsWith("drop table if exists"));
+    const catalogAt = db.statements.findIndex((s) => s.includes("pg_constraint"));
+    assert.equal(creates.length, constraintMirrors(SUFFIX).length);
+    assert.equal(drops.length, creates.length);
+    assert.ok(db.statements.slice(0, catalogAt).every((s) => !s.startsWith("drop")));
+    assert.ok(db.statements.slice(catalogAt + 1).every((s) => s.startsWith("drop")));
+  });
+
+  it("names a drifted rule, quoting the schema's side and the database's", async () => {
+    // The #71 shape, staged: the mirror reports the schema's arithmetic, the
+    // real table still carries the old one.
+    const catalog = agreeingCatalog((name) => `CHECK (${name})`).map((row) =>
+      row.table_name === "evaluations" && row.constraint_name === "evaluations_score_25_check"
+        ? { ...row, definition: "CHECK (the old arithmetic)" }
+        : row,
+    );
+    const db = fakeDatabase({ catalog });
+
+    const outcome = await probeConstraintDrift(db.execute, SUFFIX);
+
+    assert.deepEqual(outcome.drift, [
+      {
+        kind: "different",
+        table: "evaluations",
+        constraint: "evaluations_score_25_check",
+        expected: "CHECK (evaluations_score_25_check)",
+        actual: "CHECK (the old arithmetic)",
+      },
+    ]);
+  });
+
+  it("drops the mirrors even when the catalog read throws, and rethrows the read's error", async () => {
+    const db = fakeDatabase({ failCatalog: new Error("catalog unavailable") });
+
+    await assert.rejects(probeConstraintDrift(db.execute, SUFFIX), /catalog unavailable/);
+
+    const drops = db.statements.filter((s) => s.startsWith("drop table if exists"));
+    assert.equal(drops.length, constraintMirrors(SUFFIX).length, "no mirror was stranded");
+  });
+
+  it("lets a failed cleanup neither mask the probe's error nor fail a clean run", async () => {
+    // A drop that fails after a failed read must not replace the error that
+    // says what actually went wrong; after a clean read it must not turn a
+    // healthy database into a red build over a stranded, inert mirror.
+    const broken = fakeDatabase({ failCatalog: new Error("the real failure"), failDrops: true });
+    await assert.rejects(probeConstraintDrift(broken.execute, SUFFIX), /the real failure/);
+
+    const clean = fakeDatabase({
+      catalog: agreeingCatalog((name) => `CHECK (${name})`),
+      failDrops: true,
+    });
+    const outcome = await probeConstraintDrift(clean.execute, SUFFIX);
+    assert.deepEqual(outcome.drift, []);
+  });
+
+  it("reports a database with no mirrored rows as zero declared, for the caller to refuse", async () => {
+    // The vacuous case: the catalog answers, but nothing in it is a mirror row
+    // — the shape a broken CREATE or an over-filtered query would produce.
+    // Refusing it is the caller's job (both scripts fail on declared === 0);
+    // the probe's job is to report the zero rather than dress it as clean.
+    const db = fakeDatabase({ catalog: [] });
+
+    const outcome = await probeConstraintDrift(db.execute, SUFFIX);
+
+    assert.equal(outcome.declared, 0);
+    assert.deepEqual(outcome.drift, []);
   });
 });
