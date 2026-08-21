@@ -277,6 +277,37 @@ export class PhaseArchive {
   }
 
   /**
+   * Discard one phase's samples and any artefact cut from them (#51).
+   *
+   * For the phase whose content arrived as TEXT: the development panel types
+   * the exposé, and whatever the open microphone captured around that typing —
+   * room tone before the panel was opened, mostly — is not a recording of the
+   * task, it is a recording of nobody performing it. Filing it anyway is what
+   * made the same typed sitting grade differently run to run: the artefact's
+   * few seconds of noise flipped the grading mode, displaced the typed
+   * duration claim, and handed the corrector silence labelled as an exposé.
+   *
+   * The samples join {@link discarded} rather than vanishing: they were
+   * captured, and the count staying visible is the difference between a
+   * decision and a leak. The cached encode goes with them — an artefact
+   * already cut from dropped samples is the same lie in a smaller file.
+   *
+   * Returns how many samples were dropped, so the caller can log the size of
+   * what it decided against.
+   */
+  drop(phase: RecordedPhase): number {
+    const segment = this.segments.get(phase);
+    if (!segment) return 0;
+    this.segments.delete(phase);
+    this.encoded.delete(phase);
+    // A dropped phase cannot stay open: frames that arrive now belong to a
+    // recording that no longer exists, and filing them would resurrect it.
+    if (this.open === phase) this.open = null;
+    this.discardedSamples += segment.samples;
+    return segment.samples;
+  }
+
+  /**
    * Every artefact with audio in it, in the order the phases were entered.
    *
    * One phase at a time rather than both at once: the encoder is a device with a

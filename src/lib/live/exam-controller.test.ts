@@ -230,6 +230,20 @@ class FakeRecorder implements RecorderLike {
       }));
   }
 
+  /** Phases whose recording the controller decided against (#51), in order,
+   *  and in `calls` so the ordering against `end` and the early encode is a
+   *  readable trace. */
+  droppedPhases: RecordedPhase[] = [];
+
+  dropPhase(phase: RecordedPhase): void {
+    this.calls.push(`drop:${phase}`);
+    this.droppedPhases.push(phase);
+    // As the real archive: the samples are gone, so the phase measures zero
+    // and produces no artefact from here on.
+    this.seconds[phase] = 0;
+    this.voiced[phase] = 0;
+  }
+
   discard(): void {
     this.discarded = true;
   }
@@ -1396,6 +1410,100 @@ describe("recording the candidate", () => {
       assert.deepEqual(h.finished[0]?.devSeconds, { monologue: 330, debate: 0 });
     });
 
+    it("sends no artefact for a typed phase, even when the room was recorded first (#51)", async () => {
+      // The ordinary panel flow: « Enregistrer » pressed, some seconds of room
+      // tone captured while the panel is found and opened, then the exposé
+      // typed. That stub used to ride in front of every typed exposé — a real
+      // file of nobody speaking, uploaded, graded as the monologue's audio,
+      // and displacing the typed duration claim.
+      const h = harness();
+      await intoMonologue(h);
+      h.advanceClock(8);
+      assert.equal(h.recorder.measuredSeconds("monologue"), 8, "the stub was captured");
+
+      h.controller.setDevTextMode(true);
+      h.controller.injectCandidateSpeech("Un exposé tapé.", 330);
+      await runToFinish(h, () => {});
+
+      const payload = h.finished[0];
+      assert.deepEqual(h.recorder.droppedPhases, ["monologue"]);
+      assert.deepEqual(
+        payload?.recordings.map((recording) => recording.phase),
+        ["debate"],
+        "the typed monologue left no file; the spoken débat kept its own",
+      );
+      // With the stub gone, the claim is what the route will compute the
+      // duration penalty from — nothing displaces it any more.
+      assert.deepEqual(payload?.devSeconds, { monologue: 330, debate: 0 });
+    });
+
+    it("drops the artefact at the boundary, after the phase closes and before the early encode", async () => {
+      // The order is the design: the drop must come after `endPhase()` (until
+      // the boundary the developer can still speak into the phase) and before
+      // the #86 pre-encode, which would otherwise spend the débat compressing
+      // a recording the sitting has just decided against.
+      const h = harness();
+      await intoMonologue(h);
+      h.advanceClock(8);
+      h.controller.setDevTextMode(true);
+      h.controller.injectCandidateSpeech("Un exposé tapé.", 330);
+      await runToFinish(h, () => {});
+
+      const end = h.recorder.calls.indexOf("end:monologue");
+      const drop = h.recorder.calls.indexOf("drop:monologue");
+      assert.ok(end !== -1 && drop === end + 1, "closed, then dropped, in the same breath");
+    });
+
+    it("produces the same artefacts however long the panel took to open", async () => {
+      // The issue's definition of done, item one: the same typed flow, run
+      // twice, must produce the same set of phases-with-audio. The stub's size
+      // was the run-to-run variable — however many seconds the panel took —
+      // so two runs that differ only in that must finish identically.
+      const phases = async (secondsBeforePanel: number) => {
+        const h = harness();
+        await intoMonologue(h);
+        h.advanceClock(secondsBeforePanel);
+        h.controller.setDevTextMode(true);
+        h.controller.injectCandidateSpeech("Le même exposé, tapé.", 330);
+        await runToFinish(h, () => {});
+        return h.finished[0]?.recordings.map((recording) => recording.phase);
+      };
+
+      assert.deepEqual(await phases(2), await phases(45));
+    });
+
+    it("costs the débat its recording too, when the débat is what was typed", async () => {
+      // Per phase, not per sitting: a spoken monologue keeps its artefact
+      // beside a typed débat that loses its own.
+      const h = harness();
+      await intoMonologue(h);
+      h.advanceClock(30);
+      await runToFinish(h, () => {
+        h.controller.injectCandidateSpeech("Une réponse tapée.", 60);
+      });
+
+      assert.deepEqual(h.recorder.droppedPhases, ["debate"]);
+      assert.deepEqual(
+        h.finished[0]?.recordings.map((recording) => recording.phase),
+        ["monologue"],
+      );
+    });
+
+    it("never drops anything on a sitting where nothing was typed", async () => {
+      // The guard the whole feature stands behind: a real spoken sitting's
+      // artefacts are untouched, both of them.
+      const h = harness();
+      await intoMonologue(h);
+      h.advanceClock(30);
+      await runToFinish(h, () => {});
+
+      assert.deepEqual(h.recorder.droppedPhases, []);
+      assert.deepEqual(
+        h.finished[0]?.recordings.map((recording) => recording.phase),
+        ["monologue", "debate"],
+      );
+    });
+
     it("gives the microphone back when the monologue ends, so the débat records", async () => {
       // The panel is on the exposé and nowhere else. A mode that outlived it
       // would leave the débat neither typeable nor recordable — an empty
@@ -1485,8 +1593,9 @@ describe("recording the candidate", () => {
         assert.equal(h.controller.getSnapshot().phase, "debate", "no other click required");
         assert.deepEqual(
           h.recorder.calls,
-          ["monologue", "end:monologue"],
-          "the phase's artefact was opened and closed, both in the one press",
+          ["monologue", "end:monologue", "drop:monologue"],
+          "the phase's artefact was opened, closed and — being typed — dropped (#51), " +
+            "all in the one press",
         );
       });
 

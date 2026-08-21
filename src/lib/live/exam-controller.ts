@@ -91,6 +91,12 @@ export interface RecorderLike {
   resume(): void;
   /** Seconds of audio recorded for one phase, measured from the samples. */
   measuredSeconds(phase: RecordedPhase): number;
+  /** Discard one phase's recording entirely (#51). Called at the phase
+   *  boundary for a phase whose content was typed, so its captured room tone
+   *  never leaves the tab dressed as the task. Required rather than optional
+   *  for the same reason `recordingFor` is: an implementation that forgot it
+   *  would upload the stub silently. */
+  dropPhase(phase: RecordedPhase): void;
   /** Of those, the seconds that carried speech. The two differ exactly when a
    *  microphone worked and the candidate did not speak into it. */
   voicedSeconds(phase: RecordedPhase): number;
@@ -596,6 +602,22 @@ export class ExamController {
    * to dress a short sitting up as a long one.
    */
   private devSeconds: Record<RecordedPhase, number> = { monologue: 0, debate: 0 };
+
+  /**
+   * DEVELOPMENT ONLY — the phases whose content was typed rather than spoken
+   * (#51). Empty on every real sitting and every production build, because
+   * `injectCandidateSpeech` is the only writer and it returns before reaching
+   * this there.
+   *
+   * What membership costs: the phase's recording is dropped at its boundary
+   * (see `advance()`), so a typed phase NEVER leaves the tab with an audio
+   * file attached. The few seconds an open microphone captured around the
+   * typing — room tone before the panel opened, mostly — were what made the
+   * same typed sitting grade differently run to run: the stub flipped the
+   * grading mode to audio, displaced the typed duration claim, and handed
+   * the corrector silence labelled as the exposé.
+   */
+  private readonly typedPhases = new Set<RecordedPhase>();
 
   private transcript: TranscriptEntry[] = [];
   private events: ExamEvent[] = [];
@@ -2094,10 +2116,18 @@ export class ExamController {
    *
    * What it does NOT do:
    *
-   *  - **It does not discard what was already captured.** Audio recorded before
-   *    the mode went on belongs to the phase and stays in the artefact. The
-   *    duration penalty is then computed from a genuinely shorter recording,
-   *    which is the truth about a phase that was half spoken and half typed.
+   *  - **It does not discard what was already captured — but typing does.**
+   *    Toggling the mode on and off again leaves the phase's audio exactly as
+   *    it was: the toggle is about the microphone, not the artefact. What
+   *    costs a phase its recording is CONTENT arriving as text — the moment
+   *    `injectCandidateSpeech` writes a typed turn, the phase is marked and
+   *    its artefact is dropped whole at the boundary (see `typedPhases` and
+   *    `advance()`). That reverses this comment's earlier promise, and #51 is
+   *    why: the promise protected a phase half spoken and half typed, and what
+   *    it delivered in the ordinary flow was a stub of room tone uploaded in
+   *    front of every typed exposé, grading the same sitting differently run
+   *    to run. A typed phase now measures zero seconds every time, and the
+   *    panel's claimed duration is what the penalty is computed from.
    *  - **It does not run in production.** Same guard, and the same reason, as
    *    {@link injectCandidateSpeech}: two independent checks of the same flag,
    *    because
@@ -2169,6 +2199,9 @@ export class ExamController {
     if (Number.isFinite(seconds) && seconds > 0) {
       this.devSeconds[this.phase] += Math.round(seconds);
     }
+    // The phase's content is now (at least partly) typed, which costs it its
+    // recording at the boundary — see `typedPhases` for the decision.
+    this.typedPhases.add(this.phase);
 
     this.addFragment("candidate", trimmed);
     // The examiner has to hear it too, or the débat argues with silence.
@@ -2411,6 +2444,20 @@ export class ExamController {
       }
       this.phaseStamps[current].endedAt = this.now();
       this.tolerate("end-phase", () => this.recorder?.endPhase());
+
+      // DEVELOPMENT ONLY — a typed phase leaves no artefact (#51). Decided at
+      // the boundary rather than when the text arrived, because until the
+      // phase ends the developer can still speak into it; and BEFORE the
+      // pre-encode below, which would otherwise spend the débat compressing a
+      // recording this sitting has just decided against. Reverses the earlier
+      // "audio captured before the mode went on stays in the artefact" rule —
+      // see `setDevTextMode` for what that rule protected and why the typed
+      // phase's determinism won: the duration penalty is then computed from
+      // the panel's claim, the same way every run, instead of from however
+      // many seconds of room tone the panel took to open.
+      if (this.typedPhases.has(current)) {
+        this.tolerate("drop-typed-recording", () => this.recorder?.dropPhase(current));
+      }
     }
 
     /**

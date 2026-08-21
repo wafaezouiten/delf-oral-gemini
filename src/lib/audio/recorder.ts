@@ -391,6 +391,19 @@ export class MicRecorder {
     return this.archive.openPhase;
   }
 
+  /** Discard one phase's recording entirely — the phase whose content was
+   *  typed (#51). The decision is the controller's; what it costs and why the
+   *  samples stay countable is `PhaseArchive.drop`'s. */
+  dropPhase(phase: RecordedPhase): void {
+    const samples = this.archive.drop(phase);
+    if (samples > 0) {
+      this.callbacks.onEvent?.("recording-dropped", {
+        phase,
+        seconds: Number((samples / this.archive.sampleRate).toFixed(2)),
+      });
+    }
+  }
+
   /** Whether the device went away mid-sitting. */
   get isLost(): boolean {
     return this.lost;

@@ -122,6 +122,91 @@ describe("audio that belongs to no phase", () => {
   });
 });
 
+describe("dropping a typed phase (#51)", () => {
+  it("removes the phase's audio, artefact and measurement in one act", async () => {
+    // The typed exposé's stub: the room tone captured before the panel was
+    // opened. Dropped, the phase reads exactly like one that captured nothing —
+    // measured zero, no file — which is what makes the typed flow deterministic.
+    const archive = new PhaseArchive();
+    archive.begin("monologue");
+    fill(archive, 8);
+    archive.end();
+
+    assert.equal(archive.drop("monologue"), 8 * INPUT_SAMPLE_RATE);
+    assert.equal(archive.measuredSeconds("monologue"), 0);
+    assert.equal(archive.voicedSeconds("monologue"), 0);
+    assert.equal(await archive.recordingFor("monologue"), null);
+    assert.deepEqual(await archive.all(), []);
+  });
+
+  it("counts the dropped samples as discarded rather than losing them", () => {
+    // Same ledger as audio captured between phases: the samples existed, the
+    // sitting decided against them, and the count is what keeps that a
+    // decision instead of a leak.
+    const archive = new PhaseArchive();
+    archive.begin("monologue");
+    fill(archive, 8);
+    archive.end();
+    archive.drop("monologue");
+
+    assert.equal(archive.discarded, 8 * INPUT_SAMPLE_RATE);
+  });
+
+  it("forgets an artefact already cut from the dropped samples", async () => {
+    // The #86 pre-encode can have run before the drop. A cached file cut from
+    // samples the sitting decided against is the same lie in a smaller box, so
+    // the drop must take it too — and audio arriving later must start afresh.
+    const archive = new PhaseArchive();
+    archive.begin("monologue");
+    fill(archive, 8);
+    archive.end();
+    assert.ok(await archive.recordingFor("monologue"), "an artefact was cut");
+
+    archive.drop("monologue");
+    assert.equal(await archive.recordingFor("monologue"), null, "and did not survive the drop");
+  });
+
+  it("leaves the other phase exactly as it was", async () => {
+    const archive = new PhaseArchive();
+    archive.begin("monologue");
+    fill(archive, 8);
+    archive.end();
+    archive.begin("debate");
+    fill(archive, 4);
+    archive.end();
+
+    archive.drop("monologue");
+
+    assert.equal(archive.measuredSeconds("debate"), 4);
+    const remaining = await archive.all();
+    assert.deepEqual(
+      remaining.map((recording) => recording.phase),
+      ["debate"],
+    );
+  });
+
+  it("closes the phase if it was still open, so nothing resurrects it", () => {
+    // Frames that arrive after the drop belong to a recording that no longer
+    // exists. They go to the discard ledger, not into a reborn segment.
+    const archive = new PhaseArchive();
+    archive.begin("monologue");
+    fill(archive, 2);
+
+    archive.drop("monologue");
+    fill(archive, 3);
+
+    assert.equal(archive.openPhase, null);
+    assert.equal(archive.measuredSeconds("monologue"), 0);
+    assert.equal(archive.discarded, 5 * INPUT_SAMPLE_RATE);
+  });
+
+  it("answers zero for a phase that never recorded", () => {
+    const archive = new PhaseArchive();
+    assert.equal(archive.drop("debate"), 0);
+    assert.equal(archive.discarded, 0);
+  });
+});
+
 describe("the artefact itself", () => {
   it("is a WAV whose own header agrees with the measurement", async () => {
     // Two readers of the same fact: the number that reaches the database, and
