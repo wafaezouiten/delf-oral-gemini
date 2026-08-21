@@ -123,14 +123,14 @@ Two details make the names come out right, and both are easy to break:
 - GitHub lists checks alphabetically, so matching the names is what produces the
   matching order. There is nothing else to configure.
 
-Lint, typecheck, unit tests and build are **one job**, not four. Four separate
-jobs would each show as their own check and would not match the reference.
-Any failing step fails the job, and the job is the gate.
+Lint, formatting, typecheck, unit tests and build are **one job**, not five.
+Separate jobs would each show as their own check and would not match the
+reference. Any failing step fails the job, and the job is the gate.
 
 Run the same gates locally before pushing:
 
 ```bash
-pnpm lint && pnpm typecheck && pnpm test:unit && pnpm build
+pnpm lint && pnpm format:check && pnpm typecheck && pnpm test:unit && pnpm build
 ```
 
 `pnpm typecheck` is `next typegen && tsc --noEmit`, not bare `tsc`. Next 16

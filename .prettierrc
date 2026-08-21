@@ -1,0 +1,24 @@
+# The house style, measured before it was written down (#96). Everything not
+# listed here is a Prettier default kept on purpose.
+
+# The repository is formatted at 100 columns, not Prettier's 80: when this was
+# adopted, 9.7% of src/ lines sat past 80 and only 0.8% past 100 — a bare
+# `prettier --write` at the default rewrote files against their own style.
+printWidth: 100
+
+# The class strings were already in plugin order before the plugin was a
+# dependency — an editor had been sorting them silently. Adopting it changed one
+# className in the whole tree; this line just writes down what was happening.
+plugins:
+  - prettier-plugin-tailwindcss
+
+# The committed content is LF (see the index), but Windows checkouts under
+# core.autocrlf=true materialise CRLF in the working tree. Prettier's default
+# ("lf") would flag every file on such a machine forever; "auto" keeps each
+# file's existing endings and lets git normalise on commit.
+endOfLine: auto
+
+# Prettier's default, kept deliberately (#96): the doc blocks and markdown in
+# this project are long, hand-wrapped, argued prose. "always" would rewrap all
+# of it once and make the next diff on any of it unreadable.
+proseWrap: preserve
