@@ -48,6 +48,7 @@ import { readsAsClosing } from "@/lib/delf/early-closing";
 import {
   closingInstruction,
   examinerOpeningLine,
+  lastQuestionInstruction,
   presenceCheckInstruction,
   resumeDebateInstruction,
   silenceRelanceInstruction,
@@ -510,20 +511,55 @@ const SILENCE_HELD_REPORT_MS = 3 * SILENCE_STEP_MS;
  * Coarse on purpose. Every cue makes the model speak — `sendDirective` is
  * `sendRealtimeInput`, which takes a turn — so this is not a clock display, it
  * is an intervention. One every three minutes is three of them in a
- * thirteen-minute débat, the last two minutes belonging to the closing handshake,
- * rather than a metronome the candidate has to talk around.
+ * thirteen-minute débat, the last two minutes belonging to the last question
+ * and the closing handshake, rather than a metronome the candidate has to talk
+ * around.
  */
 const TIME_CUE_INTERVAL_MS = 180_000;
 
 /**
- * How little may be left for a cue still to be worth sending.
+ * How little may be left for an ordinary cue still to be worth sending.
  *
- * Under two minutes there is nothing a cue can do that the closing handshake is
- * not about to do properly, and everything to lose: the last cue of a débat
- * would land next to the closing directive with no turn boundary between them,
- * which is the blend {@link checkCandidateSilence} is also written to avoid.
+ * Under two minutes the grid stands down and the end of the débat belongs to
+ * two spoken interventions instead: the last question (#108), announced as such
+ * at this very crossing, and the closing handshake. A silent cue there would
+ * land next to one of them with no turn boundary between, which is the blend
+ * {@link checkCandidateSilence} is also written to avoid.
  */
 const TIME_CUE_FLOOR_MS = 120_000;
+
+/**
+ * How little may be left for the last question still to be worth asking (#108).
+ *
+ * The announcement waits for a quiet floor like every cue, and a candidate deep
+ * in an answer can hold it back well past the two-minute crossing. At some
+ * point the question stops fitting: forty-five seconds is one short question
+ * and one short answer before the closing directive wants the floor, and under
+ * that the candidate is better served by an uninterrupted final answer than by
+ * a « dernière question » whose reply the clock cuts in half. A débat that
+ * never went quiet in the window simply misses the announcement, and the log
+ * says so.
+ */
+const LAST_QUESTION_CUTOFF_MS = 45_000;
+
+/**
+ * How early the débat's closing directive goes out (#108).
+ *
+ * Sent at 0:00 the examiner only STARTS its sentence there — a couple of
+ * seconds of generation, a few more of speech — so « le temps de l'épreuve est
+ * écoulé » was always heard well after time was up, and the part ran long by
+ * exactly that much. Led by ten seconds, the sentence lands while the clock
+ * still shows seconds and the part ends where the clock says it does. The
+ * teardown does not move: it still waits on the closing turn completing, which
+ * is what lets the candidate's last transcription arrive (see
+ * `beginClosingHandshake`).
+ *
+ * The monologue keeps 0:00, deliberately: every second before its boundary is
+ * the candidate's graded monologue, and an examiner cutting in early there
+ * takes speaking time the grille counts. The débat's last seconds are an
+ * exchange the examiner is licensed to end.
+ */
+const CLOSING_LEAD_MS = 10_000;
 
 /**
  * How long the room must have been quiet before a cue is slipped into it.
@@ -791,6 +827,19 @@ export class ExamController {
   private lastTimeCueIndex = 0;
   private cueVoicedSeconds = 0;
   private floorQuietSince: number | null = null;
+
+  /**
+   * Where the débat's last-question announcement stands (#108).
+   *
+   * Three states rather than a boolean because "it never went out" splits in
+   * two, and the difference travels: `sent` is a promise the rest of the débat
+   * has to keep (the early-goodbye recovery switches wording on it), while
+   * `missed` — a floor that never went quiet before the cutoff — changes
+   * nothing downstream but is logged, because a sitting where the candidate
+   * was never told the end was coming should say so rather than read as
+   * covered.
+   */
+  private lastQuestionCue: "pending" | "sent" | "missed" = "pending";
 
   /**
    * The examiner said goodbye in the middle of the débat (#85).
@@ -1179,7 +1228,13 @@ export class ExamController {
     this.earlyClosingRecoveries += 1;
     const minutes = Math.max(1, Math.round(remainingSeconds("debate", this.elapsed) / 60));
     this.log("examiner-early-closing-answered", { minutes });
-    this.sendControllerDirective("early-closing-recovery", resumeDebateInstruction(minutes));
+    // A goodbye after the announced last question is answered differently: the
+    // recovery must not demand the fresh objection that would break « une
+    // dernière question » in the examiner's own mouth (#108).
+    this.sendControllerDirective(
+      "early-closing-recovery",
+      resumeDebateInstruction(minutes, this.lastQuestionCue === "sent"),
+    );
     return true;
   }
 
@@ -1900,7 +1955,8 @@ export class ExamController {
     if (this.connection !== "connected") return false;
 
     const remaining = remainingSeconds("debate", this.elapsed);
-    if (remaining * 1000 < TIME_CUE_FLOOR_MS) return false;
+    if (remaining * 1000 < TIME_CUE_FLOOR_MS)
+      return this.checkLastQuestionCue(now, quiet, remaining);
 
     // An index into the three-minute grid, not a count: a cue held back while
     // the candidate was speaking coalesces with the next one rather than
@@ -1917,6 +1973,49 @@ export class ExamController {
     if (this.silenceSince !== null) this.silenceSince = now;
     this.log("debate-time-cue", { minutes });
     this.sendControllerDirective("debate-time-cue", timeRemainingInstruction(minutes));
+    return true;
+  }
+
+  /**
+   * Announce the last question, once, in the closing two minutes (#108).
+   *
+   * The one cue the candidate is meant to HEAR. Everything else near the end is
+   * addressed past them — the grid cues are for the model alone, the clock
+   * badge is chrome — and a candidate mid-argument watches none of it: the
+   * débat simply stopped with answers still in hand. So when the grid stands
+   * down at two minutes, this takes the same slot once: the examiner says out
+   * loud that the end is near and poses one question named as the last.
+   *
+   * Same guards as the grid, and inherited the same way — the caller has
+   * already established the phase, a floor being measured, a live socket and no
+   * closing in flight. What is new is the cutoff: a floor that never goes
+   * quiet holds the announcement back like any cue, but unlike a grid cue it
+   * does not keep sooner-or-later value. Under {@link LAST_QUESTION_CUTOFF_MS}
+   * a last question no longer fits in front of the closing directive, so it is
+   * dropped and the drop is logged — a sitting where the candidate was never
+   * warned should say so.
+   *
+   * `sent` is a promise (#108): from here nothing asks for a fresh question.
+   * The grid is already floored above this moment, the relances only ever
+   * re-ask into a silence, and the early-goodbye recovery reads this state to
+   * switch from "new objection" to "follow up on that answer".
+   */
+  private checkLastQuestionCue(now: number, quiet: boolean, remaining: number): boolean {
+    if (this.lastQuestionCue !== "pending") return false;
+    if (remaining * 1000 < LAST_QUESTION_CUTOFF_MS) {
+      this.lastQuestionCue = "missed";
+      this.log("debate-last-question-missed", { remainingSeconds: remaining });
+      return false;
+    }
+    if (!quiet) return false;
+
+    this.lastQuestionCue = "sent";
+    // The cue makes the examiner speak, so the silence window re-anchors on the
+    // attempt, exactly as the grid cues and relances do: the answer to a
+    // question not yet asked is not a silence.
+    if (this.silenceSince !== null) this.silenceSince = now;
+    this.log("debate-last-question", { remainingSeconds: remaining });
+    this.sendControllerDirective("debate-last-question", lastQuestionInstruction());
     return true;
   }
 
@@ -2973,7 +3072,12 @@ export class ExamController {
       return;
     }
 
-    if (isPhaseTimeUp(this.phase, seconds) && !this.closing) {
+    // The débat's deadline is read with a lead (#108): the closing directive
+    // sent at 0:00 is heard after it, so the sentence goes out early enough to
+    // land while the clock still runs. The monologue keeps 0:00 — its last
+    // seconds are graded candidate speech, not an exchange to be called.
+    const closingLead = this.phase === "debate" ? CLOSING_LEAD_MS / 1000 : 0;
+    if (isPhaseTimeUp(this.phase, seconds + closingLead) && !this.closing) {
       // A monologue that ran its whole length in silence does not become a
       // débat. The clock stops, the screen says so, and the task stays to be
       // done — the same refusal the candidate's own button meets, applied to

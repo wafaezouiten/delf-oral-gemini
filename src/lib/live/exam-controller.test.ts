@@ -3512,6 +3512,152 @@ describe("where a phase started, in the transcript's own time base (#70)", () =>
   });
 });
 
+describe("the last question and the call of time (#108)", () => {
+  /** Preparation to a débat that has begun, clock at zero, with a candidate who
+   *  talks: the last-question announcement exists for a working exchange, not
+   *  for #84's silent room. */
+  async function intoDebate(h: Harness): Promise<void> {
+    h.controller.start();
+    await h.controller.advanceEarly();
+    await pressRecord(h);
+    h.session().candidateSays("Le télétravail a transformé le rapport au bureau.");
+    h.advanceClock(MONOLOGUE_MIN_SECONDS + 10);
+    await h.controller.advanceEarly();
+    await completeClosing(h);
+  }
+
+  /** Nobody is making a sound. Two ticks, because the floor has to have been
+   *  quiet for two seconds and one tick is not a duration. */
+  const quiet = (h: Harness, seconds: number) => {
+    h.recorder.voiced.debate = 0;
+    h.advanceClock(seconds - 3);
+    h.advanceClock(3);
+  };
+
+  const announcements = (h: Harness) =>
+    h.session().directives.filter((text) => text.includes("dernière question"));
+  const events = (h: Harness, name: string) =>
+    h.controller.getSnapshot().events.filter((event) => event.name === name);
+
+  it("announces the last question, aloud, when the grid stands down at two minutes", async () => {
+    const h = harness();
+    await intoDebate(h);
+
+    quiet(h, 690);
+    assert.equal(announcements(h).length, 1, "the two-minute crossing is the moment");
+    assert.match(announcements(h)[0], /à voix haute/, "this one the candidate is meant to hear");
+    assert.match(announcements(h)[0], /aucun chiffre/, "but never as a number");
+    assert.equal(events(h, "debate-last-question").length, 1, "and the sitting's log says so");
+
+    quiet(h, 20);
+    assert.equal(announcements(h).length, 1, "a last question is only ever one");
+  });
+
+  it("waits for a pause rather than talking over the candidate's answer", async () => {
+    // Same rule as every cue: the directive makes the examiner speak, and a
+    // candidate interrupted mid-argument loses a graded answer.
+    const h = harness();
+    await intoDebate(h);
+
+    h.advanceClock(680); // voiced audio keeps arriving: somebody is talking
+    h.advanceClock(20);
+    assert.deepEqual(announcements(h), [], "the candidate is mid-answer at the crossing");
+
+    quiet(h, 6);
+    assert.equal(announcements(h).length, 1, "and it arrives at the first pause");
+  });
+
+  it("drops it, and says so, when the floor never frees in time", async () => {
+    // Under the cutoff a last question no longer fits in front of the closing
+    // directive, so the candidate keeps their uninterrupted final answer. The
+    // log carries the drop: a sitting where the warning never happened should
+    // say so rather than read as covered.
+    const h = harness();
+    await intoDebate(h);
+
+    h.advanceClock(690); // talking through the whole window
+    h.advanceClock(50);
+    quiet(h, 6);
+
+    assert.deepEqual(announcements(h), [], "too late to ask and still hear an answer");
+    assert.equal(events(h, "debate-last-question-missed").length, 1);
+    assert.equal(events(h, "debate-last-question").length, 0);
+  });
+
+  it("keeps the promise when the examiner says goodbye after it", async () => {
+    // « Une dernière question » followed by a recovery demanding a fresh
+    // objection is the app breaking its own announcement through the
+    // examiner's mouth. After the announcement, a goodbye is still
+    // contradicted, but the examiner is sent back to the answer it heard.
+    const h = harness();
+    await intoDebate(h);
+    quiet(h, 690);
+    assert.equal(announcements(h).length, 1);
+
+    h.session().examinerSays("Merci beaucoup, l'épreuve est terminée. Au revoir.");
+    h.session().finishTurn();
+
+    const recoveries = h.session().directives.filter((text) => text.includes("n'est PAS terminée"));
+    assert.equal(recoveries.length, 1, "the goodbye is still contradicted");
+    assert.match(recoveries[0], /Rebondis/, "but towards the answer, not a fresh objection");
+    assert.ok(
+      !recoveries[0].includes("nouvelle objection"),
+      "a new objection would break « une dernière question »",
+    );
+  });
+
+  it("asks for a fresh objection when the goodbye comes before the announcement", async () => {
+    // The other side of the same switch: with minutes left and no promise made,
+    // the recovery keeps its original wording (#85).
+    const h = harness();
+    await intoDebate(h);
+    h.advanceClock(360);
+
+    h.session().examinerSays("Merci beaucoup, l'épreuve est terminée. Au revoir.");
+    h.session().finishTurn();
+
+    const recoveries = h.session().directives.filter((text) => text.includes("n'est PAS terminée"));
+    assert.equal(recoveries.length, 1);
+    assert.match(recoveries[0], /nouvelle objection/);
+  });
+
+  it("calls time while the débat's clock still runs", async () => {
+    // Sent at 0:00 the examiner only STARTS its sentence there, so « le temps
+    // est écoulé » was always heard after time was up. The directive now leads
+    // the clock by ten seconds; the teardown still waits on the turn.
+    const h = harness();
+    await intoDebate(h);
+
+    h.advanceClock(PHASE_DURATIONS.debate - 11);
+    assert.equal(h.controller.getSnapshot().closing, false, "eleven seconds out is not the call");
+
+    h.advanceClock(1);
+    assert.equal(h.controller.getSnapshot().closing, true, "ten seconds out is");
+    assert.equal(h.controller.getSnapshot().phase, "debate", "and the part is still running");
+    assert.match(
+      h.session().directives[h.session().directives.length - 1],
+      /Le temps de l'épreuve est écoulé/,
+    );
+  });
+
+  it("does not lead the monologue's clock", async () => {
+    // Every second before the monologue's boundary is the candidate's graded
+    // monologue; an examiner cutting in early there takes speaking time the
+    // grille counts.
+    const h = harness();
+    h.controller.start();
+    await h.controller.advanceEarly();
+    await pressRecord(h);
+    h.session().candidateSays("Le télétravail a transformé le rapport au bureau.");
+
+    h.advanceClock(PHASE_DURATIONS.monologue - 5);
+    assert.equal(h.controller.getSnapshot().closing, false, "five seconds still belong to them");
+
+    h.advanceClock(5);
+    assert.equal(h.controller.getSnapshot().closing, true, "the boundary itself has not moved");
+  });
+});
+
 describe("which examiner the controller's sessions are created for (#99)", () => {
   /** Preparation → monologue, clock running. */
   async function intoMonologue(h: Harness): Promise<void> {
