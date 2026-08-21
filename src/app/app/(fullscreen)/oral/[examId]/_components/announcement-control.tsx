@@ -34,7 +34,10 @@ export function AnnouncementControl({
   if (!mode) return null;
 
   return (
-    <div className="flex shrink-0 justify-end">
+    {/* `relative` anchors the `sr-only` span below — absolute, and without a
+        positioned ancestor it would anchor to the document and grow the page
+        by the rail's scroll distance (#114). */}
+    <div className="relative flex shrink-0 justify-end">
       {/* Politely, and once. The visible button says « Passer » and names no
           speaker; this is the whole of what the card's heading used to say, in
           the place the button appears. Polite rather than assertive because the
