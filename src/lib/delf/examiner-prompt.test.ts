@@ -289,6 +289,23 @@ describe("examiner prompt", () => {
       assert.ok(instruction.includes("contente-toi STRICTEMENT de l'intervention demandée"));
     });
 
+    it("restates the evaluation ban inside the monologue's own rules", () => {
+      // The identity already forbids evaluating aloud; this block names the
+      // shapes it takes mid-monologue — a verdict on an argument, on the
+      // level, on a formulation — so a model reaching for encouragement finds
+      // the specific sentence it was about to say already forbidden.
+      const instruction = buildExaminerInstruction("monologue", TOPIC);
+      assert.ok(instruction.includes("AUCUNE ÉVALUATION"));
+      assert.ok(instruction.includes("qu'un argument est bon ou mauvais"));
+      assert.ok(instruction.includes("que son niveau de français est bon ou faible"));
+    });
+
+    it("keeps the débat tied to the sujet and the candidate's arguments", () => {
+      const instruction = buildExaminerInstruction("debate", TOPIC);
+      assert.ok(instruction.includes("RESTE SUR LE SUJET"));
+      assert.ok(instruction.includes("N'introduis pas de sujet sans rapport"));
+    });
+
     it("spells out that no single sign of struggle grants the floor", () => {
       const instruction = buildExaminerInstruction("monologue", TOPIC);
       for (const sign of ["Une hésitation", "Une reformulation", "Une pause"]) {
