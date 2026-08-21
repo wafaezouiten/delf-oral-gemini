@@ -55,14 +55,21 @@ export interface FinishFailure {
   /** Whether to offer « Réessayer l'envoi ». */
   retryable: boolean;
   /**
-   * The failure notice's headline and the screen's lede paragraph, overriding
-   * the defaults for the one failure they would lie about (#86): « L'envoi a
-   * échoué » over a correction whose envoi succeeded. Absent on every failure
-   * `describeFinishFailure` produces — those really are send failures, and
-   * the defaults are theirs.
+   * The screen's four sentences, overridable as a set for the one failure the
+   * defaults would lie about (#86): a correction that timed out after a
+   * SUCCESSFUL envoi. `heading` is the card's h1, `title` the failure
+   * notice's, `lede` the paragraph between them, and `leaveLabel` the way-out
+   * button — whose default says « Abandonner », a word with no referent when
+   * the sitting is already safely accepted and may yet correct itself.
+   * Overridden together or not at all in practice: three default sentences
+   * around one corrected sentence is the same contradiction wearing fewer
+   * words. All absent on every failure `describeFinishFailure` produces —
+   * those really are send failures, and the defaults are theirs.
    */
+  heading?: string;
   title?: string;
   lede?: string;
+  leaveLabel?: string;
 }
 
 /**
@@ -75,12 +82,16 @@ export interface FinishFailure {
  * wait gave up is returned instantly rather than graded twice.
  */
 export const CORRECTION_TIMED_OUT: FinishFailure = {
+  heading: "Correction en attente",
   title: "La correction se fait attendre",
   lede: "Votre prestation est bien reçue ; c'est la correction qui n'est pas arrivée.",
   message:
     "L'examinateur n'a pas rendu sa correction dans le temps prévu. " +
     "Votre enregistrement est en sécurité : réessayez l'envoi — si la correction " +
     "a abouti entre-temps, elle s'affichera immédiatement, sans être recomptée.",
+  // Leaving abandons nothing: the sitting is accepted, and its correction may
+  // yet land in the historique on its own.
+  leaveLabel: "Revenir au tableau de bord",
   retryable: true,
 };
 

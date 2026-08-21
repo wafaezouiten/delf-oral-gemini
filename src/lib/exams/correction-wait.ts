@@ -25,8 +25,19 @@
  *  grading, and twenty-odd requests over a minute is nothing. */
 export const CORRECTION_POLL_MS = 3_000;
 
-/** The finish route's own ceiling (`maxDuration` 300 s) plus slack for the
- *  answer to travel: past this, the grading request is dead by definition. */
+/**
+ * The finish route's own ceiling (`maxDuration` 300 s) plus slack for the
+ * answer to travel: past this, the grading request is dead by definition.
+ *
+ * "By definition" is the PLATFORM's definition — this app deploys on Vercel,
+ * which enforces `maxDuration` by killing the invocation. A self-hosted
+ * `next start` enforces nothing, so there a slow grading could still be
+ * attaching when this limit gives up and the candidate retries — two
+ * concurrent paid model calls on one sitting, and the documented
+ * instant-race window on the correction insert. Whoever ports this off
+ * Vercel must re-derive this limit from whatever bounds their invocations,
+ * not inherit the number.
+ */
 export const CORRECTION_WAIT_LIMIT_MS = 330_000;
 
 export interface CorrectionWaitOptions {

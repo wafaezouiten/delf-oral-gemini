@@ -80,7 +80,7 @@ export function FinishedScreen({
 
           <Kicker className="mt-6">DELF B2 · Production orale</Kicker>
           <h1 className="mt-1 font-serif text-2xl font-semibold">
-            {submitError ? "Correction interrompue" : "Épreuve terminée"}
+            {submitError ? (submitError.heading ?? "Correction interrompue") : "Épreuve terminée"}
           </h1>
 
           {/* A live region only while there is no failure. Once `submitError` is
@@ -153,9 +153,13 @@ export function FinishedScreen({
                   </button>
                 )}
                 <button type="button" onClick={onLeave} className={secondaryButton}>
-                  {submitError.retryable
-                    ? "Abandonner et revenir au tableau de bord"
-                    : "Revenir au tableau de bord"}
+                  {/* « Abandonner » only where leaving actually abandons the
+                      épreuve — the timeout's override drops the word, because
+                      its sitting is accepted and may yet correct itself (#86). */}
+                  {submitError.leaveLabel ??
+                    (submitError.retryable
+                      ? "Abandonner et revenir au tableau de bord"
+                      : "Revenir au tableau de bord")}
                 </button>
               </div>
             }

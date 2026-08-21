@@ -86,6 +86,13 @@ describe("the wait that ran out (#86)", () => {
     assert.ok(CORRECTION_TIMED_OUT.title, "the notice must not fall back to « L'envoi a échoué »");
     assert.doesNotMatch(CORRECTION_TIMED_OUT.title, /envoi a échoué/i);
     assert.match(CORRECTION_TIMED_OUT.lede ?? "", /bien reçue/);
+    // All four sentences, or the contradiction survives in whichever the
+    // screen still defaults: « Correction interrompue » over a correction in
+    // waiting, « Abandonner » over a sitting nothing can abandon.
+    assert.doesNotMatch(CORRECTION_TIMED_OUT.heading ?? "", /interrompue/i);
+    assert.ok(CORRECTION_TIMED_OUT.heading, "the h1 must not fall back either");
+    assert.doesNotMatch(CORRECTION_TIMED_OUT.leaveLabel ?? "", /abandonner/i);
+    assert.ok(CORRECTION_TIMED_OUT.leaveLabel, "nor the way-out button");
     // And the retry's honesty: a correction that landed late is returned by
     // the duplicate check, not graded twice.
     assert.match(CORRECTION_TIMED_OUT.message, /sans être recomptée/);
@@ -95,7 +102,9 @@ describe("the wait that ran out (#86)", () => {
     // The overrides are the timeout's and nobody else's — a 502 or a network
     // failure really is a failed envoi, and the default words are theirs.
     const failure = describeFinishFailure(502, null);
+    assert.equal(failure.heading, undefined);
     assert.equal(failure.title, undefined);
     assert.equal(failure.lede, undefined);
+    assert.equal(failure.leaveLabel, undefined);
   });
 });
