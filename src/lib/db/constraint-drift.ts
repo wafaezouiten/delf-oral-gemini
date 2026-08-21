@@ -24,10 +24,14 @@
  * (The types matter, not a nicety — the bands are `smallint`, and Postgres
  * prints different casts for a `smallint` than an `integer` comparison.)
  *
- * This module is the pure half: which checks the schema declares, the DDL the
- * mirrors need, and the diff. Creating the mirrors and reading the catalog is
- * the script's, because it needs the live connection this file must not have —
- * `node --test` covers everything on this side of that line.
+ * This module owns everything except the connection: which checks the schema
+ * declares, the DDL the mirrors need, the diff — and, since #125, the probe
+ * that runs them in order ({@link probeConstraintDrift}), against an INJECTED
+ * executor rather than an imported client. Two callers hand it one:
+ * `scripts/verify-persistence.ts` inside the full round trip, and
+ * `scripts/verify-constraints.ts`, the entry point CI runs on schema changes,
+ * which probes and writes nothing else. `node --test` covers everything on
+ * this side of the injection, fake executor included.
  */
 
 import { is } from "drizzle-orm";
@@ -205,4 +209,173 @@ export function diffConstraintDefinitions(
     }
   }
   return drift;
+}
+
+/**
+ * One SQL statement, executed for its rows. The probe's whole connection
+ * surface — injected so `node --test` can stand a database in with a map.
+ *
+ * Statements are TEXT, so nothing at this boundary can bind a parameter. That
+ * makes the bare-identifier regexes in this file LOAD-BEARING against SQL
+ * injection, not decoration: every name that reaches a statement — mirror
+ * names via {@link constraintMirrors}'s suffix guard, table names via the
+ * check inside {@link probeConstraintDrift}, reaped names via the pattern in
+ * {@link reapStaleMirrors} — is proven identifier-shaped first. Anyone
+ * reusing this executor shape for less trusted input must keep that chain,
+ * or restore the parameterised query this replaced.
+ */
+export type SqlExecutor = (statement: string) => Promise<Array<Record<string, unknown>>>;
+
+export interface ConstraintProbeOptions {
+  /**
+   * Where a failed cleanup goes instead of nowhere. A drop that fails must
+   * neither mask the probe's own error nor fail a clean run — but swallowing
+   * it silently would let a database that refuses drops leak one inert mirror
+   * per run with no signal at all. Defaults to `console.warn`.
+   */
+  onCleanupFailure?: (mirrorName: string, error: unknown) => void;
+  /** Injectable clock for the reaper's staleness arithmetic. */
+  now?: () => number;
+}
+
+/**
+ * How old a leftover mirror must be before the next run reaps it.
+ *
+ * Leftovers are real: a cancelled CI job is killed, not thrown at, so the
+ * probe's `finally` never runs and its mirrors stay behind — and two quick
+ * pushes to one ref is exactly what the workflow's `cancel-in-progress`
+ * produces. One hour is far past any probe's lifetime, so a concurrent run's
+ * fresh mirrors are never touched, while a cancelled run's debris survives
+ * only until the next probe of the same database.
+ */
+export const MIRROR_REAP_AGE_MS = 60 * 60 * 1000;
+
+const warnCleanupFailure = (mirrorName: string, error: unknown) =>
+  console.warn(`[constraint-drift] could not drop mirror "${mirrorName}":`, error);
+
+/**
+ * Drop mirrors stranded by runs that never got to their own cleanup.
+ *
+ * Only names wearing this module's exact shape with a TIMESTAMP suffix are
+ * candidates — both scripts suffix with `Date.now()` — and only when that
+ * timestamp is at least {@link MIRROR_REAP_AGE_MS} old. A name whose suffix
+ * does not parse is left alone rather than guessed about.
+ */
+async function reapStaleMirrors(
+  execute: SqlExecutor,
+  nowMs: number,
+  onCleanupFailure: (mirrorName: string, error: unknown) => void,
+): Promise<void> {
+  const rows = await execute(
+    `select rel.relname as relname
+     from pg_class rel
+     join pg_namespace nsp on nsp.oid = rel.relnamespace
+     where nsp.nspname = current_schema()
+       and rel.relkind = 'r'
+       and rel.relname like 'verify_constraints_%'`,
+  );
+  for (const row of rows as Array<{ relname: string }>) {
+    // The pattern is the injection guard for the drop below as well as the
+    // staleness key: nothing that fails it reaches a statement.
+    const match = /^verify_constraints_[a-z0-9_]*_(\d+)$/.exec(row.relname);
+    if (!match) continue;
+    const age = nowMs - Number(match[1]);
+    if (!(age >= MIRROR_REAP_AGE_MS)) continue;
+    await execute(`drop table if exists "${row.relname}"`).catch((error) =>
+      onCleanupFailure(row.relname, error),
+    );
+  }
+}
+
+export interface ConstraintProbeOutcome {
+  /** How many declared constraints the catalog reported back off the mirrors.
+   *  Zero means the probe held nothing and must be treated as a failure by the
+   *  caller — a vacuous pass is the comment-shaped guard this replaces. */
+  declared: number;
+  drift: ConstraintDrift[];
+}
+
+/**
+ * Run the whole comparison against one database (#125).
+ *
+ * Creates the mirrors, reads `pg_get_constraintdef` for mirrors and schema
+ * tables in one catalog query, diffs, and drops the mirrors in a `finally` —
+ * whatever the query did. Every statement is passed to `execute` as text:
+ * the identifiers in it come from `schema.ts` and the validated suffix, both
+ * of which {@link constraintMirrors} refuses anything non-identifier-shaped,
+ * and the guard below is what keeps that assumption checked rather than held.
+ *
+ * The mirrors are REAL tables, not `TEMP` ones, and that is a driver fact
+ * rather than a taste: `neon-http` is stateless — each query can land on its
+ * own session — and a temp table would vanish between the CREATE and the
+ * catalog read.
+ */
+export async function probeConstraintDrift(
+  execute: SqlExecutor,
+  suffix: string,
+  options: ConstraintProbeOptions = {},
+): Promise<ConstraintProbeOutcome> {
+  const onCleanupFailure = options.onCleanupFailure ?? warnCleanupFailure;
+  const mirrors = constraintMirrors(suffix);
+  try {
+    // Before this run builds anything: sweep up what a killed run left. A
+    // cancelled CI job never reaches its `finally`, so its mirrors are the
+    // previous tenant's furniture — reaped by age, never by name collision,
+    // which is what keeps a concurrent run's fresh mirrors safe.
+    await reapStaleMirrors(execute, (options.now ?? Date.now)(), onCleanupFailure);
+
+    for (const mirror of mirrors) await execute(mirror.createSql);
+
+    const names = [...schemaTableNames(), ...mirrors.map((mirror) => mirror.mirrorName)];
+    for (const name of names) {
+      // Belt under the braces the mirror builder already wears: every name is
+      // written into the catalog query as a quoted literal, and this probe
+      // would rather refuse a strange one than trust its own provenance story.
+      if (!/^[a-z0-9_]+$/i.test(name)) {
+        throw new Error(`table name ${JSON.stringify(name)} is not a bare identifier`);
+      }
+    }
+    const rows = await execute(
+      `select rel.relname as table_name,
+              con.conname as constraint_name,
+              pg_get_constraintdef(con.oid) as definition
+       from pg_constraint con
+       join pg_class rel on rel.oid = con.conrelid
+       join pg_namespace nsp on nsp.oid = rel.relnamespace
+       where con.contype = 'c'
+         and nsp.nspname = current_schema()
+         and rel.relname in (${names.map((name) => `'${name}'`).join(", ")})`,
+    );
+
+    // The mirrors' rows are the expectation, mapped back to the tables they
+    // mirror; the schema tables' own rows are what the database actually holds.
+    const mirroredTable = new Map(mirrors.map((mirror) => [mirror.mirrorName, mirror.table]));
+    const expected: LiveConstraint[] = [];
+    const live: LiveConstraint[] = [];
+    for (const row of rows as Array<{
+      table_name: string;
+      constraint_name: string;
+      definition: string;
+    }>) {
+      const constraint = { constraint: row.constraint_name, definition: row.definition };
+      const table = mirroredTable.get(row.table_name);
+      if (table !== undefined) expected.push({ ...constraint, table });
+      else live.push({ ...constraint, table: row.table_name });
+    }
+
+    return { declared: expected.length, drift: diffConstraintDefinitions(expected, live) };
+  } finally {
+    for (const mirror of mirrors) {
+      // Best-effort, each on its own: one failed drop must not strand the
+      // rest, and a cleanup error must not mask the probe's — which is the one
+      // that says what actually went wrong. But reported, never swallowed: a
+      // database that refuses drops would otherwise leak one inert mirror per
+      // run with no signal until someone counted tables. What does get
+      // stranded — here, or by a killed process that never reaches this line —
+      // is reaped by the next run's sweep above.
+      await execute(`drop table if exists "${mirror.mirrorName}"`).catch((error) =>
+        onCleanupFailure(mirror.mirrorName, error),
+      );
+    }
+  }
 }

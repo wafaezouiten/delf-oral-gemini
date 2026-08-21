@@ -21,6 +21,7 @@
     "verify:live": "tsx scripts/verify-live.ts",
     "verify:eval": "cross-env NODE_OPTIONS=--conditions=react-server tsx scripts/verify-eval.ts",
     "verify:db": "cross-env NODE_OPTIONS=--conditions=react-server tsx scripts/verify-persistence.ts",
+    "verify:constraints": "cross-env NODE_OPTIONS=--conditions=react-server tsx scripts/verify-constraints.ts",
     "verify:vault": "cross-env NODE_OPTIONS=--conditions=react-server tsx scripts/verify-vault.ts",
     "compare": "cross-env NODE_OPTIONS=--conditions=react-server tsx scripts/compare.ts",
     "compare:summarise": "tsx scripts/comparison/summarise.ts",
