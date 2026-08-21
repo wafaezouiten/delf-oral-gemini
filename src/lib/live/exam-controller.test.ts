@@ -4,6 +4,7 @@ import { describe, it } from "node:test";
 import type { AnnouncementOutcome, AnnouncerLike } from "@/lib/audio/announcer";
 import type { PhaseRecording, RecordedPhase } from "@/lib/audio/archive";
 import { ANNOUNCEMENTS } from "@/lib/delf/announcements";
+import { countClosingTurns } from "@/lib/delf/early-closing";
 import { PHASE_DURATIONS, MONOLOGUE_MIN_SECONDS } from "@/lib/delf/phases";
 import type { OralTopic } from "@/lib/delf/topics";
 import type { SessionManagerCallbacks } from "./session-manager";
@@ -3195,6 +3196,38 @@ describe("an examiner that says goodbye seven minutes early (#85)", () => {
       );
     });
 
+    it("does not re-count a goodbye off its own stale text when the examiner merely keeps talking", async () => {
+      // The corner past the recovery cap: nothing is sent, so no turn break is
+      // pending, and an examiner that speaks again with no candidate in
+      // between coalesces into the goodbye's own entry. The watch re-reads
+      // the merged text — and the phrase it finds there must be recognised as
+      // the goodbye already counted, not a new one.
+      const h = harness();
+      await intoDebate(h);
+      h.advanceClock(360);
+
+      for (let turn = 0; turn < 3; turn += 1) {
+        h.session().examinerSays("Au revoir.");
+        h.session().finishTurn();
+      }
+      assert.equal(events(h, "examiner-early-closing").length, 3);
+      assert.equal(recoveries(h).length, 2, "the third went unanswered — no break pending");
+
+      // Coalesces into the third goodbye's entry; the merged text still
+      // contains « au revoir », but no NEW goodbye was spoken.
+      h.session().examinerSays(" Très bien, je vous écoute encore.");
+      assert.equal(
+        events(h, "examiner-early-closing").length,
+        3,
+        "stale goodbye text is not counted again",
+      );
+
+      // A repeated goodbye in the same merged entry is new text and still
+      // counts — the guarantee the every-one-on-the-record test above pins.
+      h.session().examinerSays(" Au revoir.");
+      assert.equal(events(h, "examiner-early-closing").length, 4, "a genuine repeat still counts");
+    });
+
     it("leaves the closing sentence the app asked for alone", async () => {
       // The same words, and the difference is who asked: inside a closing
       // handshake this IS the handshake working.
@@ -3208,6 +3241,47 @@ describe("an examiner that says goodbye seven minutes early (#85)", () => {
 
       await completeClosing(h);
       assert.equal(h.controller.getSnapshot().phase, "finished");
+      assert.equal(
+        h.finished[0]?.earlyClosingCount,
+        0,
+        "an ordinary sitting reports no incident (#92)",
+      );
+    });
+
+    it("carries every goodbye out of the tab on the finish payload (#92)", async () => {
+      // The event log below dies with the page; this is the number that does
+      // not. Three goodbyes, of which only two were answered — the count is of
+      // the fault, not of the recovery, so the third is in it.
+      const h = harness();
+      await intoDebate(h);
+      h.advanceClock(360);
+
+      for (let turn = 0; turn < 3; turn += 1) {
+        h.session().examinerSays("Au revoir.");
+        h.session().finishTurn();
+      }
+      assert.equal(recoveries(h).length, 2, "the third goodbye went unanswered");
+
+      // The clock runs out and the app opens the real closing — whose goodbye
+      // must NOT be counted, or every sitting would report an incident.
+      h.advanceClock(PHASE_DURATIONS.debate);
+      await completeClosing(h);
+
+      assert.equal(h.controller.getSnapshot().phase, "finished");
+      assert.equal(h.finished[0]?.earlyClosingCount, 3, "answered or not, all three are counted");
+
+      // The invariant the finish route's clamp leans on: a genuine payload's
+      // transcript backs its count in MAGNITUDE, not just in presence, because
+      // detection ran on these very turns with the same phrase list and each
+      // answered goodbye's recovery directive broke the next one into its own
+      // entry. If this ever fails, the route is shrinking genuine claims.
+      // (An UNANSWERED repeat goodbye — past the recovery cap — can coalesce
+      // into the previous entry and be under-counted; that is the clamp's
+      // documented trade, not a failure of this invariant.)
+      assert.ok(
+        countClosingTurns(h.finished[0].transcript) >= h.finished[0].earlyClosingCount,
+        "the submitted transcript backs the full count",
+      );
     });
   });
 });

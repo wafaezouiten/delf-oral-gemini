@@ -101,6 +101,7 @@ interface ExamRow {
   phase: OralPhase;
   transcript: TranscriptEntry[];
   reconnectCount: number;
+  earlyClosingCount: number;
   startedAt: Date;
   finishedAt: Date | null;
   abandonedAt: Date | null;
@@ -134,6 +135,7 @@ class MemoryStore implements SittingStore {
       phase: "preparation",
       transcript: [],
       reconnectCount: 0,
+      earlyClosingCount: 0,
       startedAt: new Date("2026-08-15T09:30:00Z"),
       finishedAt: null,
       abandonedAt: null,
@@ -176,6 +178,7 @@ class MemoryStore implements SittingStore {
     exam.phase = "finished";
     exam.transcript = claim.transcript;
     exam.reconnectCount = claim.reconnectCount;
+    exam.earlyClosingCount = claim.earlyClosingCount;
     exam.finishedAt = claim.finishedAt;
     return true;
   }
@@ -239,6 +242,7 @@ class MemoryStore implements SittingStore {
       outcome: sittingOutcome({ finishedAt: exam.finishedAt, correction }),
       transcript: exam.transcript,
       reconnectCount: exam.reconnectCount,
+      earlyClosingCount: exam.earlyClosingCount,
       examinerModel: null,
       startedAt: exam.startedAt,
       finishedAt: exam.finishedAt,
@@ -255,6 +259,9 @@ function finishInput(overrides: Partial<Parameters<typeof correctSitting>[2]> = 
   return {
     transcript: [...MONOLOGUE.entries, ...DEBATE.entries],
     reconnectCount: 1,
+    // Distinct from `reconnectCount` on purpose, so the assertion below can
+    // tell a claim that wrote the wrong number into the right column (#92).
+    earlyClosingCount: 2,
     phases: [
       {
         phase: "monologue" as const,
@@ -507,6 +514,7 @@ describe("correcting a sitting", () => {
     assert.equal(sitting.outcome, "corrected");
     assert.deepEqual(sitting.finishedAt, NOW);
     assert.equal(sitting.reconnectCount, 1);
+    assert.equal(sitting.earlyClosingCount, 2, "the examiner's goodbyes survive the tab (#92)");
     assert.deepEqual(sitting.transcript, [...MONOLOGUE.entries, ...DEBATE.entries]);
 
     assert.deepEqual(
@@ -555,6 +563,7 @@ describe("correcting a sitting", () => {
           await store.claimForCorrection(REF, {
             transcript: [],
             reconnectCount: 0,
+            earlyClosingCount: 0,
             finishedAt: NOW,
           });
           await store.writeCorrection(REF, {
@@ -646,6 +655,7 @@ describe("correcting a sitting", () => {
           await store.claimForCorrection(REF, {
             transcript: [],
             reconnectCount: 0,
+            earlyClosingCount: 0,
             finishedAt: NOW,
           });
           await store.writeCorrection(REF, {

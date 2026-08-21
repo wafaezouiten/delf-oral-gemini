@@ -296,6 +296,13 @@ export interface ExamFinishedPayload {
   phases: PhaseReport[];
   reconnectCount: number;
   /**
+   * How many goodbyes the examiner said mid-débat, outside a closing handshake
+   * (#92) — the count behind every `examiner-early-closing` event, carried out
+   * of the tab the way `reconnectCount` is, because the event log itself dies
+   * with the page. Zero on the ordinary sitting.
+   */
+  earlyClosingCount: number;
+  /**
    * DEVELOPMENT ONLY — the seconds typed phases claim to have lasted (#36).
    * Undefined on every real sitting. See `ExamController`'s `devSeconds`.
    */
@@ -761,6 +768,30 @@ export class ExamController {
    */
   private earlyClosingHeard = false;
   private earlyClosingRecoveries = 0;
+  /**
+   * Every goodbye heard, answered or not — where `earlyClosingRecoveries` stops
+   * counting at the recovery cap, this keeps going, because the third goodbye
+   * the app gave up contradicting is still a fact about the sitting (#92).
+   * Never reset: sitting-level, like `reconnectCount`, and it leaves the tab
+   * the same way — on the finish payload, into `oral_exams.early_closing_count`.
+   */
+  private earlyClosingCount = 0;
+  /**
+   * How far into which transcript entry the counted goodbye reaches (#92).
+   *
+   * `earlyClosingHeard` guards re-matching only until the turn boundary clears
+   * it — and a goodbye's entry can GROW past its boundary: beyond the recovery
+   * cap nothing is sent, so no turn break is pending, and an examiner that
+   * simply keeps talking with no candidate in between coalesces into the same
+   * entry. Re-scanning the merged text would then re-count the goodbye already
+   * on the record off text that contains no new one. So the watch matches only
+   * the text that arrived since this mark, and the turn boundary advances the
+   * mark over the whole spoken turn — one turn, one count, however its
+   * fragments landed — while a REPEATED goodbye in the continuation is new
+   * text, still matches, and still counts, which is what #91's every-one-on-
+   * the-record test has always asserted.
+   */
+  private countedGoodbye: { index: number; textLength: number } | null = null;
 
   /**
    * The consigne being spoken, and everything the candidate can do about it (#37).
@@ -1044,7 +1075,11 @@ export class ExamController {
    *
    * The turn accumulated so far is what is matched, not the fragment that just
    * arrived: Gemini splits a sentence wherever it likes, and half a goodbye in
-   * each of two fragments is still a goodbye.
+   * each of two fragments is still a goodbye. Since #92 that accumulation runs
+   * from the last COUNTED goodbye rather than from the top of the entry — a
+   * turn's entry can keep growing past its boundary when nothing was sent to
+   * break it, and re-reading the whole merged text would count the same
+   * goodbye twice off its own stale words (see `countedGoodbye`).
    *
    * Nothing is sent from here. The examiner is still mid-turn, and a directive
    * arriving now would blend into the sentence it is answering — the hazard
@@ -1052,9 +1087,26 @@ export class ExamController {
    */
   private watchForEarlyClosing(): void {
     if (this.phase !== "debate" || this.closing || this.earlyClosingHeard) return;
-    const turn = this.transcript[this.transcript.length - 1];
-    if (!turn || turn.speaker !== "examiner" || !readsAsClosing(turn.text)) return;
+    const index = this.transcript.length - 1;
+    const turn = this.transcript[index];
+    if (!turn || turn.speaker !== "examiner") return;
+    // Only the text that arrived since this entry's counted goodbye, when it
+    // has one — the entry can outlive its turn boundary (see `countedGoodbye`),
+    // and the goodbye before the mark is on the record already. Entries are
+    // append-only and coalescing replaces in place, so the index names the
+    // same logical turn across every re-read.
+    const unscanned =
+      this.countedGoodbye?.index === index
+        ? turn.text.slice(this.countedGoodbye.textLength)
+        : turn.text;
+    if (!readsAsClosing(unscanned)) return;
     this.earlyClosingHeard = true;
+    this.countedGoodbye = { index, textLength: turn.text.length };
+    // Counted at detection, not at the answer: the branch in
+    // `answerEarlyClosing` where the clock ran out first still heard a goodbye
+    // said with time on the clock, and the count is the record of the fault
+    // rather than of the recovery (#92).
+    this.earlyClosingCount += 1;
     // Logged whether or not it will be answered, and with what is left on the
     // clock: a débat where the examiner tried to leave at 6:00 is a fact about
     // the sitting, and one the transcript alone states only by implication.
@@ -1076,6 +1128,16 @@ export class ExamController {
   private answerEarlyClosing(): boolean {
     if (!this.earlyClosingHeard) return false;
     this.earlyClosingHeard = false;
+    // The turn is now wholly spoken, so the mark advances over all of it:
+    // fragments that landed after the counted phrase were part of the same
+    // goodbye, and only text arriving after THIS point can be a new one. The
+    // index check matters — mid-turn candidate speech can have pushed the
+    // goodbye's entry off the end, and a mark advanced over the wrong entry
+    // would swallow real text.
+    const index = this.transcript.length - 1;
+    if (this.countedGoodbye?.index === index) {
+      this.countedGoodbye = { index, textLength: this.transcript[index].text.length };
+    }
     // The clock ran out between the goodbye and this boundary, so the épreuve
     // really is ending and the model was merely early. Nothing to contradict.
     if (this.phase !== "debate" || this.closing) return false;
@@ -2701,6 +2763,7 @@ export class ExamController {
         recorded: Number(report.recordedSeconds.toFixed(2)),
       })),
       reconnects: this.reconnectCount,
+      earlyClosings: this.earlyClosingCount,
     });
 
     // See the top of the method: the voice must not outlive the screen.
@@ -2711,6 +2774,7 @@ export class ExamController {
       recordings,
       phases,
       reconnectCount: this.reconnectCount,
+      earlyClosingCount: this.earlyClosingCount,
       // Only when something was actually typed, so a real sitting sends no such
       // field at all rather than a pair of zeroes the route has to interpret.
       devSeconds:

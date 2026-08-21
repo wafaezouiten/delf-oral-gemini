@@ -15,7 +15,13 @@
  * that arrived, so it is measured HERE, out of the uploaded file, and that is
  * the number the DELF duration penalty is computed from. A client that
  * miscounts, or an upload that truncates, then produces a short recording rather
- * than a long claim.
+ * than a long claim. One deliberate exception since #92: a payload can EXCUSE
+ * the débat from that penalty by reporting the examiner closed the épreuve
+ * early, and the report rests on the client-authored transcript — a forgeable
+ * claim, accepted knowingly because the browser is the only witness this
+ * architecture has and the only mark at stake is the sender's own. The
+ * decision, and what the clamp on it does and does not buy, live on
+ * `resolveEarlyClosingCount`.
  *
  * **What this route no longer does.** Since Phase 8 it does not write anything
  * itself. It reads the request, decides what the correction should be graded
@@ -43,6 +49,7 @@ import { authorizeExam } from "@/lib/auth/exam-guard";
 import type { OralSpeakingPhase } from "@/lib/db";
 import { neonSittingStore } from "@/lib/db/sittings";
 import { correctSitting, type CorrectionRow } from "@/lib/exams/sitting-persistence";
+import { resolveEarlyClosingCount } from "@/lib/delf/early-closing";
 import { PARTICIPATION_WORD_FLOOR } from "@/lib/delf/orale-rubric";
 import { findTopic } from "@/lib/delf/topics";
 import { candidateWordCount } from "@/lib/delf/transcript";
@@ -288,6 +295,22 @@ export async function POST(request: Request, context: { params: Promise<{ examId
   const debateSeconds = devSeconds("debate") ?? measuredSeconds("debate");
 
   /**
+   * The examiner's early goodbyes (#92) — the client's count, clamped to what
+   * the transcript beside it shows. NOT an anti-forgery check: the transcript
+   * arrives in the same request, so the clamp bounds an incoherent or buggy
+   * claim, never a fabricated one — see the header above for why that trust
+   * is accepted, and `resolveEarlyClosingCount` for the whole decision, where
+   * `node --test` can reach it; this route only owes it the payload.
+   *
+   * Resolved ONCE, here, for every consumer downstream — the corrector's
+   * paragraph, the rubric's waiver, the stored column and the note the
+   * results page keys on it — because a count stored as 2 while the penalties
+   * stood would put « n'a pas été retenue contre vous » above a mark it was
+   * retained against.
+   */
+  const earlyClosingCount = resolveEarlyClosingCount(payload.earlyClosingCount, payload.transcript);
+
+  /**
    * Audio-aware grading whenever we actually have a recording; the text path is
    * the fallback for a sitting that produced none.
    *
@@ -310,6 +333,11 @@ export async function POST(request: Request, context: { params: Promise<{ examId
       transcript: payload.transcript,
       monologueSeconds,
       debateSeconds,
+      // The examiner's early goodbyes, as the controller counted them and the
+      // transcript corroborated them — see the derivation above (#92).
+      // Positive, this adds the incident paragraph to the prompt and excuses
+      // the débat from both penalties.
+      earlyClosingCount,
       // Labelled, not just ordered: when only one phase recorded — a microphone
       // denied before the monologue, a headset unplugged mid-débat — the
       // corrector has to be told which task it is listening to, or it assumes
@@ -347,6 +375,10 @@ export async function POST(request: Request, context: { params: Promise<{ examId
       {
         transcript: payload.transcript,
         reconnectCount: payload.reconnectCount,
+        // The corroborated figure, not the raw claim — the stored count is
+        // what the results page keys the « not held against you » note on,
+        // so it must be the number the grading actually honoured.
+        earlyClosingCount,
         phases: payload.phases,
         recordings: recordings.map((recording) => ({
           phase: recording.phase,

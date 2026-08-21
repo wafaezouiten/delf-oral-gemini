@@ -17,7 +17,7 @@ import {
 import { Kicker, Tag } from "@/app/_components/po/tag";
 import { scoreInk } from "@/app/_components/score-band";
 import { cn } from "@/lib/ui/class-names";
-import { correctionNotices } from "@/lib/ui/correction-notices";
+import { correctionNotices, earlyClosingNotice } from "@/lib/ui/correction-notices";
 import {
   CORRECTION_TRANSCRIPT_COPY,
   correctionTranscriptView,
@@ -110,6 +110,14 @@ export interface StoredResult {
   monologueSeconds: number;
   debateSeconds: number;
   reconnectCount: number;
+  /**
+   * How many times the examiner tried to close the épreuve mid-débat (#92).
+   * Optional for the same reason `examinerModel` is: a stash from before the
+   * field existed carries nothing, and a row from before the column reads 0.
+   * Absent or zero, nothing renders — those corrections were graded by a
+   * corrector that was never told, and the note would be false above them.
+   */
+  earlyClosingCount?: number;
   /**
    * The halves whose recording was kept and can be streamed back (#98), with
    * the mime type each was measured to be — the player needs it to ask the
@@ -262,6 +270,15 @@ export function ResultsClient({
    */
   const notices = correctionNotices(evaluation);
 
+  /**
+   * The examiner-fault note (#92) — the one sentence on this page keyed to the
+   * sitting rather than to the correction, because the count lives on
+   * `oral_exams`. It is what keeps `early_closing_count` from repeating
+   * `reconnect_count`'s fate: a column persisted, passed all the way here, and
+   * rendered nowhere.
+   */
+  const earlyClosing = earlyClosingNotice(result.earlyClosingCount);
+
   const phonoNote = evaluation.feedback.phonologieNonEvaluable
     ? "La phonologie n'a pas pu être évaluée de façon fiable sur cette production."
     : undefined;
@@ -364,6 +381,10 @@ export function ResultsClient({
               <p className="text-muted-foreground mt-3 text-xs leading-relaxed">
                 {notices.duration}
               </p>
+            )}
+
+            {earlyClosing && (
+              <p className="text-muted-foreground mt-3 text-xs leading-relaxed">{earlyClosing}</p>
             )}
 
             {!passed && (

@@ -140,6 +140,37 @@ function durationNotice(parts: readonly CorrectionPart[], beforePenalty: number)
  * the absence has to come off first, or a halved sitting's 13-point difference
  * conjures a duration paragraph for a penalty nobody took.
  */
+/**
+ * The examiner's fault, told to the candidate it happened to (#92).
+ *
+ * A standalone export rather than a third field on {@link CorrectionNotices},
+ * because it is not a fact about the correction's arithmetic: the count lives
+ * on the sitting (`oral_exams.early_closing_count`), not on the evaluation, and
+ * the page has it whether or not either penalty fired.
+ *
+ * Zero returns null — and so do the two states that read as zero: a stash from
+ * before the field existed, and a row from before the column. Both are honest
+ * silences: those corrections were graded by a corrector that was never told,
+ * with the penalties standing, and this sentence would be false above them.
+ *
+ * What the sentence commits to is chosen to be true on every sitting it renders
+ * over: the corrector WAS told (the paragraph and the count>0 gate share a
+ * deploy), and the débat's shortfall was not charged (the waiver keys on the
+ * same count). It deliberately does not say "no penalty was applied" — the
+ * monologue's penalties still stand, and a candidate docked for a ninety-second
+ * monologue must not read a sentence that says otherwise.
+ */
+export function earlyClosingNotice(earlyClosingCount: number | undefined): string | null {
+  if (!earlyClosingCount || earlyClosingCount <= 0) return null;
+
+  return (
+    `Pendant le débat, l'examinateur a annoncé à tort la fin de l'épreuve avant la fin ` +
+    `du temps imparti. Cette erreur de l'examinateur n'a pas été retenue contre vous${NBSP}: ` +
+    `le correcteur a reçu pour consigne de ne pas en tenir compte, et un débat écourté ` +
+    `par cette annonce n'a entraîné aucune pénalité.`
+  );
+}
+
 export function correctionNotices(scores: CorrectionScores): CorrectionNotices {
   const absencePenalty = scores.absencePenalty ?? 0;
 

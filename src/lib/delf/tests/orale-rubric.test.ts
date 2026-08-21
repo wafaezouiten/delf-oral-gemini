@@ -176,14 +176,18 @@ test("exactly at a floor is not short", () => {
 // ------------------------------------------------------------ the whole rule
 
 /**
- * A candidate who was present in both parts, in words.
+ * A candidate who was present in both parts, in words — and an examiner who
+ * behaved.
  *
  * Spread into every `scoreSitting` case that is about something else, because
  * participation is now a precondition of the ordinary scoring path: without it
  * every one of these fixtures would silently become a walk-out and be halved,
  * and the tests would still pass while measuring the wrong rule.
+ * `examinerClosedEarly: false` rides along for the mirrored reason: true would
+ * silently excuse the débat from both penalties (#92), and the walk-out cases
+ * below would measure the waiver instead of the charge.
  */
-const SPOKE = { monologueWords: 400, debateWords: 300 };
+const SPOKE = { monologueWords: 400, debateWords: 300, examinerClosedEarly: false };
 
 const bands = (value: number) =>
   Object.fromEntries(ORAL_CRITERIA.map((criterion) => [criterion, value])) as Record<
@@ -391,6 +395,7 @@ test("walking out of the débat halves the mark", () => {
     monologueWords: 400,
     debateWords: 0,
     phonologyHeard: true,
+    examinerClosedEarly: false,
   });
 
   assert.equal(scored.rawScore25, 25);
@@ -409,6 +414,7 @@ test("the halving is proportional, so a weak walk-out is not spared", () => {
       monologueWords: 400,
       debateWords: 0,
       phonologyHeard: true,
+      examinerClosedEarly: false,
     });
 
   assert.equal(halved(3).rawScore25, 15);
@@ -429,6 +435,7 @@ test("an absent part is not also docked for being short", () => {
     monologueWords: 400,
     debateWords: 0,
     phonologyHeard: true,
+    examinerClosedEarly: false,
   });
 
   assert.equal(scored.durationPenalty, 0);
@@ -445,6 +452,7 @@ test("the other part is still docked for being short", () => {
     monologueWords: 120,
     debateWords: 0,
     phonologyHeard: true,
+    examinerClosedEarly: false,
   });
 
   assert.equal(scored.absencePenalty, 13);
@@ -464,6 +472,7 @@ test("halving happens before the duration penalty, not after", () => {
     monologueWords: 120,
     debateWords: 0,
     phonologyHeard: true,
+    examinerClosedEarly: false,
   });
 
   assert.equal(scored.score25, 9);
@@ -498,6 +507,122 @@ test("the halving fires once, even when neither part happened", () => {
   assert.equal(penalty, 13);
 });
 
+// ------------------------------------- a débat the examiner ended early (#92)
+
+test("a débat the examiner closed is not halved as a walk-out", () => {
+  // The case the waiver exists for: a full monologue, an examiner that said
+  // « vous pouvez quitter la salle » mid-débat, and a candidate who obeyed.
+  // Without the flag this is the 12/25 walk-out above; with it the silence in
+  // the débat is the examiner's to answer for.
+  const scored = scoreSitting(bands(5), {
+    monologueSeconds: 400,
+    debateSeconds: 0,
+    monologueWords: 400,
+    debateWords: 0,
+    phonologyHeard: true,
+    examinerClosedEarly: true,
+  });
+
+  assert.equal(scored.absencePenalty, 0);
+  assert.deepEqual(scored.absentParts, []);
+  assert.deepEqual(scored.excusedParts, ["debate"]);
+  assert.equal(scored.score25, 25);
+});
+
+test("a débat the examiner cut short is not docked the −3 either", () => {
+  // Both rules point at the débat, and the waiver has to silence both: excusing
+  // the halving and then charging the dock would price the examiner's fault at
+  // exactly the penalty the issue says the candidate must not pay.
+  const scored = scoreSitting(bands(5), {
+    monologueSeconds: 400,
+    debateSeconds: 240,
+    monologueWords: 400,
+    debateWords: 180,
+    phonologyHeard: true,
+    examinerClosedEarly: true,
+  });
+
+  assert.equal(scored.durationPenalty, 0);
+  assert.deepEqual(scored.shortParts, []);
+  assert.deepEqual(scored.excusedParts, ["debate"]);
+  assert.equal(scored.score25, 25);
+});
+
+test("the monologue's penalties are untouched by the examiner's goodbye", () => {
+  // The goodbye is only ever heard mid-débat, after the monologue is over —
+  // whatever the examiner did later, a ninety-second monologue was the
+  // candidate's own shortfall and is still docked.
+  const scored = scoreSitting(bands(5), {
+    monologueSeconds: 90,
+    debateSeconds: 0,
+    monologueWords: 120,
+    debateWords: 0,
+    phonologyHeard: true,
+    examinerClosedEarly: true,
+  });
+
+  assert.equal(scored.absencePenalty, 0, "the absent débat is excused");
+  assert.equal(scored.durationPenalty, 3, "the short monologue is not");
+  assert.deepEqual(scored.shortParts, ["monologue"]);
+  assert.deepEqual(scored.excusedParts, ["debate"]);
+  assert.equal(scored.score25, 22);
+});
+
+test("an absent monologue is still halved when only the débat is excused", () => {
+  // The waiver names one part; it must not become a general amnesty. A
+  // candidate who sat silent through the monologue and was then dismissed from
+  // the débat is still halved for the half that was theirs to produce.
+  const scored = scoreSitting(bands(5), {
+    monologueSeconds: 0,
+    debateSeconds: 0,
+    monologueWords: 0,
+    debateWords: 0,
+    phonologyHeard: true,
+    examinerClosedEarly: true,
+  });
+
+  assert.equal(scored.absencePenalty, 13);
+  assert.deepEqual(scored.absentParts, ["monologue"]);
+  assert.deepEqual(scored.excusedParts, ["debate"]);
+});
+
+test("a recovered sitting reports no waiver, because nothing needed one", () => {
+  // The examiner said goodbye, was contradicted, and the candidate talked the
+  // débat to its full length. No rule had anything to charge, so nothing was
+  // excused — `excusedParts` explains a penalty that did not fire, and a full
+  // sitting labelled with one would be an explanation of nothing.
+  const scored = scoreSitting(bands(5), {
+    monologueSeconds: 400,
+    debateSeconds: 700,
+    monologueWords: 400,
+    debateWords: 300,
+    phonologyHeard: true,
+    examinerClosedEarly: true,
+  });
+
+  assert.equal(scored.absencePenalty, 0);
+  assert.equal(scored.durationPenalty, 0);
+  assert.deepEqual(scored.excusedParts, []);
+  assert.equal(scored.score25, 25);
+});
+
+test("the excused débat never appears in absentParts or shortParts", () => {
+  // The arrays explain charges. A part listed beside a penalty of 0 would send
+  // the results page hunting for points nobody took — which is exactly the
+  // corner `applyAbsentPartPenalty`'s `excused` filter exists to close.
+  const excusedAbsent = applyAbsentPartPenalty(25, { monologueWords: 400, debateWords: 0 }, [
+    "debate",
+  ]);
+  assert.deepEqual(excusedAbsent, { score25: 25, penalty: 0, absentParts: [] });
+
+  const excusedShort = applySittingDurationPenalty(
+    25,
+    { monologueSeconds: 400, debateSeconds: 60 },
+    ["debate"],
+  );
+  assert.deepEqual(excusedShort, { score25: 25, penalty: 0, shortParts: [] });
+});
+
 test("the two penalties always reconstruct the score, as the CHECK constraint asserts", () => {
   // `evaluations_score_25_check` is `score_25 = greatest(raw − absence −
   // duration, 0)`. It is written as a sum, while `scoreSitting` applies the two
@@ -505,19 +630,23 @@ test("the two penalties always reconstruct the score, as the CHECK constraint as
   for (const band of [0, 1, 3, 5] as const) {
     for (const debateWords of [0, 300]) {
       for (const monologueSeconds of [90, 400]) {
-        const scored = scoreSitting(bands(band), {
-          monologueSeconds,
-          debateSeconds: debateWords === 0 ? 0 : 700,
-          monologueWords: 400,
-          debateWords,
-          phonologyHeard: true,
-        });
+        for (const examinerClosedEarly of [false, true]) {
+          const scored = scoreSitting(bands(band), {
+            monologueSeconds,
+            debateSeconds: debateWords === 0 ? 0 : 700,
+            monologueWords: 400,
+            debateWords,
+            phonologyHeard: true,
+            examinerClosedEarly,
+          });
 
-        assert.equal(
-          scored.score25,
-          Math.max(scored.rawScore25 - scored.absencePenalty - scored.durationPenalty, 0),
-          `band ${band}, débat ${debateWords} words, monologue ${monologueSeconds}s`,
-        );
+          assert.equal(
+            scored.score25,
+            Math.max(scored.rawScore25 - scored.absencePenalty - scored.durationPenalty, 0),
+            `band ${band}, débat ${debateWords} words, monologue ${monologueSeconds}s, ` +
+              `examiner ${examinerClosedEarly ? "closed early" : "behaved"}`,
+          );
+        }
       }
     }
   }
