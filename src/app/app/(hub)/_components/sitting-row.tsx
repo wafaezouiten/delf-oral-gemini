@@ -78,9 +78,12 @@ export function SittingRow({
         {/* The kept recordings, one player per half (#98). Only what exists:
             a sitting from before the vault, a text-mode sitting or a walk-out
             has an empty list and keeps the row it always had — no dead
-            controls, no sentence about what is missing in a list this long. */}
+            controls, no sentence about what is missing in a list this long.
+            Stacked rather than side by side: the card carries a full set of
+            transport controls plus « Supprimer », and two abreast would fold
+            into a clutter at exactly the width the historique is read at. */}
         {detailed && sitting.playable.length > 0 && (
-          <div className="no-print mt-2.5 grid max-w-xl gap-x-4 gap-y-2 sm:grid-cols-2">
+          <div className="no-print mt-2.5 flex max-w-xl flex-col gap-2.5">
             {sitting.playable.map((recording) => (
               <div key={recording.phase} className="min-w-0">
                 <p className="text-muted-foreground text-[0.625rem] font-semibold tracking-[0.08em] uppercase">
@@ -88,8 +91,10 @@ export function SittingRow({
                 </p>
                 <RecordingPlayer
                   src={`/api/exams/${sitting.examId}/recordings/${recording.phase}`}
+                  deleteHref={`/api/exams/${sitting.examId}/recordings/${recording.phase}`}
                   mimeType={recording.mimeType}
-                  className="mt-1 h-8 w-full"
+                  durationSeconds={recording.durationSeconds}
+                  className="mt-1"
                 />
               </div>
             ))}

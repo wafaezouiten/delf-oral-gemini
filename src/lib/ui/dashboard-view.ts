@@ -107,7 +107,7 @@ export interface DashboardSitting {
    * sittings, on sittings from before the vault existed, and on deployments
    * without one, all of which render exactly as they did before #98.
    */
-  playable: Array<{ phase: "monologue" | "debate"; mimeType: string }>;
+  playable: Array<{ phase: "monologue" | "debate"; mimeType: string; durationSeconds: number }>;
 }
 
 /** The zero an abandoned sitting scores, on every criterion. */

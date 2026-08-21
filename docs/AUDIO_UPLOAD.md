@@ -170,8 +170,12 @@ The rules, and where each is enforced:
   exactly as before #98: graded sittings, disposed rows, no players.
 - **Retention is "until the row says otherwise".** No expiry window. « Repartir
   de zéro » archives and deletes nothing (#69), so archived corrections keep
-  playing. Any future purge speaks through `deleted_at`, which playback obeys
-  before it trusts a `uri`.
+  playing. The one purge that exists is the candidate's own: the player's
+  « Supprimer » (`DELETE` on the same route, after an inline confirmation)
+  stamps `deleted_at` first and clears the store second — playback obeys the
+  stamp before it trusts a `uri`, so a crash between the two errs towards an
+  unreachable orphan, never a playable row the candidate was told was gone.
+  The row keeps its duration and size: the voice goes, the record stays.
 - **Playback format is the upload format.** Ogg Opus plays in Chrome, Firefox
   and Edge; Safari's support is unverified on the real files, so the player
   asks `canPlayType` first and says so instead of erroring

@@ -14,9 +14,11 @@
  * That promise now covers bytes as well as rows (#98): the recordings a sitting
  * kept in the vault stay kept, and playback on an archived correction keeps
  * working, because the archive hides a record rather than shortening it. The
- * candidate whose reset should also silence their old voice is asking for a
- * deletion this product does not yet offer — that is a per-recording delete
- * speaking through `oral_recordings.deleted_at`, not a different reset.
+ * candidate who wants an old voice silenced has that as its own verb — the
+ * player's « Supprimer », one recording at a time, speaking through
+ * `oral_recordings.deleted_at` (`DELETE /api/exams/:id/recordings/:phase`) —
+ * and it is deliberately not folded into this reset: starting over and
+ * erasing a voice are different decisions, differently irreversible.
  *
  * Two ways this differs from the sitting routes next door:
  *

@@ -31,7 +31,7 @@ import { NextResponse } from "next/server";
 
 import { EXAM_ACCESS_DENIALS } from "@/lib/auth/exam-access";
 import { authorizeExam } from "@/lib/auth/exam-guard";
-import { findRecording } from "@/lib/db/sittings";
+import { disposeRecording, findRecording } from "@/lib/db/sittings";
 import { decidePlayback, parseRecordedPhase } from "@/lib/exams/recording-playback";
 import { isRecordingVaultConfigured, recordingVault } from "@/lib/storage/recording-vault";
 
@@ -135,4 +135,81 @@ export async function GET(
       "Content-Disposition": "inline",
     },
   });
+}
+
+/**
+ * DELETE — the candidate removes one of their own recordings, for good (#98).
+ *
+ * « Supprimer » on the player card, after an inline confirmation. The order
+ * inside is the one `decidePlayback` already trusts: the row is stamped first
+ * (`disposeRecording`), the store is cleared second, so a crash between the
+ * two leaves an unreachable orphan rather than a playable row pointing at
+ * bytes the candidate was told were gone. Clearing the store is best-effort
+ * for the same reason — once the row says deleted, the deletion has happened;
+ * a failed `del` costs storage, never truth.
+ *
+ * Only the voice is deleted. The row keeps its duration, its size and its
+ * stamp — the honest record every disposed recording has had since Phase 6 —
+ * and the correction it fed is untouched: the grade was computed when the
+ * bytes existed, and deleting the artefact afterwards does not un-hear it.
+ *
+ * 404 for "nothing to delete" covers a phase that never recorded, bytes
+ * already gone, and a repeated press — the candidate asked for an absence,
+ * and an absence is what there is.
+ */
+export async function DELETE(
+  _request: Request,
+  context: { params: Promise<{ examId: string; phase: string }> },
+) {
+  const { examId, phase: phaseSegment } = await context.params;
+
+  const access = await authorizeExam(examId);
+  if (access.status === "denied") {
+    const { status, error } = EXAM_ACCESS_DENIALS[access.reason];
+    return NextResponse.json({ error }, { status });
+  }
+
+  const phase = parseRecordedPhase(phaseSegment);
+  if (!phase) {
+    return NextResponse.json({ error: "Enregistrement inconnu" }, { status: 404 });
+  }
+
+  if (access.status !== "owned") {
+    return NextResponse.json({ error: "Enregistrement introuvable" }, { status: 404 });
+  }
+
+  let disposed: { uri: string } | null;
+  try {
+    disposed = await disposeRecording(
+      { examId: access.examId, userId: access.userId },
+      phase,
+      new Date(),
+    );
+  } catch (error) {
+    // Nothing was stamped, so nothing is claimed: the recording is still
+    // there, and the card must keep saying so.
+    console.error("[recordings] could not dispose recording", access.examId, phase, error);
+    return NextResponse.json(
+      { error: "La suppression a échoué. Réessayez dans un instant." },
+      { status: 503 },
+    );
+  }
+
+  if (!disposed) {
+    return NextResponse.json({ error: "Enregistrement introuvable" }, { status: 404 });
+  }
+
+  // The row already says deleted; this is housekeeping, not the deletion.
+  await recordingVault()
+    ?.discard(disposed.uri)
+    .catch((error: unknown) => {
+      console.error(
+        "[recordings] row stamped but the store still holds the bytes",
+        access.examId,
+        phase,
+        error,
+      );
+    });
+
+  return NextResponse.json({ deleted: true });
 }

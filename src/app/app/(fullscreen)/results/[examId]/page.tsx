@@ -73,7 +73,13 @@ export default async function ResultsPage({ params }: PageProps<"/app/results/[e
   // which is the honest sentence for a recording that existed and is gone.
   const playable = sitting.recordings
     .filter((row) => row.uri !== null && row.deletedAt === null)
-    .map((row) => ({ phase: row.phase, mimeType: row.mimeType }));
+    .map((row) => ({
+      phase: row.phase,
+      mimeType: row.mimeType,
+      // From the row, so the player can print « 0:00 / 1:38 » before a single
+      // byte has moved — its file stays unfetched until play is pressed.
+      durationSeconds: row.durationSeconds,
+    }));
 
   const initial: StoredResult = {
     evaluation: {

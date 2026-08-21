@@ -98,9 +98,15 @@ const playableByExam = (userId: string) =>
   getDb()
     .select({
       examId: oralRecordings.examId,
-      playable: sql<Array<{ phase: "monologue" | "debate"; mimeType: string }>>`
+      playable: sql<
+        Array<{ phase: "monologue" | "debate"; mimeType: string; durationSeconds: number }>
+      >`
         json_agg(
-          json_build_object('phase', ${oralRecordings.phase}, 'mimeType', ${oralRecordings.mimeType})
+          json_build_object(
+            'phase', ${oralRecordings.phase},
+            'mimeType', ${oralRecordings.mimeType},
+            'durationSeconds', coalesce(${oralRecordings.durationSeconds}, 0)
+          )
           order by ${oralRecordings.phase}
         )
       `.as("playable"),

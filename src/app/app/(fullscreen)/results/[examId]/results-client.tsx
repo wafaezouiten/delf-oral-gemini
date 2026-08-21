@@ -121,7 +121,7 @@ export interface StoredResult {
    * playback belongs to the server-read path alone. Absent or empty, the
    * correction renders exactly as it did before #98.
    */
-  playable?: Array<{ phase: "monologue" | "debate"; mimeType: string }>;
+  playable?: Array<{ phase: "monologue" | "debate"; mimeType: string; durationSeconds: number }>;
 }
 
 /**
@@ -520,7 +520,7 @@ function TranscriptColumn({
   monologueSeconds: number;
   debateSeconds: number;
   examId: string;
-  playable: ReadonlyArray<{ phase: "monologue" | "debate"; mimeType: string }>;
+  playable: ReadonlyArray<{ phase: "monologue" | "debate"; mimeType: string; durationSeconds: number }>;
 }) {
   const { sections, silentNotice } = correctionTranscriptView(transcript, {
     monologueSeconds,
@@ -571,8 +571,10 @@ function TranscriptColumn({
                   <RecordingPlayer
                     key={recording.phase}
                     src={`/api/exams/${examId}/recordings/${section.phase}`}
+                    deleteHref={`/api/exams/${examId}/recordings/${section.phase}`}
                     mimeType={recording.mimeType}
-                    className="mt-3 h-9 w-full"
+                    durationSeconds={recording.durationSeconds}
+                    className="mt-3"
                   />
                 ))}
 
