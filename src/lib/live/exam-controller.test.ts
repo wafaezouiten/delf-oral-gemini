@@ -1489,6 +1489,33 @@ describe("recording the candidate", () => {
       );
     });
 
+    it("stays typed through a restart — the typed turn does too", async () => {
+      // Deliberate, not an oversight: `restartMonologue` rewinds the clock, but
+      // it removes neither the typed turn from the transcript nor the claimed
+      // seconds — so a phase that was typed into and then restarted and spoken
+      // is still a phase whose content is partly typed, and its recording goes
+      // the way every typed phase's does. Clearing the mark on restart while
+      // the typed words stayed in the transcript would re-open exactly the
+      // mixed-input coin flip #51 closed, one restart deep.
+      const h = harness();
+      await intoMonologue(h);
+      h.controller.setDevTextMode(true);
+      h.controller.injectCandidateSpeech("Un fragment tapé.", 60);
+      h.controller.setDevTextMode(false);
+
+      h.controller.restartMonologue();
+      h.advanceClock(120);
+      assert.equal(h.recorder.measuredSeconds("monologue"), 120, "the restart was spoken");
+
+      await runToFinish(h, () => {});
+
+      assert.deepEqual(h.recorder.droppedPhases, ["monologue"]);
+      assert.deepEqual(
+        h.finished[0]?.recordings.map((recording) => recording.phase),
+        ["debate"],
+      );
+    });
+
     it("never drops anything on a sitting where nothing was typed", async () => {
       // The guard the whole feature stands behind: a real spoken sitting's
       // artefacts are untouched, both of them.
