@@ -45,6 +45,13 @@ export interface CorrectionWaitOptions {
   limitMs?: number;
   /** Injectable so the tests do not actually wait. */
   sleep?: (ms: number) => Promise<void>;
+  /**
+   * Answering true ends the wait with `"cancelled"` — the screen that started
+   * it is gone. Checked before every poll, so a candidate who navigated away
+   * mid-wait does not leave a loop hammering the status route for five more
+   * minutes on behalf of nobody.
+   */
+  cancelled?: () => boolean;
 }
 
 const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
@@ -60,17 +67,21 @@ const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, 
 export async function waitForCorrection(
   isCorrected: () => Promise<boolean>,
   options: CorrectionWaitOptions = {},
-): Promise<"corrected" | "timed-out"> {
+): Promise<"corrected" | "timed-out" | "cancelled"> {
   const pollMs = options.pollMs ?? CORRECTION_POLL_MS;
   const limitMs = options.limitMs ?? CORRECTION_WAIT_LIMIT_MS;
   const sleep = options.sleep ?? wait;
 
   for (let waited = 0; waited < limitMs; waited += pollMs) {
     await sleep(pollMs);
+    // After the sleep as well as implicitly before the next one: the common
+    // cancellation arrives mid-sleep, and a dead screen's wait must neither
+    // fire one more request nor report anything to the nobody watching it.
+    if (options.cancelled?.()) return "cancelled";
     const corrected = await isCorrected().catch(() => false);
     if (corrected) return "corrected";
   }
-  return "timed-out";
+  return options.cancelled?.() ? "cancelled" : "timed-out";
 }
 
 /** One status poll: the route's boolean, or a throw the loop reads as "not

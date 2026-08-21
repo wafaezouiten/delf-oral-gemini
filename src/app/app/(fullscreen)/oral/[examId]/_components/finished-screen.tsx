@@ -120,6 +120,18 @@ export function FinishedScreen({
 
         {announcement}
 
+        {/* The awaiting sentence says the tab is disposable; this is the
+            sentence made actionable (#86). Leaving unmounts the screen, which
+            cancels the poll — the correction finishes on the server either
+            way, and the historique is where the sentence promised it. */}
+        {stage.kind === "awaiting" && !submitError && (
+          <div className="flex justify-center">
+            <button type="button" onClick={onLeave} className={secondaryButton}>
+              Revenir au tableau de bord
+            </button>
+          </div>
+        )}
+
         {droppedPhases.length > 0 && (
           <Notice tone="warning" title="Un enregistrement n'a pas pu être envoyé">
             {droppedPhases.length === 2

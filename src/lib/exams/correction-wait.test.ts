@@ -70,6 +70,48 @@ describe("waiting for the correction to land", () => {
     assert.equal(polls, 5);
   });
 
+  it("stops the moment the screen that asked is gone, without one more request", async () => {
+    // The candidate took the awaiting sentence at its word and left. The wait
+    // must end silently — no further polls fired on behalf of nobody, and the
+    // caller told it was cancellation rather than a timeout to announce.
+    let polls = 0;
+    let sleeps = 0;
+    let gone = false;
+    const outcome = await waitForCorrection(
+      async () => {
+        polls += 1;
+        return false;
+      },
+      {
+        pollMs: 1000,
+        limitMs: 60_000,
+        sleep: async () => {
+          sleeps += 1;
+          if (sleeps === 3) gone = true;
+        },
+        cancelled: () => gone,
+      },
+    );
+
+    assert.equal(outcome, "cancelled");
+    assert.equal(polls, 2, "the poll the cancellation preceded was never fired");
+  });
+
+  it("reports a cancellation that lands at the limit as cancelled, not timed out", async () => {
+    // The two exits can coincide; the screen being gone is the one that says
+    // what actually happened, and a timeout would imply a failure notice
+    // nobody is there to read.
+    let gone = false;
+    const outcome = await waitForCorrection(async () => false, {
+      pollMs: 1000,
+      limitMs: 1_000,
+      sleep: async () => void (gone = true),
+      cancelled: () => gone,
+    });
+
+    assert.equal(outcome, "cancelled");
+  });
+
   it("waits past the finish route's own budget before giving up", () => {
     // `maxDuration` is 300 s and the grading runs inside it, behind the
     // response. A limit under that would declare corrections dead while their

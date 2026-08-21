@@ -39,6 +39,15 @@
  * realistic duplicate — a refreshed tab, a retried request, a candidate pressing
  * the button twice — costs a paid model call at worst and produces exactly one
  * correction, which is the case this phase is asked to handle.
+ *
+ * #86 MOVED that window; it did not close or widen it. The grading now runs
+ * after the claim, so two finishes racing can both reach `accepted` and both
+ * pay for a model call behind their responses — where before, a racer that
+ * lost the claim never graded at all. The failure in kind is unchanged (the
+ * same instant race could always produce a duplicate row, and one correction
+ * is returned either way); what moved is the cost, from one model call in the
+ * race case to two — which is the price the realistic duplicate was already
+ * priced at above.
  */
 
 import type { OralCriterion } from "@/lib/delf/criteria";

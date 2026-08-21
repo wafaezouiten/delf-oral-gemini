@@ -98,6 +98,21 @@ export function ExamClient({
    * poll below waits for the correction to land.
    */
   const [awaitingCorrection, setAwaitingCorrection] = useState(false);
+  /**
+   * Whether this screen still exists — the poll's cancellation signal (#86).
+   * `waitForCorrection` can run for five minutes, and a candidate who left —
+   * the back button, the way-out button below — must not leave behind a loop
+   * hammering the status route and setting state on an unmounted component.
+   * Same pattern as `isOpusEncodingSupported`'s `live` guard, held in a ref
+   * because the poll starts from a callback rather than an effect.
+   */
+  const liveRef = useRef(true);
+  useEffect(() => {
+    liveRef.current = true;
+    return () => {
+      liveRef.current = false;
+    };
+  }, []);
   const submittedRef = useRef(false);
 
   /**
@@ -290,7 +305,13 @@ export function ExamClient({
          */
         if (body.evaluation === undefined) {
           setAwaitingCorrection(true);
-          const outcome = await waitForCorrection(() => fetchCorrectionStatus(examId));
+          const outcome = await waitForCorrection(() => fetchCorrectionStatus(examId), {
+            cancelled: () => !liveRef.current,
+          });
+          // The screen is gone — the candidate took the sentence at its word
+          // and left. Nothing to set, nobody to navigate; the correction
+          // finishes on the server and the historique will have it.
+          if (outcome === "cancelled") return;
           if (outcome === "corrected") {
             router.push(`/app/results/${examId}`);
             return;
