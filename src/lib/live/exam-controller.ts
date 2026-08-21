@@ -2068,7 +2068,11 @@ export class ExamController {
    * rewound: a typed turn stays in the transcript, its claimed seconds stay
    * counted, and the `typedPhases` mark stays with them — so a phase typed
    * into, restarted, and then spoken in full still drops its recording at the
-   * boundary. The mark follows the content, and the content survived.
+   * boundary. The mark follows the content, and the content survived — not as
+   * a policy that could have gone the other way, but because nothing can
+   * un-write a typed turn: `addFragment` only appends, so "typed a fragment,
+   * deleted it, spoke the rest" is not a state this controller can reach, and
+   * a mark that outlives its content cannot happen either.
    */
   restartMonologue(): void {
     if (this.phase !== "monologue" || this.closing) return;
