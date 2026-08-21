@@ -111,10 +111,7 @@ export const MIN_VOICED_SECONDS = 5;
  * stranding a candidate who cannot reach the débat *or* the end of the épreuve,
  * which is worse than the accident it prevents.
  */
-export function monologueWasSilent(
-  capturedSeconds: number,
-  voicedSeconds: number,
-): boolean {
+export function monologueWasSilent(capturedSeconds: number, voicedSeconds: number): boolean {
   if (!(capturedSeconds > 0)) return false;
   return voicedSeconds < MIN_VOICED_SECONDS;
 }

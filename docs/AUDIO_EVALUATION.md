@@ -78,9 +78,9 @@ The table below is to be filled in from a real run. Nothing should be claimed
 about Gemini's DELF scoring reliability until it is — a plausible-sounding
 justification is not evidence that the band is right.
 
-| Sample | Phonologie (text) | Phonologie (audio) | Other criteria moved? |
-| --- | --- | --- | --- |
-| _to be filled_ | | | |
+| Sample         | Phonologie (text) | Phonologie (audio) | Other criteria moved? |
+| -------------- | ----------------- | ------------------ | --------------------- |
+| _to be filled_ |                   |                    |                       |
 
 ### Interpreting it honestly
 
@@ -89,4 +89,4 @@ produce more varied scores by being more random. Before concluding that audio
 helps, read the justifications and check they describe something you can actually
 hear in the recording. If the audio justification is generic ("la prononciation
 est globalement claire") while the text one cited specific hesitations, the audio
-run is *worse* despite a wider spread.
+run is _worse_ despite a wider spread.

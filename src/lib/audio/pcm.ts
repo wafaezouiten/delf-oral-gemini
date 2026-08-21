@@ -162,8 +162,12 @@ export function readWavFormat(bytes: ArrayBuffer): WavFormat | null {
 
   if (ascii(0, 4) !== "RIFF" || ascii(8, 4) !== "WAVE") return null;
 
-  let format: { sampleRate: number; channels: number; bitsPerSample: number; byteRate: number } | null =
-    null;
+  let format: {
+    sampleRate: number;
+    channels: number;
+    bitsPerSample: number;
+    byteRate: number;
+  } | null = null;
   let dataBytes: number | null = null;
 
   let offset = 12;
@@ -218,9 +222,7 @@ export function readWavFormat(bytes: ArrayBuffer): WavFormat | null {
  * wrote, and measuring it would be answering a question that was not asked.
  */
 export function checkWavFormat(format: WavFormat, sampleRate: number): boolean {
-  return (
-    format.sampleRate === sampleRate && format.channels === 1 && format.bitsPerSample === 16
-  );
+  return format.sampleRate === sampleRate && format.channels === 1 && format.bitsPerSample === 16;
 }
 
 /** The measured length of a WAV, or null if it cannot be measured. See

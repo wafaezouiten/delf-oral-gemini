@@ -139,13 +139,7 @@ export function ConversationScene({
  * The ring is the reference's `motion.span` as a CSS class — see `.po-ring` in
  * globals.css for why that swap is deliberate rather than a shortcut.
  */
-function SpeakerFace({
-  active,
-  tone,
-}: {
-  active: boolean;
-  tone: "examiner" | "candidate";
-}) {
+function SpeakerFace({ active, tone }: { active: boolean; tone: "examiner" | "candidate" }) {
   return (
     <span className="relative size-11 shrink-0 sm:size-[2.875rem]" aria-hidden>
       {active && (

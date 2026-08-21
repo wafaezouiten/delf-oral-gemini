@@ -29,8 +29,8 @@ export default function NotFound() {
         </p>
         <h1 className="font-serif text-2xl font-semibold">Page introuvable</h1>
         <p className="text-muted-foreground text-sm leading-relaxed">
-          Cette page n&apos;existe pas, ou l&apos;épreuve que vous cherchez
-          n&apos;est pas accessible depuis ce compte.
+          Cette page n&apos;existe pas, ou l&apos;épreuve que vous cherchez n&apos;est pas
+          accessible depuis ce compte.
         </p>
       </div>
       <div className="flex justify-center">

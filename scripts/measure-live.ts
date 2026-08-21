@@ -63,7 +63,7 @@ const apiKey = process.env.GEMINI_API_KEY;
 if (!apiKey) throw new Error("GEMINI_API_KEY is not set");
 
 /** A full B2 sitting, for the extrapolation: 7 min monologue + 13 min débat. */
-const SITTING_SECONDS = (420 + 780);
+const SITTING_SECONDS = 420 + 780;
 
 /**
  * Candidate turns, written to be answerable and to keep the examiner arguing.
@@ -316,7 +316,9 @@ async function main() {
   );
   const script = CANDIDATE_TURNS.slice(0, Math.min(turnsWanted, CANDIDATE_TURNS.length));
 
-  console.log(`\nMeasuring a Gemini Live débat: ${script.length} candidate turns on "${TOPIC.slug}"\n`);
+  console.log(
+    `\nMeasuring a Gemini Live débat: ${script.length} candidate turns on "${TOPIC.slug}"\n`,
+  );
 
   const liveConfig = debateConfig({ topic: TOPIC });
   const live = await connect(liveConfig);

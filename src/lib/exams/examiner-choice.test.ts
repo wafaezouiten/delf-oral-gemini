@@ -5,12 +5,13 @@ import { requestExaminerChoice } from "./examiner-choice";
 
 /** A `fetch` that answers with a given status and body. */
 function fakeFetch(status: number, body: unknown) {
-  return mock.fn(async () =>
-    ({
-      ok: status >= 200 && status < 300,
-      status,
-      json: async () => body,
-    }) as unknown as Response,
+  return mock.fn(
+    async () =>
+      ({
+        ok: status >= 200 && status < 300,
+        status,
+        json: async () => body,
+      }) as unknown as Response,
   );
 }
 
@@ -82,14 +83,15 @@ describe("requesting an examiner choice", () => {
 
   it("survives a body that is not JSON at all", async () => {
     // A platform error is an HTML page, not this route's JSON.
-    const fetchImpl = mock.fn(async () =>
-      ({
-        ok: true,
-        status: 200,
-        json: async () => {
-          throw new SyntaxError("Unexpected token <");
-        },
-      }) as unknown as Response,
+    const fetchImpl = mock.fn(
+      async () =>
+        ({
+          ok: true,
+          status: 200,
+          json: async () => {
+            throw new SyntaxError("Unexpected token <");
+          },
+        }) as unknown as Response,
     );
     const outcome = await requestExaminerChoice("12", MODEL, fetchImpl as unknown as typeof fetch);
     assert.equal(outcome.applied, false);

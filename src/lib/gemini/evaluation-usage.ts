@@ -55,9 +55,7 @@ export function readEvaluationUsage(
   // `promptTokensDetails` breaks the prompt down by modality; the audio slice is
   // the entire cost difference between the two evaluation modes, and it is
   // nowhere near proportional to the prose it accompanies.
-  const audio = metadata?.promptTokensDetails?.find(
-    (detail) => detail.modality === AUDIO_MODALITY,
-  );
+  const audio = metadata?.promptTokensDetails?.find((detail) => detail.modality === AUDIO_MODALITY);
 
   return {
     promptTokens: metadata?.promptTokenCount ?? null,

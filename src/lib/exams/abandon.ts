@@ -58,9 +58,7 @@ export async function requestAbandon(
      * than assumed successful: the whole point of this call is a claim the exit
      * dialog makes to the candidate, and it should not be made on a guess.
      */
-    const body = (await response.json().catch(() => null)) as
-      | { abandoned?: unknown }
-      | null;
+    const body = (await response.json().catch(() => null)) as { abandoned?: unknown } | null;
 
     return body?.abandoned === true
       ? { recorded: true }

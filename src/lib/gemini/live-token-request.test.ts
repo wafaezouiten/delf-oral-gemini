@@ -25,9 +25,7 @@ const OTHER_SLUG = ORAL_TOPICS[1].slug;
 
 /** An allow-listed examiner that is not the default, so a test can tell "the
  *  choice won" apart from "the default won". */
-const OTHER_MODEL = LIVE_MODEL_OPTIONS.map((option) => option.id).find(
-  (id) => id !== LIVE_MODEL,
-)!;
+const OTHER_MODEL = LIVE_MODEL_OPTIONS.map((option) => option.id).find((id) => id !== LIVE_MODEL)!;
 
 function body(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return { phase: "debate", examId: "42", topicSlug: SLUG, ...overrides };

@@ -185,9 +185,7 @@ export function partsUnderFloor(durations: SittingDurations): Array<"monologue" 
 export const PARTICIPATION_WORD_FLOOR = 20;
 
 /** Which parts the candidate did not actually produce, in exam order. */
-export function partsAbsent(
-  participation: SittingParticipation,
-): Array<"monologue" | "debate"> {
+export function partsAbsent(participation: SittingParticipation): Array<"monologue" | "debate"> {
   const absent: Array<"monologue" | "debate"> = [];
   if (participation.monologueWords < PARTICIPATION_WORD_FLOOR) absent.push("monologue");
   if (participation.debateWords < PARTICIPATION_WORD_FLOOR) absent.push("debate");

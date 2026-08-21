@@ -2,7 +2,13 @@
 
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 
-import { ArrowRightIcon, CheckCircleIcon, ClockIcon, CloseIcon, SearchIcon } from "@/app/_components/po/icons";
+import {
+  ArrowRightIcon,
+  CheckCircleIcon,
+  ClockIcon,
+  CloseIcon,
+  SearchIcon,
+} from "@/app/_components/po/icons";
 import { Kicker, Tag } from "@/app/_components/po/tag";
 import { ScoreTag } from "@/app/_components/score-band";
 import { StartExamButton } from "@/app/app/(hub)/_components/start-exam-button";
@@ -62,8 +68,7 @@ export function SujetsCatalogue({
     if (!needle) return sujets;
     return sujets.filter(
       (sujet) =>
-        normalise(sujet.title).includes(needle) ||
-        normalise(sujet.topic.document).includes(needle),
+        normalise(sujet.title).includes(needle) || normalise(sujet.topic.document).includes(needle),
     );
   }, [query, sujets]);
 
@@ -76,9 +81,9 @@ export function SujetsCatalogue({
           Production orale · Sujets
         </h1>
         <p className="text-muted-foreground mt-3 text-[0.84375rem] leading-relaxed text-pretty">
-          Des débats d&apos;actualité transformés en sujets d&apos;examen : le
-          document déclencheur, la consigne officielle, puis un examinateur qui
-          vous répond et vous note sur {COMPETENCY_MAX}.
+          Des débats d&apos;actualité transformés en sujets d&apos;examen : le document déclencheur,
+          la consigne officielle, puis un examinateur qui vous répond et vous note sur{" "}
+          {COMPETENCY_MAX}.
         </p>
 
         {/* The facts, banded between two hairlines: a quiet strip that separates
@@ -88,7 +93,7 @@ export function SujetsCatalogue({
             wrapped inside a banded strip reads as a layout fault. */}
         <div className="mt-7">
           <div className="bg-border h-px" />
-          <div className="text-muted-foreground tabular flex items-center gap-x-3 overflow-x-auto py-3 text-[0.6875rem] font-medium tracking-[0.04em] whitespace-nowrap [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          <div className="text-muted-foreground tabular flex [scrollbar-width:none] items-center gap-x-3 overflow-x-auto py-3 text-[0.6875rem] font-medium tracking-[0.04em] whitespace-nowrap [&::-webkit-scrollbar]:hidden">
             {[
               `${sujets.length} sujets publiés`,
               "Examinateur IA",
@@ -135,7 +140,7 @@ export function SujetsCatalogue({
       </div>
 
       {filtered.length === 0 ? (
-        <p className="border-border text-muted-foreground mt-6 sheet border border-dashed px-6 py-12 text-center text-sm">
+        <p className="border-border text-muted-foreground sheet mt-6 border border-dashed px-6 py-12 text-center text-sm">
           Aucun sujet ne correspond à « {query} ».
         </p>
       ) : (
@@ -164,10 +169,7 @@ export function SujetsCatalogue({
         onLaunch={() => setLaunching(true)}
       />
 
-      <LaunchDialog
-        sujet={launching ? open : null}
-        onClose={() => setLaunching(false)}
-      />
+      <LaunchDialog sujet={launching ? open : null} onClose={() => setLaunching(false)} />
     </main>
   );
 }
@@ -290,22 +292,23 @@ function SujetSheet({
           </div>
 
           <div className="min-h-0 flex-1 overflow-y-auto px-6 py-6">
-            <h2 id="sujet-sheet-title" className="font-serif text-2xl leading-snug font-semibold text-balance">
+            <h2
+              id="sujet-sheet-title"
+              className="font-serif text-2xl leading-snug font-semibold text-balance"
+            >
               {sujet.title}
             </h2>
 
             <div className="mt-3 flex flex-wrap gap-1.5">
               <Tag>{sujet.kind}</Tag>
               <Tag>{sujet.meta}</Tag>
-              {sujet.score !== null && (
-                <ScoreTag score25={sujet.score} prefix="Déjà passé" />
-              )}
+              {sujet.score !== null && <ScoreTag score25={sujet.score} prefix="Déjà passé" />}
             </div>
 
             {/* The same paper stock the épreuve prints it on, so the thing the
                 candidate reads here and the thing they meet inside the exam are
                 visibly the same object. */}
-            <div className="border-paper-border bg-paper mt-6 sheet border p-5 sm:p-6">
+            <div className="border-paper-border bg-paper sheet mt-6 border p-5 sm:p-6">
               <h3 className="text-muted-foreground border-border border-b pb-2 text-[0.6875rem] font-semibold tracking-[0.16em] uppercase">
                 Document déclencheur
               </h3>
@@ -369,13 +372,16 @@ function LaunchDialog({ sujet, onClose }: { sujet: KioskSujet | null; onClose: (
         onClose();
       }}
       aria-labelledby="launch-dialog-title"
-      className="bg-card text-foreground border-border m-auto w-[min(29rem,92vw)] sheet border p-0 backdrop:bg-black/50"
+      className="bg-card text-foreground border-border sheet m-auto w-[min(29rem,92vw)] border p-0 backdrop:bg-black/50"
     >
       {sujet && (
         <div className="space-y-4 p-6">
           <div>
             <Kicker>Monologue suivi et débat</Kicker>
-            <h2 id="launch-dialog-title" className="mt-1 text-[1.0625rem] leading-snug font-semibold tracking-tight">
+            <h2
+              id="launch-dialog-title"
+              className="mt-1 text-[1.0625rem] leading-snug font-semibold tracking-tight"
+            >
               {sujet.title}
             </h2>
           </div>
@@ -413,11 +419,7 @@ function LaunchDialog({ sujet, onClose }: { sujet: KioskSujet | null; onClose: (
               >
                 Annuler
               </button>
-              <StartExamButton
-                topicSlug={sujet.slug}
-                topicTitle={sujet.title}
-                label="Commencer"
-              />
+              <StartExamButton topicSlug={sujet.slug} topicTitle={sujet.title} label="Commencer" />
             </div>
           </div>
         </div>

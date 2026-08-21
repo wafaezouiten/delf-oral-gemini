@@ -80,19 +80,19 @@ pull requests from one shared counter, so the phase numbers and the issue number
 do not line up — pull request #1 and issue #2 were created before this scheme
 existed. The mapping is authoritative:
 
-| Phase | Issue | Branch                          |
-| ----- | ----- | ------------------------------- |
-| 0     | #3    | `feature/0-infrastructure`      |
-| 1     | #2    | `feature/1-delf-logic`          |
-| 2     | #4    | `feature/2-db-schema`           |
-| 3     | #5    | `feature/3-auth`                |
-| 4     | #6    | `feature/4-gemini-session`      |
-| 5     | #7    | `feature/5-audio-transport`     |
-| 6     | #8    | `feature/6-audio-recording`     |
-| 7     | #9    | `feature/7-evaluation`          |
-| 8     | #10   | `feature/8-persistence`         |
-| 9     | #11   | `feature/9-ui`                  |
-| 10    | #12   | `feature/10-comparison-report`  |
+| Phase | Issue | Branch                         |
+| ----- | ----- | ------------------------------ |
+| 0     | #3    | `feature/0-infrastructure`     |
+| 1     | #2    | `feature/1-delf-logic`         |
+| 2     | #4    | `feature/2-db-schema`          |
+| 3     | #5    | `feature/3-auth`               |
+| 4     | #6    | `feature/4-gemini-session`     |
+| 5     | #7    | `feature/5-audio-transport`    |
+| 6     | #8    | `feature/6-audio-recording`    |
+| 7     | #9    | `feature/7-evaluation`         |
+| 8     | #10   | `feature/8-persistence`        |
+| 9     | #11   | `feature/9-ui`                 |
+| 10    | #12   | `feature/10-comparison-report` |
 
 Open pull requests with `Closes #N` so merging closes the issue. The description
 follows [`.github/pull_request_template.md`](../.github/pull_request_template.md):
@@ -106,14 +106,14 @@ silently.
 Six, in this order — the same six the company's DELF repository shows, verified
 against the checks on its PR #429:
 
-| # | Check                                        | Comes from                                 | Gate?                                       |
-| - | -------------------------------------------- | ------------------------------------------ | ------------------------------------------- |
-| 1 | `Build / Lint, typecheck, unit tests & build` | `.github/workflows/build.yml`              | **yes** — the one gate                      |
-| 2 | `Claude Code Review / claude-review`          | `.github/workflows/claude-review.yml`      | advisory — a comment, not a pass/fail       |
-| 3 | `Fallow / Codebase Intelligence`              | `.github/workflows/fallow.yml`             | report-only, by design                      |
-| 4 | `GitGuardian Security Checks`                 | the GitGuardian GitHub App                 | yes, once installed                         |
-| 5 | `Vercel`                                      | the Vercel GitHub integration              | reports the deployment                      |
-| 6 | `Vercel Preview Comments`                     | the Vercel GitHub integration              | reports the preview comment                 |
+| #   | Check                                         | Comes from                            | Gate?                                 |
+| --- | --------------------------------------------- | ------------------------------------- | ------------------------------------- |
+| 1   | `Build / Lint, typecheck, unit tests & build` | `.github/workflows/build.yml`         | **yes** — the one gate                |
+| 2   | `Claude Code Review / claude-review`          | `.github/workflows/claude-review.yml` | advisory — a comment, not a pass/fail |
+| 3   | `Fallow / Codebase Intelligence`              | `.github/workflows/fallow.yml`        | report-only, by design                |
+| 4   | `GitGuardian Security Checks`                 | the GitGuardian GitHub App            | yes, once installed                   |
+| 5   | `Vercel`                                      | the Vercel GitHub integration         | reports the deployment                |
+| 6   | `Vercel Preview Comments`                     | the Vercel GitHub integration         | reports the preview comment           |
 
 Two details make the names come out right, and both are easy to break:
 
@@ -225,12 +225,12 @@ Two things about this check look like bugs and are not:
   branch.** It exchanges an OIDC token for an app token and validates that the
   workflow file is identical to the version on the default branch (`develop`, at
   the time of writing); on the pull request
-  that *introduces* the workflow there is no such version, so it logs
+  that _introduces_ the workflow there is no such version, so it logs
   `Skipping action due to workflow validation` and exits successfully. The check
   is green and no review is posted. It starts reviewing on the first pull request
   opened after this workflow lands on the default branch. Note the same rule
   bites any
-  pull request that *edits* `claude-review.yml`.
+  pull request that _edits_ `claude-review.yml`.
 
 Reviews are posted by `claude[bot]`, a GitHub App identity obtained through that
 OIDC exchange — which is why `pull-requests: read` is enough here, in both this
@@ -278,10 +278,10 @@ bash scripts/apply-branch-protection.sh
 
 What the script applies:
 
-| Branch    | Pull request required | Required checks                                                      | Extra                                           |
-| --------- | --------------------- | -------------------------------------------------------------------- | ----------------------------------------------- |
-| `develop` | yes                   | `Lint, typecheck, unit tests & build` + `GitGuardian Security Checks` | conversations resolved; no force push or delete |
-| `main`    | yes                   | same                                                                 | up to date, **and admins included** — nobody pushes directly |
+| Branch    | Pull request required | Required checks                                                       | Extra                                                        |
+| --------- | --------------------- | --------------------------------------------------------------------- | ------------------------------------------------------------ |
+| `develop` | yes                   | `Lint, typecheck, unit tests & build` + `GitGuardian Security Checks` | conversations resolved; no force push or delete              |
+| `main`    | yes                   | same                                                                  | up to date, **and admins included** — nobody pushes directly |
 
 The script still writes a rule for a `staging` branch. That branch is inert
 under the current model, so the rule is harmless but pointless — drop it when the

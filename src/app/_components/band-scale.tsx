@@ -1,4 +1,10 @@
-import { BAND_LABELS, BAND_TONE, GRILLE_BANDS, type BandTone, type GrilleBand } from "@/lib/delf/grille";
+import {
+  BAND_LABELS,
+  BAND_TONE,
+  GRILLE_BANDS,
+  type BandTone,
+  type GrilleBand,
+} from "@/lib/delf/grille";
 
 /**
  * One criterion's band, drawn on the grille's own scale.
@@ -45,8 +51,7 @@ export function BandScale({ band }: { band: GrilleBand }) {
       {/* One statement for a screen reader, rather than four cells it would have
           to reassemble into one. The cells below are decoration of this text. */}
       <span className="sr-only">
-        Note {band} sur 5 : {BAND_LABELS[band]}. Échelle de la grille :{" "}
-        {GRILLE_BANDS.join(", ")}.
+        Note {band} sur 5 : {BAND_LABELS[band]}. Échelle de la grille : {GRILLE_BANDS.join(", ")}.
       </span>
 
       <div className="flex" aria-hidden>

@@ -173,7 +173,10 @@ export function ConversationControls({
                 ring over a part that has not started is the same false claim the
                 recording badge is written to avoid. */}
             {recording && !armed && (
-              <span className="po-ring border-danger absolute -inset-1 rounded-full border-2" aria-hidden />
+              <span
+                className="po-ring border-danger absolute -inset-1 rounded-full border-2"
+                aria-hidden
+              />
             )}
             {armed ? (
               <>
@@ -204,9 +207,7 @@ export function ConversationControls({
             onClick={onAdvance}
             disabled={phase !== "debate" || !canAdvance}
             title={
-              phase === "debate"
-                ? undefined
-                : "Le débat doit avoir lieu avant la fin de l'épreuve."
+              phase === "debate" ? undefined : "Le débat doit avoir lieu avant la fin de l'épreuve."
             }
             className="bg-primary text-primary-foreground h-9 shrink-0 rounded-md px-4 text-xs font-semibold transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
           >
@@ -232,9 +233,7 @@ export function ConversationControls({
                 >
                   <AlertIcon className="size-4 shrink-0" />
                   <div className="min-w-0">
-                    <p className="text-xs font-semibold whitespace-nowrap">
-                      Transcription vide
-                    </p>
+                    <p className="text-xs font-semibold whitespace-nowrap">Transcription vide</p>
                     <p className="text-[0.6875rem] leading-snug whitespace-nowrap">
                       Chronomètre arrêté.
                     </p>

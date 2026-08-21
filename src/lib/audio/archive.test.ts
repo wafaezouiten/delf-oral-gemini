@@ -17,7 +17,9 @@ import { wavDurationSeconds } from "./pcm";
 /** `seconds` of audio, as the framer would deliver it: 40 ms frames. */
 function frames(seconds: number): Int16Array[] {
   const perFrame = INPUT_SAMPLE_RATE / 25;
-  return Array.from({ length: Math.round(seconds * 25) }, () => new Int16Array(perFrame).fill(1000));
+  return Array.from({ length: Math.round(seconds * 25) }, () =>
+    new Int16Array(perFrame).fill(1000),
+  );
 }
 
 function fill(archive: PhaseArchive, seconds: number): void {

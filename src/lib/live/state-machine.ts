@@ -136,13 +136,7 @@ export function isRecovering(state: SessionState): boolean {
  * allowed to do.
  */
 export type ExamStatus =
-  | "preparation"
-  | "monologue"
-  | "debate"
-  | "reconnecting"
-  | "resuming"
-  | "finished"
-  | "error";
+  "preparation" | "monologue" | "debate" | "reconnecting" | "resuming" | "finished" | "error";
 
 export const EXAM_STATUSES: readonly ExamStatus[] = [
   "preparation",

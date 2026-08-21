@@ -15,13 +15,13 @@ component that the reference fed from a table this project does not have.**
 
 ### Routes
 
-| Route | Shell | What it is |
-| --- | --- | --- |
-| `/production-orale` | app chrome | The hub: masthead, format of the épreuve, sujets à la une, capability strip |
-| `/production-orale/sujets-actualites` | app chrome | The sujets kiosk: masthead, search, facet chips, cards, detail sheet, launch dialog |
-| `/production-orale/sujets-actualites/[month]` | app chrome | The same kiosk, scoped to a month |
-| `/production-orale/tableau-de-bord` | app chrome | Stat tiles, per-part averages, recent submissions |
-| `/production-orale/simulateur` | **fullscreen** | The épreuve itself: four phases in one client component |
+| Route                                         | Shell          | What it is                                                                          |
+| --------------------------------------------- | -------------- | ----------------------------------------------------------------------------------- |
+| `/production-orale`                           | app chrome     | The hub: masthead, format of the épreuve, sujets à la une, capability strip         |
+| `/production-orale/sujets-actualites`         | app chrome     | The sujets kiosk: masthead, search, facet chips, cards, detail sheet, launch dialog |
+| `/production-orale/sujets-actualites/[month]` | app chrome     | The same kiosk, scoped to a month                                                   |
+| `/production-orale/tableau-de-bord`           | app chrome     | Stat tiles, per-part averages, recent submissions                                   |
+| `/production-orale/simulateur`                | **fullscreen** | The épreuve itself: four phases in one client component                             |
 
 ### Components
 
@@ -29,25 +29,25 @@ The simulateur is one orchestrator (`simulateur-client.tsx`) that renders one of
 four screens, plus a shared chrome. The chrome and the two static screens live in
 `components/po/*`; the live conversation and the /25 report keep their own files.
 
-| Component | Job |
-| --- | --- |
-| `PoSimulatorTopBar` | Retour · identity kicker · `Sujet / Préparation / Passage` stepper · per-phase right slot |
-| `PoTimerRing` | Draining SVG ring + `m:ss`, destructive-red inside the urgency window |
-| `PoBriefingScreen` | Left "séance" rail (déroulé + pre-flight checks) / right document déclencheur |
-| `PoPreparationScreen` | Left sujet / right rail (passation card, notes, structure attendue) |
-| `PoConversationScene` | The two faces, the beat stepper, the elapsed/total clock and its bar |
-| `PoSceneStepper` | The beats *inside* the passation (`Exposé → Débat`) — not the top-level stepper |
-| `PoConversationControls` | Foot bar: notes toggle · big mic · Terminer l'épreuve |
-| `PoNotesDrawer` | Read-only slide-over of the préparation notes |
-| `PoAudioBars` | Five breathing bars — a "mic is live" glyph, not a level meter |
-| `ConversationSimulateur` | Transport + timing brain; owns no layout |
-| `EvaluationResultats` / `OralResultReport` | Loading → error → the two-column /25 report |
-| `EpreuveHub` + `hub-*` | The hub, drawn entirely from a pure view model |
-| `SujetsCatalogue` + `sujet-*` | The shared sujets kiosk |
+| Component                                  | Job                                                                                       |
+| ------------------------------------------ | ----------------------------------------------------------------------------------------- |
+| `PoSimulatorTopBar`                        | Retour · identity kicker · `Sujet / Préparation / Passage` stepper · per-phase right slot |
+| `PoTimerRing`                              | Draining SVG ring + `m:ss`, destructive-red inside the urgency window                     |
+| `PoBriefingScreen`                         | Left "séance" rail (déroulé + pre-flight checks) / right document déclencheur             |
+| `PoPreparationScreen`                      | Left sujet / right rail (passation card, notes, structure attendue)                       |
+| `PoConversationScene`                      | The two faces, the beat stepper, the elapsed/total clock and its bar                      |
+| `PoSceneStepper`                           | The beats _inside_ the passation (`Exposé → Débat`) — not the top-level stepper           |
+| `PoConversationControls`                   | Foot bar: notes toggle · big mic · Terminer l'épreuve                                     |
+| `PoNotesDrawer`                            | Read-only slide-over of the préparation notes                                             |
+| `PoAudioBars`                              | Five breathing bars — a "mic is live" glyph, not a level meter                            |
+| `ConversationSimulateur`                   | Transport + timing brain; owns no layout                                                  |
+| `EvaluationResultats` / `OralResultReport` | Loading → error → the two-column /25 report                                               |
+| `EpreuveHub` + `hub-*`                     | The hub, drawn entirely from a pure view model                                            |
+| `SujetsCatalogue` + `sujet-*`              | The shared sujets kiosk                                                                   |
 
 ### Pure view models
 
-Everything the screens *print* is derived in React-free modules so it can be unit
+Everything the screens _print_ is derived in React-free modules so it can be unit
 tested: `lib/quiz/po-player-view.ts` (déroulé, structure attendue, mic copy,
 beats), `lib/quiz/exam-view.ts` (`formatExamTime`, `remainingFraction`),
 `lib/epreuve-hub.ts` (the hub's every string). This project already follows the
@@ -110,16 +110,16 @@ same rule, so the reproduction keeps it.
 
 ### Architecture differences that shape the reproduction
 
-| | Reference | Here |
-| --- | --- | --- |
-| Levels | A1–B2, part chosen by query param | B2 only, one fixed two-part épreuve |
-| Phases | `intro → preparation → conversation → evaluation`, all client-side | A state machine (`lib/delf/phases.ts`): `preparation → monologue → debate → finished`, one clock each |
-| Speaking | one conversation, beats approximated from a 40 % time share | two real phases with their own timers and their own examiner behaviour |
-| Transport | ElevenLabs agent | Gemini Live, with reconnect/resume state a candidate can see |
-| Recording | none | real per-phase capture, uploaded at the end |
-| Correction | client action, rendered in place | persisted server-side, read back at `/app/results/[examId]` |
-| Sujet identity | encoded in a `?topic=` query param | a sitting row, `/app/oral/[examId]` |
-| UI kit | shadcn + Hugeicons + motion/react | none — Tailwind v4 and this project's own tokens |
+|                | Reference                                                          | Here                                                                                                  |
+| -------------- | ------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------- |
+| Levels         | A1–B2, part chosen by query param                                  | B2 only, one fixed two-part épreuve                                                                   |
+| Phases         | `intro → preparation → conversation → evaluation`, all client-side | A state machine (`lib/delf/phases.ts`): `preparation → monologue → debate → finished`, one clock each |
+| Speaking       | one conversation, beats approximated from a 40 % time share        | two real phases with their own timers and their own examiner behaviour                                |
+| Transport      | ElevenLabs agent                                                   | Gemini Live, with reconnect/resume state a candidate can see                                          |
+| Recording      | none                                                               | real per-phase capture, uploaded at the end                                                           |
+| Correction     | client action, rendered in place                                   | persisted server-side, read back at `/app/results/[examId]`                                           |
+| Sujet identity | encoded in a `?topic=` query param                                 | a sitting row, `/app/oral/[examId]`                                                                   |
+| UI kit         | shadcn + Hugeicons + motion/react                                  | none — Tailwind v4 and this project's own tokens                                                      |
 
 ### Screen-by-screen
 
@@ -134,17 +134,17 @@ past the préparation into the exposé. The épreuve now starts when the page do
 
 What it carried was not dropped with it:
 
-- *Moved:* the pre-flight card, into the préparation rail as `PreflightCard`,
+- _Moved:_ the pre-flight card, into the préparation rail as `PreflightCard`,
   with the real `getUserMedia` mic test intact.
-- *Moved:* the déroulé, to the foot of the same rail. Still built from
+- _Moved:_ the déroulé, to the foot of the same rail. Still built from
   `PHASE_DURATIONS`, so it prints this project's three real phases rather than a
   level's `OralPartSpec`.
-- *Moved:* the WebCodecs danger notice, over the préparation's sujet. The
+- _Moved:_ the WebCodecs danger notice, over the préparation's sujet. The
   reference has no equivalent because it never uploads audio; here a browser that
   cannot encode loses the whole audio correction, and the préparation is now the
   last moment the candidate can do anything about it. The topbar's « Commencer »
   is what waits for the answer.
-- *Dropped with the screen:* the transport toggle row — admin-gated in the
+- _Dropped with the screen:_ the transport toggle row — admin-gated in the
   reference (`connectionLabel` returns `undefined` for candidates), and this
   project has no admin role, so it never rendered for anyone — and the serif
   part headline, whose `partSubtitle` helper went with its only caller.
@@ -157,12 +157,12 @@ the stepper still counted screens.
 
 Two departures from the reference's rail, both #59:
 
-- *The way on moved into the topbar.* The reference has a passation card with the
+- _The way on moved into the topbar._ The reference has a passation card with the
   primary CTA and a "Passer et commencer maintenant" ghost at the rail's foot —
   the same action twice, three cards below the clock that tells a candidate
   whether to press it. There is one « Commencer » now and it is beside the ring.
   It keeps the `checking` gate the card's button held.
-- *The consigne is a button, not a card.* It was a panel with the script, a
+- _The consigne is a button, not a card._ It was a panel with the script, a
   replay and a sticky mute, and it outlived the clip by the length of the phase.
   While the voice plays there is « Passer » at the right-hand end of the
   « Document déclencheur » rule — beside the document the consigne is about —
@@ -176,7 +176,7 @@ all and gives the room to the reference's scene — two faces, a ring pulsing
 around whoever holds the floor, the elapsed/total clock with its draining bar —
 over the exchange, turn by turn.
 
-- *Added, against the reference (#48, #60):* the débat shows **who is speaking
+- _Added, against the reference (#48, #60):_ the débat shows **who is speaking
   and what was said**. The reference has no transcript feed anywhere, and this
   screen has now been built all three ways: the exchange alone (#48), which left
   no cue for whose turn it was and squeezed the turns into a 20rem box beside the
@@ -186,34 +186,34 @@ over the exchange, turn by turn.
   is still named by its title above the scene. The turns are chat-style — the
   examiner left, « Vous » right — where the results page sets the same exchange
   as a printed document: during the sitting it is a conversation, afterwards it
-  is a record. The speaker names are the same in both, because *who* said
+  is a record. The speaker names are the same in both, because _who_ said
   something must not change between them.
-- *Dropped with it:* the quiet status card the feed could be hidden behind, and
+- _Dropped with it:_ the quiet status card the feed could be hidden behind, and
   its « Masquer » / « Afficher la transcription » pair. Its two sentences are the
   two lines under the faces, and its guidance is what the conversation panel
   prints while it is still empty.
-- *Added, against the reference (#55):* the **close is on screen**. Ending a part
+- _Added, against the reference (#55):_ the **close is on screen**. Ending a part
   asks the examiner for a closing sentence and waits up to `CLOSING_SAFETY_MS`
   for it, so several seconds pass between the click and the next consigne. The
   control now goes inert and says « Fin de l'exposé », and the status line says
   what follows. Before, `canAdvance` went false and the control fell back to its
   locked copy: « Encore 0 min avant de pouvoir conclure », over a monologue that
   was concluding.
-- *Dropped:* the scene's inner beat stepper. The reference names the two beats
+- _Dropped:_ the scene's inner beat stepper. The reference names the two beats
   — Exposé, Débat — between the faces, and this project's topbar has named the
   épreuve's three parts since #37; two steppers disagreeing about which step the
   candidate is on is why the inner one went, and it did not come back with the
   scene (#60).
-- *Adapted:* the mic button advances the épreuve rather than opening a socket —
+- _Adapted:_ the mic button advances the épreuve rather than opening a socket —
   the socket is the controller's. During the monologue it is disabled until the
   5-minute DELF floor, which is `canAdvanceEarly`'s existing rule shown as a hint
   under the mic rather than as a long button label.
-- *Kept from here:* the connection badge, the recording badge, the lost-connection
+- _Kept from here:_ the connection badge, the recording badge, the lost-connection
   notice with its reconnect button, and the microphone notice. The reference has
   no analogue for any of them; they are real states of this product and #11's
   requirement is that each has a visible, non-technical message. They sit in the
   topbar (badges) and above the sujet (notices).
-- *Dropped:* the reference's `alert()` calls on mic failure. This project routes
+- _Dropped:_ the reference's `alert()` calls on mic failure. This project routes
   every failure through `<Notice>`.
 
 **Évaluation.** Reproduced whole: the slim header, the split body, the transcript
@@ -221,14 +221,14 @@ column set as a printed page, the /25 verdict with its floor warning, the five
 criteria as collapsible band rows grouped by compétence, points forts / axes /
 appréciation / conseil, and the floor confirmation line.
 
-- *Kept from here:* `BandScale`. The reference prints a bar and a `3/5` chip; the
+- _Kept from here:_ `BandScale`. The reference prints a bar and a `3/5` chip; the
   official grid prints the whole `0 · 1 · 3 · 5` scale with the awarded band
   ringed, which is what this project already draws and what a candidate learns
   more from. It sits inside the reference's collapsible row, replacing the bar.
-- *Kept from here:* the duration-penalty line, the "corrigé sans l'audio" notice
+- _Kept from here:_ the duration-penalty line, the "corrigé sans l'audio" notice
   and the two measured phase durations. All are facts this correction carries and
   the reference's never did.
-- *Adapted:* "Recommencer" starts a **new sitting** rather than resetting client
+- _Adapted:_ "Recommencer" starts a **new sitting** rather than resetting client
   state — a sitting here is a row, and re-running one would overwrite a
   correction that is already the candidate's record.
 
@@ -236,14 +236,14 @@ appréciation / conseil, and the floor confirmation line.
 « Le format de l'épreuve » (one card per partie, facts as chips, the criteria
 behind a hairline on the last card), « Sujets à la une », capability strip.
 
-- *Adapted:* the sujets come from `ORAL_TOPICS` and the per-sujet best score from
+- _Adapted:_ the sujets come from `ORAL_TOPICS` and the per-sujet best score from
   this project's own `evaluations`, so the "Commencer / Refaire" state and the
   score tag are both real.
 
 **Sujets.** Reproduced as the kiosk's shape: masthead, search, cards, detail
 sheet, launch dialog.
 
-- *Dropped:* the facet chips and the `[month]` route. The reference facets by
+- _Dropped:_ the facet chips and the `[month]` route. The reference facets by
   DELF partie because its catalogue mixes A1–B2 parts; here every sujet is the
   same B2 épreuve, so the chips would be one chip reading "6". The monthly route
   needs a publication date this catalogue does not carry.
@@ -251,11 +251,11 @@ sheet, launch dialog.
 **Tableau de bord.** Reproduced as the shape: stat tiles, a breakdown card with
 bars, a recent-sittings list, the empty state.
 
-- *Adapted:* « Moyenne par partie » becomes **moyenne par critère**. This project
+- _Adapted:_ « Moyenne par partie » becomes **moyenne par critère**. This project
   runs both parts inside one sitting with one /25, so there is no per-part score
   to average — but the five criteria are five real columns, which is the same
   bar-chart shape fed by data that exists.
-- *Adapted:* the tiles are average /25, success rate against the floor, practice
+- _Adapted:_ the tiles are average /25, success rate against the floor, practice
   time (summed from `oral_exam_phases.spoken_seconds`, i.e. measured audio) and
   the day streak.
 
@@ -279,7 +279,7 @@ The column is a separate one rather than a reading of `finished_at` and `phase`.
 Between them those two can already describe a sitting that ran to the end and was
 never graded — but they cannot tell that apart from a tab closed by a flat
 battery, and only one of those is a decision. That difference is the whole point:
-what is being recorded is the candidate's *choice* to leave after an explicit
+what is being recorded is the candidate's _choice_ to leave after an explicit
 warning.
 
 **A historique page**, which the reference has no equivalent of — its tableau de
@@ -291,7 +291,7 @@ pages that both open on a row of statistics would be the same page twice.
 page where this product has an account screen, and the one thing that screen
 does is « Réinitialiser ma progression »: the tableau de bord returns to its empty state and
 the sujet cards return to « Commencer », while every épreuve stays in the
-historique under *Archives*, correction and all. `oral_exams.archived_at` is the
+historique under _Archives_, correction and all. `oral_exams.archived_at` is the
 whole mechanism — a line drawn across the record rather than a tombstone — and it
 is stamped only on sittings already on the record, so an épreuve still in
 progress when the button is pressed belongs to the new record instead of
@@ -309,7 +309,7 @@ for the one control a candidate might arrive looking for. The explanation travel
 with the confirmation rather than sitting on screen permanently: a candidate who
 is not pressing it does not need the paragraph, and one who is needs it right
 then. The reset is deliberately **not** a third tab in Clerk's
-nav — it touches nothing Clerk owns, and filing it beside *Profil* and *Sécurité*
+nav — it touches nothing Clerk owns, and filing it beside _Profil_ and _Sécurité_
 claimed it was an account setting. Signing out stays in the menu, so the page
 carries no sign-out control of its own. It is not a fifth destination in the rail: an
 account is not part of the épreuve, and the four destinations stay four.
@@ -338,10 +338,10 @@ it is reversible. What the colour must not do is hurry the decision, so red
 appears once per decision — on the trigger here, on « Abandonner » in the exit
 dialog — and never again on the button that confirms it.
 
-The count is reported *after* the reset, from what the route says it archived,
+The count is reported _after_ the reset, from what the route says it archived,
 rather than promised before it.
 
-**Changing a password is a Clerk setting, not code.** The *Sécurité* tab shows a
+**Changing a password is a Clerk setting, not code.** The _Sécurité_ tab shows a
 password section only when the password strategy is enabled on the instance
 (Clerk Dashboard → User & authentication → Password) — #36 §3 recommended turning
 it **off** so the e-mail path is `email → code → in`, and with it off there is
@@ -384,6 +384,7 @@ Everything below is a decision, not an oversight:
    and the collapse control is not. The `(fullscreen)` group keeps no app chrome
    at all — a tab bar across the foot of the passation would sit exactly where
    the mic is.
+
 2. **No Hugeicons, no motion/react, no shadcn.** This project has none of the
    three as dependencies and adding them for icon glyphs and two keyframes would
    be a large dependency bill for a small surface. Icons are inline SVGs in one

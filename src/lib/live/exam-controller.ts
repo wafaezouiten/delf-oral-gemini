@@ -890,8 +890,7 @@ export class ExamController {
       announcement: this.announcementId,
       // Armed and waiting for the click — as distinct from waiting for the
       // consigne to finish, which is the consigne control's business.
-      awaitingStart:
-        this.phaseAwaitingStart && !this.announcementPlaying,
+      awaitingStart: this.phaseAwaitingStart && !this.announcementPlaying,
       announcementPlaying: this.announcementPlaying,
     };
   }
@@ -986,10 +985,7 @@ export class ExamController {
         : typeof detail === "object"
           ? JSON.stringify(detail)
           : String(detail);
-    this.events = [
-      ...this.events.slice(-199),
-      { at, phase: this.phase, name, detail: printable },
-    ];
+    this.events = [...this.events.slice(-199), { at, phase: this.phase, name, detail: printable }];
     // Nothing reads `events` outside this class — not the screen, not the finish
     // payload — so a sitting that behaved oddly used to leave the person who sat
     // it with nothing to look at, and a report like "thirty seconds and the
@@ -1579,7 +1575,8 @@ export class ExamController {
    * of forty with `candidate-speaking` beside it means the room was talking.
    */
   private waitReport(now: number): Record<string, number> {
-    const waited = this.silenceArmedAt === null ? 0 : Math.round((now - this.silenceArmedAt) / 1000);
+    const waited =
+      this.silenceArmedAt === null ? 0 : Math.round((now - this.silenceArmedAt) / 1000);
     return { waitedSeconds: waited, ...this.silenceHolds };
   }
 
@@ -1741,7 +1738,10 @@ export class ExamController {
     // an app that asked about the equipment twice would be talking about itself.
     if (nudge === 1) {
       this.presenceChecks += 1;
-      this.log("silence-presence-check", { inDebate: this.presenceChecks, ...this.waitReport(now) });
+      this.log("silence-presence-check", {
+        inDebate: this.presenceChecks,
+        ...this.waitReport(now),
+      });
       this.sendControllerDirective("silence-presence-check", presenceCheckInstruction());
       return;
     }
@@ -1839,7 +1839,8 @@ export class ExamController {
    */
   private floorIsQuiet(now: number): boolean {
     const voiced = this.recorder?.voicedSeconds("debate") ?? 0;
-    const busy = this.examinerSpeaking || this.announcementPlaying || voiced > this.cueVoicedSeconds;
+    const busy =
+      this.examinerSpeaking || this.announcementPlaying || voiced > this.cueVoicedSeconds;
     this.cueVoicedSeconds = voiced;
     if (busy) {
       this.floorQuietSince = null;

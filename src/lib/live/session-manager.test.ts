@@ -345,7 +345,10 @@ describe("session creation", () => {
     const h = harness({ model: "gemini-2.5-flash-native-audio-preview-12-2025" });
     await h.session.connect();
 
-    assert.equal(h.transport.tokenRequests[0].model, "gemini-2.5-flash-native-audio-preview-12-2025");
+    assert.equal(
+      h.transport.tokenRequests[0].model,
+      "gemini-2.5-flash-native-audio-preview-12-2025",
+    );
     assert.equal(h.transport.opens[0].model, "gemini-2.5-flash-native-audio-preview-12-2025");
   });
 
@@ -573,7 +576,11 @@ describe("reconnection", () => {
     h.transport.socket.drop();
     await flush();
 
-    assert.deepEqual(h.timers.slept, [400, 400], "the second drop starts from the base delay again");
+    assert.deepEqual(
+      h.timers.slept,
+      [400, 400],
+      "the second drop starts from the base delay again",
+    );
     assert.equal(h.session.connectionState, "connected");
   });
 
@@ -637,10 +644,7 @@ describe("reconnection", () => {
     assert.equal(h.transport.socket.audioChunks.length, 50);
     // Bounded, but not silently: a dropped-audio incident has to be visible in
     // the session log, and once per outage rather than once per chunk.
-    assert.equal(
-      h.log.events.filter((event) => event.name === "audio-buffer-overflow").length,
-      1,
-    );
+    assert.equal(h.log.events.filter((event) => event.name === "audio-buffer-overflow").length, 1);
   });
 
   it("ignores the retired socket's close, which lands mid-reconnect", async () => {

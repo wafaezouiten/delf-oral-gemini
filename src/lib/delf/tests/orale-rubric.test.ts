@@ -320,18 +320,24 @@ test("the ceiling is applied after snapping, so an illegal 4 becomes 3 either wa
   // A model emitting 4 is snapped to 3, which is already at the ceiling. The
   // result must be the same whether or not the correction heard anything —
   // otherwise the two orders would disagree and the mark would depend on one.
-  const heard = scoreSitting({ ...bands(3), phonologie: 4 }, {
-    monologueSeconds: 400,
-    debateSeconds: 700,
-    ...SPOKE,
-    phonologyHeard: true,
-  });
-  const unheard = scoreSitting({ ...bands(3), phonologie: 4 }, {
-    monologueSeconds: 400,
-    debateSeconds: 700,
-    ...SPOKE,
-    phonologyHeard: false,
-  });
+  const heard = scoreSitting(
+    { ...bands(3), phonologie: 4 },
+    {
+      monologueSeconds: 400,
+      debateSeconds: 700,
+      ...SPOKE,
+      phonologyHeard: true,
+    },
+  );
+  const unheard = scoreSitting(
+    { ...bands(3), phonologie: 4 },
+    {
+      monologueSeconds: 400,
+      debateSeconds: 700,
+      ...SPOKE,
+      phonologyHeard: false,
+    },
+  );
 
   assert.equal(heard.criteria.phonologie, 3);
   assert.equal(unheard.criteria.phonologie, 3);

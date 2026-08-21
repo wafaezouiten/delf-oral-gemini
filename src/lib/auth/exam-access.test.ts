@@ -125,7 +125,13 @@ describe("exam access", () => {
 describe("page gate", () => {
   it("renders the owner's own sitting", () => {
     assert.equal(
-      pageGate({ status: "owned", userId: OWNER, examId: 41, topicSlug: null, examinerModel: null }),
+      pageGate({
+        status: "owned",
+        userId: OWNER,
+        examId: 41,
+        topicSlug: null,
+        examinerModel: null,
+      }),
       "render",
     );
   });

@@ -78,12 +78,7 @@ import type { TranscriptEntry } from "@/lib/delf/transcript";
  * whatever later reads it. `schema.test.ts` asserts these values stay identical
  * to `ORAL_PHASES` — the enum is a mirror of the machine, never a second opinion.
  */
-export const oralPhase = pgEnum("oral_phase", [
-  "preparation",
-  "monologue",
-  "debate",
-  "finished",
-]);
+export const oralPhase = pgEnum("oral_phase", ["preparation", "monologue", "debate", "finished"]);
 
 /**
  * The two phases the candidate actually speaks in, and therefore the only two

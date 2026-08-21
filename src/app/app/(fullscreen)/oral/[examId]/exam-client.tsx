@@ -447,9 +447,9 @@ export function ExamClient({
             </button>
           }
         >
-          Les tentatives automatiques de reconnexion n&apos;ont pas abouti. Le
-          temps de cette partie continue de s&apos;écouler et ce qui a déjà été
-          dit est conservé. Vérifiez votre connexion internet, puis reprenez.
+          Les tentatives automatiques de reconnexion n&apos;ont pas abouti. Le temps de cette partie
+          continue de s&apos;écouler et ce qui a déjà été dit est conservé. Vérifiez votre connexion
+          internet, puis reprenez.
         </Notice>
       )}
 
@@ -478,15 +478,11 @@ export function ExamClient({
     <>
       {notices}
       {canEncode === false && (
-        <Notice
-          tone="danger"
-          title="Votre navigateur ne peut pas envoyer l'enregistrement"
-        >
-          Il ne sait pas compresser l&apos;audio. Votre prestation sera corrigée à
-          partir de la transcription seule, sans écoute de votre prononciation, et
-          la pénalité de durée s&apos;appliquera comme si aucun enregistrement
-          n&apos;existait. Passez plutôt l&apos;épreuve sur une version récente de
-          Chrome, Edge, Safari ou Firefox.
+        <Notice tone="danger" title="Votre navigateur ne peut pas envoyer l'enregistrement">
+          Il ne sait pas compresser l&apos;audio. Votre prestation sera corrigée à partir de la
+          transcription seule, sans écoute de votre prononciation, et la pénalité de durée
+          s&apos;appliquera comme si aucun enregistrement n&apos;existait. Passez plutôt
+          l&apos;épreuve sur une version récente de Chrome, Edge, Safari ou Firefox.
         </Notice>
       )}
     </>

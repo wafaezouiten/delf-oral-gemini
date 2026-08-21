@@ -149,8 +149,7 @@ export function correctionNotices(scores: CorrectionScores): CorrectionNotices {
       : scores.score25 < scores.rawScore25 - absencePenalty;
 
   return {
-    absence:
-      absencePenalty > 0 ? absenceNotice(scores.absentParts ?? [], scores.rawScore25) : null,
+    absence: absencePenalty > 0 ? absenceNotice(scores.absentParts ?? [], scores.rawScore25) : null,
     duration: penalisedForDuration
       ? durationNotice(
           scores.shortParts ?? [],

@@ -327,7 +327,7 @@ async function testMonologueSilence(pcm: Int16Array) {
     heardAfter.length > 0,
     heardAfter.length > 0
       ? `during=${heardDuring ? "streamed live" : "withheld until activityEnd"}, ` +
-        `captured: "${heardAfter.slice(0, 110)}"`
+          `captured: "${heardAfter.slice(0, 110)}"`
       : "NOTHING TRANSCRIBED, even after activityEnd",
   );
 

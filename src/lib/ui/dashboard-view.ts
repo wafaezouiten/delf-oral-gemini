@@ -100,10 +100,7 @@ export interface DashboardSitting {
 
 /** The zero an abandoned sitting scores, on every criterion. */
 export function zeroCriteria(): Record<OralCriterion, number> {
-  return Object.fromEntries(ORAL_CRITERIA.map((key) => [key, 0])) as Record<
-    OralCriterion,
-    number
-  >;
+  return Object.fromEntries(ORAL_CRITERIA.map((key) => [key, 0])) as Record<OralCriterion, number>;
 }
 
 export interface DashboardTile {
@@ -307,9 +304,7 @@ export function buildDashboardView(
   sittings: readonly DashboardSitting[],
   today: Date,
 ): DashboardView {
-  const ordered = [...sittings].sort(
-    (a, b) => b.endedAt.getTime() - a.endedAt.getTime(),
-  );
+  const ordered = [...sittings].sort((a, b) => b.endedAt.getTime() - a.endedAt.getTime());
 
   return {
     tiles: buildTiles(ordered, today),
