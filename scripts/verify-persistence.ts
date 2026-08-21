@@ -24,10 +24,16 @@
 import { config } from "dotenv";
 config({ path: ".env.local" });
 
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 
 import { getDb, isDatabaseConfigured } from "../src/lib/db";
 import { archiveCandidateRecord } from "../src/lib/db/account";
+import {
+  constraintMirrors,
+  diffConstraintDefinitions,
+  schemaTableNames,
+  type LiveConstraint,
+} from "../src/lib/db/constraint-drift";
 import { readCandidateHistory } from "../src/lib/db/history";
 import { oralExams, oralTopics } from "../src/lib/db/schema";
 import { archivePreparationExit, neonSittingStore } from "../src/lib/db/sittings";
@@ -120,9 +126,91 @@ function check(what: string, ok: boolean, detail?: unknown): void {
   if (!ok) failures += 1;
 }
 
+/**
+ * The push-vs-migrate footgun, checked structurally (#77).
+ *
+ * `drizzle-kit push` applies a new column and silently leaves CHECK constraints
+ * at whatever the database already had; the WARNING in `schema.ts` records the
+ * sitting that lesson cost. A comment only guards people who read it, so this
+ * compares every live `pg_get_constraintdef` against what the schema declares
+ * and fails loudly on any difference — from push, from a hand edit, from any
+ * cause at all.
+ *
+ * The mechanics (and why nothing here parses SQL) live in
+ * `src/lib/db/constraint-drift.ts`: short-lived mirror tables carry the
+ * schema's constraints into the SAME database, so both sides of the comparison
+ * come out of the same server's normaliser and bare string equality is the
+ * whole test. Runs first, before the round trip below — when a constraint has
+ * drifted, the write failures further down are symptoms, and this is the line
+ * that names their cause.
+ */
+async function verifyConstraints(db: ReturnType<typeof getDb>): Promise<void> {
+  console.log("constraints");
+  const mirrors = constraintMirrors(`${Date.now()}`);
+  try {
+    for (const mirror of mirrors) await db.execute(sql.raw(mirror.createSql));
+
+    const names = [...schemaTableNames(), ...mirrors.map((mirror) => mirror.mirrorName)];
+    const result = await db.execute(sql`
+      select rel.relname as table_name,
+             con.conname as constraint_name,
+             pg_get_constraintdef(con.oid) as definition
+      from pg_constraint con
+      join pg_class rel on rel.oid = con.conrelid
+      join pg_namespace nsp on nsp.oid = rel.relnamespace
+      where con.contype = 'c'
+        and nsp.nspname = current_schema()
+        and rel.relname in (${sql.join(
+          names.map((name) => sql`${name}`),
+          sql`, `,
+        )})
+    `);
+    const rows = result.rows as Array<{
+      table_name: string;
+      constraint_name: string;
+      definition: string;
+    }>;
+
+    // The mirrors' rows are the expectation, mapped back to the tables they
+    // mirror; the schema tables' own rows are what the database actually holds.
+    const mirroredTable = new Map(mirrors.map((mirror) => [mirror.mirrorName, mirror.table]));
+    const expected: LiveConstraint[] = [];
+    const live: LiveConstraint[] = [];
+    for (const row of rows) {
+      const constraint = {
+        constraint: row.constraint_name,
+        definition: row.definition,
+      };
+      const table = mirroredTable.get(row.table_name);
+      if (table !== undefined) expected.push({ ...constraint, table });
+      else live.push({ ...constraint, table: row.table_name });
+    }
+
+    // Guards the probe against itself: a refactor that stopped the mirrors
+    // being created would otherwise report a database with no declared checks
+    // as clean, which is the comment-shaped failure this section replaces.
+    check("the schema declares checks for the probe to hold", expected.length > 0, {
+      declared: expected.length,
+    });
+
+    const drift = diffConstraintDefinitions(expected, live);
+    check(
+      "every live CHECK matches the schema, word for word",
+      drift.length === 0,
+      drift.length > 0 ? drift : { constraints: expected.length },
+    );
+  } finally {
+    for (const mirror of mirrors) {
+      await db.execute(sql.raw(`drop table if exists "${mirror.mirrorName}"`));
+    }
+  }
+}
+
 async function main(): Promise<number> {
   const db = getDb();
   const store = neonSittingStore();
+
+  await verifyConstraints(db);
 
   // The catalogue row the sitting has to reference, upserted the way
   // `POST /api/exams` does it.
