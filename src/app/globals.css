@@ -175,30 +175,39 @@ body {
 }
 
 /**
- * The dead band below every screen (#114).
+ * The dead-band guard (#114).
  *
- * `<body>` is a flex column, so anything a third party appends to its end
- * becomes a flex item *in flow*: give it any height and the document grows by
- * exactly that much — a band of empty, scrollable background under the hub
- * pages and under the viewport-locked correction alike. Clerk mounts two such
- * containers at the end of `<body>` for its portals (`#clerk-components`, and
- * a `.cl-rootBox` for One Tap); empty they cost nothing, but the moment one
- * renders in-flow content the band appears.
+ * `<body>` is a flex column, so anything appended to it becomes a flex item
+ * *in flow*: give it any height and the document grows by exactly that much —
+ * a band of empty, scrollable background under the hub pages and under the
+ * viewport-locked correction alike. Clerk mounts portal containers at the end
+ * of `<body>`, browser extensions inject their own, and none of them is this
+ * app's layout. The root layout wraps the product in `#app` precisely so the
+ * rest can be named: every other child of `<body>` is a squatter, and a
+ * squatter gets no say in how tall the page is.
  *
- * Pinned to the top-left corner rather than merely `absolute`: an absolutely
- * positioned box left at its static position still sits past the page's end
- * and still extends the scrollable area, which is the bug wearing different
- * clothes. What Clerk shows inside — popovers, modals — positions itself
- * `fixed` against the viewport, so it neither needs the container's place in
- * flow nor notices losing it. Direct children of `<body>` only: the inline
- * `UserButton` in the sidebar renders its own `.cl-rootBox` where it stands,
- * and that one is layout.
+ * `absolute` at the page's origin, and deliberately not `fixed` and not
+ * `!important`. Not `fixed`, because a squatter's absolutely-positioned
+ * children (Clerk popovers on the floating-ui absolute strategy) compute
+ * their coordinates against the nearest positioned ancestor — a box pinned to
+ * the page's origin keeps those coordinates meaning what they meant when the
+ * container sat in flow, where a `fixed` box would re-anchor them to the
+ * viewport and drag them along on scroll. Not `!important`, because anything
+ * that positions itself out of flow (overlays, toolbars, inline-styled
+ * widgets) already causes no band and should win against this rule. And at
+ * `top: 0` rather than left at its static position, because an abspos box
+ * past the page's end still extends the scrollable area — the same band in
+ * different clothes.
+ *
+ * `@media screen`: on paper there is no scrollbar to protect, and a printed
+ * page has no business repositioning what it will not show.
  */
-body > #clerk-components,
-body > .cl-rootBox {
-  position: absolute;
-  top: 0;
-  left: 0;
+@media screen {
+  body > :not(#app) {
+    position: absolute;
+    top: 0;
+    left: 0;
+  }
 }
 
 /* Numbers in clocks and scores must not jitter as they tick. */
