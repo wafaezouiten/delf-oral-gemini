@@ -80,7 +80,10 @@ export function TimerRing({
         role="timer"
         aria-label={clockLabel(phase, remaining)}
         className={cn(
-          "flex shrink-0 items-center gap-1.5 rounded-full border py-1 pr-3 pl-2",
+          // `relative` anchors the `sr-only` status span — absolute, and
+          // without a positioned ancestor it would anchor to the document
+          // and could grow the page past its content (#114).
+          "relative flex shrink-0 items-center gap-1.5 rounded-full border py-1 pr-3 pl-2",
           urgent
             ? "border-danger/40 bg-danger-subtle text-danger"
             : "border-border bg-card text-foreground",
@@ -116,13 +119,15 @@ export function TimerRing({
             minute
           </span>
         )}
-      </div>
 
-      {/* One sentence at a time, and only at a milestone. Assertive would cut
-          across the examiner mid-sentence, which is worse than arriving late. */}
-      <span role="status" aria-live="polite" className="sr-only">
-        {announcement}
-      </span>
+        {/* One sentence at a time, and only at a milestone. Assertive would cut
+            across the examiner mid-sentence, which is worse than arriving late.
+            Inside the ring's box rather than beside it, so the box's `relative`
+            is the span's anchor. */}
+        <span role="status" aria-live="polite" className="sr-only">
+          {announcement}
+        </span>
+      </div>
     </>
   );
 }

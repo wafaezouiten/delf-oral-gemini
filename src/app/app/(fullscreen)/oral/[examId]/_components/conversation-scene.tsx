@@ -74,8 +74,11 @@ export function ConversationScene({
       ? `À vous de parler. ${candidateStatus}`
       : examinerStatus;
 
+  // `relative` on the row anchors the `sr-only` span — absolute, and without
+  // a positioned ancestor it would anchor to the document and grow the page
+  // by the column's scroll distance (#114).
   return (
-    <div className="border-border bg-card flex shrink-0 items-center gap-3 rounded-lg border p-4 sm:gap-4 sm:px-5">
+    <div className="border-border bg-card relative flex shrink-0 items-center gap-3 rounded-lg border p-4 sm:gap-4 sm:px-5">
       <span aria-live="polite" className="sr-only">
         {turnAnnouncement}
       </span>

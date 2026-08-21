@@ -108,7 +108,9 @@ export function SujetsCatalogue({
         </div>
       </header>
 
-      <div className="mt-6">
+      {/* `relative` anchors the `sr-only` label — absolute, and without a
+          positioned ancestor it would anchor to the document (#114). */}
+      <div className="relative mt-6">
         <label htmlFor={searchId} className="sr-only">
           Rechercher un sujet
         </label>

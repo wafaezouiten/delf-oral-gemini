@@ -80,8 +80,12 @@ export default async function HistoriquePage() {
     );
   }
 
+  // `max-w-4xl`, the tableau de bord's measure: the two screens print the same
+  // `SittingRow`s, and this one was the hub's narrowest page — beside the rail
+  // on a wide monitor it read as half a page of margin (#114). The empty state
+  // above keeps `max-w-3xl`, like the dashboard's.
   return (
-    <main className="mx-auto w-full max-w-3xl px-6 py-10">
+    <main className="mx-auto w-full max-w-4xl px-6 py-10">
       <Kicker>DELF B2 · Production orale</Kicker>
       <h1 className="font-serif mt-1 text-2xl leading-tight font-semibold">Historique</h1>
       <p className="text-muted-foreground mt-2 text-sm leading-relaxed">
