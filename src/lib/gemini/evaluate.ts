@@ -37,7 +37,7 @@ import {
 import { EvaluationFailure } from "./evaluation-failure";
 import { readEvaluationUsage, type EvaluationUsage } from "./evaluation-usage";
 import { waitForFileActive } from "./file-activation";
-import { withTransientRetry } from "./transient";
+import { transientStatus, withTransientRetry } from "./transient";
 import { candidateWordCount, formatTranscript, type TranscriptEntry } from "@/lib/delf/transcript";
 import type { OralTopic } from "@/lib/delf/topics";
 import type { EvaluationFeedback, EvaluationMode, OralSpeakingPhase } from "@/lib/db/schema";
@@ -455,7 +455,7 @@ export async function evaluateExam(params: EvaluateParams): Promise<EvaluationRe
                 onRetry: (error, attempt, delayMs) =>
                   console.warn(
                     `[evaluate] ${label} upload attempt ${attempt} failed ` +
-                      `(${(error as { status?: number }).status}), retrying in ${delayMs}ms`,
+                      `(${transientStatus(error)}), retrying in ${delayMs}ms`,
                   ),
               },
             );
@@ -512,7 +512,7 @@ export async function evaluateExam(params: EvaluateParams): Promise<EvaluationRe
     {
       onRetry: (error, attempt, delayMs) =>
         console.warn(
-          `[evaluate] attempt ${attempt} failed (${(error as { status?: number }).status}), ` +
+          `[evaluate] attempt ${attempt} failed (${transientStatus(error)}), ` +
             `retrying in ${delayMs}ms`,
         ),
     },
