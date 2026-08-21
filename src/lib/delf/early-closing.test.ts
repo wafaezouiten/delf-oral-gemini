@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { readsAsClosing, transcriptShowsClosing } from "./early-closing";
+import { countClosingTurns, readsAsClosing, resolveEarlyClosingCount } from "./early-closing";
 import type { TranscriptEntry } from "./transcript";
 
 describe("hearing an examiner say goodbye seven minutes early (#85)", () => {
@@ -64,35 +64,60 @@ describe("corroborating the finish payload's count against its own transcript (#
     ...over,
   });
 
-  it("finds the goodbye a genuine count was read off", () => {
-    // The guarantee the route's check leans on: the controller detected the
+  it("honours a claim the transcript backs, in full", () => {
+    // The guarantee the route's clamp leans on: the controller detected each
     // goodbye on the very examiner turns the payload re-submits, with the same
-    // phrase list — so a true claim always has this turn to show.
-    assert.ok(
-      transcriptShowsClosing([
-        turn({ speaker: "candidate", text: "Je pense que le télétravail isole." }),
-        turn({ text: "Nous allons passer à la troisième partie de l'épreuve. Au revoir." }),
-      ]),
-    );
+    // phrase list — so a true claim has its turns to show, and passes whole.
+    const transcript = [
+      turn({ speaker: "candidate", text: "Je pense que le télétravail isole." }),
+      turn({ text: "Nous allons passer à la troisième partie de l'épreuve. Au revoir." }),
+      turn({ speaker: "candidate", text: "Mais il reste sept minutes, non ?" }),
+      turn({ text: "Vous pouvez disposer." }),
+    ];
+
+    assert.equal(countClosingTurns(transcript), 2);
+    assert.equal(resolveEarlyClosingCount(2, transcript), 2);
   });
 
-  it("denies a claim whose transcript shows no goodbye anywhere", () => {
-    // The tamper the check exists for: `earlyClosingCount: 1` pasted into an
-    // otherwise ordinary payload, to shed a duration penalty measured out of
-    // real audio. No turn tells the story the number does.
-    assert.ok(
-      !transcriptShowsClosing([
-        turn({ text: "Vous dites que le bureau isole. N'est-ce pas l'inverse ?" }),
-        turn({ speaker: "candidate", text: "Non, je maintiens ma position." }),
-      ]),
-    );
+  it("zeroes a claim whose transcript shows no goodbye anywhere", () => {
+    // The tamper the corroboration exists for: `earlyClosingCount: 1` pasted
+    // into an otherwise ordinary payload, to shed a duration penalty measured
+    // out of real audio. No turn tells the story the number does.
+    const ordinary = [
+      turn({ text: "Vous dites que le bureau isole. N'est-ce pas l'inverse ?" }),
+      turn({ speaker: "candidate", text: "Non, je maintiens ma position." }),
+    ];
+
+    assert.equal(resolveEarlyClosingCount(1, ordinary), 0);
   });
 
-  it("only listens where detection ever listened: examiner turns, in the débat", () => {
+  it("caps an inflated claim at the turns that back it", () => {
+    // The magnitude half of the same trust problem: one real goodbye does not
+    // corroborate `count: 500`. The rubric only asks whether the count is
+    // positive, but the column is an analytics signal and a 32-bit integer —
+    // an unbounded pass-through poisons the first and, past 2³¹, refuses the
+    // sender's own INSERT.
+    const oneGoodbye = [turn({})];
+
+    assert.equal(resolveEarlyClosingCount(500, oneGoodbye), 1);
+    assert.equal(resolveEarlyClosingCount(2_147_483_648, oneGoodbye), 1);
+  });
+
+  it("never raises a claim, however many turns match", () => {
+    // The clamp is a ceiling, not a re-derivation: the server cannot tell an
+    // early goodbye from the legitimate closing sentence — `closing` does not
+    // survive into the transcript — so extra matching turns must not talk a
+    // count upwards. An honest zero above a transcript that ends with the
+    // app's own closing stays zero.
+    assert.equal(resolveEarlyClosingCount(0, [turn({}), turn({})]), 0);
+    assert.equal(resolveEarlyClosingCount(1, [turn({}), turn({})]), 1);
+  });
+
+  it("only counts where detection ever listened: examiner turns, in the débat", () => {
     // A goodbye in the candidate's own mouth corroborates nothing — they can
     // type it — and the monologue has no examiner to take its leave.
-    assert.ok(!transcriptShowsClosing([turn({ speaker: "candidate" })]));
-    assert.ok(!transcriptShowsClosing([turn({ phase: "monologue" })]));
-    assert.ok(!transcriptShowsClosing([]));
+    assert.equal(countClosingTurns([turn({ speaker: "candidate" })]), 0);
+    assert.equal(countClosingTurns([turn({ phase: "monologue" })]), 0);
+    assert.equal(countClosingTurns([]), 0);
   });
 });

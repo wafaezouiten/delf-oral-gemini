@@ -43,7 +43,7 @@ import { authorizeExam } from "@/lib/auth/exam-guard";
 import type { OralSpeakingPhase } from "@/lib/db";
 import { neonSittingStore } from "@/lib/db/sittings";
 import { correctSitting, type CorrectionRow } from "@/lib/exams/sitting-persistence";
-import { transcriptShowsClosing } from "@/lib/delf/early-closing";
+import { resolveEarlyClosingCount } from "@/lib/delf/early-closing";
 import { PARTICIPATION_WORD_FLOOR } from "@/lib/delf/orale-rubric";
 import { findTopic } from "@/lib/delf/topics";
 import { candidateWordCount } from "@/lib/delf/transcript";
@@ -289,27 +289,20 @@ export async function POST(request: Request, context: { params: Promise<{ examId
   const debateSeconds = devSeconds("debate") ?? measuredSeconds("debate");
 
   /**
-   * The examiner's early goodbyes (#92) — the client's count, honoured only
-   * when the transcript beside it shows a goodbye at all.
+   * The examiner's early goodbyes (#92) — the client's count, clamped to what
+   * the transcript beside it can witness. Everything about the clamp — why a
+   * genuine claim always corroborates, why the magnitude is capped and not
+   * just the presence checked, and what none of it can prove — lives on
+   * `resolveEarlyClosingCount`, where `node --test` can reach it; this route
+   * only owes it the payload.
    *
-   * The claim waives the débat's penalties, including the duration penalty
-   * this route measures out of the uploaded bytes precisely so no client
-   * claim can reach it — so the raw number is not taken alone. A genuine
-   * count always corroborates, because the controller read the goodbye off
-   * the very turns this payload re-submits, with the same phrase list; a
-   * positive count with no matching turn is a claim the sender's own
-   * transcript denies, and it is graded as zero. See
-   * `transcriptShowsClosing` for what this floor can and cannot buy.
-   *
-   * Zeroed ONCE, here, for every consumer downstream — the corrector's
+   * Resolved ONCE, here, for every consumer downstream — the corrector's
    * paragraph, the rubric's waiver, the stored column and the note the
-   * results page keys on it — because a count stored as 2 while the
-   * penalties stood would put « n'a pas été retenue contre vous » above a
-   * mark it was retained against.
+   * results page keys on it — because a count stored as 2 while the penalties
+   * stood would put « n'a pas été retenue contre vous » above a mark it was
+   * retained against.
    */
-  const earlyClosingCount = transcriptShowsClosing(payload.transcript)
-    ? payload.earlyClosingCount
-    : 0;
+  const earlyClosingCount = resolveEarlyClosingCount(payload.earlyClosingCount, payload.transcript);
 
   /**
    * Audio-aware grading whenever we actually have a recording; the text path is

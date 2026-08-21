@@ -295,7 +295,7 @@ export interface EvaluateParams {
    * How many times the examiner tried to close the épreuve early (#92), as the
    * controller counted it, the finish payload carried it, and the route
    * corroborated it against the transcript before handing it here
-   * (`transcriptShowsClosing`). Positive, it adds the incident paragraph to
+   * (`resolveEarlyClosingCount`). Positive, it adds the incident paragraph to
    * the prompt and excuses the débat from both penalties
    * (`SittingConditions.examinerClosedEarly`).
    *

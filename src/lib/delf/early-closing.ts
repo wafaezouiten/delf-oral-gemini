@@ -86,37 +86,65 @@ export function readsAsClosing(text: string): boolean {
 }
 
 /**
- * Does the submitted transcript contain a goodbye at all? The finish route's
- * corroboration of the client's `earlyClosingCount` claim (#92).
- *
- * The claim waives the débat's penalties, so a raw number in a payload must at
- * least be consistent with the transcript beside it. This check holds because
- * of where a genuine count comes from: the controller read the goodbye off the
- * very examiner turns the finish payload re-submits, with this file's own
- * phrase list — so a true claim ALWAYS has a matching turn to show, and a
- * payload with a positive count and no such turn is asserting an incident its
- * own transcript denies.
- *
- * Be honest about what it cannot buy. The controller counted goodbyes *outside
- * a closing handshake*, and `closing` does not survive into the transcript —
- * so this cannot tell the fault from the legitimate closing sentence the app
- * itself asked for at the end of most sittings, and it examines an artefact
- * the client authors anyway. It is a consistency floor, not a proof: it stops
- * a claim that did not even bother to tell a coherent story (and a client that
- * miscounts through a bug), and it keeps the stored count, the waiver, the
- * corrector's paragraph and the candidate's note all keyed to a sitting whose
- * transcript actually shows a goodbye. The unforgeable record of the incident
- * remains the audio, which the corrector hears.
+ * How many examiner turns of the débat read as a goodbye — the most the
+ * transcript can witness about the incident the count claims (#92).
  *
  * Débat examiner turns only, exactly where detection ever listened: a phrase
  * in the candidate's own mouth, or anywhere in the monologue, corroborates
  * nothing.
  */
-export function transcriptShowsClosing(
+export function countClosingTurns(
   entries: ReadonlyArray<Pick<TranscriptEntry, "phase" | "speaker" | "text">>,
-): boolean {
-  return entries.some(
+): number {
+  return entries.filter(
     (entry) =>
       entry.phase === "debate" && entry.speaker === "examiner" && readsAsClosing(entry.text),
-  );
+  ).length;
+}
+
+/**
+ * The finish route's corroboration of the client's `earlyClosingCount` claim
+ * (#92): the claim, clamped to what the transcript beside it can witness.
+ *
+ * The claim waives the débat's penalties — including the duration penalty the
+ * route measures out of the uploaded bytes precisely so no client claim can
+ * reach it — and it is stored on the sitting as the record of how often the
+ * examiner misbehaves. So a raw number in a payload is not taken alone, on
+ * either axis:
+ *
+ *  - **Zero matching turns zeroes the claim.** A genuine count ALWAYS has its
+ *    turn to show, because the controller read the goodbye off the very
+ *    examiner turns the finish payload re-submits, with this file's own phrase
+ *    list; a positive count above a transcript with no goodbye anywhere is
+ *    asserting an incident its own transcript denies.
+ *  - **The magnitude is capped at the matching-turn count.** The rubric only
+ *    ever asks whether the count is positive, but the column is also the
+ *    measure of whether #85's prompt rules work, and `count: 500` beside one
+ *    real goodbye would be stored as-is — an unbounded claim in an analytics
+ *    column, and past 2³¹ a number a Postgres `integer` refuses at the INSERT,
+ *    failing the sender's own finish. Capped, the stored figure can never
+ *    exceed the transcript's turn bound.
+ *
+ * The cap can UNDER-record a genuine tally by design: the controller counts
+ * per spoken turn, but only a controller directive forces a turn break in the
+ * transcript — so a repeat goodbye past the recovery cap, which is answered by
+ * nothing, coalesces into the previous goodbye's entry and two counted
+ * goodbyes become one matching turn. A clamped genuine claim stays positive,
+ * which is all the waiver and the candidate's note read, and "at most what the
+ * transcript shows" is the honest server-derivable magnitude.
+ *
+ * And be honest about what none of this can buy. `closing` does not survive
+ * into the transcript, so a matching turn cannot be told from the legitimate
+ * closing sentence the app itself asked for at the end of most sittings — and
+ * the transcript is an artefact the client authors anyway. This is a
+ * consistency floor, not a proof: it stops a claim that did not even bother to
+ * tell a coherent story, and a client that miscounts through a bug. The
+ * unforgeable record of the incident remains the audio, which the corrector
+ * hears.
+ */
+export function resolveEarlyClosingCount(
+  claimed: number,
+  entries: ReadonlyArray<Pick<TranscriptEntry, "phase" | "speaker" | "text">>,
+): number {
+  return Math.min(claimed, countClosingTurns(entries));
 }

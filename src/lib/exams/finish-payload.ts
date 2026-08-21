@@ -93,10 +93,12 @@ export const finishPayloadSchema = z.object({
    * one number in this payload that can RAISE a grade rather than lower it
    * (positive, it waives the débat's penalties, including the duration penalty
    * the route measures out of the uploaded bytes precisely so no client claim
-   * can reach it), so the route honours it only when the submitted transcript
-   * actually shows a goodbye. A genuine count always does — the controller
-   * read it off the very turns this payload re-submits — and what that
-   * corroboration can and cannot buy is `transcriptShowsClosing`'s to say.
+   * can reach it), so the route clamps it to the goodbyes the submitted
+   * transcript actually shows. A genuine count always has them — the
+   * controller read it off the very turns this payload re-submits — and what
+   * that corroboration can and cannot buy is `resolveEarlyClosingCount`'s to
+   * say, which is also why there is no `.max()` here: the clamp bounds the
+   * stored value by the transcript's own turn limit.
    *
    * Defaulted rather than required, unlike `reconnectCount`, because it is
    * being added to a payload that already exists in the wild: a candidate

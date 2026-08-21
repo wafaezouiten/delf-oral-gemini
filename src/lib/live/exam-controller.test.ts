@@ -4,7 +4,7 @@ import { describe, it } from "node:test";
 import type { AnnouncementOutcome, AnnouncerLike } from "@/lib/audio/announcer";
 import type { PhaseRecording, RecordedPhase } from "@/lib/audio/archive";
 import { ANNOUNCEMENTS } from "@/lib/delf/announcements";
-import { transcriptShowsClosing } from "@/lib/delf/early-closing";
+import { countClosingTurns } from "@/lib/delf/early-closing";
 import { PHASE_DURATIONS, MONOLOGUE_MIN_SECONDS } from "@/lib/delf/phases";
 import type { OralTopic } from "@/lib/delf/topics";
 import type { SessionManagerCallbacks } from "./session-manager";
@@ -3238,13 +3238,17 @@ describe("an examiner that says goodbye seven minutes early (#85)", () => {
       assert.equal(h.controller.getSnapshot().phase, "finished");
       assert.equal(h.finished[0]?.earlyClosingCount, 3, "answered or not, all three are counted");
 
-      // The invariant the finish route's corroboration leans on: a payload
-      // whose count is positive always carries the goodbye it was read off,
-      // because detection ran on these very turns with the same phrase list.
-      // If this ever fails, the route is zeroing genuine claims.
+      // The invariant the finish route's clamp leans on: a genuine payload's
+      // transcript backs its count in MAGNITUDE, not just in presence, because
+      // detection ran on these very turns with the same phrase list and each
+      // answered goodbye's recovery directive broke the next one into its own
+      // entry. If this ever fails, the route is shrinking genuine claims.
+      // (An UNANSWERED repeat goodbye — past the recovery cap — can coalesce
+      // into the previous entry and be under-counted; that is the clamp's
+      // documented trade, not a failure of this invariant.)
       assert.ok(
-        transcriptShowsClosing(h.finished[0].transcript),
-        "the counted goodbye is in the submitted transcript",
+        countClosingTurns(h.finished[0].transcript) >= h.finished[0].earlyClosingCount,
+        "the submitted transcript backs the full count",
       );
     });
   });
