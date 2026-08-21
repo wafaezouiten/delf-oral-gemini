@@ -30,8 +30,10 @@ export interface FinishAnswer {
   status: number;
   /** The route's JSON, or null when the body was not JSON — a platform error
    *  arrives as an HTML page, and losing the status with it would lose the half
-   *  that decides whether a retry is worth offering. */
-  body: { evaluation?: unknown; error?: unknown } | null;
+   *  that decides whether a retry is worth offering. `pending` is the 202's
+   *  own word (#86): the sitting is accepted and the correction is being
+   *  attached behind the response. */
+  body: { evaluation?: unknown; error?: unknown; pending?: unknown } | null;
 }
 
 export function postFinishRequest(

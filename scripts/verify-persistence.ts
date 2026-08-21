@@ -318,6 +318,34 @@ async function main(): Promise<number> {
     });
     check("and the second one never graded", graded === 1, { graded });
 
+    /**
+     * The claim hold (#86), against the real clock: while a claim is younger
+     * than the grading budget and no correction exists, a second finish must
+     * be refused — that refusal is what stands between "fire the request
+     * twice" and two paid model calls — and a released claim must open the
+     * door again at once, which is the failed-accept repair path.
+     */
+    console.log("\nthe claim hold");
+    const [held] = await db
+      .insert(oralExams)
+      .values({ userId: USER, topicId, phase: "preparation" })
+      .returning({ id: oralExams.id });
+    const heldRef = { examId: held.id, userId: USER };
+
+    const heldAccept = await acceptSitting(store, heldRef, acceptInput);
+    check("a sitting nothing holds is accepted", heldAccept.status === "accepted", {
+      status: heldAccept.status,
+    });
+    const rival = await acceptSitting(store, heldRef, acceptInput);
+    check("a second finish inside the grading budget is refused", rival.status === "not-stored", {
+      status: rival.status,
+    });
+    await store.releaseClaim(heldRef);
+    const reclaimed = await acceptSitting(store, heldRef, acceptInput);
+    check("a released claim is re-acceptable at once", reclaimed.status === "accepted", {
+      status: reclaimed.status,
+    });
+
     console.log("\nread back");
     const stored = await store.readSitting(ref);
     check("the sitting reads as corrected", stored?.outcome === "corrected", {

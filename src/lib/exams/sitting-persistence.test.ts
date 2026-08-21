@@ -7,6 +7,7 @@ import type { EvaluationFeedback, OralSpeakingPhase } from "@/lib/db/schema";
 import type { TranscriptEntry } from "@/lib/delf/transcript";
 
 import {
+  CORRECTION_CLAIM_HOLD_SECONDS,
   acceptSitting,
   attachCorrection,
   deriveCorrectionWrite,
@@ -178,6 +179,15 @@ class MemoryStore implements SittingStore {
     const exam = this.owned(ref);
     if (!exam) return false;
     if (this.evaluations.some((row) => row.examId === ref.examId)) return false;
+    // The claim hold (#86), as the SQL applies it — a previous claim younger
+    // than the grading budget most likely has a model call behind it. The
+    // fake's clock is the claim's own timestamp, matching the injected `now`.
+    if (
+      exam.finishedAt !== null &&
+      +claim.finishedAt - +exam.finishedAt < CORRECTION_CLAIM_HOLD_SECONDS * 1000
+    ) {
+      return false;
+    }
 
     exam.phase = "finished";
     exam.transcript = claim.transcript;
@@ -185,6 +195,13 @@ class MemoryStore implements SittingStore {
     exam.earlyClosingCount = claim.earlyClosingCount;
     exam.finishedAt = claim.finishedAt;
     return true;
+  }
+
+  async releaseClaim(ref: SittingRef): Promise<void> {
+    const exam = this.owned(ref);
+    if (!exam) return;
+    if (this.evaluations.some((row) => row.examId === ref.examId)) return;
+    exam.finishedAt = null;
   }
 
   async abandonSitting(ref: SittingRef, abandonedAt: Date): Promise<boolean> {
@@ -684,27 +701,55 @@ describe("correcting a sitting", () => {
     assert.equal(sitting?.correction, null);
   });
 
-  it("refuses the finish when the artefact write fails, and strands nothing", async () => {
+  it("refuses the finish when the artefact write fails, gives the claim back, and strands nothing", async () => {
     // The accept's own failure: claimed, but the rows did not land. Nothing is
-    // safe, so the caller must refuse — and the refusal must be repairable,
-    // because the claim keys on corrections rather than `finished_at`.
+    // safe, so the caller must refuse — and because nothing here will grade,
+    // the claim is RELEASED, so the immediate retry is not held out for a
+    // grading budget nobody is spending.
     store.failNextArtefactWrite = true;
     const failed = await acceptSitting(store, REF, acceptInput());
     assert.equal(failed.status, "not-stored");
+    assert.equal(
+      store.exams.find((row) => row.id === EXAM_ID)?.finishedAt,
+      null,
+      "the failed accept does not sit on the claim",
+    );
 
     const retry = await acceptSitting(store, REF, acceptInput());
-    assert.equal(retry.status, "accepted", "the re-claim repairs what the failure left");
+    assert.equal(retry.status, "accepted", "the re-claim repairs what the failure left, at once");
   });
 
-  it("repairs an uncorrected sitting when it is finished again", async () => {
+  it("refuses a second finish while the first's grading may still be in flight (#86)", async () => {
+    // The review's finding on this PR: the fast 202 made stacking submits
+    // cheap, and each accepted one would have paid for its own model call.
+    // Within the grading budget, claimed-and-uncorrected reads as "being
+    // graded" and the second finish gets a retryable refusal instead.
+    const first = await acceptSitting(store, REF, acceptInput());
+    assert.equal(first.status, "accepted");
+
+    const preserve = mock.fn(async () => new Map<OralSpeakingPhase, string>());
+    const second = await acceptSitting(store, REF, acceptInput({ preserve }));
+
+    assert.equal(second.status, "not-stored");
+    assert.equal(preserve.mock.callCount(), 0, "and it never stored a second copy of the voice");
+    assert.equal(store.evaluations.length, 0);
+  });
+
+  it("repairs an uncorrected sitting when it is finished again, past the hold", async () => {
     // The claim asks about corrections, not about `finished_at`, precisely so
-    // this is possible. Keying on the stamp would strand the sitting.
+    // this is possible — once the grading budget has certainly expired, which
+    // is when the finished screen offers the retry (`CORRECTION_WAIT_LIMIT_MS`
+    // sits above the hold). Keying on the stamp would strand the sitting.
     const accepted = await acceptSitting(store, REF, acceptInput());
     assert.equal(accepted.status, "accepted");
     store.failNextWrite = true;
     await attachCorrection(store, REF, attachInput());
 
-    const retry = await finishSitting(store);
+    const afterHold = () => new Date(+NOW + (CORRECTION_CLAIM_HOLD_SECONDS + 1) * 1000);
+    const retry = await finishSitting(store, {
+      accept: { now: afterHold },
+      attach: { now: afterHold },
+    });
     assert.equal(retry.status, "stored");
     assert.equal((await store.readSitting(REF))?.outcome, "corrected");
     assert.equal(store.evaluations.length, 1);

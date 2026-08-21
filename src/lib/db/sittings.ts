@@ -24,7 +24,7 @@ import type {
   StoredCorrection,
   StoredSitting,
 } from "@/lib/exams/sitting-persistence";
-import { sittingOutcome } from "@/lib/exams/sitting-persistence";
+import { CORRECTION_CLAIM_HOLD_SECONDS, sittingOutcome } from "@/lib/exams/sitting-persistence";
 
 /**
  * The SQL half of Phase 8 — the only module that knows how a sitting is stored.
@@ -447,11 +447,36 @@ export function neonSittingStore(): SittingStore {
             // sitting whose write failed be finished again instead of being
             // stranded marked-done and ungradeable.
             sql`not exists (select 1 from ${evaluations} where ${evaluations.examId} = ${oralExams.id})`,
+            // …but not while a previous claim is still inside the grading
+            // budget (#86): behind an answered 202, "claimed and uncorrected"
+            // most likely means "being graded", and a second claim here would
+            // be a second paid model call for the same sitting. The database's
+            // clock, not the caller's — the caller's is a browser away.
+            sql`(${oralExams.finishedAt} is null
+              or ${oralExams.finishedAt} < now() - make_interval(secs => ${CORRECTION_CLAIM_HOLD_SECONDS}))`,
           ),
         )
         .returning({ id: oralExams.id });
 
       return claimed.length > 0;
+    },
+
+    async releaseClaim(ref: SittingRef) {
+      // The accept could not finish, so its claim must not exclude the retry
+      // for the whole hold (#86). Never on a corrected sitting: the guard is
+      // the same one the claim wears, because un-finishing a graded épreuve
+      // would contradict the row the candidate is already looking at.
+      await db
+        .update(oralExams)
+        .set({ finishedAt: null })
+        .where(
+          and(
+            eq(oralExams.id, ref.examId),
+            eq(oralExams.userId, ref.userId),
+            isNotNull(oralExams.finishedAt),
+            sql`not exists (select 1 from ${evaluations} where ${evaluations.examId} = ${oralExams.id})`,
+          ),
+        );
     },
 
     async writeArtefacts(ref: SittingRef, artefacts: ArtefactRows) {

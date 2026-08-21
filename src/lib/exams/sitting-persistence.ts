@@ -40,14 +40,16 @@
  * the button twice — costs a paid model call at worst and produces exactly one
  * correction, which is the case this phase is asked to handle.
  *
- * #86 MOVED that window; it did not close or widen it. The grading now runs
- * after the claim, so two finishes racing can both reach `accepted` and both
- * pay for a model call behind their responses — where before, a racer that
- * lost the claim never graded at all. The failure in kind is unchanged (the
- * same instant race could always produce a duplicate row, and one correction
- * is returned either way); what moved is the cost, from one model call in the
- * race case to two — which is the price the realistic duplicate was already
- * priced at above.
+ * #86 MOVED that window, and then had to re-narrow it. The grading now runs
+ * after the claim, which on its own turned "fire the finish twice" into N
+ * accepted requests each paying for a model call — the route answers in
+ * seconds, so stacking submits inside the 30–60 s grading window became
+ * cheap. So the claim now also refuses while a previous claim is younger
+ * than {@link CORRECTION_CLAIM_HOLD_SECONDS}: within the grading budget, an
+ * uncorrected-but-claimed sitting is treated as one being graded, and a
+ * second finish gets a retryable refusal instead of a second bill. What
+ * remains open is exactly what was always open — the same-instant race,
+ * two claims in the same moment — unchanged in kind and now no cheaper.
  */
 
 import type { OralCriterion } from "@/lib/delf/criteria";
@@ -239,10 +241,27 @@ export interface SittingStore {
    * Take exclusive ownership of the right to correct this sitting, marking it
    * finished in the same statement.
    *
-   * Returns `false` when a correction already exists — see the module header for
-   * why the condition is about corrections rather than about `finished_at`.
+   * Returns `false` when a correction already exists — see the module header
+   * for why the condition is about corrections rather than about `finished_at`
+   * — and, since #86, ALSO while a previous claim is younger than
+   * {@link CORRECTION_CLAIM_HOLD_SECONDS}: the grading now runs behind the
+   * response, so for that window an uncorrected-but-claimed sitting most
+   * likely has a grading in flight, and a second claim would buy a second
+   * paid model call for the same sitting. Past the window the platform has
+   * necessarily killed the invocation, and the re-claim is the repair path.
    */
   claimForCorrection(ref: SittingRef, claim: SittingClaim): Promise<boolean>;
+
+  /**
+   * Give a claim back, because the accept that made it could not finish (#86).
+   *
+   * Un-stamps `finished_at` — never on a corrected sitting — so a finish whose
+   * artefact write failed can be retried immediately instead of waiting out
+   * the claim hold for a grading that never started. Best-effort by contract:
+   * a release that fails leaves the sitting held for at most the hold window,
+   * which is degraded, not stranded.
+   */
+  releaseClaim(ref: SittingRef): Promise<void>;
 
   /**
    * The phases and the recordings, atomically, with no correction beside them
@@ -375,6 +394,25 @@ export function deriveArtefactRows(input: Omit<CorrectionInput, "correction">): 
 // =====================================================
 
 /**
+ * How long a claim excludes a second one, in seconds (#86).
+ *
+ * The number IS the finish route's `maxDuration` (300 s), and the coupling is
+ * the point: the grading runs behind the response inside that budget, so
+ * within the window an uncorrected-but-claimed sitting most likely has a paid
+ * model call in flight, and accepting a second finish would buy a second one
+ * — the review's finding on this PR: the fast 202 turned "fire the request
+ * twice" into N re-gradings. Past the window the platform has killed the
+ * invocation, so the re-claim is the honest repair.
+ *
+ * `CORRECTION_WAIT_LIMIT_MS` (330 s) sits deliberately ABOVE this, which is
+ * what keeps the two from ever fighting: the candidate is only offered
+ * « Réessayer l'envoi » after the hold has certainly expired, so the honest
+ * retry is never refused. Anyone moving one of the three numbers — the
+ * route's `maxDuration`, this hold, the wait limit — moves all three.
+ */
+export const CORRECTION_CLAIM_HOLD_SECONDS = 300;
+
+/**
  * What accepting a sitting — everything except the grade — came to (#86).
  */
 export type AcceptOutcome =
@@ -499,9 +537,11 @@ export async function acceptSitting(
       }),
     );
   } catch (error) {
-    // Claimed, but the rows did not land. The sitting reads `uncorrected` and
-    // the retry re-claims — the claim keys on corrections, not `finished_at` —
-    // so refusing the finish here strands nothing.
+    // Claimed, but the rows did not land — nothing here will grade, so the
+    // claim must not sit on the sitting excluding the immediate retry for the
+    // whole hold window. Given back best-effort: a release that also fails
+    // leaves the retry waiting out the hold, degraded but bounded.
+    await store.releaseClaim(ref).catch(() => undefined);
     return { status: "not-stored", error };
   }
 

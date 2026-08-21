@@ -112,7 +112,7 @@ describe("waiting for the correction to land", () => {
     assert.equal(outcome, "cancelled");
   });
 
-  it("waits past the finish route's own budget before giving up", () => {
+  it("waits past the finish route's own budget before giving up", async () => {
     // `maxDuration` is 300 s and the grading runs inside it, behind the
     // response. A limit under that would declare corrections dead while their
     // request was still legally alive; the slack past it is for the answer to
@@ -120,6 +120,13 @@ describe("waiting for the correction to land", () => {
     // grading, not become its own load.
     assert.ok(CORRECTION_WAIT_LIMIT_MS > 300_000);
     assert.ok(CORRECTION_POLL_MS >= 1_000);
+
+    // The third leg of the same triangle (#86): the claim hold refuses a
+    // re-finish inside the grading budget, so the retry this wait ends in
+    // must only ever be offered after the hold has certainly expired —
+    // otherwise the screen would offer a button the route refuses.
+    const { CORRECTION_CLAIM_HOLD_SECONDS } = await import("./sitting-persistence");
+    assert.ok(CORRECTION_WAIT_LIMIT_MS > CORRECTION_CLAIM_HOLD_SECONDS * 1000);
   });
 });
 

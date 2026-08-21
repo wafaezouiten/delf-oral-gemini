@@ -294,16 +294,17 @@ export function ExamClient({
         if (body === null) throw new Error("the finish route answered 200 without JSON");
 
         /**
-         * A 202: the sitting is safe and the correction is being attached
-         * behind the response (#86). Nothing goes into sessionStorage — the
-         * pending path only exists for persisted sittings, and the results
-         * page reads those from the database. Poll until the correction
-         * lands, then navigate; past the server's own budget, stop claiming
-         * anything is in progress and put the retry in front of the tab —
-         * which still holds the artefacts, and whose re-finish begins with a
-         * duplicate check, so a correction that landed late costs nothing.
+         * The 202's own word (#86): the sitting is safe and the correction is
+         * being attached behind the response. Nothing goes into
+         * sessionStorage — the pending path only exists for persisted
+         * sittings, and the results page reads those from the database. Poll
+         * until the correction lands, then navigate; past the server's own
+         * budget, stop claiming anything is in progress and put the retry in
+         * front of the tab — which still holds the artefacts, and whose
+         * re-finish begins with a duplicate check, so a correction that
+         * landed late costs nothing.
          */
-        if (body.evaluation === undefined) {
+        if (body.pending === true) {
           setAwaitingCorrection(true);
           const outcome = await waitForCorrection(() => fetchCorrectionStatus(examId), {
             cancelled: () => !liveRef.current,
@@ -321,6 +322,11 @@ export function ExamClient({
           setSubmitting(false);
           submittedRef.current = false;
           return;
+        }
+        // Neither pending nor carrying a result is a contract breach, not a
+        // shape to guess at; the catch below turns it into the retry message.
+        if (body.evaluation === undefined) {
+          throw new Error("the finish route answered without a result or a pending word");
         }
 
         sessionStorage.setItem(
