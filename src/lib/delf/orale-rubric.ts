@@ -181,6 +181,14 @@ export function partsUnderFloor(durations: SittingDurations): Array<"monologue" 
  * Deliberately not zero. "Answered nothing" in practice looks like « euh… non,
  * ça va, merci », and a rule that a single « oui » defeats is a rule that
  * rewards saying one word over saying none.
+ *
+ * **Replayed against history — change it knowing that (#77).** The results
+ * page recovers which parts a STORED correction was docked for by re-running
+ * {@link partsAbsent} over the stored transcript with today's floor and
+ * today's `candidateWordCount` tokenisation, not the ones in force when the
+ * correction was charged. The mark itself cannot move — that comes from the
+ * stored `absence_penalty` — but moving this figure can make an old
+ * correction name a different part than the one it was actually docked for.
  */
 export const PARTICIPATION_WORD_FLOOR = 20;
 

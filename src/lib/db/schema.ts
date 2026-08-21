@@ -513,6 +513,12 @@ export const evaluations = pgTable(
     // from the generated migration; `pnpm verify:db` now writes a row with both
     // penalties non-zero, which is the only shape that notices.
     //
+    // Since #77 this comment is no longer the only guard: `pnpm verify:db`
+    // compares every live `pg_get_constraintdef` against what this file
+    // declares (`constraint-drift.ts`) and fails loudly on any difference —
+    // so a pushed database announces its drift the first time anyone verifies
+    // it, instead of on the first row that needed the new arithmetic.
+    //
     // Keeps the four score columns telling one story. Both rubric copies apply
     // the penalty the same way — subtract, floor at 0 — so this constraint is
     // neutral in the disagreement between them.
