@@ -141,6 +141,9 @@ async function readRecordings(
 }
 
 export async function POST(request: Request, context: { params: Promise<{ examId: string }> }) {
+  // When the request reached this function, so the wait #86 is about can be
+  // read off the logs as its segments rather than argued about as one blur.
+  const receivedAt = Date.now();
   const { examId } = await context.params;
 
   /**
@@ -172,12 +175,16 @@ export async function POST(request: Request, context: { params: Promise<{ examId
     return NextResponse.json({ error: "Requête trop volumineuse" }, { status: 413 });
   }
 
+  // Timed because it is not just parsing: `formData()` consumes the body, so on
+  // a slow connection this segment IS the candidate's upload arriving.
+  const formReadStartedAt = Date.now();
   let form: FormData;
   try {
     form = await request.formData();
   } catch {
     return NextResponse.json({ error: "Requête illisible" }, { status: 400 });
   }
+  const formReadSeconds = (Date.now() - formReadStartedAt) / 1000;
 
   const payloadRaw = form.get("payload");
   if (typeof payloadRaw !== "string") {
@@ -222,7 +229,9 @@ export async function POST(request: Request, context: { params: Promise<{ examId
 
   // In exam order, because that is what the evaluator's prompt promises the
   // model about the files it is being handed.
+  const measureStartedAt = Date.now();
   const read = await readRecordings(form);
+  const measureSeconds = (Date.now() - measureStartedAt) / 1000;
   if ("rejected" in read) {
     return read.reason === "too-large"
       ? NextResponse.json(
@@ -326,6 +335,33 @@ export async function POST(request: Request, context: { params: Promise<{ examId
    */
   const mode: EvaluationMode = recordings.length === 0 ? "text" : "audio";
 
+  /**
+   * The candidate's wait, as its segments (#86): the upload arriving
+   * (`formReadSeconds`), the bytes being measured, the Files API uploads and
+   * the corrector (from the evaluation, split there for the same reason), and
+   * the whole route. One line per finish, so the argument about which lever to
+   * pull next is an argument about numbers read off a deployment's logs.
+   * `null` segments mean no fresh grading ran — a duplicate submission returns
+   * the stored correction and pays neither the uploads nor the model.
+   */
+  const logTimings = (evaluation: EvaluationResult | null) => {
+    const seconds = (value: number) => Number(value.toFixed(2));
+    console.info(
+      "[finish] timings",
+      JSON.stringify({
+        formReadSeconds: seconds(formReadSeconds),
+        measureSeconds: seconds(measureSeconds),
+        uploadSeconds: evaluation ? seconds(evaluation.uploadSeconds) : null,
+        modelSeconds: evaluation ? seconds(evaluation.modelSeconds) : null,
+        totalSeconds: seconds((Date.now() - receivedAt) / 1000),
+        recordings: recordings.map((recording) => ({
+          phase: recording.phase,
+          bytes: recording.byteSize,
+        })),
+      }),
+    );
+  };
+
   const grade = () =>
     evaluateExam({
       mode,
@@ -357,7 +393,9 @@ export async function POST(request: Request, context: { params: Promise<{ examId
     // ownership question that went unanswered. Grade and hand it straight back;
     // the results page renders from the response either way.
     if (persistedExamId === null) {
-      return NextResponse.json({ evaluation: await grade(), persisted: false });
+      const evaluation = await grade();
+      logTimings(evaluation);
+      return NextResponse.json({ evaluation, persisted: false });
     }
 
     /**
@@ -441,6 +479,7 @@ export async function POST(request: Request, context: { params: Promise<{ examId
      * `results-client.tsx`) precisely because a stored correction is the other
      * thing it can be rendering.
      */
+    logTimings(graded);
     return NextResponse.json({
       evaluation: graded ?? outcome.correction,
       persisted: outcome.status !== "graded-not-stored",

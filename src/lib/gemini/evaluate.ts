@@ -261,7 +261,21 @@ export interface EvaluationResult {
   feedback: EvaluationFeedback;
   model: string;
   promptVersion: string;
+  /**
+   * The whole of this call, wall-clock: uploads, corrector, parsing. The stored
+   * column (`evaluations.latency_seconds`), so its meaning must not move — rows
+   * written before and after #86 have to stay comparable.
+   */
   latencySeconds: number;
+  /**
+   * The split of {@link latencySeconds} that #86 asked for, because a fix
+   * chosen against one undifferentiated number is chosen blind: how long the
+   * Files API uploads took, and how long the corrector itself did. Diagnostics
+   * like `rawCriteria` and `usage` below — they travel in the response and are
+   * deliberately not columns; the operator's copy is the `[evaluate]` log line.
+   */
+  uploadSeconds: number;
+  modelSeconds: number;
   /**
    * What the correction actually cost, in tokens, as the API reported it.
    *
@@ -379,6 +393,7 @@ export async function evaluateExam(params: EvaluateParams): Promise<EvaluationRe
 
   const parts: Part[] = [{ text: buildPrompt({ ...params, earlyClosingCount, recordings }) }];
 
+  const uploadStartedAt = Date.now();
   if (params.mode === "audio") {
     if (recordings.length === 0) {
       throw new Error("Audio mode requires the candidate's recording");
@@ -389,19 +404,31 @@ export async function evaluateExam(params: EvaluateParams): Promise<EvaluationRe
     // it. `audio/ogg` is accepted and transcribed — verified against the real
     // service, see docs/AUDIO_UPLOAD.md.
     //
-    // Sequential rather than concurrent: the free tier rate-limits uploads, and
-    // two files is not a latency problem worth a 429 for.
-    for (const recording of recordings) {
-      const uploaded = await ai.files.upload({
-        file: recording.blob,
-        config: { mimeType: recording.mimeType },
-      });
-      if (!uploaded.uri || !uploaded.mimeType) {
-        throw new Error("File upload returned no usable URI");
-      }
-      parts.push(createPartFromUri(uploaded.uri, uploaded.mimeType));
-    }
+    // Concurrent since #86, reversing a deliberate "sequential, the free tier
+    // rate-limits uploads" trade. Decided rather than drifted into: the free
+    // tier's Files API limit is a request *rate*, not a concurrency cap, the
+    // fan-out here is bounded at the two speaking phases, and a candidate is
+    // sitting at « Épreuve terminée » for the whole of this — `uploadSeconds`
+    // below is what says how much the change bought. A 429, if one ever
+    // arrives, surfaces exactly as it did sequentially: the route's 502 and
+    // the retry button. `map` preserves exam order, which the prompt promises
+    // the model about the files it is handed.
+    parts.push(
+      ...(await Promise.all(
+        recordings.map(async (recording) => {
+          const uploaded = await ai.files.upload({
+            file: recording.blob,
+            config: { mimeType: recording.mimeType },
+          });
+          if (!uploaded.uri || !uploaded.mimeType) {
+            throw new Error("File upload returned no usable URI");
+          }
+          return createPartFromUri(uploaded.uri, uploaded.mimeType);
+        }),
+      )),
+    );
   }
+  const uploadSeconds = (Date.now() - uploadStartedAt) / 1000;
 
   /**
    * Retried on a busy corrector, and only on a busy corrector.
@@ -418,6 +445,7 @@ export async function evaluateExam(params: EvaluateParams): Promise<EvaluationRe
    * outside the retry deliberately: re-sending the audio is the expensive half
    * and a failed upload leaves nothing to reuse.
    */
+  const modelStartedAt = Date.now();
   const response = await withTransientRetry(
     () =>
       ai.models.generateContent({
@@ -438,6 +466,16 @@ export async function evaluateExam(params: EvaluateParams): Promise<EvaluationRe
             `retrying in ${delayMs}ms`,
         ),
     },
+  );
+
+  const modelSeconds = (Date.now() - modelStartedAt) / 1000;
+  // The split #86 asked for, where an operator will actually see it: which half
+  // of the corrector's latency was the network and which was the model. One
+  // line per correction, so a slow sitting can be read off the deployment logs
+  // rather than re-argued from guesses.
+  console.info(
+    `[evaluate] uploads ${uploadSeconds.toFixed(1)}s (${recordings.length} file(s)), ` +
+      `corrector ${modelSeconds.toFixed(1)}s (${EVAL_MODEL})`,
   );
 
   const text = response.text;
@@ -498,6 +536,8 @@ export async function evaluateExam(params: EvaluateParams): Promise<EvaluationRe
     model: EVAL_MODEL,
     promptVersion: EVAL_PROMPT_VERSION,
     latencySeconds: (Date.now() - startedAt) / 1000,
+    uploadSeconds,
+    modelSeconds,
     usage: readEvaluationUsage(response.usageMetadata),
   };
 }
