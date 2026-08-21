@@ -15,7 +15,9 @@ plugins:
 # The committed content is LF (see the index), but Windows checkouts under
 # core.autocrlf=true materialise CRLF in the working tree. Prettier's default
 # ("lf") would flag every file on such a machine forever; "auto" keeps each
-# file's existing endings and lets git normalise on commit.
+# file's existing endings. Note the dependency this creates: keeping the *index*
+# LF is entirely git's job (core.autocrlf / .gitattributes normalisation on
+# commit) — with "auto", Prettier will never fix accidental CRLF creep itself.
 endOfLine: auto
 
 # Prettier's default, kept deliberately (#96): the doc blocks and markdown in
