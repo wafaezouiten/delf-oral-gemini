@@ -6,11 +6,13 @@ import { useRouter } from "next/navigation";
 import { Notice } from "@/app/_components/notice";
 import { dangerButton } from "@/app/_components/button-styles";
 import { ExitDialog } from "@/app/_components/po/exit-dialog";
+import { QuitPreparationDialog } from "@/app/_components/po/quit-preparation-dialog";
 import { useExamController } from "@/lib/live/use-exam-controller";
 import type { ExamFinishedPayload } from "@/lib/live/exam-controller";
 import { isOpusEncodingSupported } from "@/lib/audio/opus-encoder";
 import { selectDeliverable } from "@/lib/exams/uploaded-recording";
 import { requestAbandon } from "@/lib/exams/abandon";
+import { requestPreparationExit } from "@/lib/exams/preparation-exit";
 import { requestExaminerChoice } from "@/lib/exams/examiner-choice";
 import { LIVE_MODEL } from "@/lib/gemini/constants";
 import { describeFinishFailure, type FinishFailure } from "@/lib/ui/finish-failure";
@@ -70,6 +72,8 @@ export function ExamClient({
   const [showExitDialog, setShowExitDialog] = useState(false);
   const [abandoning, setAbandoning] = useState(false);
   const [abandonFailed, setAbandonFailed] = useState(false);
+  const [showQuitPreparation, setShowQuitPreparation] = useState(false);
+  const [quittingPreparation, setQuittingPreparation] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<FinishFailure | null>(null);
   const submittedRef = useRef(false);
@@ -384,6 +388,39 @@ export function ExamClient({
   };
 
   /**
+   * Quit during the préparation (#113): archive the sitting, then leave.
+   *
+   * NOT the abandon path, and the difference is the issue. Nothing has been said
+   * during the préparation, so there is no performance to score zero — leaving
+   * here must not be the walk-out that quitting mid-exposé is. The sitting is
+   * archived instead (the reset's stamp, #69), so a deliberate exit does not
+   * strand a row that looks like a crashed tab.
+   *
+   * Awaited like the abandon, for the #38 reason — `router.push` is a soft
+   * navigation, so there is nothing to outrun and the click's work should be
+   * done before the screen changes — but the outcome is only logged, never
+   * blocking. The dialog promised the candidate an *absence*: this épreuve will
+   * not count and will not appear. An exit whose write failed produces exactly
+   * that, so there is no broken promise to report and no retry to offer.
+   *
+   * No `router.refresh()`, unlike the abandon: nothing the destination renders
+   * changed. An archived préparation reaches no historique, no sujet card and no
+   * tableau de bord — the walk-out needed the refresh precisely because its
+   * zero does.
+   */
+  const quitPreparation = async () => {
+    if (quittingPreparation) return;
+    setQuittingPreparation(true);
+
+    const outcome = await requestPreparationExit(examId);
+    if (!outcome.recorded) {
+      console.warn("[preparation] the exit was not archived on the server", outcome);
+    }
+
+    leave();
+  };
+
+  /**
    * Every failure the épreuve can produce, in the order a candidate cares about
    * it: the connection that has stopped coming back, then the microphone. Both
    * are messages first and a control second — a red button on its own is not an
@@ -497,6 +534,10 @@ export function ExamClient({
     );
   }
 
+  // The walk-out confirmation, from the exposé onwards only. The préparation
+  // renders its own dialog below (#113): this one's zero is a promise the
+  // product keeps by stamping `abandoned_at`, and before the exposé there is no
+  // performance for that zero to be about.
   const exitDialog = (
     <ExitDialog
       open={showExitDialog}
@@ -520,7 +561,7 @@ export function ExamClient({
           onNotes={setNotes}
           remaining={state.remaining}
           onStartExam={() => void controller.advanceEarly()}
-          onExit={() => setShowExitDialog(true)}
+          onExit={() => setShowQuitPreparation(true)}
           checking={checkingBrowser}
           examinerModel={examinerModel}
           examinerSaving={examinerSaving}
@@ -529,7 +570,12 @@ export function ExamClient({
           notices={hasNotices || canEncode === false ? preparationNotices : undefined}
           announcement={announcement}
         />
-        {exitDialog}
+        <QuitPreparationDialog
+          open={showQuitPreparation}
+          pending={quittingPreparation}
+          onCancel={() => setShowQuitPreparation(false)}
+          onConfirm={() => void quitPreparation()}
+        />
       </>
     );
   }

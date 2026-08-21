@@ -30,7 +30,7 @@ import { getDb, isDatabaseConfigured } from "../src/lib/db";
 import { archiveCandidateRecord } from "../src/lib/db/account";
 import { readCandidateHistory } from "../src/lib/db/history";
 import { oralExams, oralTopics } from "../src/lib/db/schema";
-import { neonSittingStore } from "../src/lib/db/sittings";
+import { archivePreparationExit, neonSittingStore } from "../src/lib/db/sittings";
 import { ORAL_CRITERIA } from "../src/lib/delf/criteria";
 import { ORAL_TOPICS } from "../src/lib/delf/topics";
 import { correctSitting, type CorrectionRow } from "../src/lib/exams/sitting-persistence";
@@ -289,6 +289,68 @@ async function main(): Promise<number> {
 
     const after = await store.readSitting(ref);
     check("and nothing they did left a mark", after?.reconnectCount === 1 && after?.transcript.length === 2);
+
+    /**
+     * Leaving the préparation (#113).
+     *
+     * Two clauses are worth a live probe here, because each is a boundary the
+     * unit tests cannot see. `archivePreparationExit`'s `phase = 'preparation'`
+     * is what keeps a quit from touching a sitting whose épreuve has moved on;
+     * and `abandonSitting`'s deliberate LACK of the mirror clause is what keeps
+     * a mid-monologue walk-out recordable at all — the row still reads
+     * `preparation` until the monologue's progress report lands, so a phase
+     * guard on the abandon would refuse a real walk-out.
+     */
+    console.log("\nleaving the préparation");
+    const [prep] = await db
+      .insert(oralExams)
+      .values({ userId: USER, topicId, phase: "preparation" })
+      .returning({ id: oralExams.id });
+    const prepRef = { examId: prep.id, userId: USER };
+
+    check(
+      "a stranger cannot archive it",
+      (await archivePreparationExit({ examId: prep.id, userId: "verify_intruder" }, new Date())) ===
+        false,
+    );
+    check(
+      "leaving during the préparation archives the sitting",
+      await archivePreparationExit(prepRef, new Date()),
+    );
+    check(
+      "a second leave writes nothing",
+      (await archivePreparationExit(prepRef, new Date())) === false,
+    );
+    check(
+      "and the sitting reaches no record, not even the archive",
+      (await readCandidateHistory(USER, { includeArchived: true })).every(
+        (s) => s.examId !== prep.id,
+      ),
+    );
+    check(
+      "a sitting past the préparation is not archivable this way",
+      (await archivePreparationExit(ref, new Date())) === false,
+    );
+
+    // A walk-out stamped while the row still reads `preparation` — which is
+    // every mid-monologue walk-out there is. This is the row the abandon's
+    // missing phase clause exists for.
+    const [midMonologue] = await db
+      .insert(oralExams)
+      .values({ userId: USER, topicId, phase: "preparation" })
+      .returning({ id: oralExams.id });
+    check(
+      "a walk-out lands while the row still reads préparation",
+      await store.abandonSitting({ examId: midMonologue.id, userId: USER }, new Date()),
+    );
+    check(
+      "and a walked-out sitting keeps its filing against a préparation exit",
+      (await archivePreparationExit({ examId: midMonologue.id, userId: USER }, new Date())) ===
+        false,
+    );
+    // Deleted rather than left: it is a real walk-out, and the next section
+    // counts the record it would otherwise join.
+    await db.delete(oralExams).where(eq(oralExams.id, midMonologue.id));
 
     /**
      * Starting over (#69).

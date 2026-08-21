@@ -215,6 +215,12 @@ export const oralExams = pgTable(
      * yet: the candidate would sit an épreuve *after* resetting and never see it
      * counted. See `archiveCandidateRecord`.
      *
+     * One other writer since #113: quitting during the préparation stamps this
+     * same column on that one sitting (`archivePreparationExit`). The meaning is
+     * the reset's — off the record by the candidate's own decision — applied to
+     * a sitting that was never going to be on it; the stamp is what tells a
+     * deliberate exit apart from a crashed tab.
+     *
      * No index of its own: every read that filters on it also filters on
      * `user_id`, and one candidate's sittings are already few enough that the
      * index below does the work.

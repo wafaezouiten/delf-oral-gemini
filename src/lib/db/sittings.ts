@@ -178,6 +178,58 @@ export async function chooseExaminerModel(ref: SittingRef, model: string): Promi
 }
 
 /**
+ * The candidate left during the préparation (#113) — the sitting is archived,
+ * never abandoned.
+ *
+ * A standalone export for `chooseExaminerModel`'s reason: the `SittingStore`
+ * interface is the finish path's seam — claim, correct, write — and this is a
+ * préparation write with none of that policy behind it.
+ *
+ * `archived_at` is the reset's stamp (#69), reused deliberately: both mean "off
+ * the record by the candidate's own decision", and a sitting nobody has spoken
+ * in has no other record to be off. The row stays exactly as unfinished as a
+ * closed tab would leave it — no terminal stamp, no zero — but the stamp tells
+ * a deliberate exit apart from a crashed one, which is the distinction
+ * `abandoned_at` exists to draw for the phases where leaving costs something.
+ *
+ * One statement, idempotence in the WHERE as everywhere in this file:
+ *
+ *  - the owner, because exam ids are sequential serials;
+ *  - `phase = 'preparation'`, the boundary. Note what the column can and cannot
+ *    say: `phase` advances when a speaking phase *finalises* (see
+ *    `appendFinalisedPhase`), so `'preparation'` strictly means "no speaking
+ *    phase has been reported", which spans the live monologue. For the honest
+ *    client — the only one that renders the préparation's exit — the two are
+ *    the same thing; a forged request sent mid-monologue archives a sitting
+ *    whose épreuve is in flight, which strands only the sender's own sitting.
+ *    The clause also subsumes the `not exists (…evaluations…)` guard the
+ *    terminal writes carry: a correction requires a claim, and the claim sets
+ *    `phase = 'finished'` in the same statement;
+ *  - `archived_at is null`, so a double-clicked « Quitter » keeps the moment
+ *    the candidate first left;
+ *  - `abandoned_at is null`, because a walk-out is ON the record and files
+ *    under whichever archive a reset later draws — rows stamped from the
+ *    préparation before #113 drew this boundary keep that filing.
+ */
+export async function archivePreparationExit(ref: SittingRef, leftAt: Date): Promise<boolean> {
+  const archived = await getDb()
+    .update(oralExams)
+    .set({ archivedAt: leftAt })
+    .where(
+      and(
+        eq(oralExams.id, ref.examId),
+        eq(oralExams.userId, ref.userId),
+        eq(oralExams.phase, "preparation"),
+        isNull(oralExams.archivedAt),
+        isNull(oralExams.abandonedAt),
+      ),
+    )
+    .returning({ id: oralExams.id });
+
+  return archived.length > 0;
+}
+
+/**
  * One phase's recording row, read for playback (#98).
  *
  * A standalone export for `chooseExaminerModel`'s reason: the `SittingStore`
@@ -445,6 +497,17 @@ export function neonSittingStore(): SittingStore {
        * and the entire point of this row is that it did not — `phase` keeps
        * saying where the candidate stopped, which is the only honest record of
        * an abandonment and the thing the history page prints.
+       *
+       * There is also deliberately NO phase clause, although #113 draws a
+       * boundary in phase terms: quitting before the exposé must not record a
+       * walk-out. The column cannot enforce that boundary, because it advances
+       * when a speaking phase *finalises* — the row reads `'preparation'`
+       * through the whole live monologue, and a `phase != 'preparation'` guard
+       * here would refuse the most ordinary walk-out there is, a candidate
+       * abandoning mid-exposé. So the before-exposé rule is the client's: the
+       * préparation screen never offers this write (it archives instead — see
+       * `archivePreparationExit`), and a hand-crafted abandon sent during the
+       * préparation writes a zero only onto its sender's own record.
        */
       const abandoned = await db
         .update(oralExams)

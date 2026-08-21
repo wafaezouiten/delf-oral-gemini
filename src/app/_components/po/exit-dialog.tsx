@@ -7,8 +7,15 @@ import { dangerButton, secondaryButton } from "@/app/_components/button-styles";
 import { AlertIcon } from "./icons";
 
 /**
- * "Quitter l'épreuve ?" — the confirmation behind Retour, once the clock has
- * started.
+ * "Quitter l'épreuve ?" — the confirmation behind Retour, from the exposé
+ * onwards.
+ *
+ * Onwards, not "once the clock has started": the préparation's Retour used to
+ * land here too, and charged a candidate who had not said a word the same zero
+ * as one who walked out mid-débat (#113). The préparation now opens
+ * `QuitPreparationDialog` instead — this dialog's copy promises a zero, and
+ * before the exposé that is a warning the product would not honour, which is
+ * exactly what this dialog was built not to be (see below).
  *
  * PORT NOTE: the reference's `ExamDialog` (shadcn `AlertDialog` underneath),
  * reproduced on the native `<dialog>` element. That is not a downgrade: a modal

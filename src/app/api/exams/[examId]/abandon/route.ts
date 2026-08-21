@@ -25,6 +25,14 @@
  * nothing — a sitting already abandoned, or one whose correction landed while
  * the dialog was open. None of those is an error the departing candidate could
  * act on, and a client leaving the page cannot retry anyway.
+ *
+ * Since #113 this route is only ever sent from the exposé onwards: quitting
+ * during the préparation is not a walk-out (nothing has been said, so there is
+ * no performance to score zero) and takes the leave route instead. That
+ * boundary is deliberately the client's, not this route's — the row's `phase`
+ * column advances when a speaking phase finalises, so it still reads
+ * `preparation` through the whole live monologue, and a phase check here would
+ * refuse the most ordinary walk-out there is. See `abandonSitting`.
  */
 
 import { NextResponse } from "next/server";
