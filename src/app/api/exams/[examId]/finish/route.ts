@@ -62,9 +62,12 @@ import { finishPayloadSchema } from "@/lib/exams/finish-payload";
 import {
   MAX_RECORDING_BYTES,
   MAX_REQUEST_BYTES,
+  MIN_RECORDING_SECONDS,
   measureUploadedRecording,
 } from "@/lib/exams/uploaded-recording";
 import { evaluateExam, type EvaluationMode, type EvaluationResult } from "@/lib/gemini/evaluate";
+// Which part of the grading died, read off the tagged throw (#73).
+import { evaluationFailureReason } from "@/lib/gemini/evaluation-failure";
 // Where the recordings go to outlive this request (#98) — when a store is
 // configured, which is a real branch rather than an assumption: without one,
 // every row below is written transient, exactly as before.
@@ -111,6 +114,12 @@ interface UploadedRecording {
  * refused — see `measureUploadedRecording`, which decides the format from the
  * bytes rather than from what the form said they were.
  *
+ * And a file that measures under `MIN_RECORDING_SECONDS` is folded into the
+ * first case (#73): a stub of seconds is treated as the absence it effectively
+ * is, everywhere downstream at once — the grading mode, the corrector's
+ * attachments, the stored rows and the vault all see one consistent answer.
+ * The constant's own comment is where the threshold is argued for.
+ *
  * One pass over the two phases, and the size check happens inside it — before
  * the `arrayBuffer()` that is the expensive half. Two loops reading the same two
  * form fields is one edit away from being two loops in the wrong order.
@@ -128,6 +137,18 @@ async function readRecordings(
 
     const measured = measureUploadedRecording(await file.arrayBuffer(), INPUT_SAMPLE_RATE);
     if (!measured) return { rejected: phase, reason: "unreadable" };
+
+    // A measurable stub is treated as absence, not refused (#73): a skipped
+    // débat or a typed exposé (#51) legitimately produces one, so a 400 here
+    // would fail sittings that are fine. Logged because a silent drop would
+    // read as "no file arrived" to anyone chasing the very reports this serves.
+    if (measured.durationSeconds < MIN_RECORDING_SECONDS) {
+      console.info(
+        `[finish] dropping the ${phase} recording: ` +
+          `${measured.durationSeconds.toFixed(1)}s is under the ${MIN_RECORDING_SECONDS}s floor`,
+      );
+      continue;
+    }
 
     recordings.push({
       phase,
@@ -475,8 +496,13 @@ export async function POST(request: Request, context: { params: Promise<{ examId
     if (outcome.status === "graded-not-stored") {
       // The candidate has their grade; losing the row is a logging problem, not
       // a reason to show them an error. The sitting reads as `uncorrected`
-      // until it is finished again, which re-runs this whole path.
-      console.error("[finish] evaluation succeeded but persistence failed:", outcome.error);
+      // until it is finished again, which re-runs this whole path. `store` is
+      // the one word of #73's taxonomy that never reaches the catch below,
+      // precisely because this path answers 200 — so it is spoken here.
+      console.error(
+        `[finish] evaluation succeeded but persistence failed (reason=store, exam=${examId}):`,
+        outcome.error,
+      );
     }
 
     /**
@@ -496,13 +522,19 @@ export async function POST(request: Request, context: { params: Promise<{ examId
       persisted: outcome.status !== "graded-not-stored",
     });
   } catch (error) {
-    console.error("[finish] evaluation failed:", error);
+    // Which part of the grading died, or `unknown` for a throw nothing tagged
+    // (#73). The reason and the exam id go to the log AND onto the response:
+    // the French sentence below is what the candidate should read, and it is
+    // also all a bug report used to be able to quote — five different failures
+    // arrived here identically. The sentence stays exactly as it was.
+    const reason = evaluationFailureReason(error) ?? "unknown";
+    console.error(`[finish] evaluation failed (reason=${reason}, exam=${examId}):`, error);
     // The failures are the finishes most worth explaining (#86): the segments
     // say how far the request got before it died. A grading that never
     // finished shows null for its halves; the route's own segments are real.
     logTimings(graded);
     return NextResponse.json(
-      { error: "L'évaluation a échoué. Réessayez dans un instant." },
+      { error: "L'évaluation a échoué. Réessayez dans un instant.", reason },
       { status: 502 },
     );
   }

@@ -39,6 +39,34 @@ import { checkWavFormat, readWavFormat } from "@/lib/audio/pcm";
 export const MAX_RECORDING_BYTES = 3 * 1024 * 1024;
 
 /**
+ * The shortest recording worth handing to the corrector (#73). A measured file
+ * under this many seconds is treated as if no file arrived for that phase.
+ *
+ * The files this exists for are stubs, and two of them are ordinary: a débat
+ * ended before anything was said still records the candidate's (silent)
+ * microphone through the examiner's closing line, and a typed dev exposé (#51)
+ * carries the seconds of room noise captured before the panel was opened. Both
+ * are legal little Opus files that pass every other check, get uploaded, and
+ * then buy nothing but failure modes — the Files API is handed a two-second
+ * fragment it may refuse, the corrector is told to listen to silence labelled
+ * as a task, and one stub flips a whole sitting out of the text path.
+ *
+ * Dropping one is free where it matters, and that is why 10 seconds is safe:
+ *
+ *  - **The duration penalty cannot move.** Both part floors are minutes
+ *    (`MONOLOGUE_FLOOR_SECONDS`, `DEBATE_FLOOR_SECONDS` in `orale-rubric.ts`),
+ *    so a phase measuring 8 seconds and one measuring 0 are equally short —
+ *    the same rule a dead microphone already meets.
+ *  - **The absence halving (#71) is charged in words**, out of the transcript,
+ *    and never reads the recording at all.
+ *  - **Phonologie loses nothing it had.** Ten seconds of audio is not evidence
+ *    of B2 phonology; if the stub was the sitting's only file, the grading
+ *    falls back to text mode and the #29 ceiling — the honest reading of an
+ *    épreuve the corrector cannot actually hear.
+ */
+export const MIN_RECORDING_SECONDS = 10;
+
+/**
  * And the whole request, which is the number that actually matters.
  *
  * 4 MiB is 4 194 304 bytes, under the platform's documented 4.5 MB, and above
