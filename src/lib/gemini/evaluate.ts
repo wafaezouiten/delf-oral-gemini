@@ -293,9 +293,11 @@ export interface EvaluateParams {
   debateSeconds: number;
   /**
    * How many times the examiner tried to close the épreuve early (#92), as the
-   * controller counted it and the finish payload carried it. Positive, it adds
-   * the incident paragraph to the prompt and excuses the débat from both
-   * penalties (`SittingConditions.examinerClosedEarly`).
+   * controller counted it, the finish payload carried it, and the route
+   * corroborated it against the transcript before handing it here
+   * (`transcriptShowsClosing`). Positive, it adds the incident paragraph to
+   * the prompt and excuses the débat from both penalties
+   * (`SittingConditions.examinerClosedEarly`).
    *
    * Optional, defaulting to 0, unlike the rubric's own flag — the callers that
    * omit it are the verification scripts and the audio-versus-text experiment,

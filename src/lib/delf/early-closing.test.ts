@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { readsAsClosing } from "./early-closing";
+import { readsAsClosing, transcriptShowsClosing } from "./early-closing";
+import type { TranscriptEntry } from "./transcript";
 
 describe("hearing an examiner say goodbye seven minutes early (#85)", () => {
   it("recognises the sitting that produced the issue", () => {
@@ -51,5 +52,47 @@ describe("hearing an examiner say goodbye seven minutes early (#85)", () => {
     ]) {
       assert.ok(!readsAsClosing(text), `false positive: ${text}`);
     }
+  });
+});
+
+describe("corroborating the finish payload's count against its own transcript (#92)", () => {
+  const turn = (over: Partial<TranscriptEntry>): TranscriptEntry => ({
+    phase: "debate",
+    speaker: "examiner",
+    timestamp: 360_000,
+    text: "Vous pouvez quitter la salle.",
+    ...over,
+  });
+
+  it("finds the goodbye a genuine count was read off", () => {
+    // The guarantee the route's check leans on: the controller detected the
+    // goodbye on the very examiner turns the payload re-submits, with the same
+    // phrase list — so a true claim always has this turn to show.
+    assert.ok(
+      transcriptShowsClosing([
+        turn({ speaker: "candidate", text: "Je pense que le télétravail isole." }),
+        turn({ text: "Nous allons passer à la troisième partie de l'épreuve. Au revoir." }),
+      ]),
+    );
+  });
+
+  it("denies a claim whose transcript shows no goodbye anywhere", () => {
+    // The tamper the check exists for: `earlyClosingCount: 1` pasted into an
+    // otherwise ordinary payload, to shed a duration penalty measured out of
+    // real audio. No turn tells the story the number does.
+    assert.ok(
+      !transcriptShowsClosing([
+        turn({ text: "Vous dites que le bureau isole. N'est-ce pas l'inverse ?" }),
+        turn({ speaker: "candidate", text: "Non, je maintiens ma position." }),
+      ]),
+    );
+  });
+
+  it("only listens where detection ever listened: examiner turns, in the débat", () => {
+    // A goodbye in the candidate's own mouth corroborates nothing — they can
+    // type it — and the monologue has no examiner to take its leave.
+    assert.ok(!transcriptShowsClosing([turn({ speaker: "candidate" })]));
+    assert.ok(!transcriptShowsClosing([turn({ phase: "monologue" })]));
+    assert.ok(!transcriptShowsClosing([]));
   });
 });

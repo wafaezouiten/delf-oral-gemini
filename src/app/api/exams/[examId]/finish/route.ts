@@ -43,6 +43,7 @@ import { authorizeExam } from "@/lib/auth/exam-guard";
 import type { OralSpeakingPhase } from "@/lib/db";
 import { neonSittingStore } from "@/lib/db/sittings";
 import { correctSitting, type CorrectionRow } from "@/lib/exams/sitting-persistence";
+import { transcriptShowsClosing } from "@/lib/delf/early-closing";
 import { PARTICIPATION_WORD_FLOOR } from "@/lib/delf/orale-rubric";
 import { findTopic } from "@/lib/delf/topics";
 import { candidateWordCount } from "@/lib/delf/transcript";
@@ -288,6 +289,29 @@ export async function POST(request: Request, context: { params: Promise<{ examId
   const debateSeconds = devSeconds("debate") ?? measuredSeconds("debate");
 
   /**
+   * The examiner's early goodbyes (#92) — the client's count, honoured only
+   * when the transcript beside it shows a goodbye at all.
+   *
+   * The claim waives the débat's penalties, including the duration penalty
+   * this route measures out of the uploaded bytes precisely so no client
+   * claim can reach it — so the raw number is not taken alone. A genuine
+   * count always corroborates, because the controller read the goodbye off
+   * the very turns this payload re-submits, with the same phrase list; a
+   * positive count with no matching turn is a claim the sender's own
+   * transcript denies, and it is graded as zero. See
+   * `transcriptShowsClosing` for what this floor can and cannot buy.
+   *
+   * Zeroed ONCE, here, for every consumer downstream — the corrector's
+   * paragraph, the rubric's waiver, the stored column and the note the
+   * results page keys on it — because a count stored as 2 while the
+   * penalties stood would put « n'a pas été retenue contre vous » above a
+   * mark it was retained against.
+   */
+  const earlyClosingCount = transcriptShowsClosing(payload.transcript)
+    ? payload.earlyClosingCount
+    : 0;
+
+  /**
    * Audio-aware grading whenever we actually have a recording; the text path is
    * the fallback for a sitting that produced none.
    *
@@ -310,11 +334,11 @@ export async function POST(request: Request, context: { params: Promise<{ examId
       transcript: payload.transcript,
       monologueSeconds,
       debateSeconds,
-      // The examiner's early goodbyes, as the controller counted them (#92).
+      // The examiner's early goodbyes, as the controller counted them and the
+      // transcript corroborated them — see the derivation above (#92).
       // Positive, this adds the incident paragraph to the prompt and excuses
-      // the débat from both penalties — taken on trust like the transcript,
-      // and bounded the same way (see `finish-payload.ts`).
-      earlyClosingCount: payload.earlyClosingCount,
+      // the débat from both penalties.
+      earlyClosingCount,
       // Labelled, not just ordered: when only one phase recorded — a microphone
       // denied before the monologue, a headset unplugged mid-débat — the
       // corrector has to be told which task it is listening to, or it assumes
@@ -352,7 +376,10 @@ export async function POST(request: Request, context: { params: Promise<{ examId
       {
         transcript: payload.transcript,
         reconnectCount: payload.reconnectCount,
-        earlyClosingCount: payload.earlyClosingCount,
+        // The corroborated figure, not the raw claim — the stored count is
+        // what the results page keys the « not held against you » note on,
+        // so it must be the number the grading actually honoured.
+        earlyClosingCount,
         phases: payload.phases,
         recordings: recordings.map((recording) => ({
           phase: recording.phase,

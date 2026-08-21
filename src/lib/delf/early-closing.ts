@@ -23,6 +23,8 @@
  *    A false negative costs the candidate the rest of their épreuve.
  */
 
+import type { TranscriptEntry } from "./transcript";
+
 /**
  * Fold a spoken sentence down to something a fixed phrase can be found in:
  * lower case, accents stripped, and every apostrophe, dash and punctuation mark
@@ -81,4 +83,40 @@ const CLOSING_PHRASES: readonly string[] = [
 export function readsAsClosing(text: string): boolean {
   const haystack = normalise(text);
   return CLOSING_PHRASES.some((phrase) => haystack.includes(phrase));
+}
+
+/**
+ * Does the submitted transcript contain a goodbye at all? The finish route's
+ * corroboration of the client's `earlyClosingCount` claim (#92).
+ *
+ * The claim waives the débat's penalties, so a raw number in a payload must at
+ * least be consistent with the transcript beside it. This check holds because
+ * of where a genuine count comes from: the controller read the goodbye off the
+ * very examiner turns the finish payload re-submits, with this file's own
+ * phrase list — so a true claim ALWAYS has a matching turn to show, and a
+ * payload with a positive count and no such turn is asserting an incident its
+ * own transcript denies.
+ *
+ * Be honest about what it cannot buy. The controller counted goodbyes *outside
+ * a closing handshake*, and `closing` does not survive into the transcript —
+ * so this cannot tell the fault from the legitimate closing sentence the app
+ * itself asked for at the end of most sittings, and it examines an artefact
+ * the client authors anyway. It is a consistency floor, not a proof: it stops
+ * a claim that did not even bother to tell a coherent story (and a client that
+ * miscounts through a bug), and it keeps the stored count, the waiver, the
+ * corrector's paragraph and the candidate's note all keyed to a sitting whose
+ * transcript actually shows a goodbye. The unforgeable record of the incident
+ * remains the audio, which the corrector hears.
+ *
+ * Débat examiner turns only, exactly where detection ever listened: a phrase
+ * in the candidate's own mouth, or anywhere in the monologue, corroborates
+ * nothing.
+ */
+export function transcriptShowsClosing(
+  entries: ReadonlyArray<Pick<TranscriptEntry, "phase" | "speaker" | "text">>,
+): boolean {
+  return entries.some(
+    (entry) =>
+      entry.phase === "debate" && entry.speaker === "examiner" && readsAsClosing(entry.text),
+  );
 }

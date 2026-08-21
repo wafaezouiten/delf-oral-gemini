@@ -88,15 +88,15 @@ export const finishPayloadSchema = z.object({
   /**
    * How many times the examiner tried to close the épreuve mid-débat (#92), as
    * `ExamController` counted it. The browser is the only witness — the goodbye
-   * happened in a Live session the server never saw — so like the transcript it
-   * is taken on trust, and the trust is bounded to the same shape as
-   * `reconnectCount`.
-   *
-   * The one number here that can RAISE a grade rather than lower it: positive,
-   * it waives the débat's penalties and tells the corrector to disregard the
-   * goodbye. A dishonest client could send it — but a dishonest client already
-   * authors the transcript wholesale, which decides far more, so this adds no
-   * trust the payload did not already extend.
+   * happened in a Live session the server never saw — so the shape is bounded
+   * here like `reconnectCount`'s, and the VALUE is not taken alone: it is the
+   * one number in this payload that can RAISE a grade rather than lower it
+   * (positive, it waives the débat's penalties, including the duration penalty
+   * the route measures out of the uploaded bytes precisely so no client claim
+   * can reach it), so the route honours it only when the submitted transcript
+   * actually shows a goodbye. A genuine count always does — the controller
+   * read it off the very turns this payload re-submits — and what that
+   * corroboration can and cannot buy is `transcriptShowsClosing`'s to say.
    *
    * Defaulted rather than required, unlike `reconnectCount`, because it is
    * being added to a payload that already exists in the wild: a candidate

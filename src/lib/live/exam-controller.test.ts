@@ -4,6 +4,7 @@ import { describe, it } from "node:test";
 import type { AnnouncementOutcome, AnnouncerLike } from "@/lib/audio/announcer";
 import type { PhaseRecording, RecordedPhase } from "@/lib/audio/archive";
 import { ANNOUNCEMENTS } from "@/lib/delf/announcements";
+import { transcriptShowsClosing } from "@/lib/delf/early-closing";
 import { PHASE_DURATIONS, MONOLOGUE_MIN_SECONDS } from "@/lib/delf/phases";
 import type { OralTopic } from "@/lib/delf/topics";
 import type { SessionManagerCallbacks } from "./session-manager";
@@ -3236,6 +3237,15 @@ describe("an examiner that says goodbye seven minutes early (#85)", () => {
 
       assert.equal(h.controller.getSnapshot().phase, "finished");
       assert.equal(h.finished[0]?.earlyClosingCount, 3, "answered or not, all three are counted");
+
+      // The invariant the finish route's corroboration leans on: a payload
+      // whose count is positive always carries the goodbye it was read off,
+      // because detection ran on these very turns with the same phrase list.
+      // If this ever fails, the route is zeroing genuine claims.
+      assert.ok(
+        transcriptShowsClosing(h.finished[0].transcript),
+        "the counted goodbye is in the submitted transcript",
+      );
     });
   });
 });
