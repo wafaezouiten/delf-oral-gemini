@@ -15,16 +15,30 @@
  */
 
 export type FinishStage =
-  { kind: "compressing" } | { kind: "uploading"; fraction: number | null } | { kind: "correcting" };
+  | { kind: "compressing" }
+  | { kind: "uploading"; fraction: number | null }
+  | { kind: "correcting" }
+  /** The finish answered 202 (#86): the sitting is safe on the server and the
+   *  correction is being attached behind it. The one stage in which closing
+   *  the tab costs nothing, and the sentence says so. */
+  | { kind: "awaiting" };
 
 /**
- * Which stage the screen is in, from the two facts the client holds: whether
- * the request has been built and sent (`submitting`), and how much of its body
- * has left the tab. The fraction reaches exactly 1 only from the transport's
- * own « the body has been sent » event (`finish-request.ts`), so « en cours de
- * correction » is never claimed while bytes are still leaving.
+ * Which stage the screen is in, from the three facts the client holds: whether
+ * the request has been built and sent (`submitting`), how much of its body has
+ * left the tab, and whether the server has ACCEPTED the sitting and moved the
+ * correction behind its response (#86). The fraction reaches exactly 1 only
+ * from the transport's own « the body has been sent » event
+ * (`finish-request.ts`), so « en cours de correction » is never claimed while
+ * bytes are still leaving — and `awaiting` outranks everything, because the
+ * 202 is the server's own word that the bytes arrived.
  */
-export function finishStage(submitting: boolean, uploadFraction: number | null): FinishStage {
+export function finishStage(
+  submitting: boolean,
+  uploadFraction: number | null,
+  accepted = false,
+): FinishStage {
+  if (accepted) return { kind: "awaiting" };
   if (!submitting) return { kind: "compressing" };
   if (uploadFraction !== null && uploadFraction >= 1) return { kind: "correcting" };
   return { kind: "uploading", fraction: uploadFraction };
@@ -48,6 +62,11 @@ export function finishStageMessage(stage: FinishStage): string {
       return "Envoi de votre enregistrement… Ne fermez pas cet onglet.";
     case "correcting":
       return "L'examinateur analyse votre passation selon la grille officielle du DELF B2. Cela peut prendre une minute ; ne fermez pas cet onglet.";
+    case "awaiting":
+      // The one stage that RELEASES the candidate (#86): the server has the
+      // recording, so the warning the two sentences above carry would now be
+      // false — and saying they may leave is the entire point of the 202.
+      return "Votre prestation est bien reçue. L'examinateur l'analyse selon la grille officielle du DELF B2 — cela peut prendre une minute. Vous pouvez fermer cet onglet : votre résultat vous attendra dans votre historique.";
   }
 }
 

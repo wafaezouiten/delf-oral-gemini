@@ -10,13 +10,18 @@ import { QuitPreparationDialog } from "@/app/_components/po/quit-preparation-dia
 import { useExamController } from "@/lib/live/use-exam-controller";
 import type { ExamFinishedPayload } from "@/lib/live/exam-controller";
 import { isOpusEncodingSupported } from "@/lib/audio/opus-encoder";
+import { fetchCorrectionStatus, waitForCorrection } from "@/lib/exams/correction-wait";
 import { postFinishRequest } from "@/lib/exams/finish-request";
 import { selectDeliverable } from "@/lib/exams/uploaded-recording";
 import { requestAbandon } from "@/lib/exams/abandon";
 import { requestPreparationExit } from "@/lib/exams/preparation-exit";
 import { requestExaminerChoice } from "@/lib/exams/examiner-choice";
 import { LIVE_MODEL } from "@/lib/gemini/constants";
-import { describeFinishFailure, type FinishFailure } from "@/lib/ui/finish-failure";
+import {
+  CORRECTION_TIMED_OUT,
+  describeFinishFailure,
+  type FinishFailure,
+} from "@/lib/ui/finish-failure";
 import { finishStage } from "@/lib/ui/finish-progress";
 import type { OralTopic } from "@/lib/delf/topics";
 import { AnnouncementControl } from "./_components/announcement-control";
@@ -86,6 +91,28 @@ export function ExamClient({
    * one spinner over a chain of segments of very different lengths.
    */
   const [uploadFraction, setUploadFraction] = useState<number | null>(null);
+  /**
+   * The server has accepted the sitting and moved the correction behind its
+   * response (#86). From this moment the tab is disposable — the recording is
+   * safe on the server — and the screen's sentence changes to say so while the
+   * poll below waits for the correction to land.
+   */
+  const [awaitingCorrection, setAwaitingCorrection] = useState(false);
+  /**
+   * Whether this screen still exists — the poll's cancellation signal (#86).
+   * `waitForCorrection` can run for five minutes, and a candidate who left —
+   * the back button, the way-out button below — must not leave behind a loop
+   * hammering the status route and setting state on an unmounted component.
+   * Same pattern as `isOpusEncodingSupported`'s `live` guard, held in a ref
+   * because the poll starts from a callback rather than an effect.
+   */
+  const liveRef = useRef(true);
+  useEffect(() => {
+    liveRef.current = true;
+    return () => {
+      liveRef.current = false;
+    };
+  }, []);
   const submittedRef = useRef(false);
 
   /**
@@ -171,6 +198,7 @@ export function ExamClient({
       setSubmitting(true);
       setSubmitError(null);
       setUploadFraction(null);
+      setAwaitingCorrection(false);
 
       const form = new FormData();
       const json = JSON.stringify({
@@ -264,6 +292,42 @@ export function ExamClient({
         // A 200 whose body did not parse is not a result the candidate can be
         // navigated to; the catch below turns it into the retryable message.
         if (body === null) throw new Error("the finish route answered 200 without JSON");
+
+        /**
+         * The 202's own word (#86): the sitting is safe and the correction is
+         * being attached behind the response. Nothing goes into
+         * sessionStorage — the pending path only exists for persisted
+         * sittings, and the results page reads those from the database. Poll
+         * until the correction lands, then navigate; past the server's own
+         * budget, stop claiming anything is in progress and put the retry in
+         * front of the tab — which still holds the artefacts, and whose
+         * re-finish begins with a duplicate check, so a correction that
+         * landed late costs nothing.
+         */
+        if (body.pending === true) {
+          setAwaitingCorrection(true);
+          const outcome = await waitForCorrection(() => fetchCorrectionStatus(examId), {
+            cancelled: () => !liveRef.current,
+          });
+          // The screen is gone — the candidate took the sentence at its word
+          // and left. Nothing to set, nobody to navigate; the correction
+          // finishes on the server and the historique will have it.
+          if (outcome === "cancelled") return;
+          if (outcome === "corrected") {
+            router.push(`/app/results/${examId}`);
+            return;
+          }
+          setAwaitingCorrection(false);
+          setSubmitError(CORRECTION_TIMED_OUT);
+          setSubmitting(false);
+          submittedRef.current = false;
+          return;
+        }
+        // Neither pending nor carrying a result is a contract breach, not a
+        // shape to guess at; the catch below turns it into the retry message.
+        if (body.evaluation === undefined) {
+          throw new Error("the finish route answered without a result or a pending word");
+        }
 
         sessionStorage.setItem(
           `delf-eval-${examId}`,
@@ -549,7 +613,7 @@ export function ExamClient({
   if (state.phase === "finished") {
     return (
       <FinishedScreen
-        stage={finishStage(submitting, uploadFraction)}
+        stage={finishStage(submitting, uploadFraction, awaitingCorrection)}
         submitError={submitError}
         droppedPhases={droppedPhases}
         onRetry={() => {

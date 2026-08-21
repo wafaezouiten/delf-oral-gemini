@@ -80,7 +80,7 @@ export function FinishedScreen({
 
           <Kicker className="mt-6">DELF B2 · Production orale</Kicker>
           <h1 className="mt-1 font-serif text-2xl font-semibold">
-            {submitError ? "Correction interrompue" : "Épreuve terminée"}
+            {submitError ? (submitError.heading ?? "Correction interrompue") : "Épreuve terminée"}
           </h1>
 
           {/* A live region only while there is no failure. Once `submitError` is
@@ -94,9 +94,10 @@ export function FinishedScreen({
             role={submitError ? undefined : "status"}
           >
             {submitError
-              ? submitError.retryable
-                ? "Votre prestation attend d'être envoyée."
-                : "Votre prestation a bien été enregistrée, mais elle n'a pas pu être corrigée."
+              ? (submitError.lede ??
+                (submitError.retryable
+                  ? "Votre prestation attend d'être envoyée."
+                  : "Votre prestation a bien été enregistrée, mais elle n'a pas pu être corrigée."))
               : finishStageMessage(stage)}
           </p>
 
@@ -119,6 +120,18 @@ export function FinishedScreen({
 
         {announcement}
 
+        {/* The awaiting sentence says the tab is disposable; this is the
+            sentence made actionable (#86). Leaving unmounts the screen, which
+            cancels the poll — the correction finishes on the server either
+            way, and the historique is where the sentence promised it. */}
+        {stage.kind === "awaiting" && !submitError && (
+          <div className="flex justify-center">
+            <button type="button" onClick={onLeave} className={secondaryButton}>
+              Revenir au tableau de bord
+            </button>
+          </div>
+        )}
+
         {droppedPhases.length > 0 && (
           <Notice tone="warning" title="Un enregistrement n'a pas pu être envoyé">
             {droppedPhases.length === 2
@@ -133,7 +146,13 @@ export function FinishedScreen({
           <Notice
             tone="danger"
             title={
-              submitError.retryable ? "L'envoi a échoué" : "Cette épreuve ne peut pas être corrigée"
+              // The override exists for the one failure the defaults would lie
+              // about (#86): a correction that timed out after a successful
+              // envoi must not be headlined « L'envoi a échoué ».
+              submitError.title ??
+              (submitError.retryable
+                ? "L'envoi a échoué"
+                : "Cette épreuve ne peut pas être corrigée")
             }
             action={
               <div className="flex flex-wrap gap-2">
@@ -146,9 +165,13 @@ export function FinishedScreen({
                   </button>
                 )}
                 <button type="button" onClick={onLeave} className={secondaryButton}>
-                  {submitError.retryable
-                    ? "Abandonner et revenir au tableau de bord"
-                    : "Revenir au tableau de bord"}
+                  {/* « Abandonner » only where leaving actually abandons the
+                      épreuve — the timeout's override drops the word, because
+                      its sitting is accepted and may yet correct itself (#86). */}
+                  {submitError.leaveLabel ??
+                    (submitError.retryable
+                      ? "Abandonner et revenir au tableau de bord"
+                      : "Revenir au tableau de bord")}
                 </button>
               </div>
             }

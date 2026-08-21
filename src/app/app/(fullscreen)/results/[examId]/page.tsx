@@ -147,9 +147,12 @@ export default async function ResultsPage({ params }: PageProps<"/app/results/[e
  * telling them apart is what "interrupted sittings are distinguishable from
  * completed ones" means in practice. `in-progress` is an épreuve that stopped
  * before it was submitted — a closed tab, a lost connection — and nothing was
- * ever graded. `uncorrected` is one that was submitted and graded, where the row
- * did not survive the write; finishing it again re-runs the whole path, which is
- * why the copy says the result may still be in the tab it was taken in.
+ * ever graded. `uncorrected` is one that was submitted, whose correction is not
+ * attached — which, since #86, is most often a correction still UNDER WAY: the
+ * finish answers as soon as the sitting is safe and grades behind the response,
+ * so a candidate who closed the tab and clicked straight here can land minutes
+ * ahead of their own mark. The copy says to refresh before it says anything is
+ * wrong, and only then that the tab that took the épreuve can re-send it.
  */
 function UnfinishedSitting({ sitting }: { sitting: StoredSitting }) {
   const interrupted = sitting.outcome === "in-progress";
@@ -165,10 +168,10 @@ function UnfinishedSitting({ sitting }: { sitting: StoredSitting }) {
         </h1>
       </div>
 
-      <Notice tone="warning" title={interrupted ? "Aucune note" : "Correction perdue"}>
+      <Notice tone="warning" title={interrupted ? "Aucune note" : "Correction en attente"}>
         {interrupted
           ? "Cette épreuve n'a pas été menée à son terme — l'onglet a été fermé, ou la connexion a été perdue avant la fin. Rien n'a été corrigé, et il n'y a pas de note à afficher."
-          : "Cette épreuve a bien été passée et corrigée, mais sa correction n'a pas pu être enregistrée. Si l'onglet où vous l'avez passée est encore ouvert, la note s'y trouve peut-être encore."}
+          : "Cette épreuve a bien été passée ; sa correction n'est pas encore enregistrée. Elle est peut-être encore en cours — attendez un instant, puis actualisez cette page. Si rien n'arrive, l'onglet où vous avez passé l'épreuve, s'il est encore ouvert, peut réessayer l'envoi."}
       </Notice>
 
       <div className="flex justify-center">

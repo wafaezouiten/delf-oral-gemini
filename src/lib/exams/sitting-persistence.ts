@@ -39,6 +39,17 @@
  * realistic duplicate — a refreshed tab, a retried request, a candidate pressing
  * the button twice — costs a paid model call at worst and produces exactly one
  * correction, which is the case this phase is asked to handle.
+ *
+ * #86 MOVED that window, and then had to re-narrow it. The grading now runs
+ * after the claim, which on its own turned "fire the finish twice" into N
+ * accepted requests each paying for a model call — the route answers in
+ * seconds, so stacking submits inside the 30–60 s grading window became
+ * cheap. So the claim now also refuses while a previous claim is younger
+ * than {@link CORRECTION_CLAIM_HOLD_SECONDS}: within the grading budget, an
+ * uncorrected-but-claimed sitting is treated as one being graded, and a
+ * second finish gets a retryable refusal instead of a second bill. What
+ * remains open is exactly what was always open — the same-instant race,
+ * two claims in the same moment — unchanged in kind and now no cheaper.
  */
 
 import type { OralCriterion } from "@/lib/delf/criteria";
@@ -113,16 +124,23 @@ export interface StoredCorrection extends CorrectionRow {
   createdAt: Date;
 }
 
+/** The artefact half of a sitting's rows: what it produced, without the grade. */
+export interface ArtefactRows {
+  phases: PhaseRow[];
+  recordings: RecordingRow[];
+}
+
 /**
  * What the finish path asks the store to write, all of it or none of it.
  *
  * Three tables telling one story: which phases the candidate sat, what they
- * produced in each, and what it was worth. A `finished` sitting carrying only
- * the first two is the inconsistency this phase exists to make impossible.
+ * produced in each, and what it was worth. Since #86 the first two are written
+ * at the accept, before the grading, so a `finished` sitting carrying only
+ * phases and recordings is no longer an inconsistency — it is the honest state
+ * of a correction still under way (or one that failed), and it reads as
+ * `uncorrected` until the attach lands.
  */
-export interface CorrectionWrite {
-  phases: PhaseRow[];
-  recordings: RecordingRow[];
+export interface CorrectionWrite extends ArtefactRows {
   correction: CorrectionRow;
 }
 
@@ -223,10 +241,36 @@ export interface SittingStore {
    * Take exclusive ownership of the right to correct this sitting, marking it
    * finished in the same statement.
    *
-   * Returns `false` when a correction already exists — see the module header for
-   * why the condition is about corrections rather than about `finished_at`.
+   * Returns `false` when a correction already exists — see the module header
+   * for why the condition is about corrections rather than about `finished_at`
+   * — and, since #86, ALSO while a previous claim is younger than
+   * {@link CORRECTION_CLAIM_HOLD_SECONDS}: the grading now runs behind the
+   * response, so for that window an uncorrected-but-claimed sitting most
+   * likely has a grading in flight, and a second claim would buy a second
+   * paid model call for the same sitting. Past the window the platform has
+   * necessarily killed the invocation, and the re-claim is the repair path.
    */
   claimForCorrection(ref: SittingRef, claim: SittingClaim): Promise<boolean>;
+
+  /**
+   * Give a claim back, because the accept that made it could not finish (#86).
+   *
+   * Un-stamps `finished_at` — never on a corrected sitting — so a finish whose
+   * artefact write failed can be retried immediately instead of waiting out
+   * the claim hold for a grading that never started. Best-effort by contract:
+   * a release that fails leaves the sitting held for at most the hold window,
+   * which is degraded, not stranded.
+   */
+  releaseClaim(ref: SittingRef): Promise<void>;
+
+  /**
+   * The phases and the recordings, atomically, with no correction beside them
+   * (#86). What the accept half writes so the sitting is complete — everything
+   * except the grade — before the response goes out and the grading starts.
+   * Upsert semantics, because the attach half's `writeCorrection` will touch
+   * the same rows again and the two must agree rather than duplicate.
+   */
+  writeArtefacts(ref: SittingRef, artefacts: ArtefactRows): Promise<void>;
 
   /** The phases, the recordings and the correction, atomically. Rejects, never partial. */
   writeCorrection(ref: SittingRef, write: CorrectionWrite): Promise<StoredCorrection>;
@@ -301,6 +345,18 @@ export interface CorrectionInput {
  * because the alternative failure is a rejected INSERT after a paid model call.
  */
 export function deriveCorrectionWrite(input: CorrectionInput): CorrectionWrite {
+  return {
+    ...deriveArtefactRows(input),
+    correction: input.correction,
+  };
+}
+
+/**
+ * The artefact half of the derivation on its own (#86): what the accept writes
+ * before any grading has run. Split out rather than duplicated so the attach's
+ * re-upsert of the same rows cannot drift from the rows the accept wrote.
+ */
+export function deriveArtefactRows(input: Omit<CorrectionInput, "correction">): ArtefactRows {
   const measured = (phase: OralSpeakingPhase): number =>
     input.recordings.find((recording) => recording.phase === phase)?.durationSeconds ?? 0;
 
@@ -330,7 +386,6 @@ export function deriveCorrectionWrite(input: CorrectionInput): CorrectionWrite {
         deletedAt: uri === null ? input.disposedAt : null,
       };
     }),
-    correction: input.correction,
   };
 }
 
@@ -338,23 +393,50 @@ export function deriveCorrectionWrite(input: CorrectionInput): CorrectionWrite {
 // THE FINISH PATH
 // =====================================================
 
-export type CorrectionOutcome =
-  /** Graded and written. The ordinary path. */
-  | { status: "stored"; correction: StoredCorrection }
+/**
+ * How long a claim excludes a second one, in seconds (#86).
+ *
+ * The number IS the finish route's `maxDuration` (300 s), and the coupling is
+ * the point: the grading runs behind the response inside that budget, so
+ * within the window an uncorrected-but-claimed sitting most likely has a paid
+ * model call in flight, and accepting a second finish would buy a second one
+ * — the review's finding on this PR: the fast 202 turned "fire the request
+ * twice" into N re-gradings. Past the window the platform has killed the
+ * invocation, so the re-claim is the honest repair.
+ *
+ * `CORRECTION_WAIT_LIMIT_MS` (330 s) sits deliberately ABOVE this, which is
+ * what keeps the two from ever fighting: the candidate is only offered
+ * « Réessayer l'envoi » after the hold has certainly expired, so the honest
+ * retry is never refused. Anyone moving one of the three numbers — the
+ * route's `maxDuration`, this hold, the wait limit — moves all three.
+ */
+export const CORRECTION_CLAIM_HOLD_SECONDS = 300;
+
+/**
+ * What accepting a sitting — everything except the grade — came to (#86).
+ */
+export type AcceptOutcome =
   /**
-   * This sitting already had a correction, so it was returned unchanged and
-   * nothing was graded or written. What "finishing twice is a no-op" looks like.
+   * Claimed, artefacts written, bytes kept: the sitting is safe, and the only
+   * thing it lacks is a correction. The caller may answer the candidate and
+   * grade behind the response.
+   */
+  | { status: "accepted" }
+  /**
+   * This sitting already has a correction, so nothing was claimed or written
+   * and nothing needs grading. What "finishing twice is a no-op" looks like —
+   * and, since the check comes first, a retry of a finish whose correction
+   * landed late costs nothing at all.
    */
   | { status: "already-corrected"; correction: StoredCorrection }
   /**
-   * Graded, but not stored: either the claim was lost and the winner's
-   * correction could not be read back, or the write itself failed. The candidate
-   * still gets their grade — it is in `correction` — and the sitting reads as
-   * `uncorrected` until someone finishes it again.
+   * The claim or the artefact write failed. Nothing about the sitting can be
+   * called safe, so the caller must refuse the finish and let the candidate
+   * retry from the tab — which still holds the only other copy.
    */
-  | { status: "graded-not-stored"; correction: CorrectionRow; error: unknown };
+  | { status: "not-stored"; error: unknown };
 
-export interface CorrectSittingInput {
+export interface AcceptSittingInput {
   transcript: TranscriptEntry[];
   reconnectCount: number;
   /** How many times the examiner tried to close the épreuve early (#92). */
@@ -362,30 +444,18 @@ export interface CorrectSittingInput {
   phases: readonly ReportedPhase[];
   recordings: readonly MeasuredRecording[];
   /**
-   * The correction itself, run lazily.
-   *
-   * A function rather than a value because the duplicate check is only worth
-   * anything if it can happen *before* this runs: grading is a paid,
-   * minutes-long model call, and a second submit of an already-corrected sitting
-   * should cost nothing at all. The test for double-finish asserts exactly that
-   * — not merely that one row exists afterwards, but that the corrector was
-   * never asked.
-   */
-  evaluate: () => Promise<CorrectionRow>;
-  /**
    * Keep the recordings' bytes durably, returning each kept phase's uri (#98).
    *
    * Run lazily, and only by the caller that wins the claim — a duplicate
-   * finish, or one that loses the race inside the model, must not file a
-   * second copy of somebody's voice next to rows it will never write. The
-   * contract is best-effort: a phase the store could not keep is simply absent
-   * from the map, and its row goes down transient, exactly as every row did
-   * before the vault existed. The implementation should not throw; if it does
-   * anyway, the correction is still stored and every recording reads as
-   * disposed — losing the copy must never cost the candidate their grade.
+   * finish must not file a second copy of somebody's voice next to rows it
+   * will never write. The contract is best-effort: a phase the store could not
+   * keep is simply absent from the map, and its row goes down transient,
+   * exactly as every row did before the vault existed. The implementation
+   * should not throw; if it does anyway, the artefact rows are still written
+   * and every recording reads as disposed — losing the copy must never cost
+   * the candidate their correction.
    *
-   * Optional because two callers have nothing to keep: a deployment without a
-   * vault, and a sitting that was never persisted.
+   * Optional because a deployment without a vault has nothing to keep.
    */
   preserve?: () => Promise<ReadonlyMap<OralSpeakingPhase, string>>;
   /** Injected so a test can pin the timestamps it asserts on. */
@@ -393,27 +463,34 @@ export interface CorrectSittingInput {
 }
 
 /**
- * Grade and persist one finished sitting, at most once.
+ * Accept one finished sitting: check, claim, keep, write the artefacts (#86).
  *
- * The order is the design: check, grade, claim, keep, write. Grading before the
- * claim is what keeps a crash mid-correction from marking the sitting finished
- * with nothing to show — and the upload sits after the claim so only the finish
- * that will write the rows stores the bytes those rows point at.
+ * The order used to be check, GRADE, claim, keep, write — grading before the
+ * claim, so a crash mid-correction could not mark the sitting finished with
+ * nothing to show. That ordering is deliberately reversed, because it is also
+ * what held the candidate at « Épreuve terminée » for the whole of a
+ * thirty-to-sixty-second model call: the claim now comes first, the response
+ * goes out the moment the artefacts are safe, and the grading runs behind it
+ * ({@link attachCorrection}).
+ *
+ * What the reversal costs, precisely: a crash between the claim and the attach
+ * leaves a sitting marked finished with no correction — the state the old
+ * ordering existed to prevent. It is accepted because it is no longer a
+ * stranding: `uncorrected` is a first-class outcome every reader understands,
+ * the claim keys on corrections rather than `finished_at` so finishing again
+ * repairs it, and the finished screen keeps the artefacts in the tab precisely
+ * so its retry can do that.
  */
-export async function correctSitting(
+export async function acceptSitting(
   store: SittingStore,
   ref: SittingRef,
-  input: CorrectSittingInput,
-): Promise<CorrectionOutcome> {
-  // A failure here is not an answer, so it is not treated as one. Grading
-  // proceeds, and the claim below is what actually decides whether anything is
-  // written — an outage must cost the candidate a stored row at worst, never
-  // their grade. Same bargain the route has always made with a missing
-  // `DATABASE_URL`.
+  input: AcceptSittingInput,
+): Promise<AcceptOutcome> {
+  // A failure here is not an answer, so it is not treated as one: the claim
+  // below is what actually decides, and an outage on the cheap read must not
+  // refuse a finish the claim would have accepted.
   const existing = await store.findCorrection(ref).catch(() => null);
   if (existing) return { status: "already-corrected", correction: existing };
-
-  const correction = await input.evaluate();
 
   const now = input.now();
   let claimed: boolean;
@@ -427,29 +504,106 @@ export async function correctSitting(
   } catch (error) {
     // Nothing was marked and nothing was written: the sitting is still in
     // progress, which is a truthful thing for it to be.
-    return { status: "graded-not-stored", correction, error };
+    return { status: "not-stored", error };
   }
 
   if (!claimed) {
-    // Somebody else corrected this sitting between the check above and here.
-    // Theirs is the one that exists, so theirs is the one that is returned;
-    // this call's grade is discarded rather than shown beside a row it is not.
+    // Somebody corrected this sitting between the check above and here. Theirs
+    // is the one that exists, so theirs is the one that is returned.
     const winner = await store.findCorrection(ref).catch(() => null);
     return winner
       ? { status: "already-corrected", correction: winner }
-      : { status: "graded-not-stored", correction, error: new Error("claim lost") };
+      : { status: "not-stored", error: new Error("claim lost") };
   }
 
   // The claim is won, so this call is the one that writes the rows — and
   // therefore the one allowed to store the bytes they will point at. The
   // second net around a `preserve` that breaks its own no-throw contract is
-  // deliberate: past this point the sitting is marked finished, and an upload
-  // failure surfacing as `graded-not-stored` would cost a written correction
-  // to save an audio copy nobody promised.
+  // deliberate: an upload failure must cost the candidate a replay button,
+  // never their finish.
   let kept: ReadonlyMap<OralSpeakingPhase, string> | undefined;
   if (input.preserve) {
     kept = await input.preserve().catch(() => undefined);
   }
+
+  try {
+    await store.writeArtefacts(
+      ref,
+      deriveArtefactRows({
+        phases: input.phases,
+        recordings: input.recordings,
+        kept,
+        disposedAt: now,
+      }),
+    );
+  } catch (error) {
+    // Claimed, but the rows did not land — nothing here will grade, so the
+    // claim must not sit on the sitting excluding the immediate retry for the
+    // whole hold window. Given back best-effort: a release that also fails
+    // leaves the retry waiting out the hold, degraded but bounded.
+    await store.releaseClaim(ref).catch(() => undefined);
+    return { status: "not-stored", error };
+  }
+
+  return { status: "accepted" };
+}
+
+export type CorrectionOutcome =
+  /** Graded and written. The ordinary path. */
+  | { status: "stored"; correction: StoredCorrection }
+  /**
+   * A correction already existed — a concurrent finish won, or this is a retry
+   * whose first grading landed. Nothing was graded or written.
+   */
+  | { status: "already-corrected"; correction: StoredCorrection }
+  /**
+   * Graded, but not stored: the write itself failed. The sitting reads as
+   * `uncorrected` until someone finishes it again; the grade is in
+   * `correction` for whoever can still show it — which, behind an
+   * already-answered response, is only the log.
+   */
+  | { status: "graded-not-stored"; correction: CorrectionRow; error: unknown };
+
+export interface AttachCorrectionInput {
+  phases: readonly ReportedPhase[];
+  recordings: readonly MeasuredRecording[];
+  /**
+   * The correction itself, run lazily.
+   *
+   * A function rather than a value because the duplicate check is only worth
+   * anything if it can happen *before* this runs: grading is a paid,
+   * minutes-long model call, and a second submit of an already-corrected
+   * sitting should cost nothing at all. The test for double-finish asserts
+   * exactly that — not merely that one row exists afterwards, but that the
+   * corrector was never asked. A throw from here propagates to the caller,
+   * which owns saying why (#73).
+   */
+  evaluate: () => Promise<CorrectionRow>;
+  /** Injected so a test can pin the timestamps it asserts on. */
+  now: () => Date;
+}
+
+/**
+ * Grade an accepted sitting and attach the correction (#86).
+ *
+ * Runs behind the response on the ordinary path, which is the entire point:
+ * the candidate stopped waiting when {@link acceptSitting} answered. The
+ * artefact rows travel again because `writeCorrection` writes all three tables
+ * — its phase and recording statements are upserts, so the rows the accept
+ * already wrote win and these are no-ops beside the one INSERT that matters.
+ * One write path for both halves is what keeps them from drifting; the kept
+ * uris are absent here on purpose, because `on conflict` preserves the
+ * accept's rows, which are the ones that carry them.
+ */
+export async function attachCorrection(
+  store: SittingStore,
+  ref: SittingRef,
+  input: AttachCorrectionInput,
+): Promise<CorrectionOutcome> {
+  const existing = await store.findCorrection(ref).catch(() => null);
+  if (existing) return { status: "already-corrected", correction: existing };
+
+  const correction = await input.evaluate();
 
   try {
     const stored = await store.writeCorrection(
@@ -458,15 +612,12 @@ export async function correctSitting(
         phases: input.phases,
         recordings: input.recordings,
         correction,
-        kept,
-        disposedAt: now,
+        disposedAt: input.now(),
       }),
     );
     return { status: "stored", correction: stored };
   } catch (error) {
-    // The sitting is now marked finished with no correction attached, which is
-    // `uncorrected` to every reader and repairable by finishing again. The
-    // candidate has their grade in hand either way.
+    // The sitting stays `uncorrected`, which is repairable by finishing again.
     return { status: "graded-not-stored", correction, error };
   }
 }

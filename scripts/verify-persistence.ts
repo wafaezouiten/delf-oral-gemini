@@ -34,7 +34,11 @@ import { oralExams, oralTopics } from "../src/lib/db/schema";
 import { archivePreparationExit, neonSittingStore } from "../src/lib/db/sittings";
 import { ORAL_CRITERIA } from "../src/lib/delf/criteria";
 import { ORAL_TOPICS } from "../src/lib/delf/topics";
-import { correctSitting, type CorrectionRow } from "../src/lib/exams/sitting-persistence";
+import {
+  acceptSitting,
+  attachCorrection,
+  type CorrectionRow,
+} from "../src/lib/exams/sitting-persistence";
 import { scoreSitting } from "../src/lib/delf/orale-rubric";
 import type { TranscriptEntry } from "../src/lib/delf/transcript";
 
@@ -249,49 +253,98 @@ async function main(): Promise<number> {
 
     console.log("\ncorrect");
     let graded = 0;
-    const input = {
+    const reportedPhases = [
+      {
+        phase: "monologue" as const,
+        startedAt: Date.now() - 900_000,
+        endedAt: Date.now() - 500_000,
+      },
+      { phase: "debate" as const, startedAt: Date.now() - 500_000, endedAt: Date.now() },
+    ];
+    const measuredRecordings = [
+      {
+        phase: "monologue" as const,
+        mimeType: "audio/ogg",
+        byteSize: 210_000,
+        durationSeconds: 402.6,
+      },
+      {
+        phase: "debate" as const,
+        mimeType: "audio/ogg",
+        byteSize: 640_000,
+        durationSeconds: 761.2,
+      },
+    ];
+    const acceptInput = {
       transcript: [...MONOLOGUE, ...DEBATE],
       reconnectCount: 1,
       // Non-zero so the round trip proves the column takes a value, not just
       // its default — a probe that writes 0 over DEFAULT 0 verifies nothing.
       earlyClosingCount: 2,
-      phases: [
-        {
-          phase: "monologue" as const,
-          startedAt: Date.now() - 900_000,
-          endedAt: Date.now() - 500_000,
-        },
-        { phase: "debate" as const, startedAt: Date.now() - 500_000, endedAt: Date.now() },
-      ],
-      recordings: [
-        {
-          phase: "monologue" as const,
-          mimeType: "audio/ogg",
-          byteSize: 210_000,
-          durationSeconds: 402.6,
-        },
-        {
-          phase: "debate" as const,
-          mimeType: "audio/ogg",
-          byteSize: 640_000,
-          durationSeconds: 761.2,
-        },
-      ],
+      phases: reportedPhases,
+      recordings: measuredRecordings,
+      now: () => new Date(),
+    };
+
+    // The two halves the finish route runs since #86: the accept before its
+    // response, the attach behind it. Probed in that order because the state
+    // between them — claimed, artefacts written, nothing graded — is exactly
+    // what a candidate is released on, and it has to read `uncorrected`.
+    const accepted = await acceptSitting(store, ref, acceptInput);
+    check("the sitting is accepted before any grading", accepted.status === "accepted", {
+      status: accepted.status,
+    });
+    const between = await store.readSitting(ref);
+    check(
+      "an accepted sitting reads uncorrected until the correction lands",
+      between?.outcome === "uncorrected",
+      { outcome: between?.outcome },
+    );
+
+    const attached = await attachCorrection(store, ref, {
+      phases: reportedPhases,
+      recordings: measuredRecordings,
       evaluate: async () => {
         graded += 1;
         return correction;
       },
       now: () => new Date(),
-    };
+    });
+    check("the correction is stored", attached.status === "stored", { status: attached.status });
 
-    const first = await correctSitting(store, ref, input);
-    check("the correction is stored", first.status === "stored", { status: first.status });
-
-    const second = await correctSitting(store, ref, input);
+    const second = await acceptSitting(store, ref, acceptInput);
     check("finishing twice is a no-op", second.status === "already-corrected", {
       status: second.status,
     });
     check("and the second one never graded", graded === 1, { graded });
+
+    /**
+     * The claim hold (#86), against the real clock: while a claim is younger
+     * than the grading budget and no correction exists, a second finish must
+     * be refused — that refusal is what stands between "fire the request
+     * twice" and two paid model calls — and a released claim must open the
+     * door again at once, which is the failed-accept repair path.
+     */
+    console.log("\nthe claim hold");
+    const [held] = await db
+      .insert(oralExams)
+      .values({ userId: USER, topicId, phase: "preparation" })
+      .returning({ id: oralExams.id });
+    const heldRef = { examId: held.id, userId: USER };
+
+    const heldAccept = await acceptSitting(store, heldRef, acceptInput);
+    check("a sitting nothing holds is accepted", heldAccept.status === "accepted", {
+      status: heldAccept.status,
+    });
+    const rival = await acceptSitting(store, heldRef, acceptInput);
+    check("a second finish inside the grading budget is refused", rival.status === "not-stored", {
+      status: rival.status,
+    });
+    await store.releaseClaim(heldRef);
+    const reclaimed = await acceptSitting(store, heldRef, acceptInput);
+    check("a released claim is re-acceptable at once", reclaimed.status === "accepted", {
+      status: reclaimed.status,
+    });
 
     console.log("\nread back");
     const stored = await store.readSitting(ref);
