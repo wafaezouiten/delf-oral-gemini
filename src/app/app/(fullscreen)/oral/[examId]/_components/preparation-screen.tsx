@@ -26,8 +26,8 @@ import { PreflightCard } from "./preflight-card";
  * PORT NOTE: `components/po/po-preparation-screen.tsx`. The rail's order was
  * reproduced whole — passation card, notes, structure attendue, a ghost
  * "commencer maintenant" at the foot — and no longer is: the passation card and
- * the ghost went with #59, and the rest was reordered on the user's call to
- * checks → structure → notes, with the déroulé card dropped entirely (its
+ * the ghost went with #59, and the rest settled on the user's call at
+ * notes → checks → structure, with the déroulé card dropped entirely (its
  * durations are already on the sujet's launch dialog).
  *
  * There is exactly ONE clock, and it lives in the topbar. The reference's own
@@ -52,10 +52,10 @@ import { PreflightCard } from "./preflight-card";
  * « Commencer la préparation » — so a candidate who had pressed « Commencer » on
  * the sujet was asked to press it again, and the examiner's spoken consigne,
  * which the controller fires on `start()`, could not be heard until they did.
- * The screen is gone; of its cards, the checks (`PreflightCard`) survive at the
- * head of this rail. The déroulé rode along for a while and is gone too — its
- * durations are on the sujet's launch dialog, which every candidate has just
- * read. What is lost is nothing a candidate acted on.
+ * The screen is gone; of its cards, the checks (`PreflightCard`) survive in
+ * this rail, under the notes. The déroulé rode along for a while and is gone
+ * too — its durations are on the sujet's launch dialog, which every candidate
+ * has just read. What is lost is nothing a candidate acted on.
  */
 export function PreparationScreen({
   topic,
@@ -184,17 +184,35 @@ export function PreparationScreen({
           </div>
         </section>
 
-        {/* Rail */}
+        {/* Rail: notes, then the checks, then the plan — the user's order,
+            settled after trying the checks first. The notes open the column
+            and stay elastic because they are what the thirty minutes are spent
+            in; the checks sit one card down, still on screen without a scroll;
+            and the plan the exposé will be marked against closes the column.
+            What must not be missed is not in here anyway: the browser that
+            cannot send a recording is a danger notice over the sujet, and it
+            holds the passation button shut. */}
         <aside className="flex min-h-0 flex-col gap-3.5 lg:overflow-y-auto lg:pr-0.5">
-          {/* The checks lead the rail. They used to sit below the notes, on the
-              argument that the notes are what the thirty minutes are spent in
-              and a one-time test should not push the writing surface a screen
-              down; the order was reversed on the user's call — a card headed
-              « Avant de commencer » opens the column, the plan the exposé will
-              be marked against comes next, and the notes take the remaining
-              height at the foot. What must not be missed still is not in here:
-              the browser that cannot send a recording is a danger notice over
-              the sujet, and it holds the passation button shut. */}
+          {/* First, and elastic: `flex-1` hands the notes whatever height the
+              two fixed cards below leave, so the writing surface grows with the
+              viewport instead of the gap at the rail's foot doing it. */}
+          <div className="border-border bg-card flex min-h-[13.75rem] flex-1 flex-col overflow-hidden rounded-lg border">
+            <div className="border-border flex items-center gap-2 border-b px-4 py-3">
+              <PencilIcon className="text-muted-foreground size-3.5" />
+              <h2 className="text-[0.78125rem] font-semibold">
+                <label htmlFor="notes">Mes notes de préparation</label>
+              </h2>
+            </div>
+            <textarea
+              id="notes"
+              value={notes}
+              onChange={(event) => onNotes(event.target.value)}
+              placeholder="Problématique, plan, arguments, exemples, connecteurs…"
+              spellCheck={false}
+              className="min-h-[9.375rem] flex-1 resize-none border-0 bg-transparent px-4 py-3.5 text-[0.84375rem] leading-[1.75] outline-none"
+            />
+          </div>
+
           <PreflightCard
             examinerModel={examinerModel}
             examinerSaving={examinerSaving}
@@ -226,26 +244,6 @@ export function PreparationScreen({
                 </li>
               ))}
             </ol>
-          </div>
-
-          {/* Last, and elastic: `flex-1` hands the notes whatever height the two
-              fixed cards above leave, so the writing surface grows with the
-              viewport instead of the gap at the rail's foot doing it. */}
-          <div className="border-border bg-card flex min-h-[13.75rem] flex-1 flex-col overflow-hidden rounded-lg border">
-            <div className="border-border flex items-center gap-2 border-b px-4 py-3">
-              <PencilIcon className="text-muted-foreground size-3.5" />
-              <h2 className="text-[0.78125rem] font-semibold">
-                <label htmlFor="notes">Mes notes de préparation</label>
-              </h2>
-            </div>
-            <textarea
-              id="notes"
-              value={notes}
-              onChange={(event) => onNotes(event.target.value)}
-              placeholder="Problématique, plan, arguments, exemples, connecteurs…"
-              spellCheck={false}
-              className="min-h-[9.375rem] flex-1 resize-none border-0 bg-transparent px-4 py-3.5 text-[0.84375rem] leading-[1.75] outline-none"
-            />
           </div>
         </aside>
       </main>
