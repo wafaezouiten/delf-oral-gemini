@@ -35,11 +35,7 @@ import {
 } from "./evaluation-response";
 import { readEvaluationUsage, type EvaluationUsage } from "./evaluation-usage";
 import { withTransientRetry } from "./transient";
-import {
-  candidateWordCount,
-  formatTranscript,
-  type TranscriptEntry,
-} from "@/lib/delf/transcript";
+import { candidateWordCount, formatTranscript, type TranscriptEntry } from "@/lib/delf/transcript";
 import type { OralTopic } from "@/lib/delf/topics";
 import type { EvaluationFeedback, EvaluationMode, OralSpeakingPhase } from "@/lib/db/schema";
 import { phonologyInstruction, type AttachedRecording } from "./phonology-instruction";

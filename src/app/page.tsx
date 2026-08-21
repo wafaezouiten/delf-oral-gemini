@@ -52,14 +52,12 @@ export default async function HomePage() {
           DELF B2 · Production orale
         </p>
         <h1 className="font-serif text-4xl leading-[1.15] font-semibold tracking-tight text-balance">
-          Passez l&apos;épreuve orale complète, face à un examinateur qui vous
-          contredit.
+          Passez l&apos;épreuve orale complète, face à un examinateur qui vous contredit.
         </h1>
         <p className="text-muted-foreground max-w-2xl text-lg leading-relaxed">
-          {prepMinutes} minutes de préparation, un monologue suivi de 5 à{" "}
-          {monologueMinutes} minutes, puis un débat argumenté d&apos;environ{" "}
-          {debateMinutes} minutes. À la fin, une note sur {COMPETENCY_MAX} selon
-          les cinq critères de la grille officielle.
+          {prepMinutes} minutes de préparation, un monologue suivi de 5 à {monologueMinutes}{" "}
+          minutes, puis un débat argumenté d&apos;environ {debateMinutes} minutes. À la fin, une
+          note sur {COMPETENCY_MAX} selon les cinq critères de la grille officielle.
         </p>
       </div>
 
@@ -73,7 +71,7 @@ export default async function HomePage() {
             <p className="text-muted-foreground text-[0.6875rem] font-semibold tracking-[0.16em] uppercase">
               {title}
             </p>
-            <p className="font-serif tabular mt-1 text-xl font-semibold">{duration}</p>
+            <p className="tabular mt-1 font-serif text-xl font-semibold">{duration}</p>
             <p className="text-muted-foreground mt-1 text-sm">{detail}</p>
           </li>
         ))}
@@ -82,10 +80,7 @@ export default async function HomePage() {
       <div className="space-y-3">
         <p className="text-muted-foreground text-sm">
           Corrigé sur les cinq critères de la grille :{" "}
-          {ORAL_CRITERIA.map((key) => ORAL_CRITERIA_LABELS[key].toLowerCase()).join(
-            ", ",
-          )}
-          .
+          {ORAL_CRITERIA.map((key) => ORAL_CRITERIA_LABELS[key].toLowerCase()).join(", ")}.
         </p>
         {/* Modals, not navigations.
          *
@@ -115,11 +110,7 @@ export default async function HomePage() {
          * the front door, not the only one.
          */}
         <div className="flex flex-wrap gap-3">
-          <SignUpButton
-            mode="modal"
-            forceRedirectUrl="/app"
-            signInForceRedirectUrl="/app"
-          >
+          <SignUpButton mode="modal" forceRedirectUrl="/app" signInForceRedirectUrl="/app">
             <button type="button" className={`${primaryButton} px-5 py-2.5`}>
               Créer un compte
             </button>
@@ -138,8 +129,7 @@ export default async function HomePage() {
       </div>
 
       <p className="text-muted-foreground text-xs">
-        Un microphone est nécessaire. L&apos;épreuve se déroule entièrement en
-        français.
+        Un microphone est nécessaire. L&apos;épreuve se déroule entièrement en français.
       </p>
     </main>
   );

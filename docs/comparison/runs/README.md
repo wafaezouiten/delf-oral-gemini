@@ -7,9 +7,9 @@ that produced them is an assertion, and #12 asked for the runs to be recorded.
 Two shapes live here, and `pnpm compare:summarise` tells them apart by their
 contents rather than their names:
 
-| Pattern | Produced by | Contains |
-| --- | --- | --- |
-| `<iso-timestamp>.json` | `pnpm compare` | every correction both systems returned for every sitting, including the ones that failed |
+| Pattern                     | Produced by         | Contains                                                                                                                                                                                                                                             |
+| --------------------------- | ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `<iso-timestamp>.json`      | `pnpm compare`      | every correction both systems returned for every sitting, including the ones that failed                                                                                                                                                             |
 | `live-<iso-timestamp>.json` | `pnpm measure:live` | one real Gemini Live session's `usageMetadata`, turn by turn, plus per-turn reply latency (#100): `turnLatencies`, the `vadSilenceDurationMs` the session was opened with, and `derived.medianFirstAudioChunkMs` / `derived.medianModelAndNetworkMs` |
 
 Reproducing a run:

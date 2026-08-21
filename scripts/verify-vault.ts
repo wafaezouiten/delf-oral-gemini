@@ -20,10 +20,7 @@ config({ path: ".env.local" });
 
 import assert from "node:assert/strict";
 
-import {
-  isRecordingVaultConfigured,
-  recordingVault,
-} from "../src/lib/storage/recording-vault";
+import { isRecordingVaultConfigured, recordingVault } from "../src/lib/storage/recording-vault";
 
 async function main(): Promise<void> {
   if (!isRecordingVaultConfigured()) {
@@ -83,7 +80,9 @@ async function main(): Promise<void> {
   }
   console.log("  gone: open() now answers null");
 
-  console.log("\n✓ The vault round-trips against the real store. New sittings will keep their recordings.");
+  console.log(
+    "\n✓ The vault round-trips against the real store. New sittings will keep their recordings.",
+  );
 }
 
 main().catch((error) => {

@@ -95,11 +95,7 @@ function oursFor(run: RunFile, sittingId: string): Array<Ok<OurRecord>> {
   return run.ours.filter((r): r is Ok<OurRecord> => r.ok && r.sittingId === sittingId);
 }
 
-function incumbentFor(
-  run: RunFile,
-  sittingId: string,
-  tache: number,
-): Array<Ok<IncumbentRecord>> {
+function incumbentFor(run: RunFile, sittingId: string, tache: number): Array<Ok<IncumbentRecord>> {
   return (run.incumbent?.results ?? []).filter(
     (r): r is Ok<IncumbentRecord> => r.ok && r.sittingId === sittingId && r.tache === tache,
   );
@@ -135,8 +131,7 @@ function criterionTable(run: RunFile): string {
 
       // The comparable incumbent value, per the attribution documented above.
       const source = ATTRIBUTION[criterion];
-      const theirs =
-        source === 1 ? t1Values : source === 2 ? t2Values : [...t1Values, ...t2Values];
+      const theirs = source === 1 ? t1Values : source === 2 ? t2Values : [...t1Values, ...t2Values];
 
       const delta =
         theirs.length === 0
@@ -272,7 +267,8 @@ function failureTable(run: RunFile): string {
     "| System | Sitting | Error | Failed after |",
     "| --- | --- | --- | --- |",
     ...ourFailures.map(
-      (r) => `| ours | ${r.sittingId} | ${"error" in r ? r.error.slice(0, 120) : ""} | ${r.latencySeconds.toFixed(1)}s |`,
+      (r) =>
+        `| ours | ${r.sittingId} | ${"error" in r ? r.error.slice(0, 120) : ""} | ${r.latencySeconds.toFixed(1)}s |`,
     ),
     ...theirFailures.map(
       (r) =>
@@ -294,7 +290,9 @@ function stabilityTable(run: RunFile): string {
       for (const tache of [1, 2] as const) {
         const values = incumbentFor(run, sitting.id, tache).map((r) => r.criteria[criterion]);
         if (values.length > 1 && !stable(values)) {
-          rows.push(`| incumbent t${tache} | ${sitting.id} | ${criterion} | ${values.join(" then ")} |`);
+          rows.push(
+            `| incumbent t${tache} | ${sitting.id} | ${criterion} | ${values.join(" then ")} |`,
+          );
         }
       }
     }

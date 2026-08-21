@@ -43,11 +43,7 @@ import {
 
 import { CLIENT_CONNECT_CONFIG, INPUT_MIME_TYPE, LIVE_MODEL } from "@/lib/gemini/constants";
 import type { OralTopic } from "@/lib/delf/topics";
-import {
-  canTransition,
-  describeTransition,
-  type SessionState,
-} from "./state-machine";
+import { canTransition, describeTransition, type SessionState } from "./state-machine";
 
 export type LivePhase = "monologue" | "debate";
 
@@ -790,7 +786,9 @@ export function parseDurationMs(value: unknown): number | null {
     const seconds = Number(record.seconds ?? 0);
     const nanos = Number(record.nanos ?? 0);
     if (Number.isFinite(seconds) || Number.isFinite(nanos)) {
-      return (Number.isFinite(seconds) ? seconds : 0) * 1000 + (Number.isFinite(nanos) ? nanos : 0) / 1e6;
+      return (
+        (Number.isFinite(seconds) ? seconds : 0) * 1000 + (Number.isFinite(nanos) ? nanos : 0) / 1e6
+      );
     }
   }
   return null;

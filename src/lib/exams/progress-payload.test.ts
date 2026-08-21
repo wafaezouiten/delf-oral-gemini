@@ -41,9 +41,7 @@ describe("progress payload", () => {
     // turns under it, and the evaluator grades the two tasks separately.
     const parsed = progressPayloadSchema.safeParse(
       payload({
-        entries: [
-          { phase: "debate", speaker: "candidate", timestamp: 1, text: "Je maintiens." },
-        ],
+        entries: [{ phase: "debate", speaker: "candidate", timestamp: 1, text: "Je maintiens." }],
       }),
     );
     assert.equal(parsed.success, false);

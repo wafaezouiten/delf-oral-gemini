@@ -442,8 +442,7 @@ function harness(
     },
     loseMicrophone: (reason = "the audio track ended") => notifyLost?.(reason),
     session: () => sessions[sessions.length - 1],
-    report: (phase: RecordedPhase) =>
-      finished[0]?.phases.find((entry) => entry.phase === phase),
+    report: (phase: RecordedPhase) => finished[0]?.phases.find((entry) => entry.phase === phase),
   };
 }
 
@@ -1067,9 +1066,7 @@ describe("recording the candidate", () => {
       false,
       "and the indicator goes dark, because at this moment it is telling the truth",
     );
-    assert.ok(
-      h.controller.getSnapshot().events.some((event) => event.name === "capture-stalled"),
-    );
+    assert.ok(h.controller.getSnapshot().events.some((event) => event.name === "capture-stalled"));
 
     // And it clears itself when the tab comes back, rather than leaving a stale
     // warning over a working microphone for the rest of the épreuve.
@@ -1516,7 +1513,9 @@ describe("recording the candidate", () => {
 
         const said = h.controller
           .getSnapshot()
-          .transcript.filter((entry) => entry.phase === "monologue" && entry.speaker === "candidate")
+          .transcript.filter(
+            (entry) => entry.phase === "monologue" && entry.speaker === "candidate",
+          )
           .map((entry) => entry.text)
           .join(" ");
         assert.match(said, /Le télétravail a transformé le rapport au bureau\./);
@@ -2262,7 +2261,9 @@ describe("the examiner's opening question", () => {
 
     // The examiner opens the débat. Gemini reports an interruption before a word
     // of it has been answered — there is nothing yet to answer.
-    h.session().examinerSays("Vous dites que le télétravail isole. N'est-ce pas plutôt le bureau ?");
+    h.session().examinerSays(
+      "Vous dites que le télétravail isole. N'est-ce pas plutôt le bureau ?",
+    );
     h.session().examinerVoice("the opening question");
     h.session().interrupts();
 
@@ -2412,7 +2413,9 @@ describe("the examiner's opening question", () => {
     await intoDebate(h);
     const player = h.players[h.players.length - 1];
 
-    h.session().examinerSays("Vous dites que le télétravail isole. N'est-ce pas plutôt le bureau ?");
+    h.session().examinerSays(
+      "Vous dites que le télétravail isole. N'est-ce pas plutôt le bureau ?",
+    );
     h.session().examinerVoice("the opening question");
 
     assert.equal(
@@ -2537,7 +2540,9 @@ describe("breaking a silence in the débat (#84, #101)", () => {
     h.recorder.voiced.debate = 0;
     // The examiner's opening question, delivered and finished. This is what
     // opens the window: the floor is the candidate's from here.
-    h.session().examinerSays("Vous dites que le télétravail isole. N'est-ce pas plutôt le bureau ?");
+    h.session().examinerSays(
+      "Vous dites que le télétravail isole. N'est-ce pas plutôt le bureau ?",
+    );
     h.session().finishTurn();
   }
 
@@ -2552,9 +2557,9 @@ describe("breaking a silence in the débat (#84, #101)", () => {
    *  silence repeats the question and the later ones ask a new, simpler one
    *  (#101), and both are forbidden to mention the silence. */
   const relances = (h: Harness) =>
-    h.session().directives.filter((text) =>
-      text.includes("Ne fais aucune remarque sur son silence"),
-    );
+    h
+      .session()
+      .directives.filter((text) => text.includes("Ne fais aucune remarque sur son silence"));
   const presenceChecks = (h: Harness) =>
     h.session().directives.filter((text) => text.includes("Vous m'entendez"));
   /** Everything the watch says, in one list: the débat's own opening directive
@@ -2680,8 +2685,8 @@ describe("breaking a silence in the débat (#84, #101)", () => {
     assert.deepEqual(
       events(h, "silence-relance").map((event) => event.detail),
       [1, 2, 3, 4, 5].map((attempt) => JSON.stringify({ attempt, waitedSeconds: 16 })),
-      "the log counts them and says what each one waited through, which is what"
-        + " replaced the stand-down it used to record",
+      "the log counts them and says what each one waited through, which is what" +
+        " replaced the stand-down it used to record",
     );
   });
 
@@ -3120,7 +3125,11 @@ describe("an examiner that says goodbye seven minutes early (#85)", () => {
       h.advanceClock(180);
       h.advanceClock(180);
 
-      assert.deepEqual(h.session().directives, [], "the examiner listens, and that is the exercise");
+      assert.deepEqual(
+        h.session().directives,
+        [],
+        "the examiner listens, and that is the exercise",
+      );
     });
   });
 
@@ -3157,7 +3166,11 @@ describe("an examiner that says goodbye seven minutes early (#85)", () => {
       assert.deepEqual(events(h, "examiner-early-closing"), [], "half of it is not a goodbye");
       h.session().examinerSays(" quitter la salle.");
 
-      assert.equal(events(h, "examiner-early-closing").length, 1, "and the other half completes it");
+      assert.equal(
+        events(h, "examiner-early-closing").length,
+        1,
+        "and the other half completes it",
+      );
     });
 
     it("stops answering after twice, and keeps logging", async () => {

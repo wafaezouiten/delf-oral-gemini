@@ -22,11 +22,7 @@ import { z } from "zod";
 // same numbers rather than by two copies of them.
 import { transcriptSchema } from "./transcript-payload";
 
-export {
-  MAX_TRANSCRIPT_CHARS,
-  MAX_TURNS,
-  MAX_TURN_CHARS,
-} from "./transcript-payload";
+export { MAX_TRANSCRIPT_CHARS, MAX_TURNS, MAX_TURN_CHARS } from "./transcript-payload";
 
 /**
  * The longest a phase's clock may claim to have run.

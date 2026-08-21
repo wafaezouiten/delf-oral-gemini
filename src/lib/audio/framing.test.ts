@@ -156,7 +156,8 @@ describe("StreamResampler", () => {
     const resampler = new StreamResampler(44100, 16000);
 
     let produced = 0;
-    for (let i = 0; i < BLOCKS; i += 1) produced += resampler.process(tone(BLOCK, i * BLOCK)).length;
+    for (let i = 0; i < BLOCKS; i += 1)
+      produced += resampler.process(tone(BLOCK, i * BLOCK)).length;
 
     const expected = (BLOCKS * BLOCK * 16000) / 44100;
     assert.ok(

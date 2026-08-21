@@ -36,8 +36,7 @@ export const DEBATE_CONVERSATION_COPY = {
    * after it is heard — and a candidate who notices that without being told
    * reads it as the product being broken.
    */
-  footnote:
-    "Transcription automatique : elle peut arriver avec un léger décalage sur la voix.",
+  footnote: "Transcription automatique : elle peut arriver avec un léger décalage sur la voix.",
 } as const;
 
 /**

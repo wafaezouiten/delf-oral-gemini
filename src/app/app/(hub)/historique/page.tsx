@@ -65,11 +65,11 @@ export default async function HistoriquePage() {
         <span className="bg-primary-subtle text-primary mx-auto flex size-14 items-center justify-center rounded-lg">
           <ClockIcon className="size-7" />
         </span>
-        <h1 className="font-serif mt-5 text-2xl font-semibold">Aucune épreuve passée</h1>
+        <h1 className="mt-5 font-serif text-2xl font-semibold">Aucune épreuve passée</h1>
         <p className="text-muted-foreground mx-auto mt-3 max-w-[48ch] text-sm leading-relaxed">
-          Vos épreuves apparaîtront ici dès la première, avec leur note sur{" "}
-          {COMPETENCY_MAX} et le détail de la correction. Une épreuve abandonnée y
-          figure aussi, comptée comme une tentative notée 0.
+          Vos épreuves apparaîtront ici dès la première, avec leur note sur {COMPETENCY_MAX} et le
+          détail de la correction. Une épreuve abandonnée y figure aussi, comptée comme une
+          tentative notée 0.
         </p>
         <div className="mt-7">
           <Link href={HUB_LINKS.sujets} className={primaryButton}>
@@ -87,7 +87,7 @@ export default async function HistoriquePage() {
   return (
     <main className="mx-auto w-full max-w-4xl px-6 py-10">
       <Kicker>DELF B2 · Production orale</Kicker>
-      <h1 className="font-serif mt-1 text-2xl leading-tight font-semibold">Historique</h1>
+      <h1 className="mt-1 font-serif text-2xl leading-tight font-semibold">Historique</h1>
       <p className="text-muted-foreground mt-2 text-sm leading-relaxed">
         {/* The count is the current record's, not the whole table's: it is the
             same number the tableau de bord computes its figures from, and two
@@ -105,7 +105,7 @@ export default async function HistoriquePage() {
       </p>
 
       {record.length > 0 ? (
-        <section className="border-border bg-card mt-6 sheet border">
+        <section className="border-border bg-card sheet mt-6 border">
           <ul className="divide-border divide-y">
             {record.map((sitting) => (
               <SittingRow key={sitting.examId} sitting={sitting} detailed />
@@ -116,9 +116,8 @@ export default async function HistoriquePage() {
         /* Reachable only after a reset: the page-level empty state above needs
            the whole table to be empty, and it is not. Saying "aucune épreuve"
            here would contradict the archive sitting directly underneath. */
-        <p className="border-border bg-card mt-6 sheet border px-6 py-5 text-sm leading-relaxed">
-          Vous êtes reparti de zéro. Vos épreuves précédentes sont dans les
-          archives, ci-dessous.{" "}
+        <p className="border-border bg-card sheet mt-6 border px-6 py-5 text-sm leading-relaxed">
+          Vous êtes reparti de zéro. Vos épreuves précédentes sont dans les archives, ci-dessous.{" "}
           <Link href={HUB_LINKS.sujets} className="font-semibold underline">
             Choisir un sujet
           </Link>
@@ -144,7 +143,7 @@ export default async function HistoriquePage() {
               fade the block, and it would take the contrast of every score in it
               down with it — for a distinction the heading and the sentence above
               already make in words. */}
-          <div className="border-border bg-card mt-4 sheet border">
+          <div className="border-border bg-card sheet mt-4 border">
             <ul className="divide-border divide-y">
               {archived.map((sitting) => (
                 <SittingRow key={sitting.examId} sitting={sitting} detailed />

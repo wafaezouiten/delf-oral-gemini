@@ -113,8 +113,12 @@ async function probe(label: string, cfg: LiveConnectConfig, manual: boolean, pcm
   session.close();
 
   console.log(`\n  ${label}`);
-  console.log(`    during speech : inputTranscription=${duringSettled} fragments, interim=${duringInterim}`);
-  console.log(`    total         : inputTranscription=${settled.length} fragments, interim=${interim.length}`);
+  console.log(
+    `    during speech : inputTranscription=${duringSettled} fragments, interim=${duringInterim}`,
+  );
+  console.log(
+    `    total         : inputTranscription=${settled.length} fragments, interim=${interim.length}`,
+  );
   console.log(`    settled text  : "${settled.join("").trim().slice(0, 100)}"`);
   console.log(`    interim text  : "${interim.join("").trim().slice(0, 100)}"`);
 }

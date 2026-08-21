@@ -80,9 +80,8 @@ export function QuitPreparationDialog({
         </div>
 
         <p className="text-muted-foreground text-sm leading-relaxed">
-          Rien n&apos;a encore été dit : cette épreuve ne sera pas notée et
-          n&apos;apparaîtra pas dans votre historique. Vous pourrez reprendre ce
-          sujet plus tard, depuis le début.
+          Rien n&apos;a encore été dit : cette épreuve ne sera pas notée et n&apos;apparaîtra pas
+          dans votre historique. Vous pourrez reprendre ce sujet plus tard, depuis le début.
         </p>
 
         <div className="flex flex-wrap justify-end gap-2 pt-1">
@@ -103,12 +102,7 @@ export function QuitPreparationDialog({
               claim is that nothing on the record is at stake — a red confirm
               would visually re-promise the risk the copy just took away. The
               reset flow's confirm is a plain button for the same reason. */}
-          <button
-            type="button"
-            onClick={onConfirm}
-            disabled={pending}
-            className={secondaryButton}
-          >
+          <button type="button" onClick={onConfirm} disabled={pending} className={secondaryButton}>
             {pending ? "Sortie…" : "Quitter"}
           </button>
         </div>

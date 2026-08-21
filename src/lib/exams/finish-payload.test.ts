@@ -240,7 +240,10 @@ describe("keeping the audit trail worth having", () => {
     });
 
     it("is bounded by the same ceiling as the wall clock beside it", () => {
-      assert.equal(accepts(payload({ devSeconds: { monologue: MAX_PHASE_SECONDS, debate: 0 } })), true);
+      assert.equal(
+        accepts(payload({ devSeconds: { monologue: MAX_PHASE_SECONDS, debate: 0 } })),
+        true,
+      );
       assert.equal(
         accepts(payload({ devSeconds: { monologue: MAX_PHASE_SECONDS + 1, debate: 0 } })),
         false,

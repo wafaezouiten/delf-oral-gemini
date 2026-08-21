@@ -42,5 +42,11 @@ export default async function OralExamPage({
   // the column and on the degraded ids that have no row, and the client treats
   // the two the same: the picker starts on the build default, which is what an
   // untouched sitting will actually hear.
-  return <ExamClient examId={examId} topic={topic} storedExaminerModel={sitting?.examinerModel ?? null} />;
+  return (
+    <ExamClient
+      examId={examId}
+      topic={topic}
+      storedExaminerModel={sitting?.examinerModel ?? null}
+    />
+  );
 }

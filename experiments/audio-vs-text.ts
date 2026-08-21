@@ -126,8 +126,12 @@ function table(comparisons: Comparison[]): void {
   console.log("\n\nPHONOLOGIE — the criterion the experiment is actually about\n");
   for (const c of comparisons) {
     console.log(`  ${c.sample}${c.note ? `  (${c.note})` : ""}`);
-    console.log(`    text  ${c.text.criteria.phonologie}/5 — ${c.text.feedback.justifications.phonologie}`);
-    console.log(`    audio ${c.audio.criteria.phonologie}/5 — ${c.audio.feedback.justifications.phonologie}`);
+    console.log(
+      `    text  ${c.text.criteria.phonologie}/5 — ${c.text.feedback.justifications.phonologie}`,
+    );
+    console.log(
+      `    audio ${c.audio.criteria.phonologie}/5 — ${c.audio.feedback.justifications.phonologie}`,
+    );
     console.log(
       `    latency: ${c.text.latencySeconds.toFixed(1)}s text vs ${c.audio.latencySeconds.toFixed(1)}s audio\n`,
     );
@@ -148,9 +152,7 @@ function table(comparisons: Comparison[]): void {
   console.log(
     `  phonologie spread, audio:     ${spread(comparisons.map((c) => c.audio.criteria.phonologie))}`,
   );
-  console.log(
-    "\n  A WIDER spread under audio means the audio evaluator discriminates between",
-  );
+  console.log("\n  A WIDER spread under audio means the audio evaluator discriminates between");
   console.log("  performances that the text evaluator scored identically. A wider spread is");
   console.log("  necessary evidence, not sufficient: read the justifications and check they");
   console.log("  describe what you can actually hear.\n");

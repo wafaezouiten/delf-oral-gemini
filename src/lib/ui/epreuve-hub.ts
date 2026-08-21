@@ -221,7 +221,11 @@ export function sujetTeaser(document: string, maxChars = 180): string {
   if (text.length <= maxChars) return text;
 
   const window = text.slice(0, maxChars);
-  const lastStop = Math.max(window.lastIndexOf(". "), window.lastIndexOf(" ! "), window.lastIndexOf(" ? "));
+  const lastStop = Math.max(
+    window.lastIndexOf(". "),
+    window.lastIndexOf(" ! "),
+    window.lastIndexOf(" ? "),
+  );
   if (lastStop > maxChars * 0.4) return window.slice(0, lastStop + 1).trim();
 
   const lastSpace = window.lastIndexOf(" ");
@@ -263,9 +267,7 @@ export function sujetMeta(): string {
  * Pure, and derived from the history the page already read rather than from a
  * second query — six sujets is not worth a round trip.
  */
-export function latestScoreBySujet(
-  history: readonly DashboardSitting[],
-): Map<string, number> {
+export function latestScoreBySujet(history: readonly DashboardSitting[]): Map<string, number> {
   const latest = new Map<string, number>();
   for (const sitting of history) {
     // Newest first, so the first row for a slug is that sujet's last sitting and

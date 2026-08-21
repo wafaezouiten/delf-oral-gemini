@@ -68,7 +68,7 @@ export function FinishedScreen({
           )}
 
           <Kicker className="mt-6">DELF B2 · Production orale</Kicker>
-          <h1 className="font-serif mt-1 text-2xl font-semibold">
+          <h1 className="mt-1 font-serif text-2xl font-semibold">
             {submitError ? "Correction interrompue" : "Épreuve terminée"}
           </h1>
 
@@ -101,9 +101,8 @@ export function FinishedScreen({
             {droppedPhases.length === 2
               ? "Vos deux prises de parole étaient trop volumineuses pour être envoyées."
               : `Votre ${PHASE_LABEL_FR[droppedPhases[0]]} était trop volumineux pour être envoyé.`}{" "}
-            Cette partie sera corrigée à partir de sa transcription seule, sans
-            écoute de votre prononciation, et comptera comme une durée de zéro
-            seconde dans la pénalité de durée.
+            Cette partie sera corrigée à partir de sa transcription seule, sans écoute de votre
+            prononciation, et comptera comme une durée de zéro seconde dans la pénalité de durée.
           </Notice>
         )}
 
@@ -111,9 +110,7 @@ export function FinishedScreen({
           <Notice
             tone="danger"
             title={
-              submitError.retryable
-                ? "L'envoi a échoué"
-                : "Cette épreuve ne peut pas être corrigée"
+              submitError.retryable ? "L'envoi a échoué" : "Cette épreuve ne peut pas être corrigée"
             }
             action={
               <div className="flex flex-wrap gap-2">

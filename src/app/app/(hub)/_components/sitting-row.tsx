@@ -45,9 +45,7 @@ export function SittingRow({
     <li className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2 px-6 py-3.5">
       <div className="min-w-0 flex-1">
         {abandoned ? (
-          <p className="text-muted-foreground truncate text-sm font-medium">
-            {sitting.topicTitle}
-          </p>
+          <p className="text-muted-foreground truncate text-sm font-medium">{sitting.topicTitle}</p>
         ) : (
           <Link
             href={`/app/results/${sitting.examId}`}

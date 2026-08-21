@@ -25,11 +25,7 @@
  */
 
 import { formatClock, formatTurnOffset } from "@/lib/delf/phases";
-import {
-  entriesForPhase,
-  type TranscriptEntry,
-  type TranscriptPhase,
-} from "@/lib/delf/transcript";
+import { entriesForPhase, type TranscriptEntry, type TranscriptPhase } from "@/lib/delf/transcript";
 
 export const CORRECTION_TRANSCRIPT_COPY = {
   kicker: "Transcription de l'épreuve",
@@ -143,8 +139,7 @@ export function correctionTranscriptView(
         entry,
         timeLabel: formatTurnOffset(entry.timestamp - anchor),
       })),
-      emptyNote:
-        entries.length === 0 && spoke ? CORRECTION_TRANSCRIPT_COPY.emptySection : null,
+      emptyNote: entries.length === 0 && spoke ? CORRECTION_TRANSCRIPT_COPY.emptySection : null,
     };
   });
 
@@ -158,4 +153,3 @@ export function correctionTranscriptView(
         },
   };
 }
-

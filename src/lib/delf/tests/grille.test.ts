@@ -127,7 +127,11 @@ test("the five bands are five distinct tones", () => {
 
 test("SCORE_BANDS covers 0–25 with no gap, descending, from zero", () => {
   const mins = SCORE_BANDS.map((band) => band.min);
-  assert.deepEqual(mins, [...mins].sort((a, b) => b - a), "bands must be highest-first");
+  assert.deepEqual(
+    mins,
+    [...mins].sort((a, b) => b - a),
+    "bands must be highest-first",
+  );
   assert.equal(mins[mins.length - 1], 0, "the lowest band must start at 0");
   assert.ok(mins[0] <= COMPETENCY_MAX, "the highest band must be reachable");
   for (let score = 0; score <= COMPETENCY_MAX; score += 1) {

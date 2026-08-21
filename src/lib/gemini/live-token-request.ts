@@ -61,8 +61,7 @@ export interface LiveTokenRequest {
 }
 
 export type LiveTokenParse =
-  | { ok: true; request: LiveTokenRequest }
-  | { ok: false; status: number; error: string };
+  { ok: true; request: LiveTokenRequest } | { ok: false; status: number; error: string };
 
 /**
  * Validate the request body.

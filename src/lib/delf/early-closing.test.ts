@@ -19,7 +19,9 @@ describe("hearing an examiner say goodbye seven minutes early (#85)", () => {
       ),
     );
     assert.ok(
-      readsAsClosing("Je vous confirme que l'épreuve est bien terminée. Vous pouvez maintenant quitter la salle. Au revoir."),
+      readsAsClosing(
+        "Je vous confirme que l'épreuve est bien terminée. Vous pouvez maintenant quitter la salle. Au revoir.",
+      ),
     );
   });
 

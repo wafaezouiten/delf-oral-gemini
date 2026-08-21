@@ -33,10 +33,13 @@ function packet(bytes = 40): Uint8Array {
 }
 
 async function opus(seconds: number, options?: { inputSampleRate?: number; channels?: number }) {
-  const blob = muxOggOpus(Array.from({ length: Math.round(seconds * 50) }, () => packet()), {
-    inputSampleRate: options?.inputSampleRate ?? INPUT_SAMPLE_RATE,
-    channels: options?.channels ?? 1,
-  });
+  const blob = muxOggOpus(
+    Array.from({ length: Math.round(seconds * 50) }, () => packet()),
+    {
+      inputSampleRate: options?.inputSampleRate ?? INPUT_SAMPLE_RATE,
+      channels: options?.channels ?? 1,
+    },
+  );
   return blob.arrayBuffer();
 }
 
@@ -69,8 +72,14 @@ describe("measuring what was uploaded", () => {
     // Not mono at the capture rate, so not something `pcm16ToWav` or
     // `encodePcm16ToOggOpus` wrote — and measuring it would be answering a
     // question nobody asked.
-    assert.equal(measureUploadedRecording(await opus(10, { inputSampleRate: 48_000 }), INPUT_SAMPLE_RATE), null);
-    assert.equal(measureUploadedRecording(await opus(10, { channels: 2 }), INPUT_SAMPLE_RATE), null);
+    assert.equal(
+      measureUploadedRecording(await opus(10, { inputSampleRate: 48_000 }), INPUT_SAMPLE_RATE),
+      null,
+    );
+    assert.equal(
+      measureUploadedRecording(await opus(10, { channels: 2 }), INPUT_SAMPLE_RATE),
+      null,
+    );
     assert.equal(measureUploadedRecording(await wav(10, 44_100), INPUT_SAMPLE_RATE), null);
   });
 
@@ -140,7 +149,6 @@ describe("what one request may carry", () => {
     // below it, or the rejection is the platform's and carries no message.
     assert.ok(MAX_REQUEST_BYTES < 4_500_000);
   });
-
 });
 
 describe("choosing what to attach", () => {

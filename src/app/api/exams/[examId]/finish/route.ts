@@ -57,11 +57,7 @@ import {
   MAX_REQUEST_BYTES,
   measureUploadedRecording,
 } from "@/lib/exams/uploaded-recording";
-import {
-  evaluateExam,
-  type EvaluationMode,
-  type EvaluationResult,
-} from "@/lib/gemini/evaluate";
+import { evaluateExam, type EvaluationMode, type EvaluationResult } from "@/lib/gemini/evaluate";
 // Where the recordings go to outlive this request (#98) — when a store is
 // configured, which is a real branch rather than an assumption: without one,
 // every row below is written transient, exactly as before.
@@ -137,10 +133,7 @@ async function readRecordings(
   return { recordings };
 }
 
-export async function POST(
-  request: Request,
-  context: { params: Promise<{ examId: string }> },
-) {
+export async function POST(request: Request, context: { params: Promise<{ examId: string }> }) {
   const { examId } = await context.params;
 
   /**
@@ -389,10 +382,7 @@ export async function POST(
                 ),
               );
             } catch (error) {
-              console.error(
-                `[finish] could not keep the ${recording.phase} recording:`,
-                error,
-              );
+              console.error(`[finish] could not keep the ${recording.phase} recording:`, error);
             }
           }
           return kept;

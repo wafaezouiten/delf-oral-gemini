@@ -60,9 +60,10 @@ export async function requestExaminerChoice(
      * applied rather than assumed: what rides on this answer is which voice
      * the candidate will actually hear.
      */
-    const body = (await response.json().catch(() => null)) as
-      | { recorded?: unknown; persisted?: unknown }
-      | null;
+    const body = (await response.json().catch(() => null)) as {
+      recorded?: unknown;
+      persisted?: unknown;
+    } | null;
 
     if (body?.recorded === true) return { applied: true, persisted: true };
     if (body?.persisted === false) return { applied: true, persisted: false };

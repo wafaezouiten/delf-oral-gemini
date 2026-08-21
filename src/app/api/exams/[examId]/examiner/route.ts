@@ -52,7 +52,10 @@ export async function POST(request: Request, context: { params: Promise<{ examId
   }
 
   try {
-    const recorded = await chooseExaminerModel({ examId: access.examId, userId: access.userId }, model);
+    const recorded = await chooseExaminerModel(
+      { examId: access.examId, userId: access.userId },
+      model,
+    );
 
     // `false` is not an error: the sitting has already left the préparation —
     // a stale tab, a replayed request — and writing nothing is the point of

@@ -90,7 +90,14 @@ export function TimerRing({
         )}
       >
         <svg viewBox="0 0 22 22" className="size-5 shrink-0" aria-hidden>
-          <circle cx="11" cy="11" r={RADIUS} fill="none" strokeWidth="2.5" className="stroke-border" />
+          <circle
+            cx="11"
+            cy="11"
+            r={RADIUS}
+            fill="none"
+            strokeWidth="2.5"
+            className="stroke-border"
+          />
           <circle
             cx="11"
             cy="11"

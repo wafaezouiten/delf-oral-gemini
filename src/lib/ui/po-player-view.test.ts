@@ -17,10 +17,7 @@ import {
 
 describe("the masthead", () => {
   it("names the épreuve, the diploma and the part", () => {
-    assert.equal(
-      poKicker("Monologue suivi"),
-      "Production orale · DELF B2 · Monologue suivi",
-    );
+    assert.equal(poKicker("Monologue suivi"), "Production orale · DELF B2 · Monologue suivi");
   });
 
   it("cuts a part title at its separator, whichever one was typed", () => {
@@ -33,7 +30,6 @@ describe("the masthead", () => {
     assert.equal(shortPartLabel("Débat — exercice en interaction"), "Débat");
     assert.equal(shortPartLabel("Débat"), "Débat");
   });
-
 });
 
 /*
@@ -236,10 +232,7 @@ describe("the status card", () => {
   it("lets the close outrank the connection and the consigne", () => {
     // The part is ending: what the socket is doing, and what the last consigne
     // was, are both answers to a question the candidate has stopped asking.
-    assert.equal(
-      passationStatus("monologue", false, true, true).title,
-      "Fin de l'exposé",
-    );
+    assert.equal(passationStatus("monologue", false, true, true).title, "Fin de l'exposé");
   });
 });
 

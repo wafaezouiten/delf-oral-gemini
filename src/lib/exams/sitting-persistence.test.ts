@@ -165,7 +165,10 @@ class MemoryStore implements SittingStore {
     return true;
   }
 
-  async claimForCorrection(ref: SittingRef, claim: Parameters<SittingStore["claimForCorrection"]>[1]) {
+  async claimForCorrection(
+    ref: SittingRef,
+    claim: Parameters<SittingStore["claimForCorrection"]>[1],
+  ) {
     const exam = this.owned(ref);
     if (!exam) return false;
     if (this.evaluations.some((row) => row.examId === ref.examId)) return false;
@@ -253,12 +256,26 @@ function finishInput(overrides: Partial<Parameters<typeof correctSitting>[2]> = 
     transcript: [...MONOLOGUE.entries, ...DEBATE.entries],
     reconnectCount: 1,
     phases: [
-      { phase: "monologue" as const, startedAt: +MONOLOGUE.startedAt, endedAt: +MONOLOGUE.endedAt! },
+      {
+        phase: "monologue" as const,
+        startedAt: +MONOLOGUE.startedAt,
+        endedAt: +MONOLOGUE.endedAt!,
+      },
       { phase: "debate" as const, startedAt: +DEBATE.startedAt, endedAt: +DEBATE.endedAt! },
     ],
     recordings: [
-      { phase: "monologue" as const, mimeType: "audio/ogg", byteSize: 210_000, durationSeconds: 402.6 },
-      { phase: "debate" as const, mimeType: "audio/ogg", byteSize: 640_000, durationSeconds: 761.2 },
+      {
+        phase: "monologue" as const,
+        mimeType: "audio/ogg",
+        byteSize: 210_000,
+        durationSeconds: 402.6,
+      },
+      {
+        phase: "debate" as const,
+        mimeType: "audio/ogg",
+        byteSize: 640_000,
+        durationSeconds: 761.2,
+      },
     ],
     evaluate: async () => correction(),
     now: () => NOW,
@@ -302,7 +319,9 @@ describe("deriving the rows", () => {
     // The monologue's clock says seven minutes; the recording is 402.6 seconds.
     // `spoken_seconds` feeds the duration penalty, so it must be the second.
     const write = deriveCorrectionWrite({
-      phases: [{ phase: "monologue", startedAt: +MONOLOGUE.startedAt, endedAt: +MONOLOGUE.endedAt! }],
+      phases: [
+        { phase: "monologue", startedAt: +MONOLOGUE.startedAt, endedAt: +MONOLOGUE.endedAt! },
+      ],
       recordings: [
         { phase: "monologue", mimeType: "audio/ogg", byteSize: 210_000, durationSeconds: 402.6 },
       ],
@@ -385,9 +404,7 @@ describe("deriving the rows", () => {
   it("produces integers the schema's own check constraints accept", () => {
     const write = deriveCorrectionWrite({
       phases: [{ phase: "debate", startedAt: +DEBATE.startedAt, endedAt: +DEBATE.endedAt! }],
-      recordings: [
-        { phase: "debate", mimeType: "audio/ogg", byteSize: 1, durationSeconds: 0.4 },
-      ],
+      recordings: [{ phase: "debate", mimeType: "audio/ogg", byteSize: 1, durationSeconds: 0.4 }],
       correction: correction({ rawScore25: 2, durationPenalty: 3, score25: 0, meetsFloor: false }),
       disposedAt,
     });
@@ -564,7 +581,11 @@ describe("correcting a sitting", () => {
     assert.equal(outcome.status === "graded-not-stored" && outcome.correction.score25, 15);
 
     const sitting = await store.readSitting(REF);
-    assert.equal(sitting?.outcome, "uncorrected", "a half-written sitting must not read as completed");
+    assert.equal(
+      sitting?.outcome,
+      "uncorrected",
+      "a half-written sitting must not read as completed",
+    );
     assert.equal(sitting?.correction, null);
   });
 
@@ -581,8 +602,9 @@ describe("correcting a sitting", () => {
   });
 
   it("writes the uris the preserve hook kept, and stamps only the rest disposed (#98)", async () => {
-    const preserve = mock.fn(async () =>
-      new Map<OralSpeakingPhase, string>([["monologue", "https://store.example/m.ogg"]]),
+    const preserve = mock.fn(
+      async () =>
+        new Map<OralSpeakingPhase, string>([["monologue", "https://store.example/m.ogg"]]),
     );
     const outcome = await correctSitting(store, REF, finishInput({ preserve }));
 

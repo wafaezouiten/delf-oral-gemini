@@ -67,11 +67,7 @@ import { sittingOutcome } from "@/lib/exams/sitting-persistence";
  * lookup, which would be a check the statement itself does not make.
  */
 function liveSittingOwnedBy({ examId, userId }: SittingRef) {
-  return and(
-    eq(oralExams.id, examId),
-    eq(oralExams.userId, userId),
-    isNull(oralExams.finishedAt),
-  );
+  return and(eq(oralExams.id, examId), eq(oralExams.userId, userId), isNull(oralExams.finishedAt));
 }
 
 /**

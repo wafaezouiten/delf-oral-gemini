@@ -52,9 +52,7 @@ export async function requestPreparationExit(
      * persisted at all. The body decides, and an unexpected shape reads as "not
      * recorded" so the log line cannot claim a write on a guess.
      */
-    const body = (await response.json().catch(() => null)) as
-      | { archived?: unknown }
-      | null;
+    const body = (await response.json().catch(() => null)) as { archived?: unknown } | null;
 
     return body?.archived === true
       ? { recorded: true }

@@ -110,7 +110,9 @@ const DEBATE = [turn("debate", "Je maintiens ma position.", 500_000)];
 
 let failures = 0;
 function check(what: string, ok: boolean, detail?: unknown): void {
-  console.log(`${ok ? "  ok  " : "  FAIL"}  ${what}${detail === undefined ? "" : ` — ${JSON.stringify(detail)}`}`);
+  console.log(
+    `${ok ? "  ok  " : "  FAIL"}  ${what}${detail === undefined ? "" : ` — ${JSON.stringify(detail)}`}`,
+  );
   if (!ok) failures += 1;
 }
 
@@ -159,12 +161,15 @@ async function main(): Promise<number> {
       })) === false,
     );
 
-    check("the monologue is recorded", await store.appendFinalisedPhase(ref, {
-      phase: "monologue",
-      entries: MONOLOGUE,
-      startedAt: new Date(Date.now() - 900_000),
-      endedAt: new Date(Date.now() - 500_000),
-    }));
+    check(
+      "the monologue is recorded",
+      await store.appendFinalisedPhase(ref, {
+        phase: "monologue",
+        entries: MONOLOGUE,
+        startedAt: new Date(Date.now() - 900_000),
+        endedAt: new Date(Date.now() - 500_000),
+      }),
+    );
 
     check(
       "a replayed monologue writes nothing",
@@ -176,12 +181,15 @@ async function main(): Promise<number> {
       })) === false,
     );
 
-    check("the débat is recorded", await store.appendFinalisedPhase(ref, {
-      phase: "debate",
-      entries: DEBATE,
-      startedAt: new Date(Date.now() - 500_000),
-      endedAt: new Date(),
-    }));
+    check(
+      "the débat is recorded",
+      await store.appendFinalisedPhase(ref, {
+        phase: "debate",
+        entries: DEBATE,
+        startedAt: new Date(Date.now() - 500_000),
+        endedAt: new Date(),
+      }),
+    );
 
     const midway = await store.readSitting(ref);
     check("the transcript was appended once, not twice", midway?.transcript.length === 2, {
@@ -197,12 +205,26 @@ async function main(): Promise<number> {
       transcript: [...MONOLOGUE, ...DEBATE],
       reconnectCount: 1,
       phases: [
-        { phase: "monologue" as const, startedAt: Date.now() - 900_000, endedAt: Date.now() - 500_000 },
+        {
+          phase: "monologue" as const,
+          startedAt: Date.now() - 900_000,
+          endedAt: Date.now() - 500_000,
+        },
         { phase: "debate" as const, startedAt: Date.now() - 500_000, endedAt: Date.now() },
       ],
       recordings: [
-        { phase: "monologue" as const, mimeType: "audio/ogg", byteSize: 210_000, durationSeconds: 402.6 },
-        { phase: "debate" as const, mimeType: "audio/ogg", byteSize: 640_000, durationSeconds: 761.2 },
+        {
+          phase: "monologue" as const,
+          mimeType: "audio/ogg",
+          byteSize: 210_000,
+          durationSeconds: 402.6,
+        },
+        {
+          phase: "debate" as const,
+          mimeType: "audio/ogg",
+          byteSize: 640_000,
+          durationSeconds: 761.2,
+        },
       ],
       evaluate: async () => {
         graded += 1;
@@ -288,7 +310,10 @@ async function main(): Promise<number> {
     );
 
     const after = await store.readSitting(ref);
-    check("and nothing they did left a mark", after?.reconnectCount === 1 && after?.transcript.length === 2);
+    check(
+      "and nothing they did left a mark",
+      after?.reconnectCount === 1 && after?.transcript.length === 2,
+    );
 
     /**
      * Leaving the préparation (#113).

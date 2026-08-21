@@ -56,11 +56,7 @@ export function Tag({
   className?: string;
   children: ReactNode;
 }) {
-  return (
-    <span className={cn(tagShape, TONES[tone], className)}>
-      {children}
-    </span>
-  );
+  return <span className={cn(tagShape, TONES[tone], className)}>{children}</span>;
 }
 
 /**
@@ -73,13 +69,7 @@ export function Tag({
  * this recipe in a dozen places as a literal; the pages this branch adds use the
  * component, and the older screens are left alone rather than churned.
  */
-export function Kicker({
-  className,
-  children,
-}: {
-  className?: string;
-  children: ReactNode;
-}) {
+export function Kicker({ className, children }: { className?: string; children: ReactNode }) {
   return (
     <p
       className={cn(

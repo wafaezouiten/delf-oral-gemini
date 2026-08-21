@@ -16,10 +16,7 @@ import { LIVE_MODEL } from "../src/lib/gemini/live-config";
 
 const BARE: LiveConnectConfig = { responseModalities: [Modality.AUDIO] };
 
-async function mint(
-  apiKey: string,
-  tokenConfig: Record<string, unknown>,
-): Promise<string> {
+async function mint(apiKey: string, tokenConfig: Record<string, unknown>): Promise<string> {
   const server = new GoogleGenAI({ apiKey });
   const token = await server.authTokens.create({
     config: {
@@ -77,8 +74,15 @@ async function main() {
 
   const cases: Array<{ label: string; tokenConfig: Record<string, unknown>; apiVersion?: string }> =
     [
-      { label: "constrained token + v1alpha", tokenConfig: { liveConnectConstraints: { model: LIVE_MODEL } }, apiVersion: "v1alpha" },
-      { label: "constrained token, no apiVersion", tokenConfig: { liveConnectConstraints: { model: LIVE_MODEL } } },
+      {
+        label: "constrained token + v1alpha",
+        tokenConfig: { liveConnectConstraints: { model: LIVE_MODEL } },
+        apiVersion: "v1alpha",
+      },
+      {
+        label: "constrained token, no apiVersion",
+        tokenConfig: { liveConnectConstraints: { model: LIVE_MODEL } },
+      },
       { label: "unconstrained token + v1alpha", tokenConfig: {}, apiVersion: "v1alpha" },
       { label: "unconstrained token, no apiVersion", tokenConfig: {} },
       { label: "unconstrained token + v1beta", tokenConfig: {}, apiVersion: "v1beta" },
@@ -101,7 +105,9 @@ async function main() {
     const token = await mint(apiKey, {
       liveConnectConstraints: { model: LIVE_MODEL, config: BARE },
     });
-    console.log(`  ${"  with config in constraint".padEnd(36)} ${await tryConnect(token, "v1alpha", BARE)}`);
+    console.log(
+      `  ${"  with config in constraint".padEnd(36)} ${await tryConnect(token, "v1alpha", BARE)}`,
+    );
   } catch (error) {
     console.log(`    MINT FAILED: ${String(error).slice(0, 140)}`);
   }

@@ -3,10 +3,6 @@ name: Build
 # The single quality gate: lint, typecheck, unit tests and a production build in
 # one job, so the pull request shows one check — "Build / Lint, typecheck, unit
 # tests & build" — exactly as the company's DELF repository does.
-#
-# Prettier is the one step of the reference job that is absent: this repository
-# has no Prettier config and no format script. Add `pnpm format:check` here the
-# day it does.
 
 on:
   push:
@@ -50,6 +46,8 @@ jobs:
             nextjs-${{ runner.os }}-
       - name: ESLint
         run: pnpm lint
+      - name: Prettier
+        run: pnpm format:check
       # `pnpm typecheck` is `next typegen && tsc --noEmit`: Next 16 generates the
       # PageProps / LayoutProps globals into .next/types during dev or build, so
       # a bare tsc passes locally and fails on a cold checkout.

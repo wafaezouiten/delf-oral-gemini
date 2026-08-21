@@ -1,11 +1,6 @@
 import Link from "next/link";
 
-import {
-  ArrowRightIcon,
-  ChartIcon,
-  ClockIcon,
-  GridCheckIcon,
-} from "@/app/_components/po/icons";
+import { ArrowRightIcon, ChartIcon, ClockIcon, GridCheckIcon } from "@/app/_components/po/icons";
 import { Kicker, Tag } from "@/app/_components/po/tag";
 import { ScoreTag } from "@/app/_components/score-band";
 import type { HubCapability, HubSujet, HubView } from "@/lib/ui/epreuve-hub";
@@ -72,7 +67,7 @@ export function HubMasthead({ view }: { view: HubView }) {
   return (
     <div className="flex flex-wrap items-start justify-between gap-x-6 gap-y-4">
       <div className="min-w-0">
-        <h1 className="font-serif max-w-[18ch] text-[2.375rem] leading-[1.05] font-semibold tracking-tight sm:text-[2.875rem]">
+        <h1 className="max-w-[18ch] font-serif text-[2.375rem] leading-[1.05] font-semibold tracking-tight sm:text-[2.875rem]">
           {view.title}
         </h1>
         <p className="text-muted-foreground mt-4 max-w-[56ch] text-[0.96875rem] leading-[1.65]">
@@ -237,7 +232,7 @@ const CAPABILITY_ICONS: Record<
 
 export function HubCapabilities({ view }: { view: HubView }) {
   return (
-    <section className="border-border bg-card mt-10 grid sheet border sm:grid-cols-3">
+    <section className="border-border bg-card sheet mt-10 grid border sm:grid-cols-3">
       {view.capabilities.map((capability, index) => {
         const Glyph = CAPABILITY_ICONS[capability.icon];
         return (

@@ -47,9 +47,7 @@ export function StartExamButton({
       router.push(`/app/oral/${examId}?sujet=${topicSlug}`);
     } catch (cause) {
       console.error(cause);
-      setError(
-        "L'épreuve n'a pas pu être ouverte. Vérifiez votre connexion, puis réessayez.",
-      );
+      setError("L'épreuve n'a pas pu être ouverte. Vérifiez votre connexion, puis réessayez.");
       setPending(false);
     }
   }

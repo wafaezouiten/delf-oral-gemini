@@ -154,12 +154,10 @@ export function PreparationScreen({
 
           <div className="border-border flex items-baseline justify-between gap-3 border-b pb-3">
             <Kicker>Sujet · Monologue suivi</Kicker>
-            <span className="text-muted-foreground shrink-0 text-[0.625rem]">
-              Tirage au sort
-            </span>
+            <span className="text-muted-foreground shrink-0 text-[0.625rem]">Tirage au sort</span>
           </div>
 
-          <h1 className="font-serif mt-4 text-[1.75rem] leading-[1.2] font-semibold text-balance">
+          <h1 className="mt-4 font-serif text-[1.75rem] leading-[1.2] font-semibold text-balance">
             {topic.title}
           </h1>
 

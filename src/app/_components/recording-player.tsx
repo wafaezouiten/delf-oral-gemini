@@ -134,9 +134,9 @@ export function RecordingPlayer({
   if (!supported) {
     return (
       <p className={cn("no-print text-muted-foreground text-xs leading-relaxed italic", className)}>
-        L&apos;enregistrement est conservé, mais votre navigateur ne peut pas lire
-        son format ({mimeType === "audio/ogg" ? "Ogg Opus" : mimeType}). Ouvrez
-        cette page dans Chrome ou Firefox pour l&apos;écouter.
+        L&apos;enregistrement est conservé, mais votre navigateur ne peut pas lire son format (
+        {mimeType === "audio/ogg" ? "Ogg Opus" : mimeType}). Ouvrez cette page dans Chrome ou
+        Firefox pour l&apos;écouter.
       </p>
     );
   }

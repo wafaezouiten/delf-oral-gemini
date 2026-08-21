@@ -24,9 +24,7 @@ export type ResetOutcome =
   /** No answer at all: offline, or a dropped connection. */
   | { reset: false; reason: "unreachable" };
 
-export async function requestRecordReset(
-  fetchImpl: typeof fetch = fetch,
-): Promise<ResetOutcome> {
+export async function requestRecordReset(fetchImpl: typeof fetch = fetch): Promise<ResetOutcome> {
   try {
     const response = await fetchImpl("/api/account/reset", { method: "POST" });
 
