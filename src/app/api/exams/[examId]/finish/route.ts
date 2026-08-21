@@ -5,9 +5,13 @@
  * phase as files) because a 20-minute recording is megabytes and has no business
  * being base64'd into a JSON body.
  *
- * Grading runs here, on the server, well after the Live session has closed. The
- * evaluation is returned in the response as well as persisted, so the results
- * page can render even when no database is configured.
+ * Grading runs here, on the server, well after the Live session has closed —
+ * and since #86, BEHIND the response on every persisted sitting: the route
+ * answers 202 the moment the sitting is claimed, its rows are written and the
+ * vault holds the bytes, and the correction attaches in `after()` while the
+ * finished screen polls `/status`. Only the degraded path (no database, a
+ * `local-…` id) still grades synchronously and returns the evaluation in the
+ * body, because it has no row for a poll to find.
  *
  * **Where each duration comes from.** The clock — how long a phase ran, when it
  * started, when it ended — only the browser knows, so it is taken on trust and
@@ -30,7 +34,9 @@
  * costs, and how a sitting that was graded but not stored is described
  * afterwards. That move is what closed #16 and #17: the writes became one
  * batch, and the arithmetic behind them became something `node --test` can
- * reach.
+ * reach. Since #86 that module's finish path is two halves — `acceptSitting`
+ * before the response, `attachCorrection` behind it — and the ordering
+ * argument lives there.
  *
  * **And what it no longer throws away.** It used to hand the blobs to the
  * corrector and drop them; since #98 the `preserve` hook below files them in
@@ -39,7 +45,7 @@
  * `sitting-persistence.ts` decides WHEN — after the claim, by its winner.
  */
 
-import { NextResponse } from "next/server";
+import { NextResponse, after } from "next/server";
 import { z } from "zod";
 
 import { INPUT_SAMPLE_RATE } from "@/lib/gemini/constants";
@@ -48,7 +54,11 @@ import { EXAM_ACCESS_DENIALS } from "@/lib/auth/exam-access";
 import { authorizeExam } from "@/lib/auth/exam-guard";
 import type { OralSpeakingPhase } from "@/lib/db";
 import { neonSittingStore } from "@/lib/db/sittings";
-import { correctSitting, type CorrectionRow } from "@/lib/exams/sitting-persistence";
+import {
+  acceptSitting,
+  attachCorrection,
+  type CorrectionRow,
+} from "@/lib/exams/sitting-persistence";
 import { resolveEarlyClosingCount } from "@/lib/delf/early-closing";
 import { PARTICIPATION_WORD_FLOOR } from "@/lib/delf/orale-rubric";
 import { findTopic } from "@/lib/delf/topics";
@@ -424,86 +434,76 @@ export async function POST(request: Request, context: { params: Promise<{ examId
   try {
     // No sitting to write to — no database, a degraded `local-…` id, or an
     // ownership question that went unanswered. Grade and hand it straight back;
-    // the results page renders from the response either way.
+    // the results page renders from the response either way. Synchronous on
+    // purpose, #86 notwithstanding: with no row to poll and no store to attach
+    // to, "come back for it" has nowhere to point.
     if (persistedExamId === null) {
       graded = await grade();
       logTimings(graded);
       return NextResponse.json({ evaluation: graded, persisted: false });
     }
 
-    /**
-     * Grade and persist, at most once per sitting.
-     *
-     * Everything about the ordering — the duplicate check before the paid call,
-     * the claim after it, the three writes in one batch — lives in
-     * `lib/exams/sitting-persistence.ts`, which is where it can be tested. This
-     * route's remaining job is to decide what the candidate sees.
-     */
-    const outcome = await correctSitting(
-      neonSittingStore(),
-      { examId: persistedExamId, userId },
-      {
-        transcript: payload.transcript,
-        reconnectCount: payload.reconnectCount,
-        // The corroborated figure, not the raw claim — the stored count is
-        // what the results page keys the « not held against you » note on,
-        // so it must be the number the grading actually honoured.
-        earlyClosingCount,
-        phases: payload.phases,
-        recordings: recordings.map((recording) => ({
-          phase: recording.phase,
-          mimeType: recording.mimeType,
-          byteSize: recording.byteSize,
-          durationSeconds: recording.durationSeconds,
-        })),
-        evaluate: async () => {
-          graded = await grade();
-          return toCorrectionRow(graded);
-        },
-        /**
-         * Keep the bytes the rows will point at (#98). Called by the winner of
-         * the claim, after grading — see `sitting-persistence.ts` for why that
-         * ordering — and best-effort per artefact: a phase the vault refuses is
-         * logged and written transient, because losing the copy must cost the
-         * candidate a replay button, never their correction. On a deployment
-         * with no vault this returns the empty map and nothing changes.
-         */
-        preserve: async () => {
-          const kept = new Map<OralSpeakingPhase, string>();
-          const vault = recordingVault();
-          if (!vault) return kept;
-          for (const recording of recordings) {
-            try {
-              kept.set(
-                recording.phase,
-                await vault.store(
-                  persistedExamId,
-                  recording.phase,
-                  recording.blob,
-                  recording.mimeType,
-                ),
-              );
-            } catch (error) {
-              console.error(`[finish] could not keep the ${recording.phase} recording:`, error);
-            }
-          }
-          return kept;
-        },
-        now: () => new Date(),
-      },
-    );
+    const store = neonSittingStore();
+    const ref = { examId: persistedExamId, userId };
+    const measuredRecordings = recordings.map((recording) => ({
+      phase: recording.phase,
+      mimeType: recording.mimeType,
+      byteSize: recording.byteSize,
+      durationSeconds: recording.durationSeconds,
+    }));
 
-    if (outcome.status === "graded-not-stored") {
-      // The candidate has their grade; losing the row is a logging problem, not
-      // a reason to show them an error. The sitting reads as `uncorrected`
-      // until it is finished again, which re-runs this whole path. `store` is
-      // the one word of #73's taxonomy that never reaches the catch below,
-      // precisely because this path answers 200 — so it is spoken here.
-      console.error(
-        `[finish] evaluation succeeded but persistence failed (reason=store, exam=${examId}):`,
-        outcome.error,
-      );
-    }
+    /**
+     * Accept, answer, then grade — in that order (#86).
+     *
+     * The candidate's wait used to contain the whole correction: thirty to
+     * sixty seconds of model call after the upload was already safe. Now the
+     * response goes out the moment the sitting is claimed, its artefact rows
+     * are written and the vault has the bytes; the grading runs behind it in
+     * `after()`, and the finished screen polls the status route until the
+     * correction lands. The ordering argument this reverses, and what the
+     * reversal costs, live on `acceptSitting`.
+     */
+    const accepted = await acceptSitting(store, ref, {
+      transcript: payload.transcript,
+      reconnectCount: payload.reconnectCount,
+      // The corroborated figure, not the raw claim — the stored count is
+      // what the results page keys the « not held against you » note on,
+      // so it must be the number the grading actually honoured.
+      earlyClosingCount,
+      phases: payload.phases,
+      recordings: measuredRecordings,
+      /**
+       * Keep the bytes the rows will point at (#98). Called by the winner of
+       * the claim, before the response — the whole point of the accept is
+       * that the audio is SAFE when the candidate is told they may leave —
+       * and best-effort per artefact: a phase the vault refuses is logged and
+       * written transient, because losing the copy must cost the candidate a
+       * replay button, never their finish. On a deployment with no vault this
+       * returns the empty map and nothing changes.
+       */
+      preserve: async () => {
+        const kept = new Map<OralSpeakingPhase, string>();
+        const vault = recordingVault();
+        if (!vault) return kept;
+        for (const recording of recordings) {
+          try {
+            kept.set(
+              recording.phase,
+              await vault.store(
+                persistedExamId,
+                recording.phase,
+                recording.blob,
+                recording.mimeType,
+              ),
+            );
+          } catch (error) {
+            console.error(`[finish] could not keep the ${recording.phase} recording:`, error);
+          }
+        }
+        return kept;
+      },
+      now: () => new Date(),
+    });
 
     /**
      * A second submission returns the correction that already exists rather
@@ -516,11 +516,72 @@ export async function POST(request: Request, context: { params: Promise<{ examId
      * `results-client.tsx`) precisely because a stored correction is the other
      * thing it can be rendering.
      */
-    logTimings(graded);
-    return NextResponse.json({
-      evaluation: graded ?? outcome.correction,
-      persisted: outcome.status !== "graded-not-stored",
+    if (accepted.status === "already-corrected") {
+      logTimings(null);
+      return NextResponse.json({ evaluation: accepted.correction, persisted: true });
+    }
+
+    if (accepted.status === "not-stored") {
+      // Nothing about the sitting is safe, so this is a refusal, not an
+      // acceptance with a caveat: the tab still holds the only good copy, and
+      // the 502 is what puts « Réessayer l'envoi » in front of it. `store` is
+      // #73's word for this, spoken here because this path never reaches the
+      // catch below.
+      console.error(
+        `[finish] the sitting could not be accepted (reason=store, exam=${examId}):`,
+        accepted.error,
+      );
+      logTimings(null);
+      return NextResponse.json(
+        { error: "L'évaluation a échoué. Réessayez dans un instant.", reason: "store" },
+        { status: 502 },
+      );
+    }
+
+    /**
+     * Accepted: the response below ends the candidate's wait, and the grading
+     * runs after it on the same invocation — `after()` keeps the function
+     * alive inside the same `maxDuration` budget, and the recording blobs are
+     * still in scope, so nothing needs re-reading from anywhere.
+     *
+     * Every failure in here can only be logged: the response is gone, and the
+     * candidate's recovery is the poll timing out into « Réessayer l'envoi » —
+     * which re-runs this whole path, finds the sitting uncorrected, re-claims
+     * and grades again. The reasons are #73's, so the log still names which
+     * part died.
+     */
+    after(async () => {
+      try {
+        const outcome = await attachCorrection(store, ref, {
+          phases: payload.phases,
+          recordings: measuredRecordings,
+          evaluate: async () => {
+            graded = await grade();
+            return toCorrectionRow(graded);
+          },
+          now: () => new Date(),
+        });
+        if (outcome.status === "graded-not-stored") {
+          console.error(
+            `[finish] evaluation succeeded but persistence failed (reason=store, exam=${examId}):`,
+            outcome.error,
+          );
+        }
+        logTimings(graded);
+      } catch (error) {
+        const reason = evaluationFailureReason(error) ?? "unknown";
+        console.error(
+          `[finish] background correction failed (reason=${reason}, exam=${examId}):`,
+          error,
+        );
+        logTimings(graded);
+      }
     });
+
+    // 202, not 200: accepted, not corrected. The body carries no evaluation —
+    // the finished screen polls the status route and navigates when the
+    // correction exists, and the results page reads it from the database.
+    return NextResponse.json({ persisted: true, pending: true }, { status: 202 });
   } catch (error) {
     // Which part of the grading died, or `unknown` for a throw nothing tagged
     // (#73). The reason and the exam id go to the log AND onto the response:

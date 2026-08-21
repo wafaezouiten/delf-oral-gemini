@@ -15,6 +15,7 @@ import {
 import { ORAL_CRITERIA } from "@/lib/delf/criteria";
 import { ORAL_PHASES, nextPhase } from "@/lib/delf/phases";
 import type {
+  ArtefactRows,
   CorrectionWrite,
   FinalisedPhase,
   SittingClaim,
@@ -320,6 +321,53 @@ export async function disposeRecording(
 export function neonSittingStore(): SittingStore {
   const db = getDb();
 
+  /**
+   * The artefact statements — phases and recordings — as batch items, shared
+   * by `writeArtefacts` (the accept, #86) and `writeCorrection` (the attach),
+   * because the attach re-runs them over rows the accept already wrote and the
+   * two must be the same statements for that to be a no-op.
+   *
+   * Only the phases the candidate actually entered. Phases `doUpdate` because
+   * the progress route may already have stamped this phase's clock, and those
+   * are the timestamps of the transition as it happened rather than as it was
+   * reported afterwards — but `spoken_seconds` is this statement's to give, so
+   * it is set on conflict. Recordings `doNothing`: the accept's rows carry the
+   * kept uris (#98), and the attach's second pass — which deliberately carries
+   * none — must never overwrite them.
+   */
+  const artefactWrites = (ref: SittingRef, rows: ArtefactRows): BatchItem<"pg">[] => {
+    const writes: BatchItem<"pg">[] = [];
+
+    if (rows.phases.length > 0) {
+      writes.push(
+        db
+          .insert(oralExamPhases)
+          .values(rows.phases.map((row) => ({ ...row, examId: ref.examId })))
+          .onConflictDoUpdate({
+            target: [oralExamPhases.examId, oralExamPhases.phase],
+            set: {
+              spokenSeconds: sql`excluded.spoken_seconds`,
+              // Keep a real timestamp over a missing one: a phase entered and
+              // never left reports `null` here, and overwriting the moment the
+              // progress route watched it end with that would be a downgrade.
+              endedAt: sql`coalesce(excluded.ended_at, ${oralExamPhases.endedAt})`,
+            },
+          }),
+      );
+    }
+
+    if (rows.recordings.length > 0) {
+      writes.push(
+        db
+          .insert(oralRecordings)
+          .values(rows.recordings.map((row) => ({ ...row, examId: ref.examId })))
+          .onConflictDoNothing(),
+      );
+    }
+
+    return writes;
+  };
+
   return {
     async appendFinalisedPhase(ref, phase) {
       /**
@@ -406,41 +454,19 @@ export function neonSittingStore(): SittingStore {
       return claimed.length > 0;
     },
 
+    async writeArtefacts(ref: SittingRef, artefacts: ArtefactRows) {
+      // The accept's half of the write (#86): the phases and the recordings,
+      // before any grading has run. The statements are the same upserts
+      // `writeCorrection` batches below — built by one function, so the two
+      // halves cannot drift — and a sitting with nothing to write (a text-mode
+      // sitting whose phases were never entered) legitimately batches nothing.
+      const writes = artefactWrites(ref, artefacts);
+      if (writes.length === 0) return;
+      await db.batch(writes as Writes);
+    },
+
     async writeCorrection(ref: SittingRef, write: CorrectionWrite) {
-      const writes: BatchItem<"pg">[] = [];
-
-      // Only the phases the candidate actually entered. `doNothing` because the
-      // progress route may already have stamped this phase's clock, and those
-      // are the timestamps of the transition as it happened rather than as it
-      // was reported afterwards — but `spoken_seconds` is this statement's to
-      // give, so it is set on conflict. There is no repeated-finish hazard in
-      // that: a second finish never reaches here, the claim refuses it first.
-      if (write.phases.length > 0) {
-        writes.push(
-          db
-            .insert(oralExamPhases)
-            .values(write.phases.map((row) => ({ ...row, examId: ref.examId })))
-            .onConflictDoUpdate({
-              target: [oralExamPhases.examId, oralExamPhases.phase],
-              set: {
-                spokenSeconds: sql`excluded.spoken_seconds`,
-                // Keep a real timestamp over a missing one: a phase entered and
-                // never left reports `null` here, and overwriting the moment the
-                // progress route watched it end with that would be a downgrade.
-                endedAt: sql`coalesce(excluded.ended_at, ${oralExamPhases.endedAt})`,
-              },
-            }),
-        );
-      }
-
-      if (write.recordings.length > 0) {
-        writes.push(
-          db
-            .insert(oralRecordings)
-            .values(write.recordings.map((row) => ({ ...row, examId: ref.examId })))
-            .onConflictDoNothing(),
-        );
-      }
+      const writes: BatchItem<"pg">[] = artefactWrites(ref, write);
 
       writes.push(
         db

@@ -54,7 +54,35 @@ export interface FinishFailure {
   message: string;
   /** Whether to offer « Réessayer l'envoi ». */
   retryable: boolean;
+  /**
+   * The failure notice's headline and the screen's lede paragraph, overriding
+   * the defaults for the one failure they would lie about (#86): « L'envoi a
+   * échoué » over a correction whose envoi succeeded. Absent on every failure
+   * `describeFinishFailure` produces — those really are send failures, and
+   * the defaults are theirs.
+   */
+  title?: string;
+  lede?: string;
 }
+
+/**
+ * The wait for a correction ran past the server's own budget (#86).
+ *
+ * NOT a send failure: the finish answered 202, so the recording is safe on
+ * the server — which is exactly why the default headline and lede must not be
+ * shown over it. Retryable, and honestly so: the retry re-runs the finish,
+ * whose first act is a duplicate check, so a correction that landed after the
+ * wait gave up is returned instantly rather than graded twice.
+ */
+export const CORRECTION_TIMED_OUT: FinishFailure = {
+  title: "La correction se fait attendre",
+  lede: "Votre prestation est bien reçue ; c'est la correction qui n'est pas arrivée.",
+  message:
+    "L'examinateur n'a pas rendu sa correction dans le temps prévu. " +
+    "Votre enregistrement est en sécurité : réessayez l'envoi — si la correction " +
+    "a abouti entre-temps, elle s'affichera immédiatement, sans être recomptée.",
+  retryable: true,
+};
 
 /**
  * Statuses that mean "not now" rather than "not ever".

@@ -94,9 +94,10 @@ export function FinishedScreen({
             role={submitError ? undefined : "status"}
           >
             {submitError
-              ? submitError.retryable
-                ? "Votre prestation attend d'être envoyée."
-                : "Votre prestation a bien été enregistrée, mais elle n'a pas pu être corrigée."
+              ? (submitError.lede ??
+                (submitError.retryable
+                  ? "Votre prestation attend d'être envoyée."
+                  : "Votre prestation a bien été enregistrée, mais elle n'a pas pu être corrigée."))
               : finishStageMessage(stage)}
           </p>
 
@@ -133,7 +134,13 @@ export function FinishedScreen({
           <Notice
             tone="danger"
             title={
-              submitError.retryable ? "L'envoi a échoué" : "Cette épreuve ne peut pas être corrigée"
+              // The override exists for the one failure the defaults would lie
+              // about (#86): a correction that timed out after a successful
+              // envoi must not be headlined « L'envoi a échoué ».
+              submitError.title ??
+              (submitError.retryable
+                ? "L'envoi a échoué"
+                : "Cette épreuve ne peut pas être corrigée")
             }
             action={
               <div className="flex flex-wrap gap-2">

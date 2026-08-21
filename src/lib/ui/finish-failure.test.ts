@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { describeFinishFailure } from "./finish-failure";
+import { CORRECTION_TIMED_OUT, describeFinishFailure } from "./finish-failure";
 
 describe("finish failures", () => {
   it("shows the route's own words, because they were written for a candidate", () => {
@@ -75,5 +75,27 @@ describe("finish failures", () => {
       const { message } = describeFinishFailure(502, body);
       assert.match(message, /pas pu être envoyée/);
     }
+  });
+});
+
+describe("the wait that ran out (#86)", () => {
+  it("never headlines a successful envoi as a failed one", () => {
+    // The one failure whose defaults would lie: the finish answered 202, so
+    // the recording is safe — the overrides exist to say so.
+    assert.equal(CORRECTION_TIMED_OUT.retryable, true, "the retry is the recovery path");
+    assert.ok(CORRECTION_TIMED_OUT.title, "the notice must not fall back to « L'envoi a échoué »");
+    assert.doesNotMatch(CORRECTION_TIMED_OUT.title, /envoi a échoué/i);
+    assert.match(CORRECTION_TIMED_OUT.lede ?? "", /bien reçue/);
+    // And the retry's honesty: a correction that landed late is returned by
+    // the duplicate check, not graded twice.
+    assert.match(CORRECTION_TIMED_OUT.message, /sans être recomptée/);
+  });
+
+  it("leaves every send failure's defaults alone", () => {
+    // The overrides are the timeout's and nobody else's — a 502 or a network
+    // failure really is a failed envoi, and the default words are theirs.
+    const failure = describeFinishFailure(502, null);
+    assert.equal(failure.title, undefined);
+    assert.equal(failure.lede, undefined);
   });
 });

@@ -34,7 +34,11 @@ import { oralExams, oralTopics } from "../src/lib/db/schema";
 import { archivePreparationExit, neonSittingStore } from "../src/lib/db/sittings";
 import { ORAL_CRITERIA } from "../src/lib/delf/criteria";
 import { ORAL_TOPICS } from "../src/lib/delf/topics";
-import { correctSitting, type CorrectionRow } from "../src/lib/exams/sitting-persistence";
+import {
+  acceptSitting,
+  attachCorrection,
+  type CorrectionRow,
+} from "../src/lib/exams/sitting-persistence";
 import { scoreSitting } from "../src/lib/delf/orale-rubric";
 import type { TranscriptEntry } from "../src/lib/delf/transcript";
 
@@ -249,45 +253,66 @@ async function main(): Promise<number> {
 
     console.log("\ncorrect");
     let graded = 0;
-    const input = {
+    const reportedPhases = [
+      {
+        phase: "monologue" as const,
+        startedAt: Date.now() - 900_000,
+        endedAt: Date.now() - 500_000,
+      },
+      { phase: "debate" as const, startedAt: Date.now() - 500_000, endedAt: Date.now() },
+    ];
+    const measuredRecordings = [
+      {
+        phase: "monologue" as const,
+        mimeType: "audio/ogg",
+        byteSize: 210_000,
+        durationSeconds: 402.6,
+      },
+      {
+        phase: "debate" as const,
+        mimeType: "audio/ogg",
+        byteSize: 640_000,
+        durationSeconds: 761.2,
+      },
+    ];
+    const acceptInput = {
       transcript: [...MONOLOGUE, ...DEBATE],
       reconnectCount: 1,
       // Non-zero so the round trip proves the column takes a value, not just
       // its default — a probe that writes 0 over DEFAULT 0 verifies nothing.
       earlyClosingCount: 2,
-      phases: [
-        {
-          phase: "monologue" as const,
-          startedAt: Date.now() - 900_000,
-          endedAt: Date.now() - 500_000,
-        },
-        { phase: "debate" as const, startedAt: Date.now() - 500_000, endedAt: Date.now() },
-      ],
-      recordings: [
-        {
-          phase: "monologue" as const,
-          mimeType: "audio/ogg",
-          byteSize: 210_000,
-          durationSeconds: 402.6,
-        },
-        {
-          phase: "debate" as const,
-          mimeType: "audio/ogg",
-          byteSize: 640_000,
-          durationSeconds: 761.2,
-        },
-      ],
+      phases: reportedPhases,
+      recordings: measuredRecordings,
+      now: () => new Date(),
+    };
+
+    // The two halves the finish route runs since #86: the accept before its
+    // response, the attach behind it. Probed in that order because the state
+    // between them — claimed, artefacts written, nothing graded — is exactly
+    // what a candidate is released on, and it has to read `uncorrected`.
+    const accepted = await acceptSitting(store, ref, acceptInput);
+    check("the sitting is accepted before any grading", accepted.status === "accepted", {
+      status: accepted.status,
+    });
+    const between = await store.readSitting(ref);
+    check(
+      "an accepted sitting reads uncorrected until the correction lands",
+      between?.outcome === "uncorrected",
+      { outcome: between?.outcome },
+    );
+
+    const attached = await attachCorrection(store, ref, {
+      phases: reportedPhases,
+      recordings: measuredRecordings,
       evaluate: async () => {
         graded += 1;
         return correction;
       },
       now: () => new Date(),
-    };
+    });
+    check("the correction is stored", attached.status === "stored", { status: attached.status });
 
-    const first = await correctSitting(store, ref, input);
-    check("the correction is stored", first.status === "stored", { status: first.status });
-
-    const second = await correctSitting(store, ref, input);
+    const second = await acceptSitting(store, ref, acceptInput);
     check("finishing twice is a no-op", second.status === "already-corrected", {
       status: second.status,
     });
