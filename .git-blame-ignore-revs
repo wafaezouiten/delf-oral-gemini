@@ -1,0 +1,7 @@
+# Purely mechanical commits that git blame should read through. GitHub honours
+# this file by its name; locally, opt in once with:
+#
+#   git config blame.ignoreRevsFile .git-blame-ignore-revs
+
+# The first pnpm format run, when the house style was written down (#96).
+51577d3f95bd9539fdc31fafd64154c74fc04eaa
