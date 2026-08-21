@@ -15,11 +15,14 @@ import { formatClock } from "@/lib/delf/phases";
 import { cn } from "@/lib/ui/class-names";
 
 /**
- * One kept recording, playable where its sitting is shown (#98) — under a
- * half's heading on the correction, and on the sitting's row in the
- * historique. One component so the two never drift on the questions that
- * matter: when bytes move, what a browser that cannot play the format is
- * told, and what deleting a voice costs.
+ * One kept recording, playable under its half's heading on the correction
+ * (#98). That is the one surface: #98 also put a pair of these on every
+ * corrected historique row, and #116 took them off again — the list stopped
+ * scanning as a record — so the historique now links to the correction
+ * instead of duplicating it. The component stays in `_components` all the
+ * same, one implementation for whatever surface earns a player next, because
+ * the questions it answers must not drift: when bytes move, what a browser
+ * that cannot play the format is told, and what deleting a voice costs.
  *
  * PORT NOTE: the reference's player card, on this project's palette — the
  * ±15 s skips, the round primary play button, the seekable progress bar, the
@@ -31,10 +34,10 @@ import { cn } from "@/lib/ui/class-names";
  * `preload="none"` and the total duration comes from the row
  * (`oral_recordings.duration_seconds`, measured at upload) rather than from
  * the file's metadata, which is what lets the card print « 0:00 / 1:38 »
- * without fetching anything. On the historique, where twenty rows can carry
- * forty players, this is the difference between a list and a download. Once
- * the file actually loads, its own metadata wins — the two only disagree by
- * rounding, and the file is the one being scrubbed.
+ * without fetching anything: rendering a correction must not cost the two
+ * downloads its players describe. Once the file actually loads, its own
+ * metadata wins — the two only disagree by rounding, and the file is the one
+ * being scrubbed.
  *
  * **« Supprimer » is permanent and says so.** One press arms it, a second
  * press confirms — an inline two-step rather than a dialog, because the
