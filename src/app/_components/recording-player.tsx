@@ -159,6 +159,11 @@ export function RecordingPlayer({
     }
   };
 
+  // A scrub before anything has loaded is legal: with `readyState` at
+  // HAVE_NOTHING, assigning `currentTime` sets the media element's default
+  // playback start position (HTML spec, "seeking"), so play then begins from
+  // the scrubbed point — the bar previews it immediately via `setTime`, and
+  // nothing is fetched until play is pressed.
   const onScrub = (event: React.PointerEvent<HTMLDivElement>) => {
     const rect = event.currentTarget.getBoundingClientRect();
     const fraction = (event.clientX - rect.left) / rect.width;

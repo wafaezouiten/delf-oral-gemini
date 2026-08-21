@@ -125,6 +125,11 @@ export async function GET(
 
   if (opened.status === 304) return new Response(null, { status: 304, headers });
 
+  // No `Accept-Ranges`, on purpose rather than by omission: a kept artefact is
+  // a few megabytes of 16 kbit/s Opus (MAX_RECORDING_BYTES caps it at 3 MiB),
+  // so the first play downloads it whole and every seek after that is local.
+  // Range support earns its complexity the day recordings get larger than
+  // that — and the cap is the thing that says they cannot.
   return new Response(opened.stream, {
     headers: {
       ...headers,
