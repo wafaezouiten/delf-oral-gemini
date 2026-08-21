@@ -3196,6 +3196,38 @@ describe("an examiner that says goodbye seven minutes early (#85)", () => {
       );
     });
 
+    it("does not re-count a goodbye off its own stale text when the examiner merely keeps talking", async () => {
+      // The corner past the recovery cap: nothing is sent, so no turn break is
+      // pending, and an examiner that speaks again with no candidate in
+      // between coalesces into the goodbye's own entry. The watch re-reads
+      // the merged text — and the phrase it finds there must be recognised as
+      // the goodbye already counted, not a new one.
+      const h = harness();
+      await intoDebate(h);
+      h.advanceClock(360);
+
+      for (let turn = 0; turn < 3; turn += 1) {
+        h.session().examinerSays("Au revoir.");
+        h.session().finishTurn();
+      }
+      assert.equal(events(h, "examiner-early-closing").length, 3);
+      assert.equal(recoveries(h).length, 2, "the third went unanswered — no break pending");
+
+      // Coalesces into the third goodbye's entry; the merged text still
+      // contains « au revoir », but no NEW goodbye was spoken.
+      h.session().examinerSays(" Très bien, je vous écoute encore.");
+      assert.equal(
+        events(h, "examiner-early-closing").length,
+        3,
+        "stale goodbye text is not counted again",
+      );
+
+      // A repeated goodbye in the same merged entry is new text and still
+      // counts — the guarantee the every-one-on-the-record test above pins.
+      h.session().examinerSays(" Au revoir.");
+      assert.equal(events(h, "examiner-early-closing").length, 4, "a genuine repeat still counts");
+    });
+
     it("leaves the closing sentence the app asked for alone", async () => {
       // The same words, and the difference is who asked: inside a closing
       // handshake this IS the handshake working.
