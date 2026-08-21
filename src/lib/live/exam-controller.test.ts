@@ -207,6 +207,15 @@ class FakeRecorder implements RecorderLike {
     return this.voiced[phase] ?? this.seconds[phase];
   }
 
+  /** Phases whose artefact was asked for on its own — the early encode the
+   *  controller starts as the débat opens (#86). */
+  prepared: RecordedPhase[] = [];
+
+  async recordingFor(phase: RecordedPhase): Promise<PhaseRecording | null> {
+    this.prepared.push(phase);
+    return (await this.recordings()).find((recording) => recording.phase === phase) ?? null;
+  }
+
   /** Asynchronous like the real one, which compresses on the way out. */
   async recordings(): Promise<PhaseRecording[]> {
     return (["monologue", "debate"] as const)
@@ -1002,6 +1011,23 @@ describe("recording the candidate", () => {
     assert.equal(h.finished.length, 1);
     assert.equal(h.finished[0].recordings.length, 2, "taken before the memory was released");
     assert.equal(h.recorder.discarded, true, "and released, since the blobs own their bytes now");
+  });
+
+  it("asks for the monologue's artefact as the débat opens, not at the finish (#86)", async () => {
+    // The samples are final once the phase closes, and the candidate is about to
+    // spend thirteen minutes debating — which is when a compression cannot be
+    // perceived. The archive memoizes what this produces, so the finish reuses
+    // it instead of holding « Épreuve terminée » behind the codec.
+    const h = harness();
+    await intoMonologue(h);
+    h.advanceClock(240);
+    await h.controller.advanceEarly();
+    h.session().finishTurn();
+    await pressRecord(h);
+
+    assert.equal(h.controller.getSnapshot().phase, "debate");
+    assert.deepEqual(h.recorder.prepared, ["monologue"], "asked for as the débat opened");
+    assert.equal(h.finished.length, 0, "long before the sitting is handed over");
   });
 
   it("reports only the phases the candidate actually reached", async () => {
