@@ -904,6 +904,21 @@ export class ExamController {
   private ticker: ReturnType<typeof setInterval> | null = null;
   /** When the closing handshake started, for its safety deadline. See `tick()`. */
   private closingStartedAt: number | null = null;
+  /**
+   * The closing turn has completed and the handshake is now waiting for its
+   * AUDIO (#135).
+   *
+   * `turnComplete` is a fact about generation, and generation runs several
+   * times faster than the voice: when it arrives, seconds of the closing
+   * sentence are still queued in the player. Advancing on it directly is what
+   * put the next part's consigne on top of the sentence still being spoken —
+   * two voices at once, at every handover. So the turn completing only sets
+   * this, and {@link finishClosingIfQuiet} advances once the speaker has run
+   * dry. The safety deadline is unchanged and still bounds the whole
+   * handshake, which is what keeps a dead speaker — a queue that will never
+   * drain — from stranding the candidate here.
+   */
+  private closingTurnComplete = false;
 
   /**
    * The examiner chosen for this sitting (#99), handed to every session this
@@ -2469,9 +2484,9 @@ export class ExamController {
     if (this.closing) return;
 
     this.closing = true;
+    this.closingTurnComplete = false;
     this.log("closing-handshake");
 
-    if (this.phase === "monologue") this.endMonologueActivity();
     // Tolerated for the same reason as the teardown steps, and this one is the
     // candidate's own « Terminer » rather than a development tool: a socket that
     // threw here never reached the stamp below, so `closingHasTimedOut()` could
@@ -2488,6 +2503,18 @@ export class ExamController {
     this.examinerTurnBreakPending = true;
     this.tolerate("closing-directive", () => this.session?.sendDirective(instruction));
 
+    // AFTER the directive, deliberately (#135). With manual VAD the
+    // `activityEnd` IS the turn boundary: the model takes the floor the moment
+    // it arrives, with whatever is in context. Sent first, it handed the model
+    // a monologue it had been told to memorise « pour le débat qui suit » and
+    // nothing else — so the "closing" turn opened a débat of its own, an
+    // objection quoting the exposé, while the directive raced its generation
+    // and lost. Sent second, the one turn the boundary releases already
+    // carries its execution order, and the sentence it produces is the thanks
+    // that was asked for. Both ride `sendRealtimeInput` on the same socket, so
+    // the ordering here is the ordering on the wire.
+    if (this.phase === "monologue") this.endMonologueActivity();
+
     // Stamped, not scheduled. The deadline is checked from `tick()` against the
     // injected clock, like every other timing decision here — this used to be a
     // real `setTimeout`, the one path in the file that ignored `deps.now()`, and
@@ -2501,6 +2528,27 @@ export class ExamController {
   private closingHasTimedOut(): boolean {
     if (!this.closing || this.closingStartedAt === null) return false;
     return this.now() - this.closingStartedAt >= CLOSING_SAFETY_MS;
+  }
+
+  /**
+   * Advance out of a completed closing handshake once nothing is audible (#135).
+   *
+   * Called from the turn completing and from every tick after it. The two
+   * player reads are the same pair the drain grace and the stall watch trust:
+   * `examinerSpeaking` for audio mid-chunk, `bufferedSeconds` for audio
+   * scheduled behind it. Both zero is a speaker with nothing left of the
+   * closing sentence, and that — not the turn's generation ending — is when
+   * the next part's consigne may have the room. A speaker that never drains is
+   * the safety timeout's case, unchanged.
+   */
+  private finishClosingIfQuiet(): boolean {
+    if (!this.closing || !this.closingTurnComplete) return false;
+    if (this.examinerSpeaking || (this.player?.bufferedSeconds ?? 0) > 0) return false;
+    this.closing = false;
+    this.closingTurnComplete = false;
+    this.clearClosingTimer();
+    this.advanceDetached();
+    return true;
   }
 
   private clearClosingTimer(): void {
@@ -2542,6 +2590,7 @@ export class ExamController {
 
     this.clearClosingTimer();
     this.closing = false;
+    this.closingTurnComplete = false;
 
     // Bank this phase's speaking time before the clock resets, and close its
     // artefact. `endPhase()` runs before the session teardown below because it
@@ -2606,6 +2655,20 @@ export class ExamController {
       this.closeSession();
     } else if (current === "debate") {
       this.closeSession();
+    }
+
+    // Whatever the examiner still had queued dies with its part (#135). The
+    // closing handshake has already waited out a well-behaved sentence, so
+    // anything left here is overrun — a safety timeout, a turn that kept
+    // going — and letting it play on would put two voices under the consigne
+    // about to be spoken. Logged, like every interruption, because "the
+    // candidate never heard the end of that" is a fact about the sitting.
+    if (current === "monologue" || current === "debate") {
+      const leftover = this.player?.bufferedSeconds ?? 0;
+      if (leftover > 0) {
+        this.log("boundary-audio-dropped", { seconds: leftover });
+        this.player?.interrupt();
+      }
     }
 
     // DEVELOPMENT ONLY — the transcription panel lives on the exposé and nowhere
@@ -2768,9 +2831,12 @@ export class ExamController {
         // The timer decides when a phase ends; the model only decides when it
         // has stopped talking about it.
         if (this.closing) {
-          this.closing = false;
-          this.clearClosingTimer();
-          this.advanceDetached();
+          // Not an advance yet (#135): the sentence this turn generated is
+          // still coming out of the speaker, and the phase turns over when it
+          // has been HEARD, not when it has been written. `tick()` carries the
+          // wait from here; the quiet case advances on this very call.
+          this.closingTurnComplete = true;
+          this.finishClosingIfQuiet();
           return;
         }
         // The turn that just ended was a goodbye the app never asked for, and
@@ -3064,8 +3130,14 @@ export class ExamController {
     // Advancing anyway is what stops a silent model stranding the candidate on
     // a frozen clock — the failure the reference implementation hit in
     // production.
+    // The turn is over and its audio has now run out: the ordinary end of a
+    // closing handshake (#135). Before the deadline check, because a drained
+    // speaker is the good exit and the timeout is the bad one.
+    if (this.finishClosingIfQuiet()) return;
+
     if (this.closingHasTimedOut()) {
       this.closing = false;
+      this.closingTurnComplete = false;
       this.clearClosingTimer();
       this.log("closing-safety-timeout");
       this.advanceDetached();

@@ -47,6 +47,10 @@ class FakeSession implements LiveSessionLike {
   activityStarts = 0;
   activityEnds = 0;
   audioChunks = 0;
+  /** Every control send in wire order (#135). The counters above cannot say
+   *  whether the closing directive went out before or after the activityEnd
+   *  that frees the model's floor, and that ordering is the fix. */
+  wire: string[] = [];
 
   constructor(
     readonly phase: "monologue" | "debate",
@@ -89,14 +93,17 @@ class FakeSession implements LiveSessionLike {
   sendDirective(text: string): void {
     if (!this.open) return;
     this.directives.push(text);
+    this.wire.push("directive");
   }
 
   beginCandidateActivity(): void {
     this.activityStarts += 1;
+    this.wire.push("activity-start");
   }
 
   endCandidateActivity(): void {
     this.activityEnds += 1;
+    this.wire.push("activity-end");
   }
 
   /** Drive an arbitrary connection-state sequence, as the real manager can —
@@ -2670,9 +2677,12 @@ describe("the examiner's opening question", () => {
     assert.equal(h.sessions.length, 2, "and this is the débat's session, not the monologue's");
   });
 
-  it("still lets the finish silence the examiner mid-sentence", async () => {
-    // Nothing above touches the interrupt the épreuve itself performs: the part
-    // is over, and the examiner does not go on talking into the correction.
+  it("still lets the finish silence a speaker that never drained", async () => {
+    // Nothing above touches the interrupt the épreuve itself performs: the
+    // part is over, and the examiner does not go on talking into the
+    // correction. What changed with #135 is the route there — the boundary now
+    // waits for a draining speaker, so a queue that never drains takes the
+    // closing handshake's safety deadline before the leftover is dropped.
     const h = harness();
     await intoDebate(h);
     const player = h.players[h.players.length - 1];
@@ -2682,8 +2692,139 @@ describe("the examiner's opening question", () => {
     await completeClosing(h);
     await settle();
 
+    assert.equal(
+      h.controller.getSnapshot().phase,
+      "debate",
+      "the queue is not draining, so the part has not turned over yet",
+    );
+
+    h.advanceClockSilently(12);
+    await settle();
+
     assert.equal(h.controller.getSnapshot().phase, "finished");
-    assert.equal(player.interrupts, 1, "the speaker was emptied by the finish");
+    assert.ok(player.interrupts >= 1, "the speaker was emptied on the way out");
+    assert.equal(player.bufferedSeconds, 0, "nothing survived into the correction");
+  });
+});
+
+/**
+ * The monologue → débat handover (#135).
+ *
+ * The sitting this is written against: « Terminer » pressed at the end of the
+ * monologue, a débat-style objection playing on the monologue screen, and the
+ * débat's consigne starting on top of it — two voices at once. Two defects
+ * compounded: the activityEnd went out before the closing directive, so the
+ * turn it released answered the exposé instead of the directive; and the phase
+ * turned over on `turnComplete`, which is a fact about generation, while the
+ * player was still seconds behind it.
+ */
+describe("the monologue → débat handover (#135)", () => {
+  const settle = () => new Promise((resolve) => setImmediate(resolve));
+  const events = (h: Harness, name: string) =>
+    h.controller.getSnapshot().events.filter((event) => event.name === name);
+
+  /** Preparation → a monologue spoken past the floor, with « Terminer » pressed:
+   *  the closing handshake is open and the examiner owes one sentence. */
+  async function intoClosingMonologue(h: Harness): Promise<void> {
+    h.controller.start();
+    await h.controller.advanceEarly();
+    await pressRecord(h);
+    h.session().candidateSays("Le télétravail a transformé le rapport au bureau.");
+    h.advanceClock(MONOLOGUE_MIN_SECONDS + 10);
+    await h.controller.advanceEarly();
+  }
+
+  it("sends the closing directive before the activityEnd that frees the floor", async () => {
+    // With manual VAD the activityEnd IS the turn boundary: the model takes
+    // the floor the moment it arrives, with whatever is in context. Sent
+    // first, the model answered the exposé it had memorised « pour le débat
+    // qui suit » — the objection the report describes — and the directive
+    // raced its generation. Both ride the same socket, so this order is the
+    // order on the wire.
+    const h = harness();
+    await intoClosingMonologue(h);
+
+    const wire = h.session().wire;
+    const directive = wire.indexOf("directive");
+    const activityEnd = wire.indexOf("activity-end");
+    assert.notEqual(directive, -1, "the closing directive went out");
+    assert.notEqual(activityEnd, -1, "and the floor was freed");
+    assert.ok(
+      directive < activityEnd,
+      "the one turn the boundary releases already carries its execution order",
+    );
+  });
+
+  it("holds the part until the closing sentence has been heard out", async () => {
+    // `turnComplete` arrives at generation speed, seconds ahead of the voice.
+    // Advancing on it is what put the débat's consigne on top of the sentence
+    // still being spoken.
+    const announcer = new FakeAnnouncer();
+    const h = harness({ announcer });
+    await intoClosingMonologue(h);
+    const player = h.players[0];
+
+    h.session().examinerVoice("je vous remercie,");
+    h.session().examinerVoice("votre exposé était...");
+    h.session().finishTurn();
+    await settle();
+
+    const held = h.controller.getSnapshot();
+    assert.equal(held.phase, "monologue", "seconds of the sentence are still queued");
+    assert.equal(held.closing, true, "the handshake is still open");
+    assert.ok(
+      !announcer.played.includes(ANNOUNCEMENTS.debate.src),
+      "and no consigne is spoken over it",
+    );
+
+    // Playback catches up: the queue drains, and the next tick notices.
+    player.drain(2);
+    h.advanceClock(1);
+    await settle();
+
+    assert.equal(h.controller.getSnapshot().phase, "debate");
+    assert.ok(
+      announcer.played.includes(ANNOUNCEMENTS.debate.src),
+      "the consigne got the room to itself",
+    );
+    assert.equal(player.interrupts, 0, "nothing was cut: the sentence simply finished");
+  });
+
+  it("drops what a dead speaker still holds when the deadline crosses the boundary", async () => {
+    // The wait trusts the player's queue, and a suspended AudioContext holds
+    // its level forever. The safety deadline already bounds the handshake;
+    // crossing the boundary on it must not leave the queue to play under the
+    // consigne whenever the context wakes back up.
+    const h = harness();
+    await intoClosingMonologue(h);
+    const player = h.players[0];
+
+    h.session().examinerVoice("a sentence no speaker will play");
+    h.session().finishTurn();
+    await settle();
+    assert.equal(h.controller.getSnapshot().phase, "monologue", "the queue is not draining");
+
+    h.advanceClockSilently(12);
+    await settle();
+
+    assert.equal(h.controller.getSnapshot().phase, "debate", "the deadline still bounds the wait");
+    assert.equal(player.interrupts, 1, "the leftover died with its part");
+    assert.equal(events(h, "boundary-audio-dropped").length, 1, "and the sitting says so");
+  });
+
+  it("advances on the turn alone when nothing was ever audible", async () => {
+    // A socket that delivered no audio — or a browser whose speaker never
+    // opened — must not spend the safety deadline waiting for silence to
+    // drain. An empty queue IS quiet, so the turn completing advances at once:
+    // the behaviour every test above this describe has always leaned on.
+    const h = harness();
+    await intoClosingMonologue(h);
+
+    h.session().finishTurn();
+    await settle();
+
+    assert.equal(h.controller.getSnapshot().phase, "debate");
+    assert.deepEqual(events(h, "closing-safety-timeout"), [], "and not via the deadline");
   });
 });
 
