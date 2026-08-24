@@ -1,46 +1,27 @@
 /**
- * The tableau de bord, as a view model: the tiles, the per-criterion bars and
- * the recent-sittings list, computed from rows the database actually holds.
+ * The tableau de bord, as a view model: the tiles, the « Votre trajectoire »
+ * chart and the recent-sittings list, computed from rows the database actually
+ * holds.
  *
  * PORT NOTE: the reference implementation's dashboard
  * (`/production-orale/tableau-de-bord`) shows four tiles — score moyen, taux de
  * réussite, temps de pratique, série — a « Moyenne par partie » bar chart, and a
- * list of recent submissions. The tiles and the list reproduce directly. The bar
- * chart does not, and the substitution is the one interesting decision here:
- *
- * The reference's chart averages a /25 **per DELF partie**, because there a
- * "submission" is one part sat on its own — a candidate picks partie 1 or partie
- * 2 from the catalogue and gets a score for it. This project's sitting is the
- * whole épreuve: one monologue *and* one débat, one correction, one /25. There
- * is no per-part score to average, and inventing one by splitting a single /25
- * across two parts would be exactly the "computing data the earlier phase does
- * not produce" that #11 rules out.
- *
- * What this project does have, and the reference did not expose, is the five
- * criteria as five real columns on `evaluations`. So the chart keeps its shape —
- * labelled rows, a bar each, a count beside them — and changes its axis to
- * **moyenne par critère**. Same question answered ("where am I losing points?"),
- * better answered, and every number in it comes off a column.
+ * list of recent submissions. The tiles and the list reproduce directly. The
+ * reference's chart never could: it averages a /25 **per DELF partie**, because
+ * there a "submission" is one part sat on its own, while this project's sitting
+ * is the whole épreuve with one /25 — there is no per-part score to average. A
+ * « Moyenne par critère » substitute stood in until #143 replaced it with the
+ * trajectory: one bar per simulation on the /25, which answers the question a
+ * candidate actually brings here ("am I getting better?") from figures every
+ * sitting really has.
  *
  * Pure: the page fetches, this shapes. Unit-tested, so the arithmetic behind a
  * number a candidate reads as their standing is checkable without a database.
  */
 
 import { COMPETENCY_FLOOR, COMPETENCY_MAX } from "@/lib/delf/constants";
-import { GRILLE_BANDS, scoreBand, type ScoreBand } from "@/lib/delf/grille";
-import { ORAL_CRITERIA, ORAL_CRITERIA_LABELS, type OralCriterion } from "@/lib/delf/criteria";
-
-/**
- * The top of the grille's scale, for the bars' full width.
- *
- * Derived here rather than added to `grille.ts`: the per-criterion half of that
- * file is a byte-for-byte port of the reference's own grille and carries an
- * explicit instruction not to change it. Reading the last band off
- * `GRILLE_BANDS` is the same single source of truth without touching it — and it
- * is still not the literal `5`, so a grille whose top band ever moved would move
- * this with it.
- */
-const GRILLE_MAX_BAND = GRILLE_BANDS[GRILLE_BANDS.length - 1];
+import { scoreBand, type ScoreBand } from "@/lib/delf/grille";
+import { ORAL_CRITERIA, type OralCriterion } from "@/lib/delf/criteria";
 
 /**
  * How a sitting ended. Only these two reach the candidate's record.
@@ -123,18 +104,42 @@ export interface DashboardTile {
   band?: ScoreBand;
 }
 
-export interface CriterionAverage {
-  key: OralCriterion;
-  label: string;
-  /** Mean band on the grille's own 0–5 scale, to one decimal. */
-  average: number;
-  /** Share of the scale, for the bar's width. 0–100. */
+/**
+ * One simulation on the « Votre trajectoire » chart (#143).
+ *
+ * Carries its own band so the tooltip's tint and the number it sits on are
+ * computed from the same figure in the same place — the rule the tiles already
+ * follow. The colour is never the message: the component prints the note as
+ * text beside the tint, so a mono printer loses nothing.
+ */
+export interface TrajectoryPoint {
+  examId: number;
+  topicTitle: string;
+  score25: number;
+  band: ScoreBand;
+  /** A walk-out is a real bar at 0 — the record the tiles already keep. */
+  outcome: SittingOutcome;
+  /** « 4 août » — the tooltip's stamp. */
+  date: string;
+  /** Share of the /25 scale, 0–100, for the bar's height off the floor. */
   percent: number;
+}
+
+export interface TrajectoryView {
+  /** Oldest first — a trajectory reads left to right. */
+  points: TrajectoryPoint[];
+  /** The newest simulation, for the card's headline. `null` on an empty record. */
+  latest: { score25: number; band: ScoreBand; date: string } | null;
+  /**
+   * Latest minus the simulation before it, or `null` when there is no before —
+   * a delta with one data point would be a comparison against nothing.
+   */
+  delta: number | null;
 }
 
 export interface DashboardView {
   tiles: DashboardTile[];
-  criteria: CriterionAverage[];
+  trajectory: TrajectoryView;
   /** Newest first, already trimmed to what the card shows. */
   recent: DashboardSitting[];
   /** How many corrected sittings the figures were computed from. */
@@ -274,22 +279,58 @@ function buildTiles(sittings: readonly DashboardSitting[], today: Date): Dashboa
 }
 
 /**
- * The per-criterion averages, in the grille's own order.
- *
- * Built from `ORAL_CRITERIA` rather than from the keys present on the rows, so a
- * criterion that no correction happened to score still gets a row at zero
- * instead of silently disappearing from the chart.
+ * The chart's y-gridlines: 0 · 5 · 10 · 15 · 20 · 25, derived from the /25 so
+ * a scale that ever moved would move its ruler with it.
  */
-function buildCriteriaAverages(sittings: readonly DashboardSitting[]): CriterionAverage[] {
-  return ORAL_CRITERIA.map((key) => {
-    const average = mean(sittings.map((sitting) => sitting.criteria[key] ?? 0));
+export const TRAJECTORY_TICKS: readonly number[] = Array.from(
+  { length: COMPETENCY_MAX / 5 + 1 },
+  (_, index) => index * 5,
+);
+
+/**
+ * « +6 pts » / « −2 pts » / « ±0 pt » — the headline's movement since the
+ * previous simulation. The sign is always printed: a bare « 6 pts » does not
+ * say which way the trajectory went, and that direction is the figure's job.
+ */
+export function formatScoreDelta(delta: number): string {
+  const magnitude = Math.abs(delta);
+  const unit = magnitude > 1 ? "pts" : "pt";
+  if (delta > 0) return `+${magnitude} ${unit}`;
+  if (delta < 0) return `−${magnitude} ${unit}`;
+  return `±0 pt`;
+}
+
+/**
+ * The trajectory: every sitting on the record, oldest first, as a bar on the
+ * /25 scale.
+ *
+ * Its own ordering rather than a reuse of `recent` — the recent list is
+ * newest-first and trimmed, and a trajectory that silently stopped at five
+ * bars would draw a record the tiles contradict.
+ */
+function buildTrajectory(newestFirst: readonly DashboardSitting[]): TrajectoryView {
+  const chronological = [...newestFirst].reverse();
+
+  const points = chronological.map((sitting): TrajectoryPoint => {
     return {
-      key,
-      label: ORAL_CRITERIA_LABELS[key],
-      average,
-      percent: Math.round((average / GRILLE_MAX_BAND) * 100),
+      examId: sitting.examId,
+      topicTitle: sitting.topicTitle,
+      score25: sitting.score25,
+      band: scoreBand(sitting.score25),
+      outcome: sitting.outcome,
+      date: formatSittingDate(sitting.endedAt),
+      percent: (sitting.score25 / COMPETENCY_MAX) * 100,
     };
   });
+
+  const latest = points.at(-1);
+  const previous = points.at(-2);
+
+  return {
+    points,
+    latest: latest ? { score25: latest.score25, band: latest.band, date: latest.date } : null,
+    delta: latest && previous ? latest.score25 - previous.score25 : null,
+  };
 }
 
 /**
@@ -308,7 +349,7 @@ export function buildDashboardView(
 
   return {
     tiles: buildTiles(ordered, today),
-    criteria: buildCriteriaAverages(ordered),
+    trajectory: buildTrajectory(ordered),
     recent: ordered.slice(0, RECENT_LIMIT),
     count: ordered.length,
   };
