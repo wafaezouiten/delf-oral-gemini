@@ -40,11 +40,15 @@ import type { OralTopic } from "@/lib/delf/topics";
  * The correction, as a two-column report on the fullscreen shell.
  *
  * PORT NOTE: the reference's `OralResultReport` in `evaluation-resultats.tsx`. A
- * slim header (sujet · level · correction-IA pill · actions), a LEFT transcript
- * column reading as one printed page, and a RIGHT evaluation rail — the /25
- * verdict with its floor warning, the five criteria as collapsible rows grouped
- * by compétence, points forts / axes, the appréciation and one conseil.
- * Reproduced block for block, in that order.
+ * slim header (sujet · level · correction-IA pill · actions), a transcript
+ * column reading as one printed page, and an evaluation rail — the /25 verdict
+ * with its floor warning, the five criteria as collapsible rows grouped by
+ * compétence, points forts / axes, the appréciation and one conseil.
+ * Reproduced block for block, in that order — but no longer in the reference's
+ * PLACES: #136 swapped the columns, on the user's call. The evaluation is what
+ * a candidate opens this page for, so it takes the wide main pane and the
+ * transcript stands by in the fixed rail. Everything inside each column is
+ * still the reference's blocks.
  *
  * Three things are this project's and stay:
  *
@@ -330,75 +334,70 @@ export function ResultsClient({
         </div>
       </header>
 
-      {/* Split body: the transcript reads, the rail marks. */}
+      {/* Split body: the evaluation marks, the transcript stands by (#136). */}
       <div className="grid min-h-0 flex-1 grid-cols-1 overflow-y-auto lg:grid-cols-[minmax(0,1fr)_26.25rem] lg:overflow-hidden print:overflow-visible">
-        <TranscriptColumn
-          title={topic.title}
-          transcript={transcript}
-          monologueSeconds={monologueSeconds}
-          debateSeconds={debateSeconds}
-          examId={examId}
-          playable={result.playable ?? []}
-        />
-
-        <aside className="border-border bg-card flex min-h-0 flex-col border-t lg:border-t-0 lg:border-l">
-          {/* Verdict */}
-          <div className="border-border shrink-0 border-b px-6 pt-5 pb-4">
-            <div className="flex flex-wrap items-baseline gap-x-3 gap-y-2">
-              <p
-                className={cn(
-                  "tabular font-serif text-[2.875rem] leading-none font-semibold",
-                  scoreInk(tone),
-                )}
-              >
-                {evaluation.score25}
-                <span className="text-muted-foreground text-[1.375rem] font-semibold">
-                  /{COMPETENCY_MAX}
-                </span>
-              </p>
-              {/* The verdict in a word as well as a colour — a candidate who
+        {/* The evaluation, as the main column (#136). The /25 and the five
+            criteria are what a candidate opens this page for, and they used to
+            sit in the 26 rem rail while the transcript held the wide pane.
+            First in the DOM as well as widest, which is what puts the verdict
+            on top of the single-column stack on a phone and first on the
+            printed sheet. The centred measure is the treatment the transcript
+            column established for a main pane; the verdict keeps its card so
+            the mark still reads as the page's one headline. */}
+        <section className="bg-muted/30 min-h-0 lg:overflow-y-auto print:overflow-visible">
+          <div className="mx-auto max-w-[46rem] px-4 py-6 pb-16 sm:px-7">
+            {/* Verdict */}
+            <div className="border-border bg-card sheet border px-6 pt-5 pb-4">
+              <div className="flex flex-wrap items-baseline gap-x-3 gap-y-2">
+                <p
+                  className={cn(
+                    "tabular font-serif text-[2.875rem] leading-none font-semibold",
+                    scoreInk(tone),
+                  )}
+                >
+                  {evaluation.score25}
+                  <span className="text-muted-foreground text-[1.375rem] font-semibold">
+                    /{COMPETENCY_MAX}
+                  </span>
+                </p>
+                {/* The verdict in a word as well as a colour — a candidate who
                   cannot tell the green pill from the red one still reads it. */}
-              <Tag tone={passed ? "success" : "danger"}>
-                <span aria-hidden>{passed ? "✓" : "✕"}</span>
-                {passed
-                  ? `Au-dessus du seuil de ${COMPETENCY_FLOOR}/${COMPETENCY_MAX}`
-                  : `Sous le seuil de ${COMPETENCY_FLOOR}/${COMPETENCY_MAX}`}
-              </Tag>
-            </div>
+                <Tag tone={passed ? "success" : "danger"}>
+                  <span aria-hidden>{passed ? "✓" : "✕"}</span>
+                  {passed
+                    ? `Au-dessus du seuil de ${COMPETENCY_FLOOR}/${COMPETENCY_MAX}`
+                    : `Sous le seuil de ${COMPETENCY_FLOOR}/${COMPETENCY_MAX}`}
+                </Tag>
+              </div>
 
-            {/* Whole sentences, built and tested in `lib/ui/correction-notices.ts`.
+              {/* Whole sentences, built and tested in `lib/ui/correction-notices.ts`.
                 The component chooses neither the wording nor the figure: both
                 depend on which rules fired, and the last version that decided
                 the wording here told a candidate who sat neither part about
                 « celle que vous avez réalisée ». */}
-            {notices.absence && (
-              <p className="text-muted-foreground mt-3 text-xs leading-relaxed">
-                {notices.absence}
-              </p>
-            )}
+              {notices.absence && (
+                <p className="text-muted-foreground mt-3 text-xs leading-relaxed">
+                  {notices.absence}
+                </p>
+              )}
 
-            {earlyClosing && (
-              <p className="text-muted-foreground mt-3 text-xs leading-relaxed">{earlyClosing}</p>
-            )}
+              {earlyClosing && (
+                <p className="text-muted-foreground mt-3 text-xs leading-relaxed">{earlyClosing}</p>
+              )}
 
-            {!passed && (
-              <div className="border-danger/40 bg-danger-subtle text-danger mt-3 flex items-start gap-2.5 rounded-md border p-3">
-                <AlertIcon className="mt-0.5 size-3.5 shrink-0" />
-                <span className="text-[0.71875rem] leading-snug">
-                  Une note inférieure à {COMPETENCY_FLOOR}/{COMPETENCY_MAX} est éliminatoire au
-                  DELF, quelle que soit la note globale.
-                </span>
-              </div>
-            )}
-          </div>
+              {!passed && (
+                <div className="border-danger/40 bg-danger-subtle text-danger mt-3 flex items-start gap-2.5 rounded-md border p-3">
+                  <AlertIcon className="mt-0.5 size-3.5 shrink-0" />
+                  <span className="text-[0.71875rem] leading-snug">
+                    Une note inférieure à {COMPETENCY_FLOOR}/{COMPETENCY_MAX} est éliminatoire au
+                    DELF, quelle que soit la note globale.
+                  </span>
+                </div>
+              )}
+            </div>
 
-          {/* The rail scrolls on its own too, and it is the half carrying the
-              /25 and the five criteria — the part of a printed correction it
-              would hurt most to lose the foot of. Same release as the three on
-              the shell. */}
-          <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4 print:overflow-visible">
             {evaluation.mode === "text" && (
-              <div className="mb-4">
+              <div className="mt-4">
                 <Notice tone="warning" title="Corrigé sans l'audio">
                   Aucun enregistrement n&apos;a pu être joint à cette épreuve. La correction a été
                   faite à partir de la transcription seule : votre prononciation n&apos;a pas été
@@ -407,95 +406,112 @@ export function ResultsClient({
               </div>
             )}
 
-            {CRITERIA_GROUPS.map((group) => (
-              <div key={group.competence} className="mb-4">
-                <Kicker className="text-[0.625rem]">{group.competence}</Kicker>
-                <div className="mt-2 flex flex-col gap-2">
-                  {group.criteria.map((key) => (
-                    <CriterionRow
-                      key={key}
-                      label={ORAL_CRITERIA_LABELS[key]}
-                      description={ORAL_CRITERIA_DESCRIPTIONS[key]}
-                      band={evaluation.criteria[key] ?? 0}
-                      justification={evaluation.feedback.justifications[key]}
-                      note={key === "phonologie" ? phonoNote : undefined}
-                      open={openKey === key}
-                      onToggle={() => setOpenKey((current) => (current === key ? null : key))}
-                    />
-                  ))}
+            <div className="mt-5">
+              {CRITERIA_GROUPS.map((group) => (
+                <div key={group.competence} className="mb-4">
+                  <Kicker className="text-[0.625rem]">{group.competence}</Kicker>
+                  <div className="mt-2 flex flex-col gap-2">
+                    {group.criteria.map((key) => (
+                      <CriterionRow
+                        key={key}
+                        label={ORAL_CRITERIA_LABELS[key]}
+                        description={ORAL_CRITERIA_DESCRIPTIONS[key]}
+                        band={evaluation.criteria[key] ?? 0}
+                        justification={evaluation.feedback.justifications[key]}
+                        note={key === "phonologie" ? phonoNote : undefined}
+                        open={openKey === key}
+                        onToggle={() => setOpenKey((current) => (current === key ? null : key))}
+                      />
+                    ))}
+                  </div>
                 </div>
-              </div>
-            ))}
+              ))}
 
-            <FeedbackPanel
-              tone="success"
-              title="Points forts"
-              marker="+"
-              items={evaluation.feedback.pointsForts}
-              emptyLabel="Aucun point fort identifié."
-            />
-
-            <div className="mt-2.5">
               <FeedbackPanel
-                tone="warning"
-                title="Axes prioritaires"
-                marker="→"
-                items={evaluation.feedback.axesPrioritaires}
-                emptyLabel="Rien à signaler, continuez ainsi."
+                tone="success"
+                title="Points forts"
+                marker="+"
+                items={evaluation.feedback.pointsForts}
+                emptyLabel="Aucun point fort identifié."
               />
-            </div>
 
-            {evaluation.feedback.appreciationGlobale && (
-              <div className="border-border bg-muted/40 sheet mt-2.5 border p-4">
-                <h3 className="text-xs font-bold">Appréciation globale</h3>
-                <p className="text-muted-foreground mt-1.5 text-xs leading-relaxed">
-                  {evaluation.feedback.appreciationGlobale}
-                </p>
+              <div className="mt-2.5">
+                <FeedbackPanel
+                  tone="warning"
+                  title="Axes prioritaires"
+                  marker="→"
+                  items={evaluation.feedback.axesPrioritaires}
+                  emptyLabel="Rien à signaler, continuez ainsi."
+                />
               </div>
-            )}
 
-            {evaluation.feedback.conseil && (
-              <div className="border-primary/30 bg-primary-subtle sheet mt-2.5 flex items-start gap-2.5 border p-4">
-                <IdeaIcon className="text-primary mt-0.5 size-4 shrink-0" />
-                <p className="text-foreground/85 text-xs leading-relaxed">
-                  <span className="text-primary font-semibold">Conseil : </span>
-                  {evaluation.feedback.conseil}
+              {evaluation.feedback.appreciationGlobale && (
+                <div className="border-border bg-muted/40 sheet mt-2.5 border p-4">
+                  <h3 className="text-xs font-bold">Appréciation globale</h3>
+                  <p className="text-muted-foreground mt-1.5 text-xs leading-relaxed">
+                    {evaluation.feedback.appreciationGlobale}
+                  </p>
+                </div>
+              )}
+
+              {evaluation.feedback.conseil && (
+                <div className="border-primary/30 bg-primary-subtle sheet mt-2.5 flex items-start gap-2.5 border p-4">
+                  <IdeaIcon className="text-primary mt-0.5 size-4 shrink-0" />
+                  <p className="text-foreground/85 text-xs leading-relaxed">
+                    <span className="text-primary font-semibold">Conseil : </span>
+                    {evaluation.feedback.conseil}
+                  </p>
+                </div>
+              )}
+
+              {passed && (
+                <p className="text-muted-foreground mt-3 flex items-center gap-2 px-1 text-[0.71875rem]">
+                  <CheckCircleIcon className="text-success size-3.5 shrink-0" />
+                  Note au-dessus du seuil éliminatoire du DELF ({COMPETENCY_FLOOR}/{COMPETENCY_MAX}
+                  ).
                 </p>
-              </div>
-            )}
+              )}
 
-            {passed && (
-              <p className="text-muted-foreground mt-3 flex items-center gap-2 px-1 text-[0.71875rem]">
-                <CheckCircleIcon className="text-success size-3.5 shrink-0" />
-                Note au-dessus du seuil éliminatoire du DELF ({COMPETENCY_FLOOR}/{COMPETENCY_MAX}).
-              </p>
-            )}
-
-            {/* Provenance, at the foot of the rail and on the printed sheet:
+              {/* Provenance, at the foot of the evaluation and on the printed sheet:
                 which model spoke and which one graded (#99). Raw ids on
                 purpose — a readable label here would make two sittings on the
                 same sujet quietly incomparable, which is the thing this line
                 exists to prevent. The examiner is omitted rather than guessed
                 on sittings from before it was recorded. */}
-            <p className="text-muted-foreground border-border mt-4 border-t px-1 pt-3 text-[0.65625rem] leading-relaxed">
-              {result.examinerModel && (
-                <>
-                  Examinateur&nbsp;: <span className="tabular">{result.examinerModel}</span>
-                  {" · "}
-                </>
-              )}
-              Correcteur&nbsp;: <span className="tabular">{evaluation.model}</span>
-            </p>
+              <p className="text-muted-foreground border-border mt-4 border-t px-1 pt-3 text-[0.65625rem] leading-relaxed">
+                {result.examinerModel && (
+                  <>
+                    Examinateur&nbsp;: <span className="tabular">{result.examinerModel}</span>
+                    {" · "}
+                  </>
+                )}
+                Correcteur&nbsp;: <span className="tabular">{evaluation.model}</span>
+              </p>
+            </div>
           </div>
-        </aside>
+        </section>
+
+        {/* The transcript, standing by in the rail the evaluation vacated.
+            Still whole, still printed, still the only place the recordings
+            play (#116) — it lost the spotlight, not the page. */}
+        <TranscriptColumn
+          title={topic.title}
+          transcript={transcript}
+          monologueSeconds={monologueSeconds}
+          debateSeconds={debateSeconds}
+          examId={examId}
+          playable={result.playable ?? []}
+        />
       </div>
     </div>
   );
 }
 
 /**
- * The left column: the épreuve as it was spoken, set as one printed page — in
- * the two parts it was sat in (#70).
+ * The transcript: the épreuve as it was spoken, set as one printed page — in
+ * the two parts it was sat in (#70). Since #136 it stands in the fixed rail
+ * rather than the wide pane; nothing about its content, its print treatment or
+ * its players moved with it.
  *
  * The turns are paragraphs with a speaker label above them rather than the
  * reference's chat bubbles. Two reasons, and the second is the one that decides
@@ -566,9 +582,13 @@ function TranscriptColumn({
   });
 
   return (
-    <section className="bg-muted/30 min-h-0 lg:overflow-y-auto print:overflow-visible">
-      <div className="mx-auto max-w-[42.5rem] px-4 py-6 pb-16 sm:px-7">
-        <article className="border-paper-border bg-paper sheet border p-7 sm:p-9">
+    <section className="border-border bg-muted/30 min-h-0 border-t lg:overflow-y-auto lg:border-t-0 lg:border-l print:overflow-visible">
+      {/* The measure caps the phone and print renderings, where this section
+          is full-width; in the 26.25 rem rail it never binds. The paddings
+          slimmed with the column (#136): p-9 of paper margin inside a 420 px
+          rail left the words a third of it. */}
+      <div className="mx-auto max-w-[42.5rem] px-4 py-6 pb-16 sm:px-5">
+        <article className="border-paper-border bg-paper sheet border p-5 sm:p-6">
           <div className="border-border border-b pb-3">
             <Kicker>{CORRECTION_TRANSCRIPT_COPY.kicker}</Kicker>
           </div>
