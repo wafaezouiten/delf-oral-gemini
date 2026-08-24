@@ -2754,7 +2754,7 @@ describe("breaking a silence in the débat (#84, #101)", () => {
 
     h.advanceClock(5);
     assert.equal(relances(h).length, 1, "sixteen seconds of silence earns the question again");
-    assert.match(relances(h)[0], /reformule autrement ta dernière question/);
+    assert.match(relances(h)[0], /reformule autrement ta question précédente/);
   });
 
   it("keeps asking at whole steps, not on every tick", async () => {
@@ -2854,8 +2854,9 @@ describe("breaking a silence in the débat (#84, #101)", () => {
   });
 
   it("stops asking for a rephrasing once the relance is repeating itself", async () => {
-    // A relance that always said "reformule ta dernière question" would have the
-    // model rephrase its own rephrasing, on a context window that is sliding.
+    // A relance that always said "reformule ta question précédente" would have
+    // the model rephrase its own rephrasing, on a context window that is
+    // sliding.
     const h = harness();
     await intoSilentDebate(h);
 
@@ -2863,7 +2864,7 @@ describe("breaking a silence in the débat (#84, #101)", () => {
     silentStep(h);
     silentStep(h);
 
-    assert.match(relances(h)[0], /reformule autrement ta dernière question/);
+    assert.match(relances(h)[0], /reformule autrement ta question précédente/);
     assert.match(relances(h)[1], /pose une question NOUVELLE/, "the next one changes the ask");
   });
 
@@ -3210,8 +3211,44 @@ describe("an examiner that says goodbye seven minutes early (#85)", () => {
       h.advanceClock(70);
       assert.deepEqual(cues(h), [], "the candidate is three minutes into an argument");
 
-      quiet(h, 6);
-      assert.equal(cues(h).length, 1, "and it arrives at the first pause");
+      // Nine, not the bare two-second pause: an answer nobody has replied to
+      // holds the floor for the reply the examiner may owe (#130).
+      quiet(h, 9);
+      assert.equal(cues(h).length, 1, "and it arrives at the first settled pause");
+    });
+
+    it("waits out the reply the examiner may owe before cueing (#130)", async () => {
+      // Between a candidate finishing an answer and the examiner's rebound
+      // reaching the speaker, nobody is audible: voice-activity detection has
+      // ended the candidate's turn and Gemini is already generating. Two quiet
+      // seconds there used to read as a free floor, and a cue sent into it
+      // landed beside the reply — two examiner questions back to back.
+      const h = harness();
+      await intoDebate(h);
+
+      h.advanceClock(120);
+      h.advanceClock(70); // the candidate talks through the three-minute boundary
+      quiet(h, 4);
+      assert.deepEqual(cues(h), [], "four quiet seconds may be a reply on its way");
+
+      h.advanceClock(5);
+      assert.equal(cues(h).length, 1, "nine is a reply that is not coming");
+    });
+
+    it("does not hold the cue once the examiner has replied", async () => {
+      // The hold is for the gap before a rebound, not a new floor rule: an
+      // answer the examiner has already replied to leaves the ordinary
+      // two-second pause in charge again.
+      const h = harness();
+      await intoDebate(h);
+
+      h.advanceClock(120);
+      h.advanceClock(70);
+      h.session().examinerSays("Dans ce cas, le lien social se construit où ?");
+      h.session().finishTurn();
+
+      quiet(h, 4);
+      assert.equal(cues(h).length, 1, "nothing is owed, so the pause is enough");
     });
 
     it("owes one cue for a stretch it could not speak into, not a queue of them", async () => {
@@ -3221,7 +3258,7 @@ describe("an examiner that says goodbye seven minutes early (#85)", () => {
       // Seven minutes of unbroken candidate, across two three-minute boundaries.
       h.advanceClock(200);
       h.advanceClock(220);
-      quiet(h, 6);
+      quiet(h, 9);
 
       assert.equal(cues(h).length, 1, "one cue, not the two the grid says are due");
       assert.match(cues(h)[0], /environ 6 minutes/, "and it names the time now, not then");
@@ -3563,8 +3600,10 @@ describe("the last question and the call of time (#108)", () => {
     h.advanceClock(20);
     assert.deepEqual(announcements(h), [], "the candidate is mid-answer at the crossing");
 
-    quiet(h, 6);
-    assert.equal(announcements(h).length, 1, "and it arrives at the first pause");
+    // Nine, not the bare two-second pause: the announcement waits out the reply
+    // the examiner may owe that answer, like every cue does (#130).
+    quiet(h, 9);
+    assert.equal(announcements(h).length, 1, "and it arrives at the first settled pause");
   });
 
   it("drops it, and says so, when the floor never frees in time", async () => {
@@ -3604,6 +3643,37 @@ describe("the last question and the call of time (#108)", () => {
       !recoveries[0].includes("nouvelle objection"),
       "a new objection would break « une dernière question »",
     );
+  });
+
+  it("keeps the promise when the silence outlives the announcement (#130)", async () => {
+    // The escalation's later steps order « une question NOUVELLE », which after
+    // « une dernière question » is the app breaking its own announcement
+    // through the examiner's mouth — and an invitation to frame the fresh
+    // question as « une dernière question » a second time. Once the promise is
+    // made, every relance re-asks the promised question instead.
+    const h = harness();
+    await intoDebate(h);
+    quiet(h, 690);
+    assert.equal(announcements(h).length, 1);
+    // The announcement's own turn ends: the floor is the candidate's, and the
+    // silence watch opens on it.
+    h.session().finishTurn();
+
+    quiet(h, 11); // « Vous m'entendez ? »
+    h.session().finishTurn();
+    quiet(h, 16); // the first relance
+    h.session().finishTurn();
+    quiet(h, 16); // the step that used to demand a fresh question
+
+    const reasks = h
+      .session()
+      .directives.filter((text) => text.includes("Repose cette même question"));
+    assert.equal(reasks.length, 2, "every step after the announcement re-asks it");
+    assert.ok(
+      !h.session().directives.some((text) => text.includes("question NOUVELLE")),
+      "no directive asks for a fresh question after « une dernière question »",
+    );
+    assert.equal(events(h, "debate-last-question").length, 1, "and it is only ever announced once");
   });
 
   it("asks for a fresh objection when the goodbye comes before the announcement", async () => {
