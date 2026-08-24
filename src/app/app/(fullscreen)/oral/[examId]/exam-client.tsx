@@ -703,25 +703,37 @@ export function ExamClient({
         devPanel={
           DEV_TOOLS_ENABLED ? (
             <div className="space-y-2">
-              {/* The exposé and nowhere else. The débat is spoken, and the
-                  controller hands the microphone back when the monologue ends
-                  so it can be. */}
-              {state.phase === "monologue" && (
+              {/* Both speaking parts (#142). One panel across the boundary, so
+                  a typed exposé arrives at a débat whose panel is already open
+                  and whose microphone is still off. */}
+              {(state.phase === "monologue" || state.phase === "debate") && (
                 <DevTranscriptionPanel
+                  phase={state.phase}
                   subject={topic.title}
                   active={state.devTextMode}
                   onActiveChange={(on) => controller.setDevTextMode(on)}
-                  // The two states in which the button cannot do what it says,
+                  // The states in which the button cannot do what it says,
                   // handed over so the panel can say which one it is in rather
                   // than looking like it did nothing (#53).
                   awaitingConsigne={awaitingConsigne}
                   closing={state.closing}
+                  // The débat only: armed, there is no session to hear a reply,
+                  // and « Enregistrer » is the button that opens one. The
+                  // exposé's submit starts the part itself, so it never reports
+                  // this state.
+                  awaitingStart={state.phase === "debate" && state.awaitingStart}
                   // « Envoyer l'exposé » ends the monologue: the text is not a
                   // fragment of it, it is the whole thing — and it starts the
                   // part first if « Enregistrer » has not been pressed, which is
-                  // the flow this panel exists for. It answers whether the
-                  // exposé counted; the panel keeps the text when it did not.
-                  onSubmit={(text, seconds) => controller.submitTypedExpose(text, seconds)}
+                  // the flow this panel exists for. « Envoyer la réponse » is
+                  // one débat turn: the examiner answers and the débat runs on.
+                  // Both report whether the text counted; the panel keeps it
+                  // when it did not.
+                  onSubmit={(text, seconds) =>
+                    state.phase === "monologue"
+                      ? controller.submitTypedExpose(text, seconds)
+                      : controller.submitTypedReply(text, seconds)
+                  }
                 />
               )}
               {/* Drives the path a real GoAway takes, so the 13-minute

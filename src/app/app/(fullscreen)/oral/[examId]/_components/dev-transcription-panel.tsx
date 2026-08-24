@@ -4,17 +4,20 @@ import { useEffect, useRef, useState } from "react";
 
 import { cn } from "@/lib/ui/class-names";
 import {
+  DEV_DEBATE_PANEL_COPY,
+  DEV_DEBATE_SUBMIT_COPY,
   DEV_PANEL_COPY,
   DEV_SUBMIT_COPY,
   describeDraft,
   devSubmitDisabled,
   devSubmitState,
+  exampleDebateReply,
   exampleExpose,
   resolveDevSeconds,
 } from "@/lib/ui/dev-transcription";
 
 /**
- * DEVELOPMENT ONLY — replace the exposé's recording with typed text.
+ * DEVELOPMENT ONLY — replace the candidate's speech with typed text.
  *
  * Exercising anything downstream of the transcript (the rubric, the
  * persistence, the results page, the duration penalty) otherwise costs twenty
@@ -36,9 +39,13 @@ import {
  * as the anchor and because a control that disappears when you use it leaves
  * nothing to say where the panel came from.
  *
- * **The exposé only.** The caller does not render this in the débat, and the
- * controller gives the microphone back when the monologue ends, so the two
- * cannot drift into a state where the mode is on with no way to use it.
+ * **Both speaking phases, one button each means something different on (#142).**
+ * On the exposé, sending IS finishing: the text is the whole monologue and the
+ * press leaves for the débat. On the débat, sending is one turn — the examiner
+ * hears it, answers aloud, and the panel stays open for the next reply. The
+ * `phase` prop is what picks the copy, the sample and the extra armed state,
+ * and the toggle survives the monologue → débat boundary on the controller so
+ * a typed exposé arrives at a débat that is already typeable.
  *
  * The open/closed state lives on the controller, not here, because the
  * controller is what pauses the recorder. A copy in this component could
@@ -56,22 +63,31 @@ import {
  * `setText("")`.
  */
 export function DevTranscriptionPanel({
+  phase,
   subject,
   active,
   awaitingConsigne = false,
+  awaitingStart = false,
   closing = false,
   onActiveChange,
   onSubmit,
 }: {
-  /** Seeds « Exemple », so the sample answers the sujet actually on screen. */
+  /** Which speaking part the panel is typing for — picks the copy and sample. */
+  phase: "monologue" | "debate";
+  /** Seeds « Exemple » on the exposé, so the sample answers the sujet on screen. */
   subject: string;
   active: boolean;
   /** The examiner is speaking this part's consigne, so nothing can be sent yet. */
   awaitingConsigne?: boolean;
-  /** The monologue is ending: the examiner has been asked for its last sentence. */
+  /** The débat is armed: « Enregistrer » has not been pressed, so there is no
+   *  session to hear a reply (#142). Never passed for the monologue, whose
+   *  submit starts the part itself. */
+  awaitingStart?: boolean;
+  /** This part is ending: the examiner has been asked for its last sentence. */
   closing?: boolean;
   onActiveChange: (on: boolean) => void;
-  /** Resolves true when the exposé counted as the monologue. See the note above. */
+  /** Resolves true when the text counted — as the monologue, or as one débat
+   *  turn. Only that clears the field; see the note above. */
   onSubmit: (text: string, seconds: number) => boolean | Promise<boolean>;
 }) {
   const [text, setText] = useState("");
@@ -85,20 +101,22 @@ export function DevTranscriptionPanel({
     if (active) field.current?.focus();
   }, [active]);
 
-  const submitState = devSubmitState({ text, awaitingConsigne, sending, closing });
-  const submitCopy = DEV_SUBMIT_COPY[submitState];
+  const debate = phase === "debate";
+  const panelCopy = debate ? DEV_DEBATE_PANEL_COPY : DEV_PANEL_COPY;
+  const submitState = devSubmitState({ text, awaitingConsigne, sending, closing, awaitingStart });
+  const submitCopy = (debate ? DEV_DEBATE_SUBMIT_COPY : DEV_SUBMIT_COPY)[submitState];
   const refused = devSubmitDisabled(submitState);
 
-  // An accepted exposé ends the monologue, and this panel belongs to the
-  // monologue — so the controller's own notification unmounts it from inside
-  // `onSubmit`, before the await below has even suspended. The state updates
-  // that follow therefore land on a component that is usually already gone.
-  //
-  // They stay, and are not conditional on that: what empties the field is the
-  // controller having accepted the exposé, which is a rule about this form and
-  // must not quietly become "the caller happened to unmount us". React has not
-  // warned about an update after unmount since 18, and there is nothing to
-  // clean up here — no subscription, no timer, nothing that outlives the panel.
+  // An accepted exposé ends the monologue from inside `onSubmit`, before the
+  // await below has even suspended. The panel now survives that boundary — the
+  // débat renders it too (#142) — so the clear is what puts an empty field in
+  // front of the débat's first reply; an accepted débat turn clears the same
+  // way and the panel simply stays. The updates are not conditional on any of
+  // that: what empties the field is the controller having accepted the text,
+  // which is a rule about this form and must not quietly become "the caller
+  // happened to keep us mounted". React has not warned about an update after
+  // unmount since 18, and there is nothing to clean up here — no subscription,
+  // no timer, nothing that outlives the panel.
   async function send() {
     setSending(true);
     try {
@@ -154,9 +172,7 @@ export function DevTranscriptionPanel({
               <GearIcon />
               Dev
             </span>
-            <span className="text-[0.6875rem] font-semibold text-amber-900">
-              {DEV_PANEL_COPY.title}
-            </span>
+            <span className="text-[0.6875rem] font-semibold text-amber-900">{panelCopy.title}</span>
             <button
               type="button"
               onClick={() => onActiveChange(false)}
@@ -187,14 +203,14 @@ export function DevTranscriptionPanel({
               if (event.key === "Escape") onActiveChange(false);
             }}
             rows={3}
-            placeholder={DEV_PANEL_COPY.placeholder}
+            placeholder={panelCopy.placeholder}
             className="min-h-14 resize-y rounded border border-amber-300 bg-white p-1.5 text-[0.6875rem] leading-relaxed text-amber-950 outline-none placeholder:text-amber-700/60 focus:border-amber-500"
           />
 
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
             <button
               type="button"
-              onClick={() => setText(exampleExpose(subject))}
+              onClick={() => setText(debate ? exampleDebateReply() : exampleExpose(subject))}
               className="shrink-0 rounded-full border border-amber-400 px-2 py-0.5 text-[0.625rem] font-semibold text-amber-800 transition-colors hover:bg-amber-100"
             >
               Exemple
@@ -241,10 +257,13 @@ export function DevTranscriptionPanel({
               l'enregistrement avant d'envoyer un texte. » — a warning, because
               there the microphone keeps running and you stop it yourself. Here
               opening the panel stops it, so that state cannot arise and the line
-              reports rather than warns. */}
+              reports rather than warns. It used to promise « le micro revient au
+              débat », which the boundary auto-off made true; the mode survives
+              into the débat now (#142), so closing the panel is the one thing
+              that gives the microphone back, and the line says so instead. */}
           <p className="text-[0.625rem] leading-snug text-amber-700">
-            Micro coupé : rien n&apos;est enregistré tant que ce panneau est ouvert. Le micro
-            revient au débat.
+            Micro coupé : rien n&apos;est enregistré tant que ce panneau est ouvert. Fermez-le pour
+            reprendre à l&apos;oral.
           </p>
         </form>
       )}

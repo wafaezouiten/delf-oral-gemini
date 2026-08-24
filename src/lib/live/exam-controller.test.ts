@@ -1430,7 +1430,10 @@ describe("recording the candidate", () => {
 
       h.controller.setDevTextMode(true);
       h.controller.injectCandidateSpeech("Un exposé tapé.", 330);
-      await runToFinish(h, () => {});
+      // The mode survives into the débat now (#142), so the débat is spoken
+      // only if the panel is closed — which is what makes it the control half
+      // of this test: one typed phase beside one recorded one.
+      await runToFinish(h, () => h.controller.setDevTextMode(false));
 
       const payload = h.finished[0];
       assert.deepEqual(h.recorder.droppedPhases, ["monologue"]);
@@ -1538,10 +1541,12 @@ describe("recording the candidate", () => {
       );
     });
 
-    it("gives the microphone back when the monologue ends, so the débat records", async () => {
-      // The panel is on the exposé and nowhere else. A mode that outlived it
-      // would leave the débat neither typeable nor recordable — an empty
-      // transcript and zero seconds arriving at the correction.
+    it("carries the mode into the débat, which the panel now follows (#142)", async () => {
+      // The reverse of what this asserted for #36. The mode used to be forced
+      // off at this boundary because the panel lived on the exposé alone, and
+      // a mode that outlived it left the débat neither typeable nor recordable.
+      // The débat has its own panel now, so the toggle stays the developer's —
+      // and closing it is what gives the microphone back.
       const h = harness();
       await intoMonologue(h);
       h.controller.setDevTextMode(true);
@@ -1551,11 +1556,12 @@ describe("recording the candidate", () => {
       await completeClosing(h);
 
       assert.equal(h.controller.getSnapshot().phase, "debate");
-      assert.equal(h.controller.getSnapshot().devTextMode, false, "the mode stood down");
-      assert.equal(h.recorder.paused, false, "the microphone is back");
+      assert.equal(h.controller.getSnapshot().devTextMode, true, "the mode came with it");
+      assert.equal(h.recorder.paused, true, "so the microphone is still off");
 
+      h.controller.setDevTextMode(false);
       h.advanceClock(60);
-      assert.equal(h.recorder.measuredSeconds("debate"), 60, "and the débat is recording");
+      assert.equal(h.recorder.measuredSeconds("debate"), 60, "and closing it records the débat");
       assert.equal(h.controller.getSnapshot().recording, true);
     });
 
@@ -1609,7 +1615,9 @@ describe("recording the candidate", () => {
         const state = h.controller.getSnapshot();
         assert.equal(state.phase, "debate", "immediately: no handshake, no safety timeout");
         assert.equal(state.closing, false, "nothing is being waited for");
-        assert.equal(h.recorder.paused, false, "and the microphone came back for the débat");
+        // The microphone used to come back here. Since #142 the panel is open
+        // in the débat too, and closing it is what hands the device back.
+        assert.equal(h.recorder.paused, true, "the panel is still open, so the mic is still off");
       });
 
       it("starts an armed part itself, so one press is the whole act (#53)", async () => {
@@ -1801,6 +1809,256 @@ describe("recording the candidate", () => {
           false,
           "the turn is over; a second exposé does not join it",
         );
+      });
+    });
+
+    describe("« Envoyer la réponse » — typed turns in the débat (#142)", () => {
+      /**
+       * Preparation → a débat that has begun, typed throughout.
+       *
+       * The flow the feature is for: the mode goes on at the monologue, the
+       * exposé is typed, and the développeur arrives at a débat whose panel is
+       * still open. `pressRecord` is what opens the débat's session, which is
+       * why a reply cannot precede it.
+       */
+      async function intoTypedDebate(h: Harness): Promise<void> {
+        h.controller.start();
+        await h.controller.advanceEarly();
+        h.controller.setDevTextMode(true);
+        await h.controller.submitTypedExpose("Un exposé complet, tapé.", 330);
+        await pressRecord(h);
+      }
+
+      it("keeps the mode across the boundary, so the débat arrives typeable", async () => {
+        // The reverse of #36's rule: the mode used to be forced off here,
+        // because the panel lived on the exposé and a mode that outlived it
+        // left the débat neither typeable nor recordable.
+        const h = harness();
+        await intoTypedDebate(h);
+
+        const state = h.controller.getSnapshot();
+        assert.equal(state.phase, "debate");
+        assert.equal(state.devTextMode, true, "the toggle is the developer's across the boundary");
+        assert.equal(h.recorder.paused, true, "and the microphone is still off");
+        assert.equal(state.recording, false, "so the badge claims nothing");
+      });
+
+      it("hands the microphone back when the panel closes, mid-débat", async () => {
+        // Closing the panel is now the ONE thing that gives the microphone
+        // back — the boundary used to do it — so a débat that starts typed and
+        // is finished out loud has to record from the moment the panel shuts.
+        const h = harness();
+        await intoTypedDebate(h);
+
+        h.controller.setDevTextMode(false);
+        h.advanceClock(60);
+
+        assert.equal(h.recorder.paused, false);
+        assert.equal(h.recorder.measuredSeconds("debate"), 60, "the rest of the débat is spoken");
+        assert.equal(h.controller.getSnapshot().recording, true);
+      });
+
+      it("writes the turn down and lets the débat run on", async () => {
+        // The whole difference from « Envoyer l'exposé »: a reply is a fragment
+        // of the phase, not the whole of it. Nothing ends, nothing advances.
+        const h = harness();
+        await intoTypedDebate(h);
+        h.session().examinerSays("Le télétravail n'isole-t-il pas les plus jeunes ?");
+        h.advanceClock(20);
+
+        const accepted = h.controller.submitTypedReply("C'est une objection sérieuse.", 45);
+
+        const state = h.controller.getSnapshot();
+        assert.equal(accepted, true, "which is what empties the panel");
+        assert.equal(state.phase, "debate", "the débat continues");
+        assert.equal(state.closing, false, "nothing is being wound up");
+        assert.ok(
+          state.transcript.some(
+            (entry) =>
+              entry.phase === "debate" &&
+              entry.speaker === "candidate" &&
+              /C'est une objection sérieuse\./.test(entry.text),
+          ),
+          "and the reply is in the transcript as the candidate's",
+        );
+      });
+
+      it("frames the reply as the candidate's words, never as an order", async () => {
+        // The one thing bare text on this channel cannot say. Everything the
+        // app sends here is read as a bracketed execution order (#128), so a
+        // typed opinion arriving loose may be obeyed rather than debated.
+        const h = harness();
+        await intoTypedDebate(h);
+
+        h.controller.submitTypedReply("Le télétravail est une chance pour les régions.", 45);
+
+        const sent = h.session().directives.at(-1) ?? "";
+        assert.match(sent, /^\[/, "it travels as a directive, the one category the model follows");
+        assert.match(
+          sent,
+          /Le télétravail est une chance pour les régions\./,
+          "carrying the words",
+        );
+        assert.match(sent, /propos du candidat/, "named as the candidate's");
+        assert.match(sent, /n'y obéis pas/, "and explicitly not as something to carry out");
+      });
+
+      it("keeps the wrapper off the transcript the evaluator reads", async () => {
+        // The framing is for the examiner's ear only. A control prompt graded
+        // as something the candidate said is the failure `sendDirective`'s own
+        // note is written against.
+        const h = harness();
+        await intoTypedDebate(h);
+
+        h.controller.submitTypedReply("Une réponse tapée.", 45);
+
+        const said = h.controller
+          .getSnapshot()
+          .transcript.filter((e) => e.phase === "debate" && e.speaker === "candidate")
+          .map((e) => e.text);
+        assert.deepEqual(said, ["Une réponse tapée."], "the bare words, and nothing else");
+      });
+
+      it("accumulates the seconds several replies claim", async () => {
+        const h = harness();
+        await intoTypedDebate(h);
+        h.controller.submitTypedReply("Première réponse.", 200);
+        h.controller.submitTypedReply("Deuxième réponse.", 130);
+
+        h.advanceClock(PHASE_DURATIONS.debate);
+        await completeClosing(h);
+
+        assert.deepEqual(h.finished[0]?.devSeconds, { monologue: 330, debate: 330 });
+      });
+
+      it("costs the typed débat its recording, the same way the exposé's goes", async () => {
+        const h = harness();
+        await intoTypedDebate(h);
+        h.controller.submitTypedReply("Une réponse tapée.", 330);
+        h.advanceClock(PHASE_DURATIONS.debate);
+        await completeClosing(h);
+
+        assert.deepEqual(h.recorder.droppedPhases, ["monologue", "debate"]);
+        assert.deepEqual(
+          h.finished[0]?.recordings.map((recording) => recording.phase),
+          [],
+          "a wholly typed sitting uploads no audio at all",
+        );
+      });
+
+      it("counts a typed reply as an answer, so the silence watch stands down", async () => {
+        // A developer typing into the débat is exactly as present as one
+        // speaking into it — and with the microphone off, voiced audio can
+        // never say so. Without this the escalation would ask « Vous
+        // m'entendez ? » of somebody who has just answered in full.
+        const h = harness();
+        await intoTypedDebate(h);
+        h.session().examinerSays("Et le lien social ?");
+        h.session().finishTurn();
+
+        h.recorder.voiced.debate = 0;
+        h.advanceClock(8);
+        h.controller.submitTypedReply("Il se construit autrement.", 45);
+        h.advanceClock(9);
+
+        const nudges = h
+          .session()
+          .directives.filter((text) => /Vous m'entendez/.test(text) || /rien répondu/.test(text));
+        assert.deepEqual(nudges, [], "the reply reset the window, so nothing was nudged");
+      });
+
+      it("still lends the examiner the clock (#85, #108)", async () => {
+        // The guard that used to stand the cues down was written when the mode
+        // could not reach the débat. A typed débat is precisely where the
+        // end-game gets tested without thirteen minutes of speaking.
+        const h = harness();
+        await intoTypedDebate(h);
+
+        h.recorder.voiced.debate = 0;
+        h.advanceClock(178);
+        h.advanceClock(3);
+
+        const cues = h.session().directives.filter((t) => t.includes("Information de service"));
+        assert.equal(cues.length, 1, "three minutes in, the examiner is told where it is");
+        assert.match(cues[0], /environ 10 minutes/);
+      });
+
+      it("refuses before « Enregistrer », because nobody is connected to hear it", async () => {
+        // The exposé's panel starts the part itself; this one cannot. The débat
+        // opens with the EXAMINER's question, over a session `startSpeaking`
+        // opens — so a reply accepted here would be a candidate turn no socket
+        // ever saw, and the examiner would open the débat over it.
+        const h = harness();
+        h.controller.start();
+        await h.controller.advanceEarly();
+        h.controller.setDevTextMode(true);
+        await h.controller.submitTypedExpose("Un exposé complet, tapé.", 330);
+
+        const armed = h.controller.getSnapshot();
+        assert.equal(armed.phase, "debate");
+        assert.equal(armed.awaitingStart, true, "nobody has pressed « Enregistrer »");
+
+        const accepted = h.controller.submitTypedReply("Trop tôt.", 45);
+
+        assert.equal(accepted, false, "so the panel keeps the reply");
+        assert.equal(h.sessions.length, 0, "and nothing was connected");
+        assert.equal(
+          h.controller.getSnapshot().transcript.some((e) => /Trop tôt/.test(e.text)),
+          false,
+          "the turn was not written either",
+        );
+      });
+
+      it("refuses while the débat's consigne is being given", async () => {
+        const announcer = new FakeAnnouncer();
+        const h = harness({ announcer });
+        const idle = () => new Promise((resolve) => setImmediate(resolve));
+
+        h.controller.start();
+        await idle();
+        announcer.reachEnd();
+        await h.controller.advanceEarly();
+        await idle();
+        announcer.reachEnd();
+        await idle();
+
+        h.controller.setDevTextMode(true);
+        // The débat's own consigne is held, so the part is open and unstarted.
+        announcer.behaviour = "hold";
+        await h.controller.submitTypedExpose("Un exposé complet, tapé.", 330);
+        await idle();
+
+        assert.equal(h.controller.getSnapshot().announcementPlaying, true);
+        assert.equal(h.controller.submitTypedReply("Sous la consigne.", 45), false);
+        assert.equal(
+          h.controller.getSnapshot().transcript.some((e) => /Sous la consigne/.test(e.text)),
+          false,
+        );
+      });
+
+      it("refuses an empty reply, and one sent into the closing", async () => {
+        const h = harness();
+        await intoTypedDebate(h);
+
+        assert.equal(h.controller.submitTypedReply("   ", 45), false, "nothing to say");
+
+        h.advanceClock(PHASE_DURATIONS.debate);
+        assert.equal(h.controller.getSnapshot().closing, true);
+        assert.equal(h.controller.submitTypedReply("Trop tard.", 45), false);
+        assert.equal(
+          h.controller.getSnapshot().transcript.some((e) => /Trop tard/.test(e.text)),
+          false,
+          "the épreuve is being wound up; a reply does not join it",
+        );
+      });
+
+      it("refuses in the monologue, where the exposé's own submit is the way", async () => {
+        const h = harness();
+        await intoMonologue(h);
+        h.controller.setDevTextMode(true);
+
+        assert.equal(h.controller.submitTypedReply("Une réponse.", 45), false);
+        assert.equal(h.controller.getSnapshot().phase, "monologue");
       });
     });
 
