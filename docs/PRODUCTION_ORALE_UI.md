@@ -125,11 +125,10 @@ same rule, so the reproduction keeps it.
 
 **Briefing — dropped as a screen (#55).** The reference opens on a sujet screen
 whose CTA starts the préparation, and this project reproduced it whole. It could
-not stay: a sitting here is created by « Commencer » in the sujets kiosk, under a
-launch dialog that says « La préparation démarre dès l'ouverture », so the
-briefing asked the candidate to commit twice — and it held the examiner's first
-spoken consigne (#37), which `ExamController.start()` fires, behind the second
-click. Its own « Passer », a top-bar neighbour of the primary CTA, went straight
+not stay: a sitting here is created by « Passer l'épreuve » in the sujets kiosk,
+whose footer warns « la préparation démarre dès l'ouverture », so the briefing
+asked the candidate to commit twice — and it held the examiner's first spoken
+consigne (#37), which `ExamController.start()` fires, behind the second click. Its own « Passer », a top-bar neighbour of the primary CTA, went straight
 past the préparation into the exposé. The épreuve now starts when the page does.
 
 What it carried was not dropped with it:
@@ -241,12 +240,16 @@ behind a hairline on the last card), « Sujets à la une », capability strip.
   score tag are both real.
 
 **Sujets.** Reproduced as the kiosk's shape: masthead, search, cards, detail
-sheet, launch dialog.
+sheet.
 
 - _Dropped:_ the facet chips and the `[month]` route. The reference facets by
   DELF partie because its catalogue mixes A1–B2 parts; here every sujet is the
   same B2 épreuve, so the chips would be one chip reading "6". The monthly route
   needs a publication date this catalogue does not carry.
+- _Dropped:_ the launch dialog (#131). Everything it showed — sujet, durée, « la
+  préparation démarre dès l'ouverture » — restated the sheet under it, so the
+  sheet's « Passer l'épreuve » now creates the sitting and navigates directly,
+  and the dialog's one warning moved onto the sheet's footer.
 
 **Tableau de bord.** Reproduced as the shape: stat tiles, a breakdown card with
 bars, a recent-sittings list, the empty state.

@@ -2,13 +2,7 @@
 
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 
-import {
-  ArrowRightIcon,
-  CheckCircleIcon,
-  ClockIcon,
-  CloseIcon,
-  SearchIcon,
-} from "@/app/_components/po/icons";
+import { ArrowRightIcon, ClockIcon, CloseIcon, SearchIcon } from "@/app/_components/po/icons";
 import { Kicker, Tag } from "@/app/_components/po/tag";
 import { ScoreTag } from "@/app/_components/score-band";
 import { StartExamButton } from "@/app/app/(hub)/_components/start-exam-button";
@@ -18,17 +12,17 @@ import type { OralTopic } from "@/lib/delf/topics";
 import type { HubSujet } from "@/lib/ui/epreuve-hub";
 
 /**
- * The sujets kiosk: the catalogue, a sujet's full sheet, and the confirmation
- * before the clock starts.
+ * The sujets kiosk: the catalogue and a sujet's full sheet, whose footer starts
+ * the épreuve.
  *
  * PORT NOTE: the reference's `components/sujets/*` — `SujetsMasthead`,
- * `SujetCard`, `SujetDetailSheet` and `SujetLaunchDialog` — reproduced as one
- * client component. The reference splits them across five files because the same
- * kiosk serves the écrite and the orale catalogues from a shared `SujetItem`;
- * with one catalogue there is nothing to share with, and the search state that
- * forced its client boundary is the only state here.
+ * `SujetCard` and `SujetDetailSheet` — reproduced as one client component. The
+ * reference splits them across five files because the same kiosk serves the
+ * écrite and the orale catalogues from a shared `SujetItem`; with one catalogue
+ * there is nothing to share with, and the search state that forced its client
+ * boundary is the only state here.
  *
- * Two of the reference's controls are deliberately NOT reproduced:
+ * Three of the reference's controls are deliberately NOT reproduced:
  *
  *  - **The facet chips.** It facets by DELF partie because its catalogue mixes
  *    A1–B2 parts and a candidate genuinely browses by "Monologue suivi" vs
@@ -38,12 +32,10 @@ import type { HubSujet } from "@/lib/ui/epreuve-hub";
  *  - **The `[month]` route.** Its sujets carry a publication month; these do not,
  *    and inventing one from the seed order would be a fabricated date on a page
  *    whose whole promise is that the sujets are current.
- *
- * The three-step flow IS reproduced, because it is the interaction pattern the
- * issue asks to preserve: card → sheet (read the whole sujet) → dialog (commit).
- * The reference's reason for the last step is worth keeping — the candidate has
- * already read the consigne in the sheet, so the dialog states only the thing
- * they cannot undo, which is that the clock starts.
+ *  - **`SujetLaunchDialog`** (#131). Its whole content — sujet, durée, « la
+ *    préparation démarre dès l'ouverture » — restated what the sheet under it
+ *    already showed, so the flow is card → sheet → « Passer l'épreuve », and the
+ *    dialog's one load-bearing warning moved onto the sheet's footer.
  */
 
 export interface KioskSujet extends HubSujet {
@@ -60,7 +52,6 @@ export function SujetsCatalogue({
 }) {
   const [query, setQuery] = useState("");
   const [openSlug, setOpenSlug] = useState<string | null>(initialSlug ?? null);
-  const [launching, setLaunching] = useState(false);
   const searchId = useId();
 
   const filtered = useMemo(() => {
@@ -160,16 +151,7 @@ export function SujetsCatalogue({
         </ul>
       )}
 
-      <SujetSheet
-        sujet={open}
-        onClose={() => {
-          setOpenSlug(null);
-          setLaunching(false);
-        }}
-        onLaunch={() => setLaunching(true)}
-      />
-
-      <LaunchDialog sujet={launching ? open : null} onClose={() => setLaunching(false)} />
+      <SujetSheet sujet={open} onClose={() => setOpenSlug(null)} />
     </main>
   );
 }
@@ -248,16 +230,13 @@ function SujetCard({
  * browsing, and losing the grid to read one sujet costs them the comparison they
  * came to make. Built on `<dialog>` for the focus trap and the Escape key, which
  * is the same reason `ExitDialog` uses it.
+ *
+ * The footer's « Passer l'épreuve » IS the launch (#131): it creates the exam
+ * row and navigates into the préparation, with no confirmation dialog between.
+ * The candidate is looking at the whole sujet — document, consigne, durée —
+ * which is everything the dialog used to restate.
  */
-function SujetSheet({
-  sujet,
-  onClose,
-  onLaunch,
-}: {
-  sujet: KioskSujet | null;
-  onClose: () => void;
-  onLaunch: () => void;
-}) {
+function SujetSheet({ sujet, onClose }: { sujet: KioskSujet | null; onClose: () => void }) {
   const ref = useRef<HTMLDialogElement>(null);
 
   useEffect(() => {
@@ -321,106 +300,14 @@ function SujetSheet({
             </div>
           </div>
 
-          <div className="border-border flex shrink-0 items-center justify-between gap-3 border-t px-6 py-4">
+          <div className="border-border flex shrink-0 flex-wrap items-center justify-between gap-3 border-t px-6 py-4">
+            {/* The dead dialog's one load-bearing line, folded into the durée it
+                sat next to: the clock starts the moment the button is pressed. */}
             <span className="text-muted-foreground inline-flex items-center gap-1.5 text-xs">
               <ClockIcon className="size-3.5 shrink-0" />
-              {PHASE_DURATIONS.preparation / 60} min de préparation avant de parler
+              La préparation ({PHASE_DURATIONS.preparation / 60} min) démarre dès l&apos;ouverture.
             </span>
-            <button
-              type="button"
-              onClick={onLaunch}
-              className="bg-primary text-primary-foreground inline-flex items-center gap-2 rounded-md px-4 py-2 text-sm font-semibold transition-opacity hover:opacity-90"
-            >
-              Passer l&apos;épreuve
-              <ArrowRightIcon className="size-3.5" />
-            </button>
-          </div>
-        </div>
-      )}
-    </dialog>
-  );
-}
-
-/**
- * The last step before the épreuve: what you are about to sit, and the one thing
- * about to happen that cannot be undone.
- *
- * Deliberately quiet, per the reference: the facts already shown, three
- * reminders, one button. Nothing new is introduced at the point of no return.
- */
-const LAUNCH_NOTES = [
-  "Prenez le temps de préparer vos arguments et vos exemples.",
-  "Parlez à voix haute : l'examinateur vous répond et vous conteste.",
-  "Vos deux prises de parole sont enregistrées, puis corrigées.",
-];
-
-function LaunchDialog({ sujet, onClose }: { sujet: KioskSujet | null; onClose: () => void }) {
-  const ref = useRef<HTMLDialogElement>(null);
-
-  useEffect(() => {
-    const dialog = ref.current;
-    if (!dialog) return;
-    if (sujet && !dialog.open) dialog.showModal();
-    if (!sujet && dialog.open) dialog.close();
-  }, [sujet]);
-
-  return (
-    <dialog
-      ref={ref}
-      onCancel={(event) => {
-        event.preventDefault();
-        onClose();
-      }}
-      aria-labelledby="launch-dialog-title"
-      className="bg-card text-foreground border-border sheet m-auto w-[min(29rem,92vw)] border p-0 backdrop:bg-black/50"
-    >
-      {sujet && (
-        <div className="space-y-4 p-6">
-          <div>
-            <Kicker>Monologue suivi et débat</Kicker>
-            <h2
-              id="launch-dialog-title"
-              className="mt-1 text-[1.0625rem] leading-snug font-semibold tracking-tight"
-            >
-              {sujet.title}
-            </h2>
-          </div>
-
-          <div className="border-border bg-muted/40 tabular rounded-md border px-3.5 py-2.5 text-xs font-medium">
-            {sujet.meta}
-          </div>
-
-          <ul className="flex flex-col gap-2">
-            {LAUNCH_NOTES.map((note) => (
-              <li
-                key={note}
-                className="text-muted-foreground flex items-start gap-2.5 text-[0.8125rem] leading-snug"
-              >
-                <CheckCircleIcon className="text-muted-foreground/60 mt-px size-4 shrink-0" />
-                {note}
-              </li>
-            ))}
-          </ul>
-
-          <div className="bg-border h-px" />
-
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            {/* The only irreversible thing on this screen, so the only thing
-                that gets to sit next to the button. */}
-            <span className="text-muted-foreground inline-flex items-center gap-1.5 text-[0.71875rem]">
-              <ClockIcon className="size-3.5 shrink-0" />
-              La préparation démarre dès l&apos;ouverture.
-            </span>
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={onClose}
-                className="text-muted-foreground hover:text-foreground rounded-md px-3 py-2 text-sm font-semibold transition-colors"
-              >
-                Annuler
-              </button>
-              <StartExamButton topicSlug={sujet.slug} topicTitle={sujet.title} label="Commencer" />
-            </div>
+            <StartExamButton topicSlug={sujet.slug} topicTitle={sujet.title} />
           </div>
         </div>
       )}
