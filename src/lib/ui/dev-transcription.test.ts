@@ -3,8 +3,6 @@ import { describe, it } from "node:test";
 
 import { DEBATE_FLOOR_SECONDS, MONOLOGUE_FLOOR_SECONDS } from "@/lib/delf/orale-rubric";
 import {
-  DEV_DEBATE_PANEL_COPY,
-  DEV_DEBATE_SUBMIT_COPY,
   DEV_PANEL_COPY,
   DEV_SUBMIT_COPY,
   MAX_DEV_SECONDS,
@@ -14,7 +12,6 @@ import {
   devSubmitDisabled,
   devSubmitState,
   estimateSpokenSeconds,
-  exampleDebateReply,
   exampleExpose,
   parseDurationInput,
   resolveDevSeconds,
@@ -191,56 +188,5 @@ describe("what « Envoyer l'exposé » can do right now (#53)", () => {
     assert.match(DEV_SUBMIT_COPY.consigne.note ?? "", /consigne/);
     assert.match(DEV_SUBMIT_COPY.closing.note ?? "", /conclut/);
     assert.equal(DEV_SUBMIT_COPY.ready.label, DEV_PANEL_COPY.submit);
-  });
-});
-
-describe("the débat's own panel (#142)", () => {
-  const state = (over: Partial<Parameters<typeof devSubmitState>[0]> = {}) =>
-    devSubmitState({
-      text: "Une réponse tapée.",
-      awaitingConsigne: false,
-      sending: false,
-      closing: false,
-      ...over,
-    });
-
-  it("promises one turn rather than a phase, which is the whole difference", () => {
-    // « Envoyer l'exposé » ends the monologue; this ends nothing. Copy that
-    // papered over that is how a developer ends a débat they meant to continue.
-    assert.equal(DEV_DEBATE_PANEL_COPY.submit, "Envoyer la réponse");
-    assert.match(DEV_DEBATE_PANEL_COPY.description, /le débat continue/);
-    assert.notEqual(DEV_DEBATE_PANEL_COPY.submit, DEV_PANEL_COPY.submit);
-  });
-
-  it("names the armed part, and the button that actually starts it", () => {
-    // The état the exposé's panel never reports: its submit starts the part
-    // itself. The débat's cannot — the part opens with the examiner's
-    // question, over a session « Enregistrer » is what opens.
-    assert.equal(state({ awaitingStart: true }), "awaitingStart");
-    assert.equal(devSubmitDisabled("awaitingStart"), true);
-    assert.match(DEV_DEBATE_SUBMIT_COPY.awaitingStart.note ?? "", /Enregistrer/);
-  });
-
-  it("lets the consigne outrank the armed state it overlaps", () => {
-    // Both are true while the examiner speaks the instruction, and the useful
-    // one is the one that says what is happening — « cliquez Enregistrer » is
-    // advice the start button itself still refuses to take.
-    assert.equal(state({ awaitingConsigne: true, awaitingStart: true }), "consigne");
-  });
-
-  it("keeps every state explained, on the phase where they are all reachable", () => {
-    assert.equal(DEV_DEBATE_SUBMIT_COPY.ready.note, null);
-    assert.equal(DEV_DEBATE_SUBMIT_COPY.empty.note, null);
-    for (const key of ["consigne", "closing", "awaitingStart"] as const) {
-      assert.notEqual(DEV_DEBATE_SUBMIT_COPY[key].note, null, `${key} says why it refuses`);
-    }
-  });
-
-  it("offers a sample that answers an objection nobody can predict", () => {
-    // The examiner improvises the question, so the sample cannot answer it.
-    // What it can be is the B2 move that fits any of them: concede, then hold.
-    const reply = exampleDebateReply();
-    assert.ok(countWords(reply) > 20, "long enough to be a graded turn");
-    assert.ok(countWords(reply) < countWords(exampleExpose("un sujet")) / 5, "and conversational");
   });
 });

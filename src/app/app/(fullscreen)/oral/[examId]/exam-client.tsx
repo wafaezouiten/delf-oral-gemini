@@ -27,6 +27,7 @@ import type { OralTopic } from "@/lib/delf/topics";
 import { AnnouncementControl } from "./_components/announcement-control";
 import { DEV_TOOLS_ENABLED } from "@/lib/dev-tools";
 import { DevTranscriptionPanel } from "./_components/dev-transcription-panel";
+import { DevExaminerPromptPanel } from "./_components/dev-examiner-prompt-panel";
 import { PreparationScreen } from "./_components/preparation-screen";
 import { PassationScreen } from "./_components/passation-screen";
 import { FinishedScreen } from "./_components/finished-screen";
@@ -76,6 +77,17 @@ export function ExamClient({
   const router = useRouter();
   const [notes, setNotes] = useState("");
   const [notesOpen, setNotesOpen] = useState(false);
+  /**
+   * DEVELOPMENT ONLY — whether the examiner-prompt editor is open (#148).
+   *
+   * Local state, unlike the transcription panel's, and the difference is the
+   * point: that toggle lives on the controller because opening it PAUSES THE
+   * MICROPHONE, so a second copy could disagree with the device. This one
+   * changes nothing about the épreuve by being open — the candidate keeps
+   * speaking and keeps being recorded — so there is nothing for the controller
+   * to arbitrate.
+   */
+  const [promptPanelOpen, setPromptPanelOpen] = useState(false);
   const [showExitDialog, setShowExitDialog] = useState(false);
   const [abandoning, setAbandoning] = useState(false);
   const [abandonFailed, setAbandonFailed] = useState(false);
@@ -703,37 +715,55 @@ export function ExamClient({
         devPanel={
           DEV_TOOLS_ENABLED ? (
             <div className="space-y-2">
-              {/* Both speaking parts (#142). One panel across the boundary, so
-                  a typed exposé arrives at a débat whose panel is already open
-                  and whose microphone is still off. */}
+              {/* Both speaking parts (#148). The examiner's instruction is
+                  what this edits, so it belongs wherever there is an examiner —
+                  and the two phases run genuinely different prompts, which is
+                  half of what makes the tool worth having. Keyed by phase so
+                  the editor reloads the instruction for the part on screen
+                  instead of carrying the monologue's draft into the débat. */}
               {(state.phase === "monologue" || state.phase === "debate") && (
-                <DevTranscriptionPanel
+                <DevExaminerPromptPanel
+                  key={state.phase}
                   phase={state.phase}
+                  topicSlug={topic.slug}
+                  active={promptPanelOpen}
+                  modified={state.examinerPromptModified}
+                  sessionOpen={state.examinerSessionOpen}
+                  onActiveChange={setPromptPanelOpen}
+                  // Store, then make it govern something: a system instruction
+                  // is fixed for a session's lifetime, so the restart is what
+                  // turns an edit into behaviour. A no-op when no session is
+                  // open, where the next connect picks the prompt up anyway.
+                  onApply={(prompt) => {
+                    controller.setExaminerPrompt(prompt);
+                    controller.restartExaminerSession();
+                  }}
+                  onReset={() => {
+                    controller.setExaminerPrompt(null);
+                    controller.restartExaminerSession();
+                  }}
+                />
+              )}
+
+              {/* The exposé and nowhere else. The débat is spoken, and the
+                  controller hands the microphone back when the monologue ends
+                  so it can be. */}
+              {state.phase === "monologue" && (
+                <DevTranscriptionPanel
                   subject={topic.title}
                   active={state.devTextMode}
                   onActiveChange={(on) => controller.setDevTextMode(on)}
-                  // The states in which the button cannot do what it says,
+                  // The two states in which the button cannot do what it says,
                   // handed over so the panel can say which one it is in rather
                   // than looking like it did nothing (#53).
                   awaitingConsigne={awaitingConsigne}
                   closing={state.closing}
-                  // The débat only: armed, there is no session to hear a reply,
-                  // and « Enregistrer » is the button that opens one. The
-                  // exposé's submit starts the part itself, so it never reports
-                  // this state.
-                  awaitingStart={state.phase === "debate" && state.awaitingStart}
                   // « Envoyer l'exposé » ends the monologue: the text is not a
                   // fragment of it, it is the whole thing — and it starts the
                   // part first if « Enregistrer » has not been pressed, which is
-                  // the flow this panel exists for. « Envoyer la réponse » is
-                  // one débat turn: the examiner answers and the débat runs on.
-                  // Both report whether the text counted; the panel keeps it
-                  // when it did not.
-                  onSubmit={(text, seconds) =>
-                    state.phase === "monologue"
-                      ? controller.submitTypedExpose(text, seconds)
-                      : controller.submitTypedReply(text, seconds)
-                  }
+                  // the flow this panel exists for. It answers whether the
+                  // exposé counted; the panel keeps the text when it did not.
+                  onSubmit={(text, seconds) => controller.submitTypedExpose(text, seconds)}
                 />
               )}
               {/* Drives the path a real GoAway takes, so the 13-minute

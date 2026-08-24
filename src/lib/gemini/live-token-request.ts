@@ -30,6 +30,7 @@ import type { ExamAccess } from "@/lib/auth/exam-access";
 import { EXAM_ACCESS_DENIALS } from "@/lib/auth/exam-access";
 import { findTopic } from "@/lib/delf/topics";
 import { LIVE_MODEL, isSelectableLiveModel } from "@/lib/gemini/constants";
+import { MAX_EXAMINER_PROMPT_LENGTH } from "@/lib/ui/dev-examiner-prompt";
 
 /** The two phases that open a Live session. `preparation` is silent by design. */
 export type LiveTokenPhase = "monologue" | "debate";
@@ -58,6 +59,16 @@ export interface LiveTokenRequest {
   requestedModel?: string;
   /** Present only on a reconnect. Its presence is what makes the connect a resume. */
   resumptionHandle?: string;
+  /**
+   * DEVELOPMENT ONLY — a replacement examiner system instruction (#148).
+   *
+   * Parsed here, but deliberately NOT honoured here: {@link gateLiveToken}
+   * drops it unless the caller says the development tooling is on. Validating
+   * and authorising in two steps is the same shape the subject and the model
+   * already have, and it is what lets the refusal be unit-tested without a
+   * request object.
+   */
+  requestedExaminerPrompt?: string;
 }
 
 export type LiveTokenParse =
@@ -99,6 +110,23 @@ export function parseLiveTokenRequest(body: unknown): LiveTokenParse {
     return { ok: false, status: 400, error: "Modèle inconnu" };
   }
 
+  // Length-bounded rather than inspected. There is nothing to validate about
+  // the CONTENT of a system instruction — replacing it wholesale is the
+  // feature — so the only questions are whether it is text and whether it is
+  // small enough to pin into a token. What keeps this safe is not this check
+  // but the gate below, which refuses it outright off a development build.
+  const prompt = input.examinerPrompt;
+  if (
+    prompt !== undefined &&
+    (typeof prompt !== "string" ||
+      prompt.trim().length === 0 ||
+      prompt.length > MAX_EXAMINER_PROMPT_LENGTH)
+  ) {
+    return { ok: false, status: 400, error: "Prompt examinateur invalide" };
+  }
+  const requestedExaminerPrompt =
+    typeof prompt === "string" && prompt.trim().length > 0 ? prompt : undefined;
+
   const handle = input.resumptionHandle;
   const resumptionHandle =
     typeof handle === "string" && handle.length > 0 && handle.length <= MAX_RESUMPTION_HANDLE_LENGTH
@@ -107,7 +135,14 @@ export function parseLiveTokenRequest(body: unknown): LiveTokenParse {
 
   return {
     ok: true,
-    request: { phase, examId, requestedTopicSlug, requestedModel: model, resumptionHandle },
+    request: {
+      phase,
+      examId,
+      requestedTopicSlug,
+      requestedModel: model,
+      resumptionHandle,
+      requestedExaminerPrompt,
+    },
   };
 }
 
@@ -134,6 +169,12 @@ export type LiveTokenGate =
        * dies with 1011 mid-épreuve.
        */
       modelSource: "sitting" | "request" | "default";
+      /**
+       * DEVELOPMENT ONLY — the system instruction to pin instead of the built
+       * one (#148). Undefined on every production mint, because the gate below
+       * only ever sets it when told the development tooling is enabled.
+       */
+      examinerPrompt?: string;
     };
 
 export interface LiveTokenGateInput {
@@ -149,6 +190,17 @@ export interface LiveTokenGateInput {
   requestedTopicSlug: string;
   /** The examiner the browser asked for, if any. Already allow-listed. */
   requestedModel?: string;
+  /** DEVELOPMENT ONLY — the replacement instruction the browser sent (#148). */
+  requestedExaminerPrompt?: string;
+  /**
+   * Whether this build carries the development tooling — `DEV_TOOLS_ENABLED`,
+   * read on the SERVER by the route and passed in so this stays pure.
+   *
+   * Defaults to false, which is the whole safety property: a caller that
+   * forgets to pass it gets the production behaviour, and the examiner prompt
+   * a browser sent is discarded without comment. Nothing below can widen it.
+   */
+  devToolsEnabled?: boolean;
 }
 
 /**
@@ -162,11 +214,25 @@ export function gateLiveToken({
   access,
   requestedTopicSlug,
   requestedModel,
+  requestedExaminerPrompt,
+  devToolsEnabled = false,
 }: LiveTokenGateInput): LiveTokenGate {
   if (access.status === "denied") {
     const { status, error } = EXAM_ACCESS_DENIALS[access.reason];
     return { decision: "deny", status, error };
   }
+
+  /**
+   * The one place a client-supplied examiner prompt is allowed in (#148).
+   *
+   * A single `&&`, and it is the entire authorisation: off a development build
+   * the field is dropped, so the instruction the token pins is the one this
+   * repository built. Not a 400 — a production server that starts refusing
+   * requests because a browser sent a field it should not have is a worse
+   * failure than one that ignores it, and there is no legitimate client that
+   * sends this outside development anyway.
+   */
+  const examinerPrompt = devToolsEnabled ? requestedExaminerPrompt : undefined;
 
   /**
    * The examiner, decided by the same rule as the subject: the row wins
@@ -205,6 +271,7 @@ export function gateLiveToken({
       decision: "mint",
       topicSlug: access.topicSlug,
       source: "sitting",
+      examinerPrompt,
       ...examinerModel(),
     };
   }
@@ -213,5 +280,11 @@ export function gateLiveToken({
   // id), the lookup failed, or the row exists but its subject could not be
   // joined. None of those is a reason to end an exam in progress, and none of
   // them lets the caller reach another candidate's sitting.
-  return { decision: "mint", topicSlug: requestedTopicSlug, source: "request", ...examinerModel() };
+  return {
+    decision: "mint",
+    topicSlug: requestedTopicSlug,
+    source: "request",
+    examinerPrompt,
+    ...examinerModel(),
+  };
 }

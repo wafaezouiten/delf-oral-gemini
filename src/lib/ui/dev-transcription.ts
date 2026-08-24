@@ -87,14 +87,12 @@ export function describeDraft(text: string, rawDuration: string): string {
 }
 
 /**
- * The panel's words, per phase (#142).
+ * The panel's words.
  *
- * Two tables rather than one, because the button means two different things.
- * On the exposé, sending IS finishing: the text is the whole monologue and the
- * press leaves for the débat. On the débat, sending is one turn of a
- * conversation that keeps going — the examiner answers and the field waits for
- * the next reply. Copy that papered over that difference is how a developer
- * ends a débat they meant to continue.
+ * The exposé only, and no per-phase variant: the panel is reachable on the
+ * monologue and nowhere else, so the débat is spoken. That is why the controller
+ * hands the microphone back when the monologue ends — a mode that outlived the
+ * only screen offering it would leave the débat neither typeable nor recordable.
  */
 export const DEV_PANEL_COPY = {
   title: "Transcription directe",
@@ -103,15 +101,6 @@ export const DEV_PANEL_COPY = {
     "Remplace l'enregistrement et la transcription de l'exposé. Le débat et la correction se déroulent normalement.",
   placeholder: "Collez ici la transcription de l'exposé.",
   submit: "Envoyer l'exposé",
-} as const;
-
-export const DEV_DEBATE_PANEL_COPY = {
-  title: "Réponse au débat",
-  /** One turn, not the phase: the débat continues around the panel. */
-  description:
-    "Remplace une réponse orale du candidat. L'examinateur entend le texte et y répond ; le débat continue.",
-  placeholder: "Écrivez la réponse du candidat à la question de l'examinateur.",
-  submit: "Envoyer la réponse",
 } as const;
 
 /**
@@ -132,16 +121,9 @@ export const DEV_DEBATE_PANEL_COPY = {
  *  - `closing` — the monologue is being ended the spoken way, by the mic button
  *    or by the clock, and the examiner has been asked for its closing sentence.
  *    A typed exposé never produces this state: it leaves for the débat at once.
- *  - `awaitingStart` — the débat is armed and « Enregistrer » has not been
- *    pressed (#142). The exposé never reports this: its panel starts the part
- *    itself, because sending the exposé and starting the part are one act. The
- *    débat's cannot — the part opens with the EXAMINER's question, asked over a
- *    socket that « Enregistrer » is what connects — so the panel names the
- *    button that actually starts it.
  *  - `ready` — press it.
  */
-export type DevSubmitState =
-  "ready" | "empty" | "consigne" | "sending" | "closing" | "awaitingStart";
+export type DevSubmitState = "ready" | "empty" | "consigne" | "sending" | "closing";
 
 export function devSubmitState(input: {
   text: string;
@@ -151,19 +133,13 @@ export function devSubmitState(input: {
   sending: boolean;
   /** The closing handshake is under way, whoever started it. */
   closing: boolean;
-  /** The part is armed and waiting for « Enregistrer » (#142, débat only). */
-  awaitingStart?: boolean;
 }): DevSubmitState {
   // `sending` outranks `closing`: a press in flight is this panel's own, and a
   // button that switched mid-press to reporting somebody else's ending would be
   // answering a question nobody asked. It resolves a tick later either way.
   if (input.sending) return "sending";
   if (input.closing) return "closing";
-  // The consigne outranks the armed state it overlaps: while the examiner is
-  // speaking the instruction, that is the thing happening, and « cliquez
-  // Enregistrer » is advice the start button itself still refuses to take.
   if (input.awaitingConsigne) return "consigne";
-  if (input.awaitingStart) return "awaitingStart";
   if (!input.text.trim()) return "empty";
   return "ready";
 }
@@ -186,35 +162,6 @@ export const DEV_SUBMIT_COPY: Record<DevSubmitState, { label: string; note: stri
   closing: {
     label: DEV_PANEL_COPY.submit,
     note: "L'examinateur conclut la partie. Trop tard pour envoyer un exposé.",
-  },
-  // Unreachable from the exposé's panel, which starts the part itself — kept
-  // honest rather than blank in case a refactor ever routes it here, because a
-  // disabled button with no reason is #53's failure repeated.
-  awaitingStart: {
-    label: DEV_PANEL_COPY.submit,
-    note: "La partie n'a pas commencé. Cliquez « Enregistrer ».",
-  },
-};
-
-/** The débat's table (#142). Same states, the conversation's words. */
-export const DEV_DEBATE_SUBMIT_COPY: Record<
-  DevSubmitState,
-  { label: string; note: string | null }
-> = {
-  ready: { label: DEV_DEBATE_PANEL_COPY.submit, note: null },
-  empty: { label: DEV_DEBATE_PANEL_COPY.submit, note: null },
-  consigne: {
-    label: DEV_DEBATE_PANEL_COPY.submit,
-    note: "L'examinateur donne la consigne. Le débat s'ouvrira ensuite avec « Enregistrer ».",
-  },
-  sending: { label: "Envoi…", note: "La réponse part vers l'examinateur." },
-  closing: {
-    label: DEV_DEBATE_PANEL_COPY.submit,
-    note: "L'examinateur conclut l'épreuve. Trop tard pour répondre.",
-  },
-  awaitingStart: {
-    label: DEV_DEBATE_PANEL_COPY.submit,
-    note: "Le débat n'a pas commencé. Cliquez « Enregistrer » : l'examinateur posera sa première question.",
   },
 };
 
@@ -258,20 +205,4 @@ export function exampleExpose(subject: string): string {
     "",
     "En conclusion, je dirais que l'évolution décrite est souhaitable à condition d'être sérieusement accompagnée. Elle ne vaut que si elle demeure un choix véritable et non une norme déguisée, et si l'on se donne les moyens concrets d'en corriger les effets sur celles et ceux qu'elle fragilise. Ce n'est pas l'évolution en elle-même qu'il faut juger, mais la manière dont nous décidons de l'encadrer.",
   ].join("\n");
-}
-
-/**
- * A sample débat reply, for the same button on the other phase (#142).
- *
- * Unlike the exposé's sample it cannot answer the question actually asked —
- * the examiner improvises it — so it is the B2 move that fits ANY objection:
- * concede the point's strength, then hold the position with a reason. Short on
- * purpose: a débat turn is conversational, and the duration a typed sitting
- * needs is claimed through the field, not padded into the text.
- */
-export function exampleDebateReply(): string {
-  return [
-    "C'est une objection sérieuse, et je reconnais volontiers que ma position ne règle pas tout.",
-    "Mais je crois qu'elle reste la plus défendable : les inconvénients que vous soulevez tiennent moins au principe lui-même qu'à la manière dont on le met en œuvre, et c'est précisément pour cela que je plaide pour un encadrement négocié plutôt que pour un rejet en bloc.",
-  ].join(" ");
 }

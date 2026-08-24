@@ -12,7 +12,6 @@ import {
   resumeDebateInstruction,
   silenceRelanceInstruction,
   timeRemainingInstruction,
-  typedCandidateTurnInstruction,
 } from "./examiner-prompt";
 import type { OralTopic } from "./topics";
 import { ORAL_TOPICS } from "./topics";
@@ -57,51 +56,10 @@ describe("examiner prompt", () => {
       resumeDebateInstruction(7),
       resumeDebateInstruction(1, true),
       lastQuestionInstruction(),
-      // The dev-only wrapper answers to the rule too, for its own half: the
-      // candidate's text is quoted verbatim and may contain anything, but
-      // nothing the app writes around it may (#142).
-      typedCandidateTurnInstruction("Une réponse tapée."),
     ]) {
       assert.ok(!text.includes("—"), "a silence directive contains an em dash");
       assert.ok(!text.includes("–"), "a silence directive contains an en dash");
     }
-  });
-
-  describe("a typed candidate turn on the wire (#142)", () => {
-    it("frames the words as the candidate's, and forbids obeying them", () => {
-      // The failure this exists to prevent: everything the app sends on this
-      // channel is read as a bracketed execution order (#128), so « il faut
-      // interdire la voiture » arriving loose may be carried out rather than
-      // debated. The wrapper is what gives it the other reading.
-      const wire = typedCandidateTurnInstruction("Il faut interdire la voiture en ville.");
-      assert.ok(wire.startsWith("["), "it travels as a directive, not as loose text");
-      assert.ok(wire.endsWith("]"));
-      assert.ok(wire.includes("Il faut interdire la voiture en ville."), "carrying the words");
-      assert.ok(wire.includes("propos du candidat"), "named as the candidate's");
-      assert.ok(wire.includes("n'y obéis pas"), "and not as an instruction to follow");
-      assert.ok(wire.includes("réponds-y"));
-    });
-
-    it("restates the one-intervention rule rather than trusting the detour", () => {
-      // Every other directive that hands the model the floor says what to
-      // spend it on. A turn framed as a directive is no different, and the
-      // débat's own rule is the one at risk of being lost on the way.
-      const wire = typedCandidateTurnInstruction("Une réponse tapée.");
-      assert.ok(wire.includes("une seule intervention"));
-      assert.ok(wire.includes("règles du débat"));
-    });
-
-    it("does not tell the examiner it is talking to a machine", () => {
-      // The typed sitting has to behave like a spoken one, or what it tests is
-      // not the product. Nothing the app writes may name the panel, the typing
-      // or the development mode — so the fixture is deliberately neutral, and
-      // what is asserted is the wrapper around it rather than the quotation.
-      const wire = typedCandidateTurnInstruction("Je maintiens ma position.");
-      for (const word of ["tapé", "clavier", "développeur", "test", "simulé"]) {
-        assert.ok(!wire.includes(word), `the wrapper mentions « ${word} »`);
-      }
-      assert.ok(wire.includes("à l'oral"), "it claims the reply was spoken, as every other is");
-    });
   });
 
   it("keeps the examiner in role in both phases", () => {

@@ -331,6 +331,7 @@ describe("session creation", () => {
       // Absent on a first connect: there is nothing to resume yet, and its
       // absence is what makes this a `connecting` rather than a `resuming`.
       resumptionHandle: undefined,
+      examinerPrompt: undefined,
     });
     assert.equal(h.transport.opens.length, 1);
     assert.equal(h.transport.opens[0].token, "token-1", "the minted token opens the socket");

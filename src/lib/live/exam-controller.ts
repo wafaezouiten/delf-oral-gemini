@@ -53,7 +53,6 @@ import {
   resumeDebateInstruction,
   silenceRelanceInstruction,
   timeRemainingInstruction,
-  typedCandidateTurnInstruction,
 } from "@/lib/delf/examiner-prompt";
 import type { OralTopic } from "@/lib/delf/topics";
 import {
@@ -236,6 +235,29 @@ export interface ExamState {
    */
   devTextMode: boolean;
   /**
+   * DEVELOPMENT ONLY — the examiner is running under an edited system
+   * instruction (#148).
+   *
+   * Always `false` where `DEV_TOOLS_ENABLED` is false, because
+   * `setExaminerPrompt` refuses there. Rendered so the panel's badge reads the
+   * fact off the controller instead of keeping a second copy — the same rule
+   * `devTextMode` follows, and for the same reason: a panel that believed it
+   * had applied a prompt the controller had discarded would send a developer
+   * hunting for a behaviour change that was never installed.
+   */
+  examinerPromptModified: boolean;
+  /**
+   * DEVELOPMENT ONLY — a live examiner session exists right now (#148).
+   *
+   * Read off `this.session` rather than inferred from the connection state,
+   * because the two disagree exactly where it matters: a session that is
+   * connecting is one an applied prompt WILL restart, and a `connection` of
+   * "idle" would have the panel promise the opposite. The prompt panel uses it
+   * to say whether applying restarts the examiner or merely waits for the next
+   * one, which is the only claim it makes that it could get wrong.
+   */
+  examinerSessionOpen: boolean;
+  /**
    * The examiner's consigne for the phase now open, or null before the first one
    * (#37).
    *
@@ -340,6 +362,11 @@ export interface ExamControllerDeps {
      *  argument rather than a closure so the factory cannot capture a choice
      *  that had not been made when the controller was built. */
     examinerModel: string | undefined,
+    /** DEVELOPMENT ONLY — the examiner prompt this session should run under
+     *  (#148), or undefined for the instruction the repository builds. An
+     *  argument for the same reason as the model above: it is edited during
+     *  the épreuve, so a factory that captured it would pin the wrong one. */
+    examinerPrompt: string | undefined,
   ) => LiveSessionLike;
   createRecorder: (callbacks: {
     onChunk: (base64: string) => void;
@@ -646,6 +673,17 @@ export class ExamController {
    * it returns before assigning there.
    */
   private devTextMode = false;
+
+  /**
+   * DEVELOPMENT ONLY — the system instruction the next session opens under
+   * (#148), or undefined for the one this repository builds.
+   *
+   * Undefined on every real sitting and in every production build:
+   * `setExaminerPrompt` is the only writer and it returns before assigning
+   * there. Read at `openSession` time rather than captured, so a prompt applied
+   * mid-débat governs the session the restart opens.
+   */
+  private examinerPrompt: string | undefined;
 
   /**
    * DEVELOPMENT ONLY — the seconds a typed phase claims to have lasted (#36).
@@ -1003,6 +1041,71 @@ export class ExamController {
     this.examinerModel = model ?? undefined;
   }
 
+  /**
+   * DEVELOPMENT ONLY — run the examiner under a different system instruction
+   * (#148).
+   *
+   * **Why this cannot touch the session that is open.** A Gemini Live session's
+   * system instruction is fixed for its lifetime: it is pinned into the
+   * ephemeral token before the socket exists (`/api/live-token`), and there is
+   * no message that replaces it afterwards. So a new prompt can only ever
+   * govern a NEW session, and this method stores it for the next one rather
+   * than pretending the current examiner has changed its mind.
+   *
+   * {@link restartExaminerSession} is the other half — it makes "the next one"
+   * be now — and the panel calls both, because a developer who has just edited
+   * a prompt wants to hear it on the next question rather than after the next
+   * phase boundary.
+   *
+   * `null` restores the built instruction. Refused outright where the tooling
+   * is off: a second independent check of the same flag the panel's render and
+   * the server's own gate make, because either could be refactored away and
+   * this is the one that decides what a session runs under.
+   */
+  setExaminerPrompt(prompt: string | null): void {
+    if (!DEV_TOOLS_ENABLED) return;
+    const next = prompt?.trim() ? prompt : undefined;
+    if (this.examinerPrompt === next) return;
+    this.examinerPrompt = next;
+    this.log("dev-examiner-prompt", next ? `${next.length} chars` : "back to the default");
+    this.emit();
+  }
+
+  /**
+   * DEVELOPMENT ONLY — close the examiner's session and open a fresh one
+   * (#148).
+   *
+   * What makes an edited prompt audible without waiting for the next phase.
+   * Deliberately NOT `forceReconnect()`, which is a *resume*: it carries the
+   * resumption handle, so the server restores the session that already exists
+   * — the one minted under the old instruction. Closing and opening builds a
+   * new `SessionManager` with no handle at all, which is the only path that
+   * mints a token under the prompt just applied.
+   *
+   * What it costs is the examiner's memory of the exchange so far, and that is
+   * not hidden: the panel says so above the button. For a tool whose whole
+   * purpose is watching one instruction behave differently from another, an
+   * examiner that starts the argument again is the honest trade, and the
+   * transcript on screen is untouched either way.
+   *
+   * A no-op unless a speaking phase has actually begun — there is no session
+   * during the préparation, and an armed part has not opened one yet, so its
+   * first connect will pick the new prompt up on its own.
+   */
+  restartExaminerSession(): void {
+    if (!DEV_TOOLS_ENABLED) return;
+    if (this.phase !== "monologue" && this.phase !== "debate") return;
+    if (!this.session) return;
+    this.log("dev-examiner-session-restart", this.phase);
+    this.closeSession();
+    // Detached, exactly as every other session open in this class is: this is
+    // called from a click handler and the connection reports itself through
+    // `onStateChange`. A failure here is a failed connect like any other.
+    void this.openSession(this.phase).catch((error) =>
+      this.log("dev-examiner-session-restart-failed", String(error)),
+    );
+  }
+
   private buildSnapshot(): ExamState {
     return {
       phase: this.phase,
@@ -1054,6 +1157,8 @@ export class ExamController {
       monologueSilent: this.isMonologueSilent(),
       monologueHeld: this.monologueHeld,
       devTextMode: this.devTextMode,
+      examinerPromptModified: this.examinerPrompt !== undefined,
+      examinerSessionOpen: this.session !== null,
       announcement: this.announcementId,
       // Armed and waiting for the click — as distinct from waiting for the
       // consigne to finish, which is the consigne control's business.
@@ -2002,16 +2107,6 @@ export class ExamController {
    * that has not finished. The speaker still works, and a candidate reading a
    * microphone error is better off in an épreuve that is still running.
    *
-   * The development text mode does not stand it down either (#142), and used
-   * to, back when the mode could not survive into the débat and the guard was
-   * unreachable. A typed débat is precisely where the end-game — the grid, the
-   * last question, the call of time — gets tested without thirteen minutes of
-   * speaking, so the cues run; with the microphone paused the floor simply
-   * measures quiet, which makes them punctual rather than wrong. What a typed
-   * turn cannot do is hold a cue back the way a spoken answer does — the floor
-   * cannot hear typing — so a cue may land while the developer is mid-reply,
-   * which is a real candidate's mid-pause and costs a test sitting nothing.
-   *
    * Returns whether it spoke, so `tick()` can keep the silence relance from
    * speaking on the same tick.
    */
@@ -2021,7 +2116,7 @@ export class ExamController {
     // Before every guard below, because a quiet clock only means anything if it
     // has been kept during the noise as well.
     const quiet = this.floorIsQuiet(now);
-    if (this.closing) return false;
+    if (this.closing || this.devTextMode) return false;
     if (this.connection !== "connected") return false;
 
     const remaining = remainingSeconds("debate", this.elapsed);
@@ -2368,14 +2463,6 @@ export class ExamController {
    * through `sendDirective` so the conversation stays coherent — a débat where
    * the examiner never heard the exposé is not a useful thing to test against.
    *
-   * **What the wire carries depends on the phase (#142).** In the monologue the
-   * text goes out bare, which in practice means nowhere: a typed exposé never
-   * opens a session, and the débat learns it from the seeded history. In the
-   * débat there IS a live socket, and bare text on it has no defined reading —
-   * see {@link typedCandidateTurnInstruction} for why the typed turn travels
-   * framed as a bracketed directive there, and why the transcript still gets
-   * the bare text.
-   *
    * Three things it deliberately does NOT do, because each would make what it
    * produces a lie about a real sitting:
    *
@@ -2411,9 +2498,8 @@ export class ExamController {
 
     this.addFragment("candidate", trimmed);
     // The examiner has to hear it too, or the débat argues with silence.
-    const wire = this.phase === "debate" ? typedCandidateTurnInstruction(trimmed) : trimmed;
     try {
-      this.session?.sendDirective(wire);
+      this.session?.sendDirective(trimmed);
     } catch (error) {
       this.log("dev-inject-directive-failed", String(error));
     }
@@ -2491,49 +2577,6 @@ export class ExamController {
     // the exposé had counted (#65). The steps in question are guarded now, and
     // `advanceDetached` reports anything else that fails rather than dropping it.
     this.advanceDetached();
-    return true;
-  }
-
-  /**
-   * DEVELOPMENT ONLY — deliver one typed turn of the débat (#142).
-   *
-   * What « Envoyer la réponse » means, and how deliberately it differs from
-   * {@link submitTypedExpose}: a débat reply is a fragment of the phase, not
-   * the whole of it. Nothing ends, nothing advances, the clock keeps running —
-   * the examiner hears the reply (framed for the wire, see
-   * {@link injectCandidateSpeech}), answers it aloud, and the developer types
-   * again. Several sends accumulate their claimed seconds the way several
-   * answers would.
-   *
-   * The refusals are the débat's own shape:
-   *
-   *  - **Not before « Enregistrer ».** The exposé's panel starts the part
-   *    itself, because sending the exposé and starting the part are the same
-   *    act. Here they are not: the débat opens with the EXAMINER's question,
-   *    and the session that asks it is opened by `startSpeaking` — a reply
-   *    accepted while the phase is armed would write a candidate turn into a
-   *    transcript no socket has seen, and the examiner would open the débat
-   *    over it as if it had never been said. So an armed débat refuses, and
-   *    the panel says which button actually starts the part.
-   *  - **Not under the consigne.** The same refusal every input makes while
-   *    the examiner is speaking the instruction (#37).
-   *  - **Not while closing.** The examiner has been asked for its last
-   *    sentence; a reply now would land behind an épreuve that is ending.
-   *
-   * @returns Whether the reply counted as a débat turn. `false` means nothing
-   *   happened at all, and the caller still holds the only copy of the text —
-   *   the same contract as {@link submitTypedExpose}, because the same panel
-   *   reads it to decide whether to clear the field.
-   */
-  submitTypedReply(text: string, seconds = 0): boolean {
-    if (!DEV_TOOLS_ENABLED) return false;
-    if (this.phase !== "debate") return false;
-    if (!text.trim()) return false;
-    if (this.closing) return false;
-    if (this.phaseStart === null) return false;
-    if (this.announcementPlaying) return false;
-
-    this.injectCandidateSpeech(text, seconds);
     return true;
   }
 
@@ -2797,14 +2840,14 @@ export class ExamController {
       }
     }
 
-    // DEVELOPMENT ONLY — the mode used to be forced off here, because the
-    // panel lived on the exposé and nowhere else (#36) and a mode that outlived
-    // the only screen offering it left the débat neither typeable nor
-    // recordable. The débat has its own panel now (#142), so the toggle is the
-    // developer's across the boundary: a typed exposé arrives at a débat whose
-    // panel is already open and whose microphone is still off, which is the
-    // flow the panel exists for — and closing it is what hands the microphone
-    // back, exactly as it is mid-phase.
+    // DEVELOPMENT ONLY — the transcription panel lives on the exposé and nowhere
+    // else (#36), so leaving the monologue is what gives the microphone back.
+    // Without this the mode would outlive the only screen that can use it: the
+    // débat would be neither typeable nor recordable, and it would arrive at the
+    // correction with an empty transcript and zero seconds.
+    if (this.devTextMode && current === "monologue") {
+      this.tolerate("dev-text-mode-off", () => this.setDevTextMode(false));
+    }
 
     this.phase = target;
     // Null, not `now()`: the phase is open but its clock has not started. The
@@ -2996,6 +3039,7 @@ export class ExamController {
       callbacks,
       history,
       this.examinerModel,
+      this.examinerPrompt,
     );
     this.session = session;
     await session.connect();
