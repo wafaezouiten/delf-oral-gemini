@@ -1,7 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useState, useSyncExternalStore } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type CSSProperties,
+} from "react";
 
 import { Notice } from "@/app/_components/notice";
 import { RecordingPlayer } from "@/app/_components/recording-player";
@@ -22,6 +29,15 @@ import {
   CORRECTION_TRANSCRIPT_COPY,
   correctionTranscriptView,
 } from "@/lib/ui/correction-transcript";
+import {
+  EVALUATION_MIN_PX,
+  RAIL_CONTENT_MAX_PX,
+  RAIL_DEFAULT_PX,
+  clampRailPx,
+  railMaxPx,
+  railPxFromPointer,
+  steppedRailPx,
+} from "@/lib/ui/transcript-rail";
 import { speakerLabel, turnKey } from "@/lib/ui/debate-conversation";
 import { COMPETENCY_FLOOR, COMPETENCY_MAX } from "@/lib/delf/constants";
 import {
@@ -224,7 +240,48 @@ export function ResultsClient({
   const stashed = useSyncExternalStore(subscribe, getSnapshot, () => undefined);
   const [openKey, setOpenKey] = useState<OralCriterion | null>(null);
 
+  /**
+   * How wide the transcript rail is pulled (#141), in the pixels the pointer
+   * speaks. State rather than a ref because the grid template renders from it;
+   * component state rather than storage because a pulled-open rail is a
+   * reading posture, not a setting — the next correction opens at the default
+   * like this one did. The arithmetic — what a pointer means, where the pull
+   * stops — is `lib/ui/transcript-rail.ts`, where it is tested.
+   */
+  const [railPx, setRailPx] = useState(RAIL_DEFAULT_PX);
+  /** The widest the pull can actually reach in the CURRENT body — kept honest
+   *  by the observer below, so the separator's announced range is the range
+   *  the keyboard's End really takes it to. */
+  const [railMax, setRailMax] = useState(RAIL_CONTENT_MAX_PX);
+  const bodyRef = useRef<HTMLDivElement | null>(null);
+  /** The width mid-drag, written straight to the DOM (see `pullRail`) and
+   *  committed to state on the gesture's end. Null between gestures. */
+  const draggedPx = useRef<number | null>(null);
+
   const result = initial ?? stashed;
+  const hasResult = result !== null && result !== undefined;
+
+  /**
+   * The clamps re-run when the WINDOW moves, not only when the handle does
+   * (#144's review). A rail pulled to 720 px on a wide screen and then
+   * resized under it kept its 720: `railPx` was only ever clamped at
+   * interaction time, so the evaluation — the pane with no CSS floor of its
+   * own — silently gave up the minimum the arithmetic promises. The observer
+   * keeps the stored width valid against the body it actually sits in, and
+   * refreshes the achievable maximum for the same reason.
+   */
+  useEffect(() => {
+    const body = bodyRef.current;
+    if (!body || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(() => {
+      const width = body.getBoundingClientRect().width;
+      if (width === 0) return;
+      setRailMax(railMaxPx(width));
+      setRailPx((current) => clampRailPx(current, width));
+    });
+    observer.observe(body);
+    return () => observer.disconnect();
+  }, [hasResult]);
 
   if (result === null) {
     return (
@@ -287,6 +344,36 @@ export function ResultsClient({
     ? "La phonologie n'a pas pu être évaluée de façon fiable sur cette production."
     : undefined;
 
+  /**
+   * The pull itself (#141): a pointer position, read as a rail width against
+   * the body's own rectangle — not the viewport's, since the two differ by
+   * whatever chrome the shell puts around the page.
+   *
+   * Written straight to the grid's CSS variable rather than through state,
+   * because a per-pixel `setRailPx` re-rendered the entire correction — every
+   * turn of the transcript, all five criterion rows — for a style only the
+   * grid reads, and a long transcript made the drag visibly stutter (#144's
+   * review). State catches up at the gesture's end (`commitRail`), which is
+   * also all the separator's `aria-valuenow` needs: mid-drag values are as
+   * transient to a screen reader as they are to the layout.
+   */
+  const pullRail = (clientX: number) => {
+    const body = bodyRef.current;
+    if (!body) return;
+    const rect = body.getBoundingClientRect();
+    const px = railPxFromPointer(clientX, rect.right, rect.width);
+    body.style.setProperty("--rail-w", `${px}px`);
+    draggedPx.current = px;
+  };
+
+  /** The gesture is over — pointer up, or capture lost to a cancel — so the
+   *  width the drag reached becomes the width the component knows. */
+  const commitRail = () => {
+    if (draggedPx.current === null) return;
+    setRailPx(draggedPx.current);
+    draggedPx.current = null;
+  };
+
   // `print:*` on all four of this page's scroll containers — the shell, the
   // grid, the transcript column and the rail. On screen the correction is a
   // fixed-height, independently-scrolling pair of columns, and a scroll
@@ -334,8 +421,26 @@ export function ResultsClient({
         </div>
       </header>
 
-      {/* Split body: the evaluation marks, the transcript stands by (#136). */}
-      <div className="grid min-h-0 flex-1 grid-cols-1 overflow-y-auto lg:grid-cols-[minmax(0,1fr)_26.25rem] lg:overflow-hidden print:overflow-visible">
+      {/* Split body: the evaluation marks, the transcript stands by (#136).
+          The rail's column is a CSS variable because the candidate can pull it
+          wider (#141); the middle `auto` track is the handle, which only
+          exists at `lg` — below it the grid is the one stacked column it
+          always was. */}
+      <div
+        ref={bodyRef}
+        // Both variables the template reads come from here, so the CSS half of
+        // the evaluation's floor is `EVALUATION_MIN_PX` itself rather than a
+        // hand-copied 24rem that could silently drift from it (#144's review).
+        // The floor holds the pane's minimum even in the frame between a
+        // window resize and the observer's re-clamp of `--rail-w`.
+        style={
+          {
+            "--rail-w": `${railPx}px`,
+            "--eval-min": `${EVALUATION_MIN_PX}px`,
+          } as CSSProperties
+        }
+        className="grid min-h-0 flex-1 grid-cols-1 overflow-y-auto lg:grid-cols-[minmax(var(--eval-min),1fr)_auto_var(--rail-w)] lg:overflow-hidden print:overflow-visible"
+      >
         {/* The evaluation, as the main column (#136). The /25 and the five
             criteria are what a candidate opens this page for, and they used to
             sit in the 26 rem rail while the transcript held the wide pane.
@@ -491,6 +596,70 @@ export function ResultsClient({
           </div>
         </section>
 
+        {/* The rail's edge is a handle (#141): pull it left and the transcript
+            gets the room to be read in full, push it back when done. Desktop
+            only — the phone stacks both columns full-width already — and gone
+            from print, which lays the sheet out on its own terms. Double-click
+            snaps back to the default; the keyboard gets the same gesture
+            through `role="separator"`, ArrowLeft widening because that is the
+            direction the drag itself teaches. The handle carries the divider
+            line the transcript column used to draw, so there is one hairline
+            between the panes, and it is the one you can grab. */}
+        <div
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Largeur de la transcription"
+          aria-valuemin={RAIL_DEFAULT_PX}
+          aria-valuemax={railMax}
+          aria-valuenow={railPx}
+          tabIndex={0}
+          title="Tirer pour ajuster la largeur de la transcription"
+          onPointerDown={(event) => {
+            // The drag must not start a text selection in either column, and
+            // capture keeps the gesture on the handle however far the pointer
+            // strays from an 8 px strip. The explicit focus() is Safari's
+            // share of the deal: preventDefault() on pointerdown suppresses
+            // its focus-on-click, and the arrow keys the handle promises only
+            // work on a handle that is actually focused.
+            event.preventDefault();
+            event.currentTarget.focus();
+            event.currentTarget.setPointerCapture(event.pointerId);
+          }}
+          onPointerMove={(event) => {
+            if (!event.currentTarget.hasPointerCapture(event.pointerId)) return;
+            pullRail(event.clientX);
+          }}
+          // Both ends of a gesture: the ordinary release, and a capture lost
+          // to a cancel. Either way the width the drag reached is committed.
+          onPointerUp={commitRail}
+          onLostPointerCapture={commitRail}
+          onDoubleClick={() => setRailPx(RAIL_DEFAULT_PX)}
+          onKeyDown={(event) => {
+            const width = bodyRef.current?.getBoundingClientRect().width;
+            if (!width) return;
+            if (event.key === "ArrowLeft") {
+              setRailPx((current) => steppedRailPx(current, "wider", width));
+            } else if (event.key === "ArrowRight") {
+              setRailPx((current) => steppedRailPx(current, "narrower", width));
+            } else if (event.key === "Home") {
+              setRailPx(RAIL_DEFAULT_PX);
+            } else if (event.key === "End") {
+              setRailPx(railMaxPx(width));
+            } else {
+              return;
+            }
+            event.preventDefault();
+          }}
+          className="border-border hover:bg-primary/10 active:bg-primary/15 focus-visible:bg-primary/15 relative hidden w-2 shrink-0 cursor-col-resize touch-none border-l outline-none lg:block print:hidden"
+        >
+          <span
+            aria-hidden
+            className="text-muted-foreground/70 absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-[0.625rem] leading-none select-none"
+          >
+            ⋮
+          </span>
+        </div>
+
         {/* The transcript, standing by in the rail the evaluation vacated.
             Still whole, still printed, still the only place the recordings
             play (#116) — it lost the spotlight, not the page. */}
@@ -582,7 +751,7 @@ function TranscriptColumn({
   });
 
   return (
-    <section className="border-border bg-muted/30 min-h-0 border-t lg:overflow-y-auto lg:border-t-0 lg:border-l print:overflow-visible">
+    <section className="border-border bg-muted/30 min-h-0 border-t lg:overflow-y-auto lg:border-t-0 print:overflow-visible">
       {/* The measure caps the phone and print renderings, where this section
           is full-width; in the 26.25 rem rail it never binds. The paddings
           slimmed with the column (#136): p-9 of paper margin inside a 420 px
