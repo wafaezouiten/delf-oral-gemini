@@ -1,29 +1,26 @@
 /**
- * The two paragraphs that explain why the mark is lower than the marking.
+ * The paragraph that explains why the mark is lower than the marking.
  *
- * Extracted from `results-client.tsx` because what they say stopped being
- * trivial the moment there were two penalties. It was trivial before: one rule
- * could separate `score25` from `rawScore25`, so "the note before the penalty"
- * and "the sum of the bands" were the same number, and there was only ever one
- * shape of sentence to write.
+ * Extracted from `results-client.tsx` because what it says is decided by which
+ * rules fired, not by the component — and because it is the one part of the
+ * correction page that does arithmetic, which `node --test` can reach here.
  *
- * Neither of those still holds. A sitting can be halved for a part that never
- * happened and *then* docked for a short other part — 25 → 12 → 9 — and the
- * duration paragraph's baseline is the 12, not the 25. Printing the 25 leaves a
- * candidate reading "25/25, divided by two" above "25/25, minus the duration
- * penalty" with a 13-point gap between the two sentences and the 9 they were
- * actually given.
+ * There used to be a second paragraph: « Note avant pénalité de durée : N/25.
+ * Votre débat a été nettement plus court que ce que demande l'épreuve
+ * réelle. » It is gone by the user's call (#137), and the removal is the
+ * PARAGRAPH only: the duration penalty itself still fires in the rubric
+ * (`delf/orale-rubric.ts`), `durationPenalty` and `shortParts` are still
+ * computed, persisted and handed to the corrector — the page just no longer
+ * explains that part of the gap between the sum of the bands and the /25. The
+ * halving keeps its sentence because a score divided by two with no
+ * explanation reads as a grading error, which is a different kind of silence
+ * from a few docked points.
  *
- * That is what this module is for, and why it is a module rather than four more
- * `const`s in the component: it is the only part of the correction page that
- * does arithmetic, it is the part that went stale when a rule was layered in
- * front of it, and `node --test` can reach it here.
- *
- * The sentences are built here too, whole. The component renders a string; it
- * does not assemble one. That is not tidiness — the first version left the
- * trailing clause in the JSX, where it hard-coded « la note obtenue sur celle
- * que vous avez réalisée » and so quietly assumed exactly one part was missing.
- * See {@link absenceNotice} for why that assumption is false.
+ * The sentence is built here, whole. The component renders a string; it does
+ * not assemble one. That is not tidiness — an early version left a trailing
+ * clause in the JSX, where it hard-coded « la note obtenue sur celle que vous
+ * avez réalisée » and so quietly assumed exactly one part was missing. See
+ * {@link absenceNotice} for why that assumption is false.
  */
 
 import { COMPETENCY_MAX } from "@/lib/delf/constants";
@@ -31,20 +28,17 @@ import { COMPETENCY_MAX } from "@/lib/delf/constants";
 export type CorrectionPart = "monologue" | "debate";
 
 /**
- * The scoring fields of a correction, as the page actually has them.
+ * The scoring fields the notices actually read.
  *
- * Everything but the two totals is optional, and deliberately so: this object
- * is read back out of `sessionStorage` or rebuilt from a stored row, so a
- * results page opened after a deploy can be showing a sitting graded before
- * the field existed, and a second submission returns a correction that never
- * carried the corrector's working at all. Each fallback below is the reading
- * that was true before the field existed.
+ * Both penalty fields are optional, and deliberately so: this object is read
+ * back out of `sessionStorage` or rebuilt from a stored row, so a results page
+ * opened after a deploy can be showing a sitting graded before the field
+ * existed, and a second submission returns a correction that never carried the
+ * corrector's working at all — `absent_parts` has no column. The fallbacks are
+ * the readings that were true before each field existed.
  */
 export interface CorrectionScores {
   rawScore25: number;
-  score25: number;
-  durationPenalty?: number;
-  shortParts?: readonly CorrectionPart[];
   absencePenalty?: number;
   absentParts?: readonly CorrectionPart[];
 }
@@ -53,11 +47,6 @@ export interface CorrectionScores {
 export interface CorrectionNotices {
   /** The halving, when a part of the épreuve was not produced. */
   absence: string | null;
-  /**
-   * The short-duration penalty, measured against the score it was actually
-   * taken off — which is the halved figure whenever both rules fired.
-   */
-  duration: string | null;
 }
 
 /** No-break space, as French typography wants it before a colon. */
@@ -104,43 +93,6 @@ function absenceNotice(parts: readonly CorrectionPart[], rawScore25: number): st
 }
 
 /**
- * Explain the short-duration penalty, and against which figure.
- *
- * The part is named rather than the penalty merely announced: « vous avez été
- * pénalisé » is an assertion, « votre débat a été plus court que ce que demande
- * l'épreuve » is something the candidate can check against the clock beside it.
- * Capitalised, because it opens the second sentence — it used to be spliced in
- * lowercase and read as a typo on the one paragraph that has to be believed.
- *
- * The unnamed fallback is reachable for the same reason as
- * {@link absenceNotice}'s: `short_parts` has no column either.
- */
-function durationNotice(parts: readonly CorrectionPart[], beforePenalty: number): string {
-  const named =
-    parts.length === 2
-      ? "Vos deux prises de parole ont été"
-      : parts[0] === "monologue"
-        ? "Votre monologue a été"
-        : parts[0] === "debate"
-          ? "Votre débat a été"
-          : "Votre temps de parole a été";
-
-  return (
-    `Note avant pénalité de durée${NBSP}: ${beforePenalty}/${COMPETENCY_MAX}. ` +
-    `${named} nettement plus court que ce que demande l'épreuve réelle.`
-  );
-}
-
-/**
- * What the page should say about the two penalties, and against which numbers.
- *
- * The fallbacks matter as much as the arithmetic. `durationPenalty` undefined
- * means a correction from before the field existed, where the only evidence a
- * penalty was taken is that the score is lower than the sum of the bands — and
- * the absence has to come off first, or a halved sitting's 13-point difference
- * conjures a duration paragraph for a penalty nobody took.
- */
-/**
  * The examiner's fault, told to the candidate it happened to (#92).
  *
  * A standalone export rather than a third field on {@link CorrectionNotices},
@@ -174,21 +126,7 @@ export function earlyClosingNotice(earlyClosingCount: number | undefined): strin
 export function correctionNotices(scores: CorrectionScores): CorrectionNotices {
   const absencePenalty = scores.absencePenalty ?? 0;
 
-  const penalisedForDuration =
-    scores.durationPenalty !== undefined
-      ? scores.durationPenalty > 0
-      : scores.score25 < scores.rawScore25 - absencePenalty;
-
   return {
     absence: absencePenalty > 0 ? absenceNotice(scores.absentParts ?? [], scores.rawScore25) : null,
-    duration: penalisedForDuration
-      ? durationNotice(
-          scores.shortParts ?? [],
-          // The halved score, not the sum of the bands. They are the same
-          // number on every sitting where both parts happened, which is why
-          // this went unnoticed until the two rules could fire together.
-          scores.rawScore25 - absencePenalty,
-        )
-      : null,
   };
 }

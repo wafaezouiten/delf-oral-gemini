@@ -4,66 +4,34 @@ import { describe, it } from "node:test";
 import { correctionNotices, earlyClosingNotice } from "./correction-notices";
 
 describe("the correction's penalty notices", () => {
-  it("says nothing about a sitting that earned neither penalty", () => {
+  it("says nothing about a sitting that earned no halving", () => {
     const notices = correctionNotices({
       rawScore25: 20,
-      score25: 20,
-      durationPenalty: 0,
       absencePenalty: 0,
-      shortParts: [],
       absentParts: [],
     });
 
     assert.equal(notices.absence, null);
-    assert.equal(notices.duration, null);
   });
 
-  it("explains a short épreuve against the sum of the bands", () => {
-    const notices = correctionNotices({
-      rawScore25: 20,
-      score25: 17,
-      durationPenalty: 3,
-      shortParts: ["debate"],
-    });
-
-    assert.equal(notices.absence, null);
-    assert.match(notices.duration!, /Note avant pénalité de durée.: 20\/25\./);
-    assert.match(notices.duration!, /Votre débat a été nettement plus court/);
+  it("has no duration paragraph left to print (#137)", () => {
+    // « Note avant pénalité de durée : N/25 » is gone by the user's call. The
+    // deep equality is the assertion: whatever a sitting was docked for its
+    // length, the notices carry one field, and it is the halving's — there is
+    // nothing here for the page to render about the duration penalty, which
+    // still fires in the rubric and simply goes unexplained.
+    assert.deepEqual(correctionNotices({ rawScore25: 20 }), { absence: null });
   });
 
   it("explains a walk-out against the half that was marked", () => {
     const notices = correctionNotices({
       rawScore25: 25,
-      score25: 12,
-      durationPenalty: 0,
       absencePenalty: 13,
-      shortParts: [],
       absentParts: ["debate"],
     });
 
     assert.match(notices.absence!, /^Vous n'avez pas participé au débat\./);
     assert.match(notices.absence!, /sur celle que vous avez réalisée \(25\/25\)/);
-    assert.equal(notices.duration, null, "the absent part is not also called short");
-  });
-
-  it("takes the duration penalty off the halved score, not the sum of the bands", () => {
-    // The case both rules fire on: 25 → halved to 12 → docked 3 → 9. Printing
-    // the 25 as the figure the −3 came off leaves the candidate reading
-    // "25/25, divided by two" above "25/25, minus the penalty" and neither
-    // sentence reaching the 9 they were given.
-    const notices = correctionNotices({
-      rawScore25: 25,
-      score25: 9,
-      durationPenalty: 3,
-      absencePenalty: 13,
-      shortParts: ["monologue"],
-      absentParts: ["debate"],
-    });
-
-    assert.match(notices.absence!, /\(25\/25\)/, "the halving is explained from the full sum");
-    // 12, not 25 — and 12 − 3 is the 9 printed above both paragraphs.
-    assert.match(notices.duration!, /Note avant pénalité de durée.: 12\/25\./);
-    assert.match(notices.duration!, /Votre monologue a été/);
   });
 
   it("does not offer a part the candidate completed when neither was completed", () => {
@@ -74,8 +42,6 @@ describe("the correction's penalty notices", () => {
     // réalisée » would name a part that does not exist.
     const notices = correctionNotices({
       rawScore25: 20,
-      score25: 10,
-      durationPenalty: 0,
       absencePenalty: 10,
       absentParts: ["monologue", "debate"],
     });
@@ -89,26 +55,12 @@ describe("the correction's penalty notices", () => {
     );
   });
 
-  it("names both parts when both ran short", () => {
-    assert.match(
-      correctionNotices({
-        rawScore25: 20,
-        score25: 17,
-        durationPenalty: 3,
-        shortParts: ["monologue", "debate"],
-      }).duration!,
-      /Vos deux prises de parole ont été/,
-    );
-  });
-
   it("still explains the halving when the correction forgot which part", () => {
     // A second submission returns the stored row, which carries the penalty and
     // not the corrector's working — `absent_parts` has no column. The paragraph
     // must still account for the missing points, and must not guess.
     const notices = correctionNotices({
       rawScore25: 25,
-      score25: 12,
-      durationPenalty: 0,
       absencePenalty: 13,
     });
 
@@ -129,8 +81,6 @@ describe("the correction's penalty notices", () => {
     ]) {
       const notice = correctionNotices({
         rawScore25: 20,
-        score25: 10,
-        durationPenalty: 0,
         absencePenalty: 10,
         absentParts,
       }).absence!;
@@ -141,34 +91,6 @@ describe("the correction's penalty notices", () => {
         `with ${JSON.stringify(absentParts)}: ${notice}`,
       );
     }
-  });
-
-  it("falls back to the difference on a correction graded before the fields existed", () => {
-    // No `durationPenalty`, no `absencePenalty`: a sitting from before either
-    // column, where the only evidence of a penalty is that the mark is under
-    // the sum of the bands. There was no halving then, so the difference is
-    // the duration penalty and nothing else.
-    const notices = correctionNotices({ rawScore25: 20, score25: 17 });
-
-    assert.equal(notices.absence, null);
-    assert.match(notices.duration!, /Note avant pénalité de durée.: 20\/25\./);
-    assert.match(notices.duration!, /Votre temps de parole a été/);
-  });
-
-  it("does not invent a duration penalty out of the halving alone", () => {
-    // The same old-correction fallback, on a sitting that WAS halved. Without
-    // subtracting the absence first, `score25 < rawScore25` is true purely
-    // because of the halving, and the page would print a duration paragraph
-    // for a penalty that was never taken.
-    const notices = correctionNotices({
-      rawScore25: 25,
-      score25: 12,
-      absencePenalty: 13,
-      absentParts: ["debate"],
-    });
-
-    assert.match(notices.absence!, /Vous n'avez pas participé au débat/);
-    assert.equal(notices.duration, null);
   });
 });
 

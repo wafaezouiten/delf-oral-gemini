@@ -72,10 +72,11 @@ export interface StoredResult {
     /**
      * What the rubric docked for a short épreuve, and which halves were short.
      *
-     * Optional because this object is read back out of `sessionStorage`, so a
-     * results page opened after a deploy can be showing a sitting graded before
-     * it. The fallback below is the old reading — worth the two lines, since the
-     * alternative is a blank penalty notice on somebody's finished exam.
+     * Part of the stored payload and still computed, persisted and used by the
+     * corrector — but nothing on this page renders either any more: the
+     * « Note avant pénalité de durée » paragraph was removed on the user's
+     * call (#137). Kept on the type because they describe what the stash and
+     * the row actually carry, not what this page shows of them.
      */
     durationPenalty?: number;
     shortParts?: Array<"monologue" | "debate">;
@@ -262,11 +263,10 @@ export function ResultsClient({
   const tone = scoreTone(evaluation.score25);
 
   /**
-   * The two paragraphs below the mark, and the figure each is measured
-   * against. Both live in `lib/ui/correction-notices.ts`, which is where the
-   * arithmetic can be tested — and it needs to be, because the duration
-   * paragraph's baseline is no longer the sum of the bands whenever the
-   * halving fired in front of it.
+   * The paragraph below the mark, built and tested in
+   * `lib/ui/correction-notices.ts`. Only the halving speaks now: the duration
+   * penalty still fires in the rubric, but its « Note avant pénalité de
+   * durée » paragraph was removed on the user's call (#137).
    */
   const notices = correctionNotices(evaluation);
 
@@ -374,12 +374,6 @@ export function ResultsClient({
             {notices.absence && (
               <p className="text-muted-foreground mt-3 text-xs leading-relaxed">
                 {notices.absence}
-              </p>
-            )}
-
-            {notices.duration && (
-              <p className="text-muted-foreground mt-3 text-xs leading-relaxed">
-                {notices.duration}
               </p>
             )}
 
