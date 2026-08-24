@@ -30,6 +30,7 @@ import {
   correctionTranscriptView,
 } from "@/lib/ui/correction-transcript";
 import {
+  EVALUATION_MIN_PX,
   RAIL_CONTENT_MAX_PX,
   RAIL_DEFAULT_PX,
   clampRailPx,
@@ -427,12 +428,18 @@ export function ResultsClient({
           always was. */}
       <div
         ref={bodyRef}
-        style={{ "--rail-w": `${railPx}px` } as CSSProperties}
-        // `minmax(24rem,1fr)` is the CSS half of the evaluation's floor — the
-        // same 384 px as `EVALUATION_MIN_PX` — so the pane holds its minimum
-        // even in the frame between a window resize and the observer's
-        // re-clamp of `--rail-w`.
-        className="grid min-h-0 flex-1 grid-cols-1 overflow-y-auto lg:grid-cols-[minmax(24rem,1fr)_auto_var(--rail-w)] lg:overflow-hidden print:overflow-visible"
+        // Both variables the template reads come from here, so the CSS half of
+        // the evaluation's floor is `EVALUATION_MIN_PX` itself rather than a
+        // hand-copied 24rem that could silently drift from it (#144's review).
+        // The floor holds the pane's minimum even in the frame between a
+        // window resize and the observer's re-clamp of `--rail-w`.
+        style={
+          {
+            "--rail-w": `${railPx}px`,
+            "--eval-min": `${EVALUATION_MIN_PX}px`,
+          } as CSSProperties
+        }
+        className="grid min-h-0 flex-1 grid-cols-1 overflow-y-auto lg:grid-cols-[minmax(var(--eval-min),1fr)_auto_var(--rail-w)] lg:overflow-hidden print:overflow-visible"
       >
         {/* The evaluation, as the main column (#136). The /25 and the five
             criteria are what a candidate opens this page for, and they used to
@@ -610,8 +617,12 @@ export function ResultsClient({
           onPointerDown={(event) => {
             // The drag must not start a text selection in either column, and
             // capture keeps the gesture on the handle however far the pointer
-            // strays from an 8 px strip.
+            // strays from an 8 px strip. The explicit focus() is Safari's
+            // share of the deal: preventDefault() on pointerdown suppresses
+            // its focus-on-click, and the arrow keys the handle promises only
+            // work on a handle that is actually focused.
             event.preventDefault();
+            event.currentTarget.focus();
             event.currentTarget.setPointerCapture(event.pointerId);
           }}
           onPointerMove={(event) => {
