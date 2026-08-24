@@ -51,6 +51,25 @@ const TONE_CLASSES: Record<ScoreTone, { fill: string; ink: string; ring: string 
 };
 
 /**
+ * The band's solid fill, for a /25 drawn as a shape rather than printed — the
+ * trajectory chart's bars. Solid rather than `-subtle` because a bar is read
+ * against the card, not written on: the subtle steps flatten to the surface at
+ * a bar's size, and the height already carries the figure for anyone who
+ * cannot see the hue.
+ */
+const FILL_CLASSES: Record<ScoreTone, string> = {
+  red: "bg-score-red",
+  coral: "bg-score-coral",
+  orange: "bg-score-orange",
+  yellow: "bg-score-yellow",
+  green: "bg-score-green",
+};
+
+export function scoreFill(tone: ScoreTone): string {
+  return FILL_CLASSES[tone];
+}
+
+/**
  * The band's ink for a /25 that is printed as a figure rather than as a pill —
  * the results page's big numeral and the dashboard tile.
  *

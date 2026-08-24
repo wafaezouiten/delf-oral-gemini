@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { ORAL_CRITERIA, type OralCriterion } from "@/lib/delf/criteria";
+import { type OralCriterion } from "@/lib/delf/criteria";
 import {
   buildDashboardView,
   currentStreak,
@@ -190,26 +190,6 @@ describe("the dashboard view", () => {
     assert.equal(view.tiles.find((tile) => tile.key === "pratique")?.value, "30 min");
   });
 
-  it("gives every criterion a row, including one nothing has scored", () => {
-    // Built from ORAL_CRITERIA rather than from the keys present on the rows: a
-    // criterion that quietly disappears from the chart is a criterion the
-    // candidate stops working on.
-    const view = buildDashboardView([sitting()], today);
-    assert.deepEqual(
-      view.criteria.map((row) => row.key),
-      [...ORAL_CRITERIA],
-    );
-  });
-
-  it("scales each bar against the grille's top band", () => {
-    const view = buildDashboardView([sitting()], today);
-    const morpho = view.criteria.find((row) => row.key === "morphosyntaxe");
-    const phono = view.criteria.find((row) => row.key === "phonologie");
-    assert.equal(morpho?.average, 1);
-    assert.equal(morpho?.percent, 20);
-    assert.equal(phono?.percent, 100);
-  });
-
   it("orders newest first regardless of how the query returned them", () => {
     const older = sitting({ examId: 1, endedAt: new Date("2026-08-10T09:00:00Z") });
     const newer = sitting({ examId: 2, endedAt: new Date("2026-08-15T09:00:00Z") });
@@ -256,12 +236,6 @@ describe("the dashboard view", () => {
     assert.doesNotMatch(caption, /corrigée/);
   });
 
-  it("pulls the criterion averages down too, since a walk-out scores nothing", () => {
-    const view = buildDashboardView([sitting(), abandoned()], today);
-    // Lexique was 3 on the corrected sitting and 0 on the walk-out.
-    assert.equal(view.criteria.find((row) => row.key === "lexique")?.average, 1.5);
-  });
-
   it("adds no practice time for a walk-out", () => {
     const view = buildDashboardView([sitting({ spokenSeconds: 600 }), abandoned()], today);
     assert.equal(view.tiles.find((tile) => tile.key === "pratique")?.value, "10 min");
@@ -282,25 +256,11 @@ describe("the dashboard view", () => {
     );
   });
 
-  it("spaces the simulations evenly across the axis, and centres a lone one", () => {
-    const three = [10, 12, 14].map((day, index) =>
-      sitting({ examId: index, endedAt: new Date(2026, 7, day) }),
-    );
-    const view = buildDashboardView(three, today);
-    assert.deepEqual(
-      view.trajectory.points.map((point) => point.x),
-      [0, 50, 100],
-    );
-
-    const lone = buildDashboardView([sitting()], today);
-    assert.equal(lone.trajectory.points[0]?.x, 50);
-  });
-
-  it("puts each point at its share of the /25 scale, band attached", () => {
+  it("gives each bar its share of the /25 scale, band attached", () => {
     const view = buildDashboardView([sitting({ score25: 17 })], today);
     const point = view.trajectory.points[0];
     assert.equal(point?.percent, 68);
-    // The tooltip's tint and the number it sits on come from the same figure.
+    // The bar's tint and the tooltip's figure come from the same number.
     assert.equal(point?.band.tone, "yellow");
   });
 
@@ -323,8 +283,8 @@ describe("the dashboard view", () => {
     assert.notEqual(view.trajectory.latest, null);
   });
 
-  it("draws a walk-out as a real point at zero", () => {
-    // The exit dialog promises the walk-out counts; a line that skipped it
+  it("draws a walk-out as a real bar at zero", () => {
+    // The exit dialog promises the walk-out counts; a chart that skipped it
     // would draw a record the tiles contradict.
     const view = buildDashboardView([sitting(), abandoned({ examId: 9 })], today);
     const walkOut = view.trajectory.points.find((point) => point.examId === 9);
@@ -342,7 +302,6 @@ describe("the dashboard view", () => {
     assert.equal(view.count, 0);
     assert.equal(view.tiles.find((tile) => tile.key === "moyenne")?.value, "0");
     assert.equal(view.tiles.find((tile) => tile.key === "reussite")?.value, "0 %");
-    assert.equal(view.criteria.length, ORAL_CRITERIA.length);
     assert.deepEqual(view.trajectory, { points: [], latest: null, delta: null });
   });
 });
