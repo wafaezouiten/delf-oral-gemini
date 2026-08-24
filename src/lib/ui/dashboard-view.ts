@@ -132,9 +132,49 @@ export interface CriterionAverage {
   percent: number;
 }
 
+/**
+ * One simulation on the « Votre trajectoire » chart (#143).
+ *
+ * Carries its own band so the tooltip's tint and the number it sits on are
+ * computed from the same figure in the same place — the rule the tiles already
+ * follow. The colour is never the message: the component prints the note as
+ * text beside the tint, so a mono printer loses nothing.
+ */
+export interface TrajectoryPoint {
+  examId: number;
+  topicTitle: string;
+  score25: number;
+  band: ScoreBand;
+  /** A walk-out is a real point at 0 — the record the tiles already keep. */
+  outcome: SittingOutcome;
+  /** « 4 août » — the tooltip's stamp. */
+  date: string;
+  /**
+   * Share of the x-axis, 0–100, oldest to newest. Simulations are evenly
+   * spaced — the subtitle says « par simulation », not per date — and a lone
+   * point sits centred rather than hugging an edge.
+   */
+  x: number;
+  /** Share of the /25 scale, 0–100, for the point's height off the floor. */
+  percent: number;
+}
+
+export interface TrajectoryView {
+  /** Oldest first — a trajectory reads left to right. */
+  points: TrajectoryPoint[];
+  /** The newest simulation, for the card's headline. `null` on an empty record. */
+  latest: { score25: number; band: ScoreBand; date: string } | null;
+  /**
+   * Latest minus the simulation before it, or `null` when there is no before —
+   * a delta with one data point would be a comparison against nothing.
+   */
+  delta: number | null;
+}
+
 export interface DashboardView {
   tiles: DashboardTile[];
   criteria: CriterionAverage[];
+  trajectory: TrajectoryView;
   /** Newest first, already trimmed to what the card shows. */
   recent: DashboardSitting[];
   /** How many corrected sittings the figures were computed from. */
@@ -293,6 +333,62 @@ function buildCriteriaAverages(sittings: readonly DashboardSitting[]): Criterion
 }
 
 /**
+ * The chart's y-gridlines: 0 · 5 · 10 · 15 · 20 · 25, derived from the /25 so
+ * a scale that ever moved would move its ruler with it.
+ */
+export const TRAJECTORY_TICKS: readonly number[] = Array.from(
+  { length: COMPETENCY_MAX / 5 + 1 },
+  (_, index) => index * 5,
+);
+
+/**
+ * « +6 pts » / « −2 pts » / « ±0 pt » — the headline's movement since the
+ * previous simulation. The sign is always printed: a bare « 6 pts » does not
+ * say which way the trajectory went, and that direction is the figure's job.
+ */
+export function formatScoreDelta(delta: number): string {
+  const magnitude = Math.abs(delta);
+  const unit = magnitude > 1 ? "pts" : "pt";
+  if (delta > 0) return `+${magnitude} ${unit}`;
+  if (delta < 0) return `−${magnitude} ${unit}`;
+  return `±0 pt`;
+}
+
+/**
+ * The trajectory: every sitting on the record, oldest first, as a point on the
+ * /25 scale.
+ *
+ * Its own ordering rather than a reuse of `recent` — the recent list is
+ * newest-first and trimmed, and a trajectory that silently stopped at five
+ * points would draw a record the tiles contradict.
+ */
+function buildTrajectory(newestFirst: readonly DashboardSitting[]): TrajectoryView {
+  const chronological = [...newestFirst].reverse();
+
+  const points = chronological.map((sitting, index): TrajectoryPoint => {
+    return {
+      examId: sitting.examId,
+      topicTitle: sitting.topicTitle,
+      score25: sitting.score25,
+      band: scoreBand(sitting.score25),
+      outcome: sitting.outcome,
+      date: formatSittingDate(sitting.endedAt),
+      x: chronological.length === 1 ? 50 : (index / (chronological.length - 1)) * 100,
+      percent: (sitting.score25 / COMPETENCY_MAX) * 100,
+    };
+  });
+
+  const latest = points.at(-1);
+  const previous = points.at(-2);
+
+  return {
+    points,
+    latest: latest ? { score25: latest.score25, band: latest.band, date: latest.date } : null,
+    delta: latest && previous ? latest.score25 - previous.score25 : null,
+  };
+}
+
+/**
  * Assemble the dashboard.
  *
  * `sittings` may arrive in any order; this sorts newest-first itself rather than
@@ -309,6 +405,7 @@ export function buildDashboardView(
   return {
     tiles: buildTiles(ordered, today),
     criteria: buildCriteriaAverages(ordered),
+    trajectory: buildTrajectory(ordered),
     recent: ordered.slice(0, RECENT_LIMIT),
     count: ordered.length,
   };

@@ -7,7 +7,9 @@ import {
   currentStreak,
   describeOutcome,
   formatPracticeTime,
+  formatScoreDelta,
   RECENT_LIMIT,
+  TRAJECTORY_TICKS,
   zeroCriteria,
   type DashboardSitting,
 } from "./dashboard-view";
@@ -270,11 +272,90 @@ describe("the dashboard view", () => {
     assert.equal(view.tiles.find((tile) => tile.key === "serie")?.value, "1 j");
   });
 
+  it("plots the trajectory oldest first, however the query returned the rows", () => {
+    const older = sitting({ examId: 1, score25: 11, endedAt: new Date("2026-07-20T09:00:00Z") });
+    const newer = sitting({ examId: 2, score25: 17, endedAt: new Date("2026-08-04T09:00:00Z") });
+    const view = buildDashboardView([newer, older], today);
+    assert.deepEqual(
+      view.trajectory.points.map((point) => point.examId),
+      [1, 2],
+    );
+  });
+
+  it("spaces the simulations evenly across the axis, and centres a lone one", () => {
+    const three = [10, 12, 14].map((day, index) =>
+      sitting({ examId: index, endedAt: new Date(2026, 7, day) }),
+    );
+    const view = buildDashboardView(three, today);
+    assert.deepEqual(
+      view.trajectory.points.map((point) => point.x),
+      [0, 50, 100],
+    );
+
+    const lone = buildDashboardView([sitting()], today);
+    assert.equal(lone.trajectory.points[0]?.x, 50);
+  });
+
+  it("puts each point at its share of the /25 scale, band attached", () => {
+    const view = buildDashboardView([sitting({ score25: 17 })], today);
+    const point = view.trajectory.points[0];
+    assert.equal(point?.percent, 68);
+    // The tooltip's tint and the number it sits on come from the same figure.
+    assert.equal(point?.band.tone, "yellow");
+  });
+
+  it("headlines the latest simulation and its movement since the one before", () => {
+    const view = buildDashboardView(
+      [
+        sitting({ examId: 1, score25: 11, endedAt: new Date("2026-07-20T09:00:00Z") }),
+        sitting({ examId: 2, score25: 17, endedAt: new Date("2026-08-04T09:00:00Z") }),
+      ],
+      today,
+    );
+    assert.equal(view.trajectory.latest?.score25, 17);
+    assert.equal(view.trajectory.latest?.date, "4 août");
+    assert.equal(view.trajectory.delta, 6);
+  });
+
+  it("offers no delta for a first simulation — there is nothing to compare against", () => {
+    const view = buildDashboardView([sitting()], today);
+    assert.equal(view.trajectory.delta, null);
+    assert.notEqual(view.trajectory.latest, null);
+  });
+
+  it("draws a walk-out as a real point at zero", () => {
+    // The exit dialog promises the walk-out counts; a line that skipped it
+    // would draw a record the tiles contradict.
+    const view = buildDashboardView([sitting(), abandoned({ examId: 9 })], today);
+    const walkOut = view.trajectory.points.find((point) => point.examId === 9);
+    assert.equal(walkOut?.score25, 0);
+    assert.equal(walkOut?.percent, 0);
+    assert.equal(walkOut?.outcome, "abandoned");
+  });
+
+  it("rules the chart every 5 points up to the /25", () => {
+    assert.deepEqual([...TRAJECTORY_TICKS], [0, 5, 10, 15, 20, 25]);
+  });
+
   it("renders an empty history without dividing by zero", () => {
     const view = buildDashboardView([], today);
     assert.equal(view.count, 0);
     assert.equal(view.tiles.find((tile) => tile.key === "moyenne")?.value, "0");
     assert.equal(view.tiles.find((tile) => tile.key === "reussite")?.value, "0 %");
     assert.equal(view.criteria.length, ORAL_CRITERIA.length);
+    assert.deepEqual(view.trajectory, { points: [], latest: null, delta: null });
+  });
+});
+
+describe("the score delta", () => {
+  it("always prints the sign — the direction is the figure's job", () => {
+    assert.equal(formatScoreDelta(6), "+6 pts");
+    assert.equal(formatScoreDelta(-2), "−2 pts");
+    assert.equal(formatScoreDelta(0), "±0 pt");
+  });
+
+  it("keeps the singular for a single point either way", () => {
+    assert.equal(formatScoreDelta(1), "+1 pt");
+    assert.equal(formatScoreDelta(-1), "−1 pt");
   });
 });
