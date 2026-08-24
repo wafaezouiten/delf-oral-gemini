@@ -49,6 +49,8 @@ describe("examiner prompt", () => {
       // The second wording is a different string and is spoken as often as the
       // first (#101), so it answers to the same rule.
       silenceRelanceInstruction(2),
+      // And the third, which replaces both once the last question is out (#130).
+      silenceRelanceInstruction(1, true),
       presenceCheckInstruction(),
       timeRemainingInstruction(7),
       resumeDebateInstruction(7),
@@ -99,6 +101,16 @@ describe("examiner prompt", () => {
       assert.ok(!relance.includes("mot pour mot"), "it is a directive, not a line to read");
     });
 
+    it("says « question précédente », never « dernière question » (#130)", () => {
+      // « Ta dernière question » meant "your previous question", but « dernière »
+      // in the examiner's ear is an invitation to announce « une dernière
+      // question » out loud, which is #108's announcement: made once, by the
+      // app, never volunteered.
+      const relance = silenceRelanceInstruction();
+      assert.ok(relance.includes("ta question précédente"));
+      assert.ok(!relance.includes("dernière"), "« dernière » is #108's word, not the relance's");
+    });
+
     it("keeps the relance from turning into a reproach or an assessment", () => {
       const relance = silenceRelanceInstruction();
       assert.ok(relance.includes("Ne fais aucune remarque sur son silence"));
@@ -125,6 +137,31 @@ describe("examiner prompt", () => {
       assert.ok(again.includes("ne lui demande pas s'il a compris"));
       assert.ok(again.includes("n'évalue pas"));
       assert.ok(!again.includes("mot pour mot"), "it is still a directive, not a line to read");
+    });
+
+    it("re-asks the promised question once the last question is announced (#130)", () => {
+      // « Une dernière question » is a promise (#108), and the escalation's
+      // « pose une question NOUVELLE » was the one directive still breaking it:
+      // a fresh question after the announced last one, and a second « une
+      // dernière question » in the examiner's mouth. After the announcement the
+      // escalation collapses to one intent, whatever the attempt.
+      const after = silenceRelanceInstruction(1, true);
+      assert.ok(after.includes("Repose cette même question"));
+      assert.ok(after.includes("Ne pose aucune question nouvelle"));
+      assert.ok(after.includes("n'annonce pas une seconde fois"));
+      assert.ok(!after.includes("NOUVELLE"), "the fresh-question demand is gone, not softened");
+      assert.equal(
+        silenceRelanceInstruction(3, true),
+        after,
+        "the promise outranks #101's escalation: every step after it says the same thing",
+      );
+    });
+
+    it("keeps the post-announcement relance from turning into a reproach too", () => {
+      const after = silenceRelanceInstruction(2, true);
+      assert.ok(after.includes("Ne fais aucune remarque sur son silence"));
+      assert.ok(after.includes("ne lui demande pas s'il a compris"));
+      assert.ok(after.includes("n'évalue pas"));
     });
 
     it("fixes the wording of the presence check, because it is a technical check", () => {

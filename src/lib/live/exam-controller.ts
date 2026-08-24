@@ -573,6 +573,30 @@ const CLOSING_LEAD_MS = 10_000;
 const TIME_CUE_QUIET_MS = 2_000;
 
 /**
+ * How long an unanswered candidate answer holds the floor beyond that (#130).
+ *
+ * Two seconds of quiet is enough to prove a pause, but not enough to prove the
+ * floor is FREE: between the candidate finishing an answer and the examiner's
+ * rebound reaching the speaker there is a gap in which nobody is audible —
+ * voice-activity detection has ended the candidate's turn and Gemini is already
+ * generating its reply, none of which the controller can see. A cue slipped
+ * into that gap lands beside the reply: two examiner turns back to back, each
+ * asking its own question, which in the closing minutes is « une dernière
+ * question » followed by another one.
+ *
+ * So while the candidate has spoken and no examiner turn has completed since,
+ * a reply is presumed owed and the cue waits this long from the candidate's
+ * last voiced moment. Eight seconds clears the generation gap by a wide margin
+ * while staying under {@link SILENCE_NUDGE_MS}, and a reply that has still not
+ * arrived by then is not coming — at which point the cue's demand for a new
+ * question is the right voice to break in with, and it still beats the relance
+ * to the tick (see `tick()`'s ordering). The cost when the examiner was never
+ * going to reply is a cue up to six seconds later than before, which the grid
+ * already tolerates from a candidate who simply kept talking.
+ */
+const EXAMINER_REPLY_WAIT_MS = 8_000;
+
+/**
  * How many times one débat will contradict an examiner that has said goodbye.
  *
  * Rationed for the same reason as the presence check: a model that has decided
@@ -827,6 +851,19 @@ export class ExamController {
   private lastTimeCueIndex = 0;
   private cueVoicedSeconds = 0;
   private floorQuietSince: number | null = null;
+
+  /**
+   * When the candidate's voice last grew the voiced total while the examiner
+   * was not audible, and when an examiner turn last completed — the two sides
+   * of "is a reply owed?" (#130). The candidate speaking after the examiner's
+   * last completed turn means Gemini is presumed to be composing a rebound,
+   * and {@link floorIsQuiet} holds the cues out of that gap for up to
+   * {@link EXAMINER_REPLY_WAIT_MS}. Both are per-phase facts and reset with
+   * the session in `openSession`: the monologue's closing turn must not read
+   * as a reply to the débat's first answer.
+   */
+  private cueCandidateVoiceAt: number | null = null;
+  private examinerTurnEndedAt: number | null = null;
 
   /**
    * Where the débat's last-question announcement stands (#108).
@@ -1906,7 +1943,14 @@ export class ExamController {
     // escalation gave up, and there is no giving up to write now.
     const attempt = nudge - 1;
     this.log("silence-relance", { attempt, ...this.waitReport(now) });
-    this.sendControllerDirective("silence-relance", silenceRelanceInstruction(attempt));
+    // « Une dernière question » is a promise (#108), and the escalation's later
+    // steps were the one path still breaking it: a candidate who went quiet
+    // after the announced last question earned a demand for a NEW one (#130).
+    // After the announcement, every step re-asks the promised question instead.
+    this.sendControllerDirective(
+      "silence-relance",
+      silenceRelanceInstruction(attempt, this.lastQuestionCue === "sent"),
+    );
   }
 
   /**
@@ -1996,9 +2040,10 @@ export class ExamController {
    * warned should say so.
    *
    * `sent` is a promise (#108): from here nothing asks for a fresh question.
-   * The grid is already floored above this moment, the relances only ever
-   * re-ask into a silence, and the early-goodbye recovery reads this state to
-   * switch from "new objection" to "follow up on that answer".
+   * The grid is already floored above this moment, the silence relances read
+   * this state to re-ask the promised question instead of escalating to a new
+   * one (#130), and the early-goodbye recovery reads it to switch from "new
+   * objection" to "follow up on that answer".
    */
   private checkLastQuestionCue(now: number, quiet: boolean, remaining: number): boolean {
     if (this.lastQuestionCue !== "pending") return false;
@@ -2031,11 +2076,23 @@ export class ExamController {
    * Two seconds rather than one tick, because a B2 candidate hunting for a word
    * leaves a 300 ms hole in the voiced audio and a single quiet tick would read
    * that as the floor being free.
+   *
+   * Quiet is still not free (#130): after a candidate answer that no examiner
+   * turn has yet followed, the likeliest reading of the quiet is that Gemini is
+   * composing its rebound, and a cue sent there produces two examiner questions
+   * back to back. That stretch holds the floor for up to
+   * {@link EXAMINER_REPLY_WAIT_MS} from the candidate's last voiced moment.
    */
   private floorIsQuiet(now: number): boolean {
     const voiced = this.recorder?.voicedSeconds("debate") ?? 0;
-    const busy =
-      this.examinerSpeaking || this.announcementPlaying || voiced > this.cueVoicedSeconds;
+    const candidateSpoke = voiced > this.cueVoicedSeconds;
+    const busy = this.examinerSpeaking || this.announcementPlaying || candidateSpoke;
+    // Growth while the examiner is audible is its own voice through the open
+    // microphone, not an answer owed a reply — the same attribution the
+    // silence watch makes when it re-baselines under a playback hold.
+    if (candidateSpoke && !this.examinerSpeaking && !this.announcementPlaying) {
+      this.cueCandidateVoiceAt = now;
+    }
     this.cueVoicedSeconds = voiced;
     if (busy) {
       this.floorQuietSince = null;
@@ -2045,7 +2102,13 @@ export class ExamController {
       this.floorQuietSince = now;
       return false;
     }
-    return now - this.floorQuietSince >= TIME_CUE_QUIET_MS;
+    if (now - this.floorQuietSince < TIME_CUE_QUIET_MS) return false;
+
+    const lastVoice = this.cueCandidateVoiceAt;
+    const replyOwed =
+      lastVoice !== null &&
+      (this.examinerTurnEndedAt === null || this.examinerTurnEndedAt < lastVoice);
+    return !replyOwed || now - lastVoice >= EXAMINER_REPLY_WAIT_MS;
   }
 
   /** Make the examiner speak on the app's initiative rather than the model's —
@@ -2723,6 +2786,10 @@ export class ExamController {
     this.openingTurnDelivered = false;
     this.speakerDrainedAt = null;
     this.openingTurnAudible = false;
+    // The reply-gap facts are this phase's too (#130): the monologue's closing
+    // turn is not a reply to anything the débat's candidate will say.
+    this.cueCandidateVoiceAt = null;
+    this.examinerTurnEndedAt = null;
 
     const callbacks: SessionManagerCallbacks = {
       onStateChange: (state) => {
@@ -2756,6 +2823,11 @@ export class ExamController {
         const openingJustDelivered = !this.openingTurnDelivered;
         this.openingTurnDelivered = true;
         this.speakerDrainedAt = null;
+        // Whatever answer the candidate had given has now been replied to: the
+        // floor's reply-gap hold stands down (#130). Unconditional, like the
+        // delivery flag above — a turn completing means this even on the paths
+        // below that return early.
+        this.examinerTurnEndedAt = this.now();
         // The snapshot reads the flag twice — the floor, and the feed's hold on
         // an unheard question — and none of the paths below is guaranteed to
         // emit, so the delivery has to announce itself.

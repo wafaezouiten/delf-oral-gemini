@@ -227,10 +227,30 @@ export function examinerOpeningLine(phase: "monologue" | "debate"): string | nul
  * sliding context window does that until the question is unrecognisable. So
  * every relance after the first is told to drop the thread and start something
  * smaller, which is also what an examiner in the room does on the third try.
+ *
+ * **Except after « une dernière question » (#130).** The announcement is a
+ * promise the machinery keeps (see `lastQuestionInstruction`), and the
+ * escalation's own later steps were the one path still breaking it: a candidate
+ * who went quiet after the announced last question earned « pose une question
+ * NOUVELLE », which is the app asking, through the examiner's mouth, the fresh
+ * question it just promised there would not be — and an invitation to frame it
+ * as « une dernière question » a second time. Once the promise is made,
+ * `afterLastQuestion` collapses the escalation to one intent regardless of
+ * `attempt`: the promised question again, more simply, announced by nobody.
+ * #101's rephrase-of-a-rephrase worry is accepted here — the promise outranks
+ * it, and the closing window is too short for the drift it feared.
+ *
+ * The ordinary wording says « ta question précédente », not « ta dernière
+ * question », though the two mean the same thing: « dernière » in the
+ * examiner's ear is an invitation to say « une dernière question » out loud,
+ * which is #108's announcement — made once, by the app, never volunteered.
  */
-export function silenceRelanceInstruction(attempt = 1): string {
+export function silenceRelanceInstruction(attempt = 1, afterLastQuestion = false): string {
+  if (afterLastQuestion) {
+    return "[Le candidat n'a rien répondu à ta dernière question. Repose cette même question, reformulée plus simplement, en une seule phrase. Ne pose aucune question nouvelle, et n'annonce pas une seconde fois qu'il s'agit de la dernière question. Ne fais aucune remarque sur son silence, ne lui demande pas s'il a compris, n'évalue pas.]";
+  }
   if (attempt <= 1) {
-    return "[Le candidat n'a rien répondu depuis plusieurs secondes. Relance-le sur le fond, en une seule phrase : reformule autrement ta dernière question, ou pose une question plus simple et plus précise sur ce qu'il a déjà dit. Ne fais aucune remarque sur son silence, ne lui demande pas s'il a compris, n'évalue pas.]";
+    return "[Le candidat n'a rien répondu depuis plusieurs secondes. Relance-le sur le fond, en une seule phrase : reformule autrement ta question précédente, ou pose une question plus simple et plus précise sur ce qu'il a déjà dit. Ne fais aucune remarque sur son silence, ne lui demande pas s'il a compris, n'évalue pas.]";
   }
   return "[Le candidat n'a toujours rien répondu. Abandonne la question précédente : pose une question NOUVELLE et nettement plus simple sur le sujet, en une seule phrase, à laquelle on peut répondre en quelques mots. Ne reformule pas ce que tu viens de dire. Ne fais aucune remarque sur son silence, ne lui demande pas s'il a compris, n'évalue pas.]";
 }
@@ -302,8 +322,10 @@ export function timeRemainingInstruction(minutes: number): string {
  *    a test holds the two files to it.
  *  - **A promise the machinery keeps.** Once « une dernière question » is said,
  *    nothing may ask for a fresh one: the ordinary time cues are already floored
- *    above this moment, and the early-goodbye recovery switches to its
- *    follow-up wording (see `resumeDebateInstruction`).
+ *    above this moment, the early-goodbye recovery switches to its follow-up
+ *    wording (see `resumeDebateInstruction`), and the silence relances re-ask
+ *    the promised question instead of escalating to a new one (#130, see
+ *    `silenceRelanceInstruction`).
  */
 export function lastQuestionInstruction(): string {
   return "[Le débat touche à sa fin. Annonce-le au candidat MAINTENANT, à voix haute, puis pose-lui une dernière question ou objection sur le sujet, le tout en deux phrases au maximum, par exemple : « Nous arrivons à la fin de cet entretien. Une dernière question : ... ». Ne prononce aucun chiffre, ni minutes ni secondes. L'épreuve n'est PAS encore terminée : ne conclus pas, ne remercie pas le candidat, ne prends pas congé de lui et ne dis pas que l'épreuve est terminée. Après sa réponse, rebondis brièvement dessus si tu reprends la parole, sans poser de question entièrement nouvelle.]";
