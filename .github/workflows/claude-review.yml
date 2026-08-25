@@ -1,12 +1,21 @@
 name: Claude Code Review
 
-# Automatic review on every pull request. Mirrors the company's DELF repository
-# workflow of the same name, with the review brief widened to the four areas
-# issue #0 asks for: architecture, code quality, bugs, security.
+# One automatic review per pull request, then on demand. This used to mirror
+# the company's DELF repository — a fresh review on EVERY push — and that is
+# what emptied the account's 2,000 free Actions minutes 25 days into August:
+# an agentic review is minutes long, and this repository's working style pushes
+# to a PR many times. The month's whole allowance went to re-reviewing
+# work-in-progress states nobody asked about.
+#
+# So: the review runs once, when the PR opens (or leaves draft) — and again
+# whenever somebody asks, by adding the `claude-review` label. Remove the label
+# and add it back to ask twice. `@claude` mentions in comments keep working
+# independently of this (see claude.yml); what changed is only what runs
+# unprompted.
 
 on:
   pull_request:
-    types: [opened, synchronize, ready_for_review]
+    types: [opened, ready_for_review, labeled]
 
 concurrency:
   group: claude-review-${{ github.event.pull_request.number }}
@@ -16,7 +25,12 @@ jobs:
   # The job id is the check name. Left un-named on purpose so the pull request
   # shows "Claude Code Review / claude-review", matching the DELF repository.
   claude-review:
-    if: github.event.pull_request.draft == false
+    # The label gate only applies to label events: any label other than
+    # `claude-review` must not trigger a review, but `opened` and
+    # `ready_for_review` carry no label at all and pass straight through.
+    if: >-
+      github.event.pull_request.draft == false &&
+      (github.event.action != 'labeled' || github.event.label.name == 'claude-review')
     runs-on: ubuntu-latest
     permissions:
       contents: read
