@@ -220,6 +220,9 @@ export function ExamClient({
         phases: payload.phases,
         reconnectCount: payload.reconnectCount,
         earlyClosingCount: payload.earlyClosingCount,
+        // What the microphone heard, per part. Only ever read to excuse a
+        // transcript the app lost — see the field on `finishPayloadSchema`.
+        voicedSeconds: payload.voicedSeconds,
         // Undefined on any sitting that was actually spoken, and ignored by the
         // route in a production build (#36).
         devSeconds: payload.devSeconds,

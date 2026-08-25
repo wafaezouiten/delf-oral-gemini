@@ -1585,6 +1585,50 @@ describe("recording the candidate", () => {
       assert.equal(h.finished[0]?.devSeconds, undefined);
     });
 
+    /**
+     * What the microphone heard, carried out of the tab.
+     *
+     * The one number that can contradict the transcript, and the finish route
+     * is the only thing that reads it: a part with minutes of voiced speech
+     * and almost no words is a transcript the app lost, not a part the
+     * candidate skipped. Without it the rubric had the transcript's word alone,
+     * called the monologue absent, and halved the mark of a candidate who had
+     * spoken for seven minutes — which is the failure this exists to stop
+     * being reported as theirs.
+     */
+    it("carries what the microphone measured in each part", async () => {
+      const h = harness();
+      await intoMonologue(h);
+      // After the phase opens: `h.recorder` is the device the controller asked
+      // for, and nothing exists to configure until it has.
+      h.recorder.voiced.monologue = 284.4;
+      h.recorder.voiced.debate = 410.6;
+      await runToFinish(h, () => {});
+
+      // Whole seconds: the comparison downstream is against a fifteen-second
+      // floor, and a payload field is not the place for sample-accurate
+      // fractions of one.
+      assert.deepEqual(h.finished[0]?.voicedSeconds, { monologue: 284, debate: 411 });
+    });
+
+    it("reports zero for a part nobody spoke in, rather than nothing", async () => {
+      // Unlike `devSeconds`, absence and zero are NOT the same claim here.
+      // Absent means "this page cannot tell you", which is a client too old to
+      // have measured; zero means "the microphone was listening and heard no
+      // speech", which is evidence — and evidence that must NOT excuse
+      // anything. The walk-out is the case that has to keep costing what it
+      // costs: an exposé, then not a word of débat.
+      const h = harness();
+      await intoMonologue(h);
+      h.recorder.voiced.debate = 0;
+      await runToFinish(h, () => {});
+
+      const voiced = h.finished[0]?.voicedSeconds;
+      assert.ok(voiced, "the field is present even when half of it is zero");
+      assert.equal(voiced.debate, 0);
+      assert.ok(voiced.monologue > 0, "and the part that did happen still reads as speech");
+    });
+
     describe("« Envoyer l'exposé »", () => {
       /**
        * Preparation → an ARMED monologue: the consigne is over, « Enregistrer »

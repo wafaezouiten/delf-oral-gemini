@@ -272,4 +272,50 @@ describe("keeping the audit trail worth having", () => {
       );
     });
   });
+
+  describe("what the microphone heard, per part", () => {
+    // The only field here that cannot raise a mark: the route reads it to
+    // REFUSE to produce one, when a part carries minutes of voiced speech and
+    // almost no transcript. So the bounds are about arithmetic that must not be
+    // poisoned, not about a claim that must not be believed.
+    it("is optional, because a page from before the field has no evidence to offer", () => {
+      // A candidate mid-sitting across the deploy finishes from a controller
+      // that has never heard of it, and a 400 there costs them the épreuve.
+      assert.equal(accepts(payload()), true);
+      assert.equal(accepts(payload({ voicedSeconds: undefined })), true);
+    });
+
+    it("accepts a plausible pair, including a sitting nobody spoke in", () => {
+      assert.equal(accepts(payload({ voicedSeconds: { monologue: 280, debate: 410 } })), true);
+      assert.equal(accepts(payload({ voicedSeconds: { monologue: 0, debate: 0 } })), true);
+    });
+
+    it("refuses a half-filled pair, so neither part can default silently", () => {
+      assert.equal(accepts(payload({ voicedSeconds: { monologue: 280 } })), false);
+      assert.equal(accepts(payload({ voicedSeconds: {} })), false);
+    });
+
+    it("refuses the values that would poison the comparison", () => {
+      assert.equal(
+        accepts(payload({ voicedSeconds: { monologue: Number.NaN, debate: 0 } })),
+        false,
+      );
+      assert.equal(accepts(payload({ voicedSeconds: { monologue: -1, debate: 0 } })), false);
+      assert.equal(
+        accepts(payload({ voicedSeconds: { monologue: Number.POSITIVE_INFINITY, debate: 0 } })),
+        false,
+      );
+    });
+
+    it("is bounded by the same ceiling as the wall clock beside it", () => {
+      assert.equal(
+        accepts(payload({ voicedSeconds: { monologue: MAX_PHASE_SECONDS, debate: 0 } })),
+        true,
+      );
+      assert.equal(
+        accepts(payload({ voicedSeconds: { monologue: MAX_PHASE_SECONDS + 1, debate: 0 } })),
+        false,
+      );
+    });
+  });
 });

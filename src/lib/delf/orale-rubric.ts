@@ -192,6 +192,76 @@ export function partsUnderFloor(durations: SittingDurations): Array<"monologue" 
  */
 export const PARTICIPATION_WORD_FLOOR = 20;
 
+/**
+ * How much VOICED audio a part must carry before an empty transcript for it is
+ * read as the app's failure rather than the candidate's silence, in seconds.
+ *
+ * The counterpart to {@link PARTICIPATION_WORD_FLOOR}, and deliberately sized
+ * against it rather than picked round: fifteen seconds of continuous voiced
+ * speech is roughly forty words of unhurried French, comfortably past the
+ * twenty the word floor asks for. So the two cannot both be satisfied by the
+ * same honest sitting — a candidate whose entire contribution was « euh… non,
+ * ça va, merci » produces neither twenty words NOR fifteen seconds of voice,
+ * and is still absent. What clears this bar and fails that one is a part where
+ * somebody spoke at length and the transcript does not show it.
+ *
+ * Note this is VOICED seconds, not recorded ones. A recording's length is how
+ * long the part ran and a silent candidate's is just as long as anybody's;
+ * `audio/voice-activity.ts` is what makes this a claim about a person.
+ */
+export const PARTICIPATION_VOICED_FLOOR = 15;
+
+/** Seconds of voiced audio measured per part, from the microphone. */
+export interface SittingVoicedSpeech {
+  monologueSeconds: number;
+  debateSeconds: number;
+}
+
+/**
+ * Parts the microphone heard at length and the transcript does not contain.
+ *
+ * A contradiction with exactly one plausible owner. The transcript is Gemini's
+ * and arrives over a socket that can die; the voiced measure is the browser's
+ * own, taken from samples that never left the tab. When they disagree this
+ * hard, the words were lost in transit — and the monologue has a documented
+ * way of losing all of them at once, since it is transcribed in a single
+ * fragment emitted at `activityEnd` (`docs/GEMINI_LIVE_FINDINGS.md` §6) and a
+ * session that dies before that boundary takes the whole exposé with it.
+ *
+ * This exists because the alternative reading was the one the app shipped: with
+ * the transcript as the only witness, {@link partsAbsent} called such a part
+ * absent, {@link applyAbsentPartPenalty} halved the mark, and the correction
+ * page told a candidate who had spoken for seven minutes that they had not
+ * presented their monologue. That sentence was false, and it was the app's
+ * fault being read aloud as the candidate's.
+ *
+ * Deliberately NOT wired into `excused`. Excusing would keep the halving off a
+ * mark that is still computed from a transcript missing half the épreuve, which
+ * trades a false accusation for a fabricated grade. The finish route refuses
+ * instead: no mark at all is the only honest output when half the evidence is
+ * gone, and it is the same judgement the route already makes about a transcript
+ * that is empty outright.
+ */
+export function partsSpokenButUntranscribed(
+  participation: SittingParticipation,
+  voiced: SittingVoicedSpeech,
+): Array<"monologue" | "debate"> {
+  const lost: Array<"monologue" | "debate"> = [];
+  if (
+    participation.monologueWords < PARTICIPATION_WORD_FLOOR &&
+    voiced.monologueSeconds >= PARTICIPATION_VOICED_FLOOR
+  ) {
+    lost.push("monologue");
+  }
+  if (
+    participation.debateWords < PARTICIPATION_WORD_FLOOR &&
+    voiced.debateSeconds >= PARTICIPATION_VOICED_FLOOR
+  ) {
+    lost.push("debate");
+  }
+  return lost;
+}
+
 /** Which parts the candidate did not actually produce, in exam order. */
 export function partsAbsent(participation: SittingParticipation): Array<"monologue" | "debate"> {
   const absent: Array<"monologue" | "debate"> = [];

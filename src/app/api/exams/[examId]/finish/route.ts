@@ -60,7 +60,7 @@ import {
   type CorrectionRow,
 } from "@/lib/exams/sitting-persistence";
 import { resolveEarlyClosingCount } from "@/lib/delf/early-closing";
-import { PARTICIPATION_WORD_FLOOR } from "@/lib/delf/orale-rubric";
+import { PARTICIPATION_WORD_FLOOR, partsSpokenButUntranscribed } from "@/lib/delf/orale-rubric";
 import { findTopic } from "@/lib/delf/topics";
 import { candidateWordCount } from "@/lib/delf/transcript";
 // Lives outside this file so it can be unit-tested: nothing in a route that
@@ -256,6 +256,59 @@ export async function POST(request: Request, context: { params: Promise<{ examId
       {
         error:
           "La transcription ne contient presque aucune parole du candidat. L'épreuve ne peut pas être évaluée.",
+      },
+      { status: 422 },
+    );
+  }
+
+  /**
+   * The same refusal, asked per part, and answered by the microphone.
+   *
+   * The gate above catches a sitting with no words in it at all. This one
+   * catches the sitting that has plenty — a full débat, say — and is missing
+   * one part's worth, in a way only a transcription failure explains: minutes
+   * of measured voiced speech under a transcript that shows almost none.
+   *
+   * Refusing is the point, and it is not the conservative option. Grading on
+   * would have produced a number, and the rubric would then have halved it and
+   * had the correction page tell the candidate they never presented their
+   * monologue — which is the failure this whole path exists to stop being
+   * reported as theirs. A 422 costs them the sitting; the alternative costs
+   * them the sitting AND blames them for it.
+   *
+   * Placed before `readRecordings`, so a refusal is decided without spending
+   * the upload, and long before anything paid is called.
+   *
+   * `voicedSeconds` absent means a client that predates the field, which has no
+   * evidence to offer either way: `partsSpokenButUntranscribed` is then asked
+   * about zeroes and answers with nothing, so those sittings behave exactly as
+   * they did before this existed.
+   */
+  const untranscribed = partsSpokenButUntranscribed(
+    {
+      monologueWords: candidateWordCount(payload.transcript, "monologue"),
+      debateWords: candidateWordCount(payload.transcript, "debate"),
+    },
+    {
+      monologueSeconds: payload.voicedSeconds?.monologue ?? 0,
+      debateSeconds: payload.voicedSeconds?.debate ?? 0,
+    },
+  );
+  if (untranscribed.length > 0) {
+    const named =
+      untranscribed.length === 2
+        ? "des deux parties de l'épreuve"
+        : untranscribed[0] === "monologue"
+          ? "de votre monologue"
+          : "de votre débat";
+    return NextResponse.json(
+      {
+        error:
+          `La transcription ${named} n'a pas été enregistrée correctement : ` +
+          `le microphone vous a bien entendu, mais vos paroles ne sont pas parvenues jusqu'au ` +
+          `correcteur. L'épreuve ne peut pas être évaluée, et ce n'est pas de votre fait.`,
+        reason: "transcription",
+        parts: untranscribed,
       },
       { status: 422 },
     );
