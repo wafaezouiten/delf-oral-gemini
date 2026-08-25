@@ -104,6 +104,15 @@ export interface LiveTokenClientRequest {
    * database configured.
    */
   model?: string;
+  /**
+   * DEVELOPMENT ONLY — a replacement examiner system instruction (#148).
+   *
+   * Forwarded on every mint, including reconnects, for the same reason the
+   * model is: a session that reconnects must come back as the same examiner,
+   * and a prompt that survived only the first connect would quietly revert
+   * mid-débat. The server drops it off a development build.
+   */
+  examinerPrompt?: string;
   /** Present on a resume. Its presence is what the server pins into the token. */
   resumptionHandle?: string;
 }
@@ -212,6 +221,9 @@ export interface ExamLiveSessionOptions {
   /** The candidate's chosen examiner, forwarded on every mint (#99). Absent
    *  means "never chosen" — the server decides, exactly as before. */
   model?: string;
+  /** DEVELOPMENT ONLY — the examiner prompt this session runs under (#148).
+   *  Absent means the instruction this repository builds. */
+  examinerPrompt?: string;
   callbacks: SessionManagerCallbacks;
   /** History to seed a fresh session with (the monologue, for the débat). */
   initialHistory?: Array<{ role: "user" | "model"; parts: Array<{ text: string }> }>;
@@ -277,6 +289,7 @@ export class ExamLiveSession {
   private readonly phase: LivePhase;
   private readonly topic: OralTopic;
   private readonly model: string | undefined;
+  private readonly examinerPrompt: string | undefined;
   private readonly callbacks: SessionManagerCallbacks;
   private readonly initialHistory: Array<{
     role: "user" | "model";
@@ -291,6 +304,7 @@ export class ExamLiveSession {
     this.phase = options.phase;
     this.topic = options.topic;
     this.model = options.model;
+    this.examinerPrompt = options.examinerPrompt;
     this.callbacks = options.callbacks;
     this.initialHistory = options.initialHistory ?? [];
     this.transport = options.transport ?? browserLiveTransport;
@@ -332,6 +346,7 @@ export class ExamLiveSession {
       phase: this.phase,
       topicSlug: this.topic.slug,
       model: this.model,
+      examinerPrompt: this.examinerPrompt,
       resumptionHandle: this.resumptionHandle,
     };
   }

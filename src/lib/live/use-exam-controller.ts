@@ -73,12 +73,16 @@ export function useExamController(options: {
     () =>
       new ExamController({
         topic,
-        createSession: (phase, sessionTopic, callbacks, initialHistory, model) =>
+        createSession: (phase, sessionTopic, callbacks, initialHistory, model, examinerPrompt) =>
           new ExamLiveSession({
             examId,
             phase,
             topic: sessionTopic,
             model,
+            // DEVELOPMENT ONLY (#148) — undefined on every real sitting. It
+            // rides to the token route, which drops it unless that build
+            // carries the tooling.
+            examinerPrompt,
             callbacks,
             initialHistory,
           }),

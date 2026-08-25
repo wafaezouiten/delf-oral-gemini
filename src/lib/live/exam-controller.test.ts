@@ -376,6 +376,9 @@ interface Harness {
   sessions: FakeSession[];
   /** The examiner each session was created for (#99), in creation order. */
   sessionModels: Array<string | undefined>;
+  /** The system instruction each session was created under (#148), in creation
+   *  order. `undefined` means the instruction the repository builds. */
+  sessionPrompts: Array<string | undefined>;
   /** The first microphone opened — the only one a healthy exam opens. */
   recorder: FakeRecorder;
   recorders: FakeRecorder[];
@@ -416,6 +419,7 @@ function harness(
   let now = 0;
   const sessions: FakeSession[] = [];
   const sessionModels: Array<string | undefined> = [];
+  const sessionPrompts: Array<string | undefined> = [];
   // Built per call rather than shared, so "how many devices did this open?" is
   // a question the harness can answer.
   const recorders: FakeRecorder[] = [];
@@ -426,10 +430,11 @@ function harness(
 
   const controller = new ExamController({
     topic: TOPIC,
-    createSession: (phase, _topic, callbacks, history, examinerModel) => {
+    createSession: (phase, _topic, callbacks, history, examinerModel, examinerPrompt) => {
       const session = new FakeSession(phase, callbacks, history);
       sessions.push(session);
       sessionModels.push(examinerModel);
+      sessionPrompts.push(examinerPrompt);
       return session;
     },
     createRecorder: (callbacks) => {
@@ -455,6 +460,7 @@ function harness(
     announcer: devices.announcer ?? null,
     sessions,
     sessionModels,
+    sessionPrompts,
     get recorder() {
       return recorders[0];
     },
@@ -3905,6 +3911,183 @@ describe("which examiner the controller's sessions are created for (#99)", () =>
     const h = harness();
     await intoMonologue(h);
     assert.deepEqual(h.sessionModels, [undefined]);
+  });
+});
+
+describe("editing the examiner's prompt mid-épreuve (#148)", () => {
+  const PROMPT = "Tu es un examinateur bien plus exigeant. Multiplie les objections.";
+  const OTHER = "Tu es un examinateur très conciliant.";
+
+  /** Preparation → a monologue that has begun, so a session exists. */
+  async function intoMonologue(h: Harness): Promise<void> {
+    h.controller.start();
+    await h.controller.advanceEarly();
+    await pressRecord(h);
+  }
+
+  /** Let the detached `openSession` a restart starts actually run. */
+  const settle = () => new Promise((resolve) => setImmediate(resolve));
+
+  it("opens every later session under the applied prompt", async () => {
+    // The instruction is pinned into the token before the socket exists, so
+    // this is the only way a prompt reaches the examiner at all.
+    const h = harness();
+    await intoMonologue(h);
+    assert.deepEqual(h.sessionPrompts, [undefined], "the monologue ran the shipped instruction");
+
+    h.controller.setExaminerPrompt(PROMPT);
+    h.advanceClock(MONOLOGUE_MIN_SECONDS + 10);
+    await h.controller.advanceEarly();
+    await completeClosing(h);
+
+    assert.equal(h.controller.getSnapshot().phase, "debate");
+    assert.deepEqual(h.sessionPrompts, [undefined, PROMPT], "the débat opened under the edit");
+  });
+
+  it("reports whether the examiner is running an edited prompt", async () => {
+    const h = harness();
+    await intoMonologue(h);
+    assert.equal(h.controller.getSnapshot().examinerPromptModified, false, "the default");
+
+    h.controller.setExaminerPrompt(PROMPT);
+    assert.equal(h.controller.getSnapshot().examinerPromptModified, true);
+
+    h.controller.setExaminerPrompt(null);
+    assert.equal(h.controller.getSnapshot().examinerPromptModified, false, "reset to the default");
+  });
+
+  it("restarts the examiner so an edit is audible without waiting for the next part", async () => {
+    // A session's system instruction is fixed for its lifetime, so applying
+    // has to open a NEW session. Deliberately not a resume: `forceReconnect`
+    // carries the resumption handle and would restore the session minted
+    // under the old instruction.
+    const h = harness();
+    await intoMonologue(h);
+    const first = h.session();
+
+    h.controller.setExaminerPrompt(PROMPT);
+    h.controller.restartExaminerSession();
+    await settle();
+
+    assert.equal(first.closed, true, "the session on the old prompt was closed");
+    assert.equal(first.reconnects, 0, "and not resumed, which would restore the old instruction");
+    assert.equal(h.sessions.length, 2);
+    assert.deepEqual(h.sessionPrompts, [undefined, PROMPT]);
+    assert.equal(h.session().phase, "monologue", "still the same part of the épreuve");
+  });
+
+  it("puts the shipped instruction back", async () => {
+    const h = harness();
+    await intoMonologue(h);
+    h.controller.setExaminerPrompt(PROMPT);
+    h.controller.restartExaminerSession();
+    await settle();
+
+    h.controller.setExaminerPrompt(null);
+    h.controller.restartExaminerSession();
+    await settle();
+
+    assert.deepEqual(h.sessionPrompts, [undefined, PROMPT, undefined]);
+    assert.equal(h.controller.getSnapshot().examinerPromptModified, false);
+  });
+
+  it("leaves the transcript, the clock and the recording alone", async () => {
+    // The distinction the panel exists to keep: this changes how the EXAMINER
+    // behaves and never touches what the candidate said or how long they
+    // spoke. A restart is a socket, not a phase.
+    const h = harness();
+    await intoMonologue(h);
+    h.session().candidateSays("Le télétravail a transformé le rapport au bureau.");
+    h.advanceClock(120);
+
+    const before = h.controller.getSnapshot();
+    h.controller.setExaminerPrompt(PROMPT);
+    h.controller.restartExaminerSession();
+    await settle();
+    const after = h.controller.getSnapshot();
+
+    assert.deepEqual(after.transcript, before.transcript, "nothing was said or unsaid");
+    assert.equal(after.elapsed, before.elapsed, "the part's clock did not move");
+    assert.equal(after.phase, "monologue");
+    assert.equal(h.recorder.paused, false, "the microphone was never touched");
+    assert.equal(h.recorder.measuredSeconds("monologue"), 120, "and kept recording");
+  });
+
+  it("says whether there is a session to restart at all", async () => {
+    // What the panel reads to promise a restart or merely the next session.
+    const h = harness();
+    h.controller.start();
+    assert.equal(
+      h.controller.getSnapshot().examinerSessionOpen,
+      false,
+      "no session in preparation",
+    );
+
+    await intoMonologue(h);
+    assert.equal(h.controller.getSnapshot().examinerSessionOpen, true);
+  });
+
+  it("does nothing when there is no session, leaving the next connect to pick it up", async () => {
+    const h = harness();
+    h.controller.start();
+    h.controller.setExaminerPrompt(PROMPT);
+    h.controller.restartExaminerSession();
+    await settle();
+
+    assert.equal(h.sessions.length, 0, "the préparation opens nobody");
+    await intoMonologue(h);
+    assert.deepEqual(h.sessionPrompts, [PROMPT], "and the first session runs the edit");
+  });
+
+  it("ignores an edit that changes nothing", async () => {
+    const h = harness();
+    await intoMonologue(h);
+    h.controller.setExaminerPrompt(PROMPT);
+    h.controller.setExaminerPrompt(PROMPT);
+
+    const events = h.controller
+      .getSnapshot()
+      .events.filter((event) => event.name === "dev-examiner-prompt");
+    assert.equal(events.length, 1, "one entry, not one per press");
+  });
+
+  it("treats a blank prompt as no prompt", async () => {
+    // The panel refuses one, but the controller is the layer that decides what
+    // a session runs under, and an empty system instruction is a session with
+    // no examiner in it.
+    const h = harness();
+    await intoMonologue(h);
+    h.controller.setExaminerPrompt("   \n\t ");
+    assert.equal(h.controller.getSnapshot().examinerPromptModified, false);
+  });
+
+  it("survives the épreuve to the correction without changing what is graded", async () => {
+    // The grade comes from the transcript and the recordings, neither of which
+    // a prompt edit touches. Asserted end to end because "a dev tool that
+    // cannot affect a mark" is the claim worth holding.
+    const h = harness();
+    await intoMonologue(h);
+    h.session().candidateSays("Le télétravail a transformé le rapport au bureau.");
+    h.controller.setExaminerPrompt(OTHER);
+    h.advanceClock(MONOLOGUE_MIN_SECONDS + 10);
+    await h.controller.advanceEarly();
+    await completeClosing(h);
+    h.advanceClock(PHASE_DURATIONS.debate);
+    await completeClosing(h);
+
+    assert.equal(h.controller.getSnapshot().phase, "finished");
+    assert.equal(h.finished[0]?.devSeconds, undefined, "no duration was claimed");
+    assert.deepEqual(
+      h.finished[0]?.recordings.map((recording) => recording.phase),
+      ["monologue", "debate"],
+      "both parts were recorded from the microphone, as a real sitting is",
+    );
+    assert.ok(
+      h.finished[0]?.transcript.some((entry) =>
+        /Le télétravail a transformé le rapport au bureau\./.test(entry.text),
+      ),
+      "and the candidate's own words are what reached the correction",
+    );
   });
 });
 

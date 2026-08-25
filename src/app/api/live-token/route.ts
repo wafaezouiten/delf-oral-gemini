@@ -14,6 +14,13 @@
  *  1. **The examiner prompt never leaves the server.** Not in the client bundle,
  *     not over the wire. The browser connects with `responseModalities` alone
  *     and the pinned config is what actually governs the session.
+ *
+ *     One exception, and it is gated rather than carved out: on a build where
+ *     `DEV_TOOLS_ENABLED` is true a browser may hand UP a replacement
+ *     instruction, so the prompt editor can try a different examiner without a
+ *     redeploy (#148). `gateLiveToken` drops that field on every other build,
+ *     so the production property above is unchanged — the server still decides
+ *     the instruction, and still never sends it down.
  *  2. **A leaked token is worth almost nothing.** It is single-use, expires in
  *     minutes, and can only ever open the exact session it was minted for.
  *
@@ -37,6 +44,7 @@ import { GoogleGenAI } from "@google/genai";
 import { NextResponse } from "next/server";
 
 import { authorizeExam } from "@/lib/auth/exam-guard";
+import { DEV_TOOLS_ENABLED } from "@/lib/dev-tools";
 import { findTopic } from "@/lib/delf/topics";
 import { liveConfigForPhase } from "@/lib/gemini/live-config";
 import { gateLiveToken, parseLiveTokenRequest } from "@/lib/gemini/live-token-request";
@@ -67,14 +75,31 @@ export async function POST(request: Request) {
   if (!parsed.ok) {
     return NextResponse.json({ error: parsed.error }, { status: parsed.status });
   }
-  const { phase, examId, requestedTopicSlug, requestedModel, resumptionHandle } = parsed.request;
+  const {
+    phase,
+    examId,
+    requestedTopicSlug,
+    requestedModel,
+    resumptionHandle,
+    requestedExaminerPrompt,
+  } = parsed.request;
 
   // One query, and it answers both halves: who owns the sitting, and what it is
   // about. It used to be two sequential round trips to the same row — see
   // `findExamOwner` — which a bad-network episode multiplied by five.
   const access = await authorizeExam(examId);
 
-  const gate = gateLiveToken({ access, requestedTopicSlug, requestedModel });
+  const gate = gateLiveToken({
+    access,
+    requestedTopicSlug,
+    requestedModel,
+    requestedExaminerPrompt,
+    // Read on the SERVER (#148). `DEV_TOOLS_ENABLED` fails closed in
+    // production, so this is what makes a browser-supplied examiner prompt
+    // unreachable there — the gate drops the field and mints the instruction
+    // this repository built, exactly as it always has.
+    devToolsEnabled: DEV_TOOLS_ENABLED,
+  });
   if (gate.decision === "deny") {
     return NextResponse.json({ error: gate.error }, { status: gate.status });
   }
@@ -114,6 +139,14 @@ export async function POST(request: Request) {
     console.warn(`[live-token] minting for the requested subject, ${why}:`, examId);
   }
 
+  // Worth a line, because it is the one condition under which the examiner is
+  // not running the instruction in this repository — and a developer reading
+  // an odd transcript should be able to find that out from the log rather than
+  // by remembering what they left in a text box.
+  if (gate.examinerPrompt) {
+    console.warn("[live-token] minting with a DEV examiner prompt override:", examId);
+  }
+
   try {
     const client = new GoogleGenAI({ apiKey });
     const now = Date.now();
@@ -126,7 +159,15 @@ export async function POST(request: Request) {
         liveConnectConstraints: {
           model: gate.model,
           // Both fields are required. Model alone => 1011 on connect.
-          config: liveConfigForPhase(phase, { topic, resumptionHandle }),
+          config: liveConfigForPhase(phase, {
+            topic,
+            resumptionHandle,
+            // Undefined unless the gate authorised it, which it only does on a
+            // development build. The prompt still never leaves the server on a
+            // production mint: what changes here is that a DEV browser may
+            // hand one up, and the gate is the only thing that lets it.
+            instructionOverride: gate.examinerPrompt,
+          }),
         },
       },
     });
