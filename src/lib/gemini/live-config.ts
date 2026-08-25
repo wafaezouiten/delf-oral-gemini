@@ -81,7 +81,7 @@ export interface LiveConfigOptions {
   resumptionHandle?: string;
   /**
    * DEVELOPMENT ONLY — a system instruction to use instead of the built one
-   * (#148).
+   * (#152).
    *
    * The whole of the examiner's behaviour, replaced. It reaches this file only
    * from the token route, which accepts it only where the development tooling

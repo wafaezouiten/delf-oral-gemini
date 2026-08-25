@@ -1,5 +1,5 @@
 /**
- * The rules and the copy behind the development examiner-prompt editor (#148).
+ * The rules and the copy behind the development examiner-prompt editor (#152).
  *
  * DEVELOPMENT ONLY in effect, but a plain module by construction — the same
  * split `dev-transcription.ts` makes, and for the same reason: nothing here

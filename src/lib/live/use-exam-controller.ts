@@ -79,7 +79,7 @@ export function useExamController(options: {
             phase,
             topic: sessionTopic,
             model,
-            // DEVELOPMENT ONLY (#148) — undefined on every real sitting. It
+            // DEVELOPMENT ONLY (#152) — undefined on every real sitting. It
             // rides to the token route, which drops it unless that build
             // carries the tooling.
             examinerPrompt,

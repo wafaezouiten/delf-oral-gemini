@@ -376,7 +376,7 @@ interface Harness {
   sessions: FakeSession[];
   /** The examiner each session was created for (#99), in creation order. */
   sessionModels: Array<string | undefined>;
-  /** The system instruction each session was created under (#148), in creation
+  /** The system instruction each session was created under (#152), in creation
    *  order. `undefined` means the instruction the repository builds. */
   sessionPrompts: Array<string | undefined>;
   /** The first microphone opened — the only one a healthy exam opens. */
@@ -3914,7 +3914,7 @@ describe("which examiner the controller's sessions are created for (#99)", () =>
   });
 });
 
-describe("editing the examiner's prompt mid-épreuve (#148)", () => {
+describe("editing the examiner's prompt mid-épreuve (#152)", () => {
   const PROMPT = "Tu es un examinateur bien plus exigeant. Multiplie les objections.";
   const OTHER = "Tu es un examinateur très conciliant.";
 

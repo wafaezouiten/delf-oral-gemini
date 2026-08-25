@@ -282,7 +282,7 @@ describe("which examiner a token is minted for", () => {
   });
 });
 
-describe("the development examiner-prompt override (#148)", () => {
+describe("the development examiner-prompt override (#152)", () => {
   const owned: ExamAccess = {
     status: "owned",
     userId: "user_1",

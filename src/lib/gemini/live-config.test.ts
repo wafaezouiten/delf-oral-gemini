@@ -103,7 +103,7 @@ describe("both phases, because the exam outlasts a connection", () => {
   }
 });
 
-describe("the development examiner-prompt override (#148)", () => {
+describe("the development examiner-prompt override (#152)", () => {
   const OVERRIDE = "Tu es un examinateur bien plus exigeant.";
 
   it("replaces the built instruction, in both phases", () => {

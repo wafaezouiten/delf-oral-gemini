@@ -60,7 +60,7 @@ export interface LiveTokenRequest {
   /** Present only on a reconnect. Its presence is what makes the connect a resume. */
   resumptionHandle?: string;
   /**
-   * DEVELOPMENT ONLY — a replacement examiner system instruction (#148).
+   * DEVELOPMENT ONLY — a replacement examiner system instruction (#152).
    *
    * Parsed here, but deliberately NOT honoured here: {@link gateLiveToken}
    * drops it unless the caller says the development tooling is on. Validating
@@ -171,7 +171,7 @@ export type LiveTokenGate =
       modelSource: "sitting" | "request" | "default";
       /**
        * DEVELOPMENT ONLY — the system instruction to pin instead of the built
-       * one (#148). Undefined on every production mint, because the gate below
+       * one (#152). Undefined on every production mint, because the gate below
        * only ever sets it when told the development tooling is enabled.
        */
       examinerPrompt?: string;
@@ -190,7 +190,7 @@ export interface LiveTokenGateInput {
   requestedTopicSlug: string;
   /** The examiner the browser asked for, if any. Already allow-listed. */
   requestedModel?: string;
-  /** DEVELOPMENT ONLY — the replacement instruction the browser sent (#148). */
+  /** DEVELOPMENT ONLY — the replacement instruction the browser sent (#152). */
   requestedExaminerPrompt?: string;
   /**
    * Whether this build carries the development tooling — `DEV_TOOLS_ENABLED`,
@@ -223,7 +223,7 @@ export function gateLiveToken({
   }
 
   /**
-   * The one place a client-supplied examiner prompt is allowed in (#148).
+   * The one place a client-supplied examiner prompt is allowed in (#152).
    *
    * A single `&&`, and it is the entire authorisation: off a development build
    * the field is dropped, so the instruction the token pins is the one this
