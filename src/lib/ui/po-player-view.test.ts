@@ -13,6 +13,7 @@ import {
   partieKicker,
   EXPOSE_PLAN,
   topbarStep,
+  rewindStartBy,
 } from "./po-player-view";
 
 describe("the masthead", () => {
@@ -257,5 +258,21 @@ describe("the topbar stepper", () => {
   it("numbers the parts as the DELF does", () => {
     assert.equal(partieKicker("monologue"), "Partie 1 · Monologue suivi");
     assert.equal(partieKicker("debate"), "Partie 2 · Débat");
+  });
+});
+
+describe("rewinding the start stamp (the dev fast-forward)", () => {
+  it("advances the derived clock by the skipped seconds", () => {
+    // Elapsed is (now - start), so moving the start earlier moves the clock
+    // forward — the whole mechanism, ported from the reference.
+    const start = 1_000_000;
+    assert.equal(rewindStartBy(start, 30), start - 30_000);
+    assert.equal(rewindStartBy(start, 120), start - 120_000);
+  });
+
+  it("never rewinds time: a non-positive skip is a no-op", () => {
+    const start = 1_000_000;
+    assert.equal(rewindStartBy(start, 0), start);
+    assert.equal(rewindStartBy(start, -45), start);
   });
 });

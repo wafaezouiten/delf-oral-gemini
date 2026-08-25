@@ -27,6 +27,7 @@ import type { OralTopic } from "@/lib/delf/topics";
 import { AnnouncementControl } from "./_components/announcement-control";
 import { DEV_TOOLS_ENABLED } from "@/lib/dev-tools";
 import { DevTranscriptionPanel } from "./_components/dev-transcription-panel";
+import { DevTimeSkip } from "./_components/dev-time-skip";
 import { PreparationScreen } from "./_components/preparation-screen";
 import { PassationScreen } from "./_components/passation-screen";
 import { FinishedScreen } from "./_components/finished-screen";
@@ -743,6 +744,23 @@ export function ExamClient({
           ) : undefined
         }
       />
+      {/* PORT NOTE (#149): the reference renders its admin time-skip exactly
+          here — a fixed pill beside the passation screen, not inside it — and
+          shows it only while the part is actually running and not closing: a
+          skip on an armed clock has nothing to move, and one during the
+          handshake would race the end it is asking for. The held monologue
+          hides it too, because `tick()` re-anchors a held clock and would
+          silently undo the jump. */}
+      {DEV_TOOLS_ENABLED &&
+        (state.phase === "monologue" || state.phase === "debate") &&
+        state.phaseStartedAt !== null &&
+        !state.closing &&
+        !state.monologueHeld && (
+          <DevTimeSkip
+            onSkip={(seconds) => controller.devSkipTime(seconds)}
+            onSkipToEnd={() => controller.devSkipToEnd()}
+          />
+        )}
       {exitDialog}
     </>
   );

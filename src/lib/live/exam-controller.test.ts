@@ -3907,3 +3907,136 @@ describe("which examiner the controller's sessions are created for (#99)", () =>
     assert.deepEqual(h.sessionModels, [undefined]);
   });
 });
+
+describe("the dev time-skip (#149)", () => {
+  /** Preparation → a monologue that has begun. */
+  async function intoMonologue(h: Harness): Promise<void> {
+    h.controller.start();
+    await h.controller.advanceEarly();
+    await pressRecord(h);
+  }
+
+  /** …and on into a débat that has begun, the spoken way. */
+  async function intoDebate(h: Harness): Promise<void> {
+    await intoMonologue(h);
+    h.session().candidateSays("Le télétravail a transformé le rapport au bureau.");
+    h.advanceClock(MONOLOGUE_MIN_SECONDS + 10);
+    await h.controller.advanceEarly();
+    await completeClosing(h);
+  }
+
+  it("advances the part's clock and moves nothing else", async () => {
+    // The port's whole design (see the reference's admin time-skip): only the
+    // start stamp is rewound, so the derived elapsed jumps while the words
+    // already said keep their timestamps and the microphone keeps recording.
+    const h = harness();
+    await intoMonologue(h);
+    h.session().candidateSays("Premièrement, il supprime des trajets subis.");
+    h.advanceClock(10);
+    const stamped = h.controller.getSnapshot().transcript[0].timestamp;
+
+    h.controller.devSkipTime(120);
+
+    const state = h.controller.getSnapshot();
+    assert.equal(state.elapsed, 130, "ten real seconds plus the skipped two minutes");
+    assert.equal(state.transcript[0].timestamp, stamped, "no word moved");
+    assert.equal(h.recorder.paused, false, "the microphone was never touched");
+  });
+
+  it("reaches time-up through the real closing handshake, never around it", async () => {
+    // « Fin du temps ». Nothing here bypasses the finalize path: the next tick
+    // is the ordinary time-up, so the examiner is asked for its closing
+    // sentence and the part ends the way a genuine timeout ends it.
+    const h = harness();
+    await intoDebate(h);
+
+    h.controller.devSkipToEnd();
+
+    assert.equal(h.controller.getSnapshot().closing, true, "the handshake is running");
+    assert.ok(
+      h.session().directives.some((text) => text.includes("Le temps de l'épreuve est écoulé")),
+      "the examiner was asked to conclude, exactly as at a real 0:00",
+    );
+    await completeClosing(h);
+    assert.equal(h.controller.getSnapshot().phase, "finished");
+  });
+
+  it("carries a skipped monologue into the débat, closing sentence and all", async () => {
+    const h = harness();
+    await intoMonologue(h);
+    h.advanceClock(30);
+
+    h.controller.devSkipToEnd();
+
+    assert.equal(h.controller.getSnapshot().closing, true);
+    await completeClosing(h);
+    assert.equal(h.controller.getSnapshot().phase, "debate");
+  });
+
+  it("lands a skip in the cue grid's window and gets one cue, not a backlog", async () => {
+    // Jumping over a three-minute boundary must not fire the cues the skip
+    // leapt past one after another — the grid is an index, not a count, and a
+    // skip proves that design the same way a held-back cue does.
+    const h = harness();
+    await intoDebate(h);
+    h.recorder.voiced.debate = 0;
+
+    h.controller.devSkipTime(185);
+    h.advanceClockSilently(3);
+
+    const cues = h.session().directives.filter((text) => text.includes("Information de service"));
+    assert.equal(cues.length, 1, "one cue for one boundary crossed");
+  });
+
+  it("still refuses to advance a silent monologue: the hold outranks the skip", async () => {
+    // The skip exercises the real end-game, and the real end-game refuses a
+    // monologue with no speech on it (#39). A dev tool that skipped past that
+    // hold would be testing a path no candidate can take.
+    const h = harness();
+    await intoMonologue(h);
+    h.recorder.voiced.monologue = 0;
+    h.advanceClock(30);
+
+    h.controller.devSkipToEnd();
+
+    const state = h.controller.getSnapshot();
+    assert.equal(state.monologueHeld, true, "held, exactly as a waited-out clock is");
+    assert.equal(state.phase, "monologue");
+    assert.equal(state.closing, false);
+  });
+
+  it("does nothing on an armed part, during a closing, or while the monologue is held", async () => {
+    const h = harness();
+    h.controller.start();
+    await h.controller.advanceEarly();
+    // Armed: « Enregistrer » has not been pressed, so there is no clock to move.
+    h.controller.devSkipTime(120);
+    assert.equal(h.controller.getSnapshot().elapsed, 0, "an armed part has no clock to skip");
+
+    await pressRecord(h);
+    h.recorder.voiced.monologue = 0;
+    h.advanceClock(30);
+    h.controller.devSkipToEnd();
+    assert.equal(h.controller.getSnapshot().monologueHeld, true);
+    // The hold froze the clock at time-up, exactly where a waited-out silent
+    // monologue freezes. Held, `tick()` re-anchors the clock to keep it still,
+    // so a further skip would be silently undone — refusal is the honest
+    // behaviour, and the frozen number must not move.
+    const heldAt = h.controller.getSnapshot().elapsed;
+    assert.equal(heldAt, PHASE_DURATIONS.monologue, "held at the end it skipped to");
+    h.controller.devSkipTime(120);
+    h.advanceClockSilently(5);
+    assert.equal(h.controller.getSnapshot().elapsed, heldAt, "a held clock stands still");
+  });
+
+  it("never rewinds: a non-positive skip is a no-op", async () => {
+    const h = harness();
+    await intoMonologue(h);
+    h.advanceClock(60);
+
+    h.controller.devSkipTime(0);
+    h.controller.devSkipTime(-45);
+
+    assert.equal(h.controller.getSnapshot().elapsed, 60);
+  });
+});
