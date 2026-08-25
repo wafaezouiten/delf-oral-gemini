@@ -13,13 +13,20 @@ import {
 } from "@/lib/ui/dev-examiner-prompt";
 
 /**
- * DEVELOPMENT ONLY — edit the examiner's system instruction mid-épreuve (#148).
+ * DEVELOPMENT ONLY — edit the examiner's system instruction mid-débat (#148).
  *
  * The examiner's behaviour is a prompt, and until this existed the only way to
  * try a different one was to edit `lib/delf/examiner-prompt.ts`, restart the
  * server, and sit the épreuve from the beginning. This shows the instruction
  * the live examiner is actually running under, lets it be changed, and puts the
  * change in force on the next question.
+ *
+ * **The débat only (#153).** The monologue's examiner is silent by design —
+ * the transport withholds its turn, and its instruction's whole content is
+ * « tu écoutes et tu ne parles pas » — so a prompt experiment there has nothing
+ * observable to test. Fixing the phase also removed a real footgun this panel
+ * used to carry: two different prompts behind one toggle, where an edit made on
+ * the part about to end read as an edit that never took.
  *
  * **It is not the transcription panel and shares nothing with it.** That one
  * writes down what the CANDIDATE said; this one changes how the EXAMINER
@@ -47,7 +54,6 @@ import {
  * characters and an editor showing three lines of it is a search box.
  */
 export function DevExaminerPromptPanel({
-  phase,
   topicSlug,
   active,
   modified,
@@ -56,8 +62,6 @@ export function DevExaminerPromptPanel({
   onApply,
   onReset,
 }: {
-  /** Which part's instruction to load — they are genuinely different prompts. */
-  phase: "monologue" | "debate";
   topicSlug: string;
   active: boolean;
   /** The examiner is running under an edited prompt, as the controller sees it. */
@@ -91,12 +95,9 @@ export function DevExaminerPromptPanel({
   const loading = active && !loaded && !failed;
 
   /**
-   * Fetch on first open, for this phase.
-   *
-   * Keyed on the phase as well as on `active` because the monologue's
-   * instruction and the débat's are different texts, and a panel carried across
-   * the boundary would otherwise be editing the part that has ended. `ignore`
-   * is the ordinary out-of-order guard: the fetch outlives a fast close.
+   * Fetch on first open. The débat's instruction, always — this panel renders
+   * on no other part (#153). `ignore` is the ordinary out-of-order guard: the
+   * fetch outlives a fast close.
    */
   useEffect(() => {
     // Once per mount. Re-opening a panel that already has the text must not
@@ -105,7 +106,7 @@ export function DevExaminerPromptPanel({
     // does retry, which is the one case where there is nothing to lose.
     if (!active || loaded) return;
     let ignore = false;
-    fetch(`/api/dev/examiner-prompt?phase=${phase}&topicSlug=${encodeURIComponent(topicSlug)}`)
+    fetch(`/api/dev/examiner-prompt?phase=debate&topicSlug=${encodeURIComponent(topicSlug)}`)
       .then((response) => (response.ok ? response.json() : Promise.reject(response.status)))
       .then((body: { prompt?: string }) => {
         if (ignore) return;
@@ -127,7 +128,7 @@ export function DevExaminerPromptPanel({
     return () => {
       ignore = true;
     };
-  }, [active, loaded, phase, topicSlug]);
+  }, [active, loaded, topicSlug]);
 
   // The caret goes where the typing goes, as it does in the transcription
   // panel. Not while loading — focusing an empty box that is about to be
@@ -159,12 +160,15 @@ export function DevExaminerPromptPanel({
     // Not `relative`, for the reason the transcription panel documents: which
     // ancestor the popover hangs off has to change with the breakpoint.
     <div className="flex shrink-0 items-center">
+      {/* Slimmer than the transcription toggle on purpose (#153): a flat pill
+          rather than a button, because two full-height dev buttons side by side
+          were crowding a bar whose real control is the microphone. */}
       <button
         type="button"
         onClick={() => onActiveChange(!active)}
         aria-expanded={active}
         className={cn(
-          "flex items-center gap-1.5 rounded-md border border-dashed border-amber-400 px-2 py-1.5 text-[0.625rem] font-semibold tracking-[0.14em] uppercase transition-colors",
+          "flex items-center gap-1 rounded-full border border-dashed border-amber-400 px-1.5 py-0.5 text-[0.5625rem] font-semibold tracking-[0.12em] uppercase transition-colors",
           active ? "bg-amber-100 text-amber-900" : "text-amber-700 hover:bg-amber-50",
         )}
       >
@@ -184,7 +188,13 @@ export function DevExaminerPromptPanel({
             if (refused) return;
             apply();
           }}
-          className="absolute inset-x-4 bottom-full z-20 mb-2 flex flex-col gap-1.5 rounded-md border border-amber-300 bg-amber-50 p-2 shadow-lg xl:right-0 xl:left-auto xl:w-[34rem]"
+          // `inset-x-4` spans the control bar below `xl`; from `xl` the panel
+          // hangs off the corner cluster at a fixed width. Both are now capped
+          // against the viewport (#153): the cluster sits 24px in from the
+          // right, so a 34rem panel on a window narrower than that ran past
+          // the edge and clipped « Appliquer le prompt » — a control that
+          // cannot be fully seen cannot be pressed with confidence.
+          className="absolute inset-x-4 bottom-full z-20 mb-2 flex flex-col gap-1.5 rounded-md border border-amber-300 bg-amber-50 p-2 shadow-lg xl:right-0 xl:left-auto xl:w-[34rem] xl:max-w-[calc(100vw-3rem)]"
         >
           <div className="flex items-center gap-1.5">
             <span className="inline-flex items-center gap-1 rounded-full border border-amber-400 px-1.5 py-px text-[0.5625rem] font-bold tracking-[0.1em] text-amber-700 uppercase">
@@ -228,11 +238,17 @@ export function DevExaminerPromptPanel({
               }
               if (event.key === "Escape") onActiveChange(false);
             }}
-            rows={16}
+            rows={12}
             spellCheck={false}
             disabled={loading || failed}
             placeholder={loading ? "Chargement du prompt…" : "Prompt système de l'examinateur."}
-            className="max-h-[45vh] min-h-64 resize-y rounded border border-amber-300 bg-white p-1.5 font-mono text-[0.625rem] leading-relaxed text-amber-950 outline-none placeholder:text-amber-700/60 focus:border-amber-500 disabled:bg-amber-100/60"
+            // The ceiling keeps the header and « Appliquer » on screen on a
+            // short window (#153): the panel opens upward from the control
+            // bar, and a 45vh box under a 9 000-character prompt pushed its
+            // own chrome past the top. The floor dropped with it — the box
+            // scrolls and resizes, so height is a starting point, not a cap
+            // on what can be read.
+            className="max-h-[min(28rem,55vh)] min-h-40 resize-y rounded border border-amber-300 bg-white p-1.5 font-mono text-[0.625rem] leading-relaxed text-amber-950 outline-none placeholder:text-amber-700/60 focus:border-amber-500 disabled:bg-amber-100/60"
           />
 
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1">

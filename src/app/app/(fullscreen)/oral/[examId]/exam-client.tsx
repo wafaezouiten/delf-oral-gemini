@@ -716,25 +716,22 @@ export function ExamClient({
         devPanel={
           DEV_TOOLS_ENABLED ? (
             <div className="space-y-2">
-              {/* Both speaking parts (#148). The examiner's instruction is
-                  what this edits, so it belongs wherever there is an examiner —
-                  and the two phases run genuinely different prompts, which is
-                  half of what makes the tool worth having. Keyed by phase so
-                  the editor reloads the instruction for the part on screen
-                  instead of carrying the monologue's draft into the débat. */}
-              {(state.phase === "monologue" || state.phase === "debate") && (
+              {/* The débat and nowhere else (#153). The monologue's examiner is
+                  silent by design — the transport withholds its turn, and its prompt's
+                  whole content is « tu écoutes et tu ne parles pas » — so a prompt
+                  experiment there has nothing observable to test. The débat is where
+                  the examiner argues, and where editing how it argues means something. */}
+              {state.phase === "debate" && (
                 <DevExaminerPromptPanel
-                  key={state.phase}
-                  phase={state.phase}
                   topicSlug={topic.slug}
                   active={promptPanelOpen}
                   modified={state.examinerPromptModified}
                   sessionOpen={state.examinerSessionOpen}
                   onActiveChange={setPromptPanelOpen}
-                  // Store, then make it govern something: a system instruction
-                  // is fixed for a session's lifetime, so the restart is what
-                  // turns an edit into behaviour. A no-op when no session is
-                  // open, where the next connect picks the prompt up anyway.
+                  // Store, then make it govern something: a system instruction is
+                  // fixed for a session's lifetime, so the restart is what turns an
+                  // edit into behaviour. A no-op when no session is open, where the
+                  // next connect picks the prompt up anyway.
                   onApply={(prompt) => {
                     controller.setExaminerPrompt(prompt);
                     controller.restartExaminerSession();
