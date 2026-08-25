@@ -101,7 +101,7 @@ no `activityEnd`, there is no turn boundary — and transcription is emitted at
 turn boundaries. So nothing is transcribed for the whole monologue, and the
 entire exposé arrives in one fragment when the floor is released.
 
-Two consequences, both handled:
+Three consequences, all handled:
 
 - The UI tells the candidate their exposé will appear at the end, rather than
   showing an empty panel for seven minutes and looking broken.
@@ -109,6 +109,23 @@ Two consequences, both handled:
   WAIT afterwards. It is what causes the transcription to be emitted, so closing
   the socket promptly after it would silently discard the entire monologue. The
   controller guards this with `activityEnded`, and a unit test pins it.
+- **`activityStart` binds to a socket, and the monologue outlives sockets.** The
+  marker was sent once, after the first `connect()` resolved, by the controller.
+  `ExamLiveSession` replaces sockets without telling anyone — that invisibility
+  is its whole job — so every reconnect during a monologue left the new socket
+  with no activity open: audio arriving outside an activity is not part of a
+  turn, and nothing after the drop was ever transcribed. Nothing threw. The
+  failure surfaced two screens away, as `partsAbsent` reading an empty monologue
+  and the correction page telling a candidate who had spoken for seven minutes
+  that they had not presented it. `candidateActivityOpen` now re-asserts the
+  marker on every connect, before the buffered audio is flushed into it.
+
+  What that still cannot recover is what was said on the socket that died: no
+  `activityEnd` reached it, so its transcription was never emitted and no client
+  can ask for it. That is why the finish payload carries measured voiced seconds
+  per part — `partsSpokenButUntranscribed` pairs them with the transcript, and
+  the route refuses to grade a part the microphone heard at length and the
+  transcript does not contain, rather than scoring it as an absence.
 
 ---
 

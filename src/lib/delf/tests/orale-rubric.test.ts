@@ -15,7 +15,9 @@ import {
   normalizeCriteria,
   applyAbsentPartPenalty,
   partsAbsent,
+  partsSpokenButUntranscribed,
   partsUnderFloor,
+  PARTICIPATION_VOICED_FLOOR,
   PARTICIPATION_WORD_FLOOR,
   scoreSitting,
   snapCriteria,
@@ -383,6 +385,75 @@ test("partsAbsent reads the word floor, not silence", () => {
     "at the floor the part happened",
   );
   assert.deepEqual(partsAbsent({ monologueWords: 0, debateWords: 300 }), ["monologue"]);
+});
+
+// -------------------------------------- a part that happened and was not heard
+
+/**
+ * The other reading of an empty part, and the one the app had no way to reach.
+ *
+ * `partsAbsent` asks the transcript and the transcript alone, which is right
+ * until the transcript is the thing that failed. The monologue is emitted in a
+ * single fragment at `activityEnd`, so one dropped socket loses seven minutes
+ * of exposé at once — and every downstream rule then agreed the candidate had
+ * not presented it, halved their mark, and printed a sentence saying so.
+ */
+test("a part the microphone heard at length is not an absence", () => {
+  const spoke = { monologueSeconds: 300, debateSeconds: 400 };
+
+  // The failure this exists for: a full sitting, and one part's words gone.
+  assert.deepEqual(partsSpokenButUntranscribed({ monologueWords: 0, debateWords: 300 }, spoke), [
+    "monologue",
+  ]);
+  assert.deepEqual(partsSpokenButUntranscribed({ monologueWords: 400, debateWords: 3 }, spoke), [
+    "debate",
+  ]);
+  assert.deepEqual(
+    partsSpokenButUntranscribed({ monologueWords: 0, debateWords: 0 }, spoke),
+    ["monologue", "debate"],
+    "in exam order, like every other part list here",
+  );
+});
+
+test("a candidate who said nothing is still absent, whatever the room did", () => {
+  // The rule only ever excuses, so the one thing it must never do is excuse
+  // silence. A part is contradicted by its own audio or it is not contradicted
+  // at all: a transcript at the word floor is a part that happened, and voiced
+  // seconds below their floor are not evidence that anything was said.
+  assert.deepEqual(
+    partsSpokenButUntranscribed(
+      { monologueWords: 400, debateWords: 2 },
+      { monologueSeconds: 300, debateSeconds: PARTICIPATION_VOICED_FLOOR - 1 },
+    ),
+    [],
+    "« euh… non, ça va » clears neither floor",
+  );
+  assert.deepEqual(
+    partsSpokenButUntranscribed(
+      { monologueWords: 400, debateWords: PARTICIPATION_WORD_FLOOR },
+      { monologueSeconds: 300, debateSeconds: 400 },
+    ),
+    [],
+    "at the word floor the part happened and there is nothing to explain",
+  );
+  assert.deepEqual(
+    partsSpokenButUntranscribed(
+      { monologueWords: 0, debateWords: 0 },
+      { monologueSeconds: 0, debateSeconds: 0 },
+    ),
+    [],
+    "no microphone is no evidence, and no evidence never accuses either way",
+  );
+});
+
+test("the two floors cannot both be satisfied by one honest sitting", () => {
+  // The sizing argument, pinned. Fifteen seconds of continuous voiced French is
+  // comfortably more than twenty words takes to say, so a part can be under the
+  // word floor and over the voiced floor only when something was lost.
+  assert.ok(
+    PARTICIPATION_VOICED_FLOOR * 2 > PARTICIPATION_WORD_FLOOR / 2,
+    "roughly two words a second is the speech this is sized against",
+  );
 });
 
 test("walking out of the débat halves the mark", () => {

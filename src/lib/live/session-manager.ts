@@ -447,6 +447,11 @@ export class ExamLiveSession {
         this.callbacks.onEvent("history-seeded", { turns: this.initialHistory.length });
       }
 
+      // BEFORE the flush below, and that order is the point: the buffered
+      // chunks are the candidate mid-sentence when the socket died, and they
+      // have to land inside the reopened activity rather than in front of it.
+      if (this.candidateActivityOpen) this.sendActivityStart("activity-reopened");
+
       // Flushed HERE and not only in `onopen`, because `open()` resolves after
       // the socket is open: `onopen` therefore runs while `this.socket` is still
       // null, `sendAudio` refuses, and every buffered chunk is quietly pushed
@@ -638,6 +643,41 @@ export class ExamLiveSession {
     await this.connect();
   }
 
+  /**
+   * Whether the candidate holds the manual-VAD floor — a fact about the PHASE,
+   * which is why it is re-asserted on every socket.
+   *
+   * During the monologue, `activityStart` is what makes the audio that follows
+   * part of a turn, and `activityEnd` is what makes Gemini emit the
+   * transcription of it (verified, and the reason it is emitted only then:
+   * `docs/GEMINI_LIVE_FINDINGS.md` §6 — nothing is transcribed DURING a
+   * manual-VAD activity; the entire exposé arrives in one fragment at the
+   * boundary).
+   *
+   * A marker binds to the socket it was sent on. This class replaces sockets
+   * without telling anyone — that invisibility is its whole purpose — and
+   * `ExamController` sends the marker exactly once, after the first `connect()`
+   * resolves. So every reconnect during a monologue used to leave the new
+   * socket with no open activity, and everything said after it was never part
+   * of a turn and never transcribed. The visible consequence was not a warning:
+   * `candidateWordCount(transcript, "monologue")` came back under
+   * `PARTICIPATION_WORD_FLOOR`, the rubric called the monologue ABSENT, and the
+   * correction told a candidate who had spoken for seven minutes that they had
+   * not presented it and halved their mark for it.
+   *
+   * What this does NOT recover is the audio already spoken on the socket that
+   * died: no `activityEnd` reached it, so its transcription was never emitted
+   * and no client can ask for it now. That is why the finish payload carries
+   * measured voiced seconds per part — so a transcript lost this way is read as
+   * the app's failure and not the candidate's silence.
+   *
+   * Re-sent on a resume as well as on a cold reconnect. Whether resumption
+   * restores an in-flight activity is not documented and was not observable
+   * from here; a duplicate `activityStart` is at worst redundant, a missing one
+   * costs the exposé.
+   */
+  private candidateActivityOpen = false;
+
   /** Stream one base64 PCM16 chunk of candidate audio. */
   sendAudio(base64: string): void {
     if (!this.socket || this.state !== "connected") {
@@ -715,18 +755,42 @@ export class ExamLiveSession {
    * Open the candidate's turn without closing it (manual VAD, monologue only).
    * Because no `activityEnd` follows, the model has no turn boundary and cannot
    * interrupt — the guarantee the monologue rests on.
+   *
+   * The floor stays open until {@link endCandidateActivity}, and OPEN IS A
+   * FACT ABOUT THE PHASE, NOT ABOUT THE SOCKET: see {@link candidateActivityOpen}
+   * for why that distinction is the whole of the monologue's transcript.
    */
   beginCandidateActivity(): void {
-    if (!this.socket) return;
-    this.socket.sendRealtimeInput({ activityStart: {} });
-    this.callbacks.onEvent("activity-start");
+    this.candidateActivityOpen = true;
+    this.sendActivityStart("activity-start");
   }
 
   /** Close the candidate's turn, handing the floor to the examiner. */
   endCandidateActivity(): void {
+    this.candidateActivityOpen = false;
     if (!this.socket) return;
     this.socket.sendRealtimeInput({ activityEnd: {} });
     this.callbacks.onEvent("activity-end");
+  }
+
+  /**
+   * Mark the candidate as holding the floor on the CURRENT socket.
+   *
+   * Split out from `beginCandidateActivity` so the reconnect path can re-send
+   * the marker without re-deciding whether the floor is open, and so the two
+   * sites log under different names — an `activity-reopened` in the session log
+   * is the fingerprint of the failure below actually having been survived.
+   *
+   * Silent with no socket, deliberately: the flag is already set, so the next
+   * connect sends it. That covers the sitting where the monologue's very first
+   * connect exhausted its retries and the candidate recovered it by hand —
+   * `beginCandidateActivity` ran against a null socket there, and before the
+   * flag existed the marker was simply never sent at all.
+   */
+  private sendActivityStart(event: string): void {
+    if (!this.socket) return;
+    this.socket.sendRealtimeInput({ activityStart: {} });
+    this.callbacks.onEvent(event);
   }
 
   /**

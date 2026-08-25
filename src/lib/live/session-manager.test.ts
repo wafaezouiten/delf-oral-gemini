@@ -442,6 +442,104 @@ describe("session configuration", () => {
   });
 });
 
+// ------------------------------------------------------- the monologue's floor
+
+/**
+ * An open candidate activity is a fact about the PHASE, and every one of these
+ * is about it surviving a socket that is not.
+ *
+ * What was wrong: the marker was sent once, on the first socket, and a session
+ * that replaced that socket — which is this class's entire job — left the new
+ * one with no activity open. Audio arriving outside an activity is not part of
+ * a turn, and the monologue's transcript is emitted at the turn boundary and
+ * NOWHERE ELSE, so what a candidate said after a reconnect was never
+ * transcribed. Nothing threw. The correction page called them absent for it.
+ */
+describe("the monologue's floor, across sockets", () => {
+  it("reopens the candidate's activity on a reconnect", async () => {
+    const h = harness({ phase: "monologue" });
+    await h.session.connect();
+    h.session.beginCandidateActivity();
+    h.transport.socket.emit(resumptionUpdate("handle-one"));
+
+    h.transport.socket.drop();
+    await flush();
+
+    assert.deepEqual(
+      h.transport.socket.realtime.filter((input) => input.activityStart),
+      [{ activityStart: {} }],
+      "the replacement socket is told the candidate still holds the floor",
+    );
+    assert.ok(h.eventNames().includes("activity-reopened"), "and the log says it happened");
+  });
+
+  it("reopens it before flushing what the candidate said during the outage", async () => {
+    // Order, not merely presence: those chunks are the candidate mid-sentence.
+    // Flushed in front of the marker they would land outside the turn, which is
+    // the same loss this reopening exists to prevent, moved by two lines.
+    const h = harness({ phase: "monologue" });
+    await h.session.connect();
+    h.session.beginCandidateActivity();
+
+    h.transport.socket.drop();
+    h.session.sendAudio("mid-sentence");
+    await flush();
+
+    const kinds = h.transport.socket.realtime.map((input) =>
+      input.activityStart ? "start" : input.audio ? "audio" : "other",
+    );
+    assert.deepEqual(kinds, ["start", "audio"]);
+  });
+
+  it("does not reopen a floor the phase has already released", async () => {
+    // `activityEnd` hands the examiner the turn. Re-opening after it would take
+    // the floor back on the candidate's behalf and cost the closing sentence.
+    const h = harness({ phase: "monologue" });
+    await h.session.connect();
+    h.session.beginCandidateActivity();
+    h.session.endCandidateActivity();
+
+    h.transport.socket.drop();
+    await flush();
+
+    assert.deepEqual(
+      h.transport.socket.realtime.filter((input) => input.activityStart),
+      [],
+    );
+  });
+
+  it("opens the floor on the socket that finally arrives, not the one that failed", async () => {
+    // The monologue whose first connect exhausted its retries, recovered by the
+    // candidate's own « reprendre la connexion ». `beginCandidateActivity` ran
+    // against a null socket, so before the flag existed the marker was never
+    // sent AT ALL — and the entire exposé that followed was never transcribed.
+    const h = harness({ phase: "monologue", maxReconnectAttempts: 1 });
+    h.transport.failMints = 2;
+    await h.session.connect();
+    assert.equal(h.session.connectionState, "failed");
+
+    h.session.beginCandidateActivity();
+    await h.session.reconnect();
+
+    assert.deepEqual(
+      h.transport.socket.realtime.filter((input) => input.activityStart),
+      [{ activityStart: {} }],
+    );
+  });
+
+  it("leaves the débat's sockets alone, since nothing ever opened a floor on them", async () => {
+    const h = harness({ phase: "debate" });
+    await h.session.connect();
+    h.transport.socket.drop();
+    await flush();
+
+    assert.deepEqual(
+      h.transport.socket.realtime.filter((input) => input.activityStart),
+      [],
+    );
+  });
+});
+
 // ------------------------------------------------------------------ resumption
 
 describe("session resumption", () => {

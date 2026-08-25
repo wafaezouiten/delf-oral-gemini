@@ -108,6 +108,34 @@ export const finishPayloadSchema = z.object({
    */
   earlyClosingCount: z.number().int().nonnegative().default(0),
   /**
+   * Seconds of VOICED audio the microphone measured, per part.
+   *
+   * The one field in this payload that can only ever protect the candidate, so
+   * the trust question it raises is the opposite of every other one here: a
+   * forged value cannot raise a mark, it can only cause the route to REFUSE to
+   * produce one. Nothing downstream reads it as a duration — the duration
+   * penalty is still measured server-side from the uploaded bytes — and it
+   * reaches no column; it is consumed inside the request that carries it.
+   *
+   * What it is for: the monologue is transcribed in a single fragment emitted
+   * at `activityEnd` (`docs/GEMINI_LIVE_FINDINGS.md` §6), so a session that
+   * dies before that boundary loses the whole exposé at once. With only the
+   * transcript to go on, the rubric read that as a candidate who never
+   * presented, halved their mark, and said so on the correction page. The
+   * microphone knows better, and this is how it gets to say so.
+   *
+   * Optional for the reason `earlyClosingCount` is defaulted: a candidate
+   * mid-sitting across the deploy finishes from a page whose controller has
+   * never heard of the field, and a 400 there costs them a twenty-minute
+   * épreuve. Absent means "no evidence", which is what that page actually has.
+   */
+  voicedSeconds: z
+    .object({
+      monologue: z.number().nonnegative().max(MAX_PHASE_SECONDS),
+      debate: z.number().nonnegative().max(MAX_PHASE_SECONDS),
+    })
+    .optional(),
+  /**
    * DEVELOPMENT ONLY — the seconds a typed phase claims to have lasted (#36).
    *
    * The one number in this file that can reach a grade, which is why the bound

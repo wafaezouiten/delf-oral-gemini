@@ -31,7 +31,13 @@
  * typings, not copied from a blog post.
  */
 
-import { Modality, type LiveConnectConfig } from "@google/genai";
+import {
+  ActivityHandling,
+  EndSensitivity,
+  Modality,
+  StartSensitivity,
+  type LiveConnectConfig,
+} from "@google/genai";
 
 import { buildExaminerInstruction } from "@/lib/delf/examiner-prompt";
 import type { OralTopic } from "@/lib/delf/topics";
@@ -138,12 +144,56 @@ export function monologueConfig({
  * the median last-word-to-first-audio gap at 1.63 s with this window at 1200 ms
  * — the model's own time to first audio was 0.43 s and flat across six turns,
  * so roughly three quarters of what the candidate waits through is this number.
- * 1000 ms is the shortest window the learner-protection floor in
- * `live-config.test.ts` allows: every millisecond cut here comes straight off
- * the reply gap, but is also a millisecond less a B2 candidate may pause
- * mid-sentence before the examiner takes their unfinished turn. Cutting below
- * one second would need evidence about learner pause lengths, not more latency
- * measurements — the failure it risks is the exam's, not the transport's.
+ * #100 cut it to 1000 ms, the shortest the learner-protection floor in
+ * `live-config.test.ts` allowed, and recorded what that bought and what it
+ * risked: every millisecond comes straight off the reply gap, and is also a
+ * millisecond less a B2 candidate may pause mid-sentence before the examiner
+ * takes their unfinished turn.
+ *
+ * **The risk was the one that landed.** Reported from a real sitting: the
+ * candidate is cut off mid-thought, their transcript arrives truncated, and the
+ * examiner answers half an answer — then asks a second question before the
+ * first has been answered at all, because the half it heard read as a complete
+ * turn. So the window goes back UP, past where #100 found it, to 1500 ms. The
+ * ~500 ms this costs the reply gap is a cost paid on every turn; the failure it
+ * buys out of is one that costs the candidate the turn itself. That trade is
+ * not close, and the latency measurement is not the evidence that settles it.
+ *
+ * **Three numbers, one decision — do not tune them apart.** The two
+ * sensitivities were unset until now, which meant the service's own defaults,
+ * which are tuned for native speakers in a quiet room:
+ *
+ *   - `START_SENSITIVITY_LOW` — more evidence required before the room counts
+ *     as somebody starting to speak. The candidate sits in front of a speaker
+ *     playing the examiner's voice, and browser echo cancellation is a best
+ *     effort, not a guarantee: at the default sensitivity the examiner's own
+ *     voice coming back through the microphone was enough to register activity.
+ *   - `END_SENSITIVITY_LOW` — more evidence required before the candidate is
+ *     judged to have finished. `silenceDurationMs` says how long a gap must be;
+ *     this says how sure the detector must be that the gap is silence at all. A
+ *     learner hunting for a word is quiet, not silent, and the pair is what
+ *     stops that being read as a turn ending.
+ *   - `prefixPaddingMs` 300 → 500 — a cough, a chair, one echoed syllable no
+ *     longer clears the bar for committing start-of-speech.
+ *
+ * **`activityHandling: NO_INTERRUPTION` is the guarantee, not the tuning.**
+ * Everything above makes a false barge-in rarer; this makes it harmless. By
+ * default any detected activity interrupts the model mid-generation, which is
+ * where the reported distortion came from — a turn cut off server-side, plus
+ * `ExamController.handleInterruption` flushing everything the player still had
+ * queued of it. The candidate then hears a question break up, and the examiner
+ * opens a fresh turn on the far side of the phantom activity with a NEW
+ * question. #74 fought one shape of this from the client and could only ever
+ * salvage what had already been delivered; this stops the server taking the
+ * decision.
+ *
+ * What it costs, stated plainly: the candidate can no longer talk over the
+ * examiner. That is acceptable here and would not be in a chat product — the
+ * examiner's interventions are one to three sentences by prompt, the DELF
+ * exercice en interaction never asks the candidate to interrupt, and the
+ * app already owns every other way a turn can end (the silence watch, the time
+ * cues, the closing handshake). Their speech during an examiner turn is still
+ * captured and still transcribed; it simply does not cut the examiner short.
  */
 export function debateConfig({
   topic,
@@ -160,9 +210,12 @@ export function debateConfig({
     contextWindowCompression: COMPRESSION,
     realtimeInputConfig: {
       automaticActivityDetection: {
-        prefixPaddingMs: 300,
-        silenceDurationMs: 1000,
+        prefixPaddingMs: 500,
+        silenceDurationMs: 1500,
+        startOfSpeechSensitivity: StartSensitivity.START_SENSITIVITY_LOW,
+        endOfSpeechSensitivity: EndSensitivity.END_SENSITIVITY_LOW,
       },
+      activityHandling: ActivityHandling.NO_INTERRUPTION,
     },
     // Higher than the monologue: the examiner has to invent counter-arguments,
     // not recite a line.

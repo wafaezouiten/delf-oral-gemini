@@ -347,6 +347,21 @@ export interface ExamFinishedPayload {
    */
   earlyClosingCount: number;
   /**
+   * Seconds of VOICED audio the microphone measured, per part.
+   *
+   * Not a duration and not a grade: the only question it answers is whether
+   * the candidate was audibly in a part at all. The route pairs it with the
+   * transcript, because those two disagreeing is a failure with exactly one
+   * plausible owner — minutes of measured speech under an empty transcript is
+   * the app having lost the words, never the candidate having declined to say
+   * them. See `partsSpokenButUntranscribed` on the finish route.
+   *
+   * Zero for both when there was no recorder at all, and that is the truthful
+   * reading: a sitting with no microphone has no evidence either way, and this
+   * field only ever speaks up to excuse, never to accuse.
+   */
+  voicedSeconds: Record<RecordedPhase, number>;
+  /**
    * DEVELOPMENT ONLY — the seconds typed phases claim to have lasted (#36).
    * Undefined on every real sitting. See `ExamController`'s `devSeconds`.
    */
@@ -3144,6 +3159,18 @@ export class ExamController {
    * a question printed in full and never heard. A turn genuinely cut short
    * server-side arrives short in the transcript too, and nothing here can make
    * it longer.
+   *
+   * **Mostly disarmed from the outside now, and left standing on purpose.** The
+   * débat runs with `activityHandling: NO_INTERRUPTION`, so the server no
+   * longer stops a turn because it heard the room — which is the fix for the
+   * reported failure this guard could only ever soften, since it acts after the
+   * decision has been taken. This stays because `interrupted` is the server's
+   * message and not the client's to predict, and because the guard costs
+   * nothing when it never fires. What DOES go quiet with it is the
+   * `noteCandidateAnswered` below: talking over the examiner used to be how a
+   * candidate's answer to « Vous m'entendez ? » registered before a word of it
+   * was transcribed. The silence watch's own voiced-audio hold covers that
+   * case, and covers it from a measure this tab owns.
    */
   private handleInterruption(): void {
     // Redundant to name the phase: `log` stamps every event with it.
@@ -3248,6 +3275,13 @@ export class ExamController {
     const recordings = (await recorder?.recordings()) ?? [];
     const encodeMs = this.now() - encodeStart;
     const phases = this.phaseReports(recorder);
+    // Read while the recorder still exists, for the same reason `phaseReports`
+    // is: `discard()` is one line below and takes the samples these were
+    // measured from with it.
+    const voicedSeconds: Record<RecordedPhase, number> = {
+      monologue: Math.round(recorder?.voicedSeconds("monologue") ?? 0),
+      debate: Math.round(recorder?.voicedSeconds("debate") ?? 0),
+    };
     // The blobs are cut and own their bytes; the PCM behind them is a second
     // copy of a sitting, and this tab is about to load a results page.
     recorder?.discard();
@@ -3278,6 +3312,7 @@ export class ExamController {
       phases,
       reconnectCount: this.reconnectCount,
       earlyClosingCount: this.earlyClosingCount,
+      voicedSeconds,
       // Only when something was actually typed, so a real sitting sends no such
       // field at all rather than a pair of zeroes the route has to interpret.
       devSeconds:

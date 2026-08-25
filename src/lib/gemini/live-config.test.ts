@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
+import { ActivityHandling, EndSensitivity, StartSensitivity } from "@google/genai";
+
 import type { OralTopic } from "@/lib/delf/topics";
 import { debateConfig, liveConfigForPhase, monologueConfig } from "./live-config";
 
@@ -53,10 +55,47 @@ describe("debate Live configuration", () => {
     assert.notEqual(detection?.disabled, true, "the examiner must be able to reply");
     // The documented floor is 500 ms, tuned for native speakers. A B2 candidate
     // searching for a word pauses far longer and must not be talked over.
+    //
+    // Raised from 1000 to 1500 after the failure #100 predicted was reported
+    // from a real sitting: candidates cut off mid-thought, truncated
+    // transcripts, and an examiner answering half an answer and then asking a
+    // second question. The floor moves with it — a floor that still allowed
+    // the setting that produced that would be guarding nothing.
     assert.ok(
-      (detection?.silenceDurationMs ?? 0) >= 1000,
+      (detection?.silenceDurationMs ?? 0) >= 1500,
       "silence threshold leaves room to think",
     );
+  });
+
+  it("requires real evidence before the room counts as the candidate speaking", () => {
+    // Both left unset meant the service's own defaults, which are tuned for a
+    // native speaker in a quiet room. The candidate sits in front of a speaker
+    // playing the examiner's voice back at them, and browser echo cancellation
+    // is a best effort: at the default sensitivity that echo was enough to
+    // register activity, which took the floor off an examiner mid-question.
+    const detection = debateConfig({ topic: TOPIC }).realtimeInputConfig
+      ?.automaticActivityDetection;
+    assert.equal(detection?.startOfSpeechSensitivity, StartSensitivity.START_SENSITIVITY_LOW);
+    assert.equal(detection?.endOfSpeechSensitivity, EndSensitivity.END_SENSITIVITY_LOW);
+    assert.ok(
+      (detection?.prefixPaddingMs ?? 0) >= 500,
+      "one echoed syllable does not commit start-of-speech",
+    );
+  });
+
+  it("makes the examiner's turn uninterruptible, rather than merely hard to interrupt", () => {
+    // The tuning above makes a false barge-in rarer; this makes it harmless.
+    // By default ANY detected activity stops generation server-side, which is
+    // where the reported distortion came from — a question breaking up
+    // mid-sentence, and the examiner then opening a fresh turn with a NEW
+    // question on the far side of activity nobody produced.
+    //
+    // The cost is real and accepted: the candidate cannot talk over the
+    // examiner. Nothing in the DELF exercice en interaction asks them to, and
+    // every other way a turn can end is already the app's (the silence watch,
+    // the time cues, the closing handshake).
+    const config = debateConfig({ topic: TOPIC });
+    assert.equal(config.realtimeInputConfig?.activityHandling, ActivityHandling.NO_INTERRUPTION);
   });
 
   it("makes the examiner adversarial", () => {
