@@ -79,6 +79,21 @@ export interface LiveConfigOptions {
   topic: OralTopic;
   /** Resumption handle from a previous session, when reconnecting. */
   resumptionHandle?: string;
+  /**
+   * DEVELOPMENT ONLY — a system instruction to use instead of the built one
+   * (#148).
+   *
+   * The whole of the examiner's behaviour, replaced. It reaches this file only
+   * from the token route, which accepts it only where the development tooling
+   * is enabled and drops it everywhere else, so a production mint cannot carry
+   * one. Absent on every real sitting, and absent is the only state the shipped
+   * product has.
+   *
+   * Applied to the instruction and to nothing else: the VAD mode, the
+   * resumption, the compression and the temperature are what make the monologue
+   * a monologue, and a prompt experiment must not be able to reach them.
+   */
+  instructionOverride?: string;
 }
 
 /**
@@ -88,11 +103,15 @@ export interface LiveConfigOptions {
  * the examiner still speaks two lines in this phase — the opening handover and
  * the closing sentence — and a session cannot change modality later.
  */
-export function monologueConfig({ topic, resumptionHandle }: LiveConfigOptions): LiveConnectConfig {
+export function monologueConfig({
+  topic,
+  resumptionHandle,
+  instructionOverride,
+}: LiveConfigOptions): LiveConnectConfig {
   return {
     responseModalities: [Modality.AUDIO],
     speechConfig: EXAMINER_SPEECH,
-    systemInstruction: buildExaminerInstruction("monologue", topic),
+    systemInstruction: instructionOverride ?? buildExaminerInstruction("monologue", topic),
     inputAudioTranscription: {},
     outputAudioTranscription: {},
     sessionResumption: resumptionHandle ? { handle: resumptionHandle, ...RESUMPTION } : RESUMPTION,
@@ -126,11 +145,15 @@ export function monologueConfig({ topic, resumptionHandle }: LiveConfigOptions):
  * one second would need evidence about learner pause lengths, not more latency
  * measurements — the failure it risks is the exam's, not the transport's.
  */
-export function debateConfig({ topic, resumptionHandle }: LiveConfigOptions): LiveConnectConfig {
+export function debateConfig({
+  topic,
+  resumptionHandle,
+  instructionOverride,
+}: LiveConfigOptions): LiveConnectConfig {
   return {
     responseModalities: [Modality.AUDIO],
     speechConfig: EXAMINER_SPEECH,
-    systemInstruction: buildExaminerInstruction("debate", topic),
+    systemInstruction: instructionOverride ?? buildExaminerInstruction("debate", topic),
     inputAudioTranscription: {},
     outputAudioTranscription: {},
     sessionResumption: resumptionHandle ? { handle: resumptionHandle, ...RESUMPTION } : RESUMPTION,

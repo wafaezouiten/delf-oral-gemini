@@ -237,6 +237,29 @@ export interface ExamState {
    */
   devTextMode: boolean;
   /**
+   * DEVELOPMENT ONLY — the examiner is running under an edited system
+   * instruction (#148).
+   *
+   * Always `false` where `DEV_TOOLS_ENABLED` is false, because
+   * `setExaminerPrompt` refuses there. Rendered so the panel's badge reads the
+   * fact off the controller instead of keeping a second copy — the same rule
+   * `devTextMode` follows, and for the same reason: a panel that believed it
+   * had applied a prompt the controller had discarded would send a developer
+   * hunting for a behaviour change that was never installed.
+   */
+  examinerPromptModified: boolean;
+  /**
+   * DEVELOPMENT ONLY — a live examiner session exists right now (#148).
+   *
+   * Read off `this.session` rather than inferred from the connection state,
+   * because the two disagree exactly where it matters: a session that is
+   * connecting is one an applied prompt WILL restart, and a `connection` of
+   * "idle" would have the panel promise the opposite. The prompt panel uses it
+   * to say whether applying restarts the examiner or merely waits for the next
+   * one, which is the only claim it makes that it could get wrong.
+   */
+  examinerSessionOpen: boolean;
+  /**
    * The examiner's consigne for the phase now open, or null before the first one
    * (#37).
    *
@@ -341,6 +364,11 @@ export interface ExamControllerDeps {
      *  argument rather than a closure so the factory cannot capture a choice
      *  that had not been made when the controller was built. */
     examinerModel: string | undefined,
+    /** DEVELOPMENT ONLY — the examiner prompt this session should run under
+     *  (#148), or undefined for the instruction the repository builds. An
+     *  argument for the same reason as the model above: it is edited during
+     *  the épreuve, so a factory that captured it would pin the wrong one. */
+    examinerPrompt: string | undefined,
   ) => LiveSessionLike;
   createRecorder: (callbacks: {
     onChunk: (base64: string) => void;
@@ -647,6 +675,17 @@ export class ExamController {
    * it returns before assigning there.
    */
   private devTextMode = false;
+
+  /**
+   * DEVELOPMENT ONLY — the system instruction the next session opens under
+   * (#148), or undefined for the one this repository builds.
+   *
+   * Undefined on every real sitting and in every production build:
+   * `setExaminerPrompt` is the only writer and it returns before assigning
+   * there. Read at `openSession` time rather than captured, so a prompt applied
+   * mid-débat governs the session the restart opens.
+   */
+  private examinerPrompt: string | undefined;
 
   /**
    * DEVELOPMENT ONLY — the seconds a typed phase claims to have lasted (#36).
@@ -1005,6 +1044,71 @@ export class ExamController {
   }
 
   /**
+   * DEVELOPMENT ONLY — run the examiner under a different system instruction
+   * (#148).
+   *
+   * **Why this cannot touch the session that is open.** A Gemini Live session's
+   * system instruction is fixed for its lifetime: it is pinned into the
+   * ephemeral token before the socket exists (`/api/live-token`), and there is
+   * no message that replaces it afterwards. So a new prompt can only ever
+   * govern a NEW session, and this method stores it for the next one rather
+   * than pretending the current examiner has changed its mind.
+   *
+   * {@link restartExaminerSession} is the other half — it makes "the next one"
+   * be now — and the panel calls both, because a developer who has just edited
+   * a prompt wants to hear it on the next question rather than after the next
+   * phase boundary.
+   *
+   * `null` restores the built instruction. Refused outright where the tooling
+   * is off: a second independent check of the same flag the panel's render and
+   * the server's own gate make, because either could be refactored away and
+   * this is the one that decides what a session runs under.
+   */
+  setExaminerPrompt(prompt: string | null): void {
+    if (!DEV_TOOLS_ENABLED) return;
+    const next = prompt?.trim() ? prompt : undefined;
+    if (this.examinerPrompt === next) return;
+    this.examinerPrompt = next;
+    this.log("dev-examiner-prompt", next ? `${next.length} chars` : "back to the default");
+    this.emit();
+  }
+
+  /**
+   * DEVELOPMENT ONLY — close the examiner's session and open a fresh one
+   * (#148).
+   *
+   * What makes an edited prompt audible without waiting for the next phase.
+   * Deliberately NOT `forceReconnect()`, which is a *resume*: it carries the
+   * resumption handle, so the server restores the session that already exists
+   * — the one minted under the old instruction. Closing and opening builds a
+   * new `SessionManager` with no handle at all, which is the only path that
+   * mints a token under the prompt just applied.
+   *
+   * What it costs is the examiner's memory of the exchange so far, and that is
+   * not hidden: the panel says so above the button. For a tool whose whole
+   * purpose is watching one instruction behave differently from another, an
+   * examiner that starts the argument again is the honest trade, and the
+   * transcript on screen is untouched either way.
+   *
+   * A no-op unless a speaking phase has actually begun — there is no session
+   * during the préparation, and an armed part has not opened one yet, so its
+   * first connect will pick the new prompt up on its own.
+   */
+  restartExaminerSession(): void {
+    if (!DEV_TOOLS_ENABLED) return;
+    if (this.phase !== "monologue" && this.phase !== "debate") return;
+    if (!this.session) return;
+    this.log("dev-examiner-session-restart", this.phase);
+    this.closeSession();
+    // Detached, exactly as every other session open in this class is: this is
+    // called from a click handler and the connection reports itself through
+    // `onStateChange`. A failure here is a failed connect like any other.
+    void this.openSession(this.phase).catch((error) =>
+      this.log("dev-examiner-session-restart-failed", String(error)),
+    );
+  }
+
+  /**
    * DEVELOPMENT ONLY — fast-forward the part's clock (#149).
    *
    * PORT NOTE: the reference's admin time-skip, whole. It rewinds the phase's
@@ -1109,6 +1213,8 @@ export class ExamController {
       monologueSilent: this.isMonologueSilent(),
       monologueHeld: this.monologueHeld,
       devTextMode: this.devTextMode,
+      examinerPromptModified: this.examinerPrompt !== undefined,
+      examinerSessionOpen: this.session !== null,
       announcement: this.announcementId,
       // Armed and waiting for the click — as distinct from waiting for the
       // consigne to finish, which is the consigne control's business.
@@ -2989,6 +3095,7 @@ export class ExamController {
       callbacks,
       history,
       this.examinerModel,
+      this.examinerPrompt,
     );
     this.session = session;
     await session.connect();
