@@ -188,13 +188,16 @@ export function DevExaminerPromptPanel({
             if (refused) return;
             apply();
           }}
-          // `inset-x-4` spans the control bar below `xl`; from `xl` the panel
-          // hangs off the corner cluster at a fixed width. Both are now capped
-          // against the viewport (#153): the cluster sits 24px in from the
-          // right, so a 34rem panel on a window narrower than that ran past
-          // the edge and clipped « Appliquer le prompt » — a control that
-          // cannot be fully seen cannot be pressed with confidence.
-          className="absolute inset-x-4 bottom-full z-20 mb-2 flex flex-col gap-1.5 rounded-md border border-amber-300 bg-amber-50 p-2 shadow-lg xl:right-0 xl:left-auto xl:w-[34rem] xl:max-w-[calc(100vw-3rem)]"
+          // A narrow column docked to the RIGHT at every breakpoint (#153,
+          // second pass). The first fix kept the full-width sub-`xl` layout
+          // and only capped the `xl` one, and the user's screenshot answered
+          // it: a panel spanning the window buries the épreuve it exists to
+          // test beside. So the panel is thin and right-anchored everywhere —
+          // the conversation stays visible on its left — and the viewport cap
+          // stays, so « Appliquer le prompt » can never be pushed off screen.
+          // The prompt itself gives nothing up: the textarea scrolls, resizes,
+          // and holds the same nine thousand characters at any width.
+          className="absolute right-4 bottom-full left-auto z-20 mb-2 flex max-h-[calc(100vh-6.5rem)] w-[min(22rem,calc(100vw-2rem))] flex-col gap-1.5 rounded-md border border-amber-300 bg-amber-50 p-2 shadow-lg xl:right-0"
         >
           <div className="flex items-center gap-1.5">
             <span className="inline-flex items-center gap-1 rounded-full border border-amber-400 px-1.5 py-px text-[0.5625rem] font-bold tracking-[0.1em] text-amber-700 uppercase">
@@ -238,17 +241,16 @@ export function DevExaminerPromptPanel({
               }
               if (event.key === "Escape") onActiveChange(false);
             }}
-            rows={12}
             spellCheck={false}
             disabled={loading || failed}
             placeholder={loading ? "Chargement du prompt…" : "Prompt système de l'examinateur."}
-            // The ceiling keeps the header and « Appliquer » on screen on a
-            // short window (#153): the panel opens upward from the control
-            // bar, and a 45vh box under a 9 000-character prompt pushed its
-            // own chrome past the top. The floor dropped with it — the box
-            // scrolls and resizes, so height is a starting point, not a cap
-            // on what can be read.
-            className="max-h-[min(28rem,55vh)] min-h-40 resize-y rounded border border-amber-300 bg-white p-1.5 font-mono text-[0.625rem] leading-relaxed text-amber-950 outline-none placeholder:text-amber-700/60 focus:border-amber-500 disabled:bg-amber-100/60"
+            // The field is the flexible part of a height-capped column (#153):
+            // the form's own ceiling is what keeps the header and « Appliquer »
+            // on screen, and this box gives way to it — down to `min-h-24` on
+            // a short window — instead of pushing its chrome past the top. It
+            // scrolls and resizes either way, so height is a starting point,
+            // not a cap on what can be read.
+            className="h-96 min-h-24 shrink resize-y rounded border border-amber-300 bg-white p-1.5 font-mono text-[0.625rem] leading-relaxed text-amber-950 outline-none placeholder:text-amber-700/60 focus:border-amber-500 disabled:bg-amber-100/60"
           />
 
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
