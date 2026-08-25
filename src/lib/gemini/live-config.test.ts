@@ -102,39 +102,3 @@ describe("both phases, because the exam outlasts a connection", () => {
     });
   }
 });
-
-describe("the development examiner-prompt override (#148)", () => {
-  const OVERRIDE = "Tu es un examinateur bien plus exigeant.";
-
-  it("replaces the built instruction, in both phases", () => {
-    for (const phase of ["monologue", "debate"] as const) {
-      const config = liveConfigForPhase(phase, { topic: TOPIC, instructionOverride: OVERRIDE });
-      assert.equal(String(config.systemInstruction), OVERRIDE);
-    }
-  });
-
-  it("builds the shipped instruction when no override is given", () => {
-    // The ordinary path, and the only one a production mint can take.
-    const config = liveConfigForPhase("debate", { topic: TOPIC });
-    assert.match(String(config.systemInstruction), /examinateur/i);
-    assert.notEqual(String(config.systemInstruction), OVERRIDE);
-  });
-
-  it("reaches the instruction and nothing else", () => {
-    // The transport is what makes a monologue a monologue: VAD disabled, no
-    // turn boundary, so the examiner is structurally unable to interrupt. A
-    // prompt experiment must not be able to switch that off by accident.
-    const plain = liveConfigForPhase("monologue", { topic: TOPIC });
-    const overridden = liveConfigForPhase("monologue", {
-      topic: TOPIC,
-      instructionOverride: OVERRIDE,
-    });
-    assert.deepEqual(
-      { ...overridden, systemInstruction: undefined },
-      { ...plain, systemInstruction: undefined },
-    );
-    assert.deepEqual(overridden.realtimeInputConfig, {
-      automaticActivityDetection: { disabled: true },
-    });
-  });
-});

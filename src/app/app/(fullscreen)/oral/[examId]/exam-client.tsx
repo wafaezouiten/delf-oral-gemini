@@ -27,7 +27,6 @@ import type { OralTopic } from "@/lib/delf/topics";
 import { AnnouncementControl } from "./_components/announcement-control";
 import { DEV_TOOLS_ENABLED } from "@/lib/dev-tools";
 import { DevTranscriptionPanel } from "./_components/dev-transcription-panel";
-import { DevExaminerPromptPanel } from "./_components/dev-examiner-prompt-panel";
 import { DevTimeSkip } from "./_components/dev-time-skip";
 import { PreparationScreen } from "./_components/preparation-screen";
 import { PassationScreen } from "./_components/passation-screen";
@@ -78,17 +77,6 @@ export function ExamClient({
   const router = useRouter();
   const [notes, setNotes] = useState("");
   const [notesOpen, setNotesOpen] = useState(false);
-  /**
-   * DEVELOPMENT ONLY — whether the examiner-prompt editor is open (#148).
-   *
-   * Local state, unlike the transcription panel's, and the difference is the
-   * point: that toggle lives on the controller because opening it PAUSES THE
-   * MICROPHONE, so a second copy could disagree with the device. This one
-   * changes nothing about the épreuve by being open — the candidate keeps
-   * speaking and keeps being recorded — so there is nothing for the controller
-   * to arbitrate.
-   */
-  const [promptPanelOpen, setPromptPanelOpen] = useState(false);
   const [showExitDialog, setShowExitDialog] = useState(false);
   const [abandoning, setAbandoning] = useState(false);
   const [abandonFailed, setAbandonFailed] = useState(false);
@@ -716,36 +704,6 @@ export function ExamClient({
         devPanel={
           DEV_TOOLS_ENABLED ? (
             <div className="space-y-2">
-              {/* Both speaking parts (#148). The examiner's instruction is
-                  what this edits, so it belongs wherever there is an examiner —
-                  and the two phases run genuinely different prompts, which is
-                  half of what makes the tool worth having. Keyed by phase so
-                  the editor reloads the instruction for the part on screen
-                  instead of carrying the monologue's draft into the débat. */}
-              {(state.phase === "monologue" || state.phase === "debate") && (
-                <DevExaminerPromptPanel
-                  key={state.phase}
-                  phase={state.phase}
-                  topicSlug={topic.slug}
-                  active={promptPanelOpen}
-                  modified={state.examinerPromptModified}
-                  sessionOpen={state.examinerSessionOpen}
-                  onActiveChange={setPromptPanelOpen}
-                  // Store, then make it govern something: a system instruction
-                  // is fixed for a session's lifetime, so the restart is what
-                  // turns an edit into behaviour. A no-op when no session is
-                  // open, where the next connect picks the prompt up anyway.
-                  onApply={(prompt) => {
-                    controller.setExaminerPrompt(prompt);
-                    controller.restartExaminerSession();
-                  }}
-                  onReset={() => {
-                    controller.setExaminerPrompt(null);
-                    controller.restartExaminerSession();
-                  }}
-                />
-              )}
-
               {/* The exposé and nowhere else. The débat is spoken, and the
                   controller hands the microphone back when the monologue ends
                   so it can be. */}

@@ -4,7 +4,6 @@ import { describe, it } from "node:test";
 import type { ExamAccess } from "@/lib/auth/exam-access";
 import { ORAL_TOPICS } from "@/lib/delf/topics";
 import { LIVE_MODEL, LIVE_MODEL_OPTIONS } from "@/lib/gemini/constants";
-import { MAX_EXAMINER_PROMPT_LENGTH } from "@/lib/ui/dev-examiner-prompt";
 import {
   MAX_RESUMPTION_HANDLE_LENGTH,
   gateLiveToken,
@@ -42,7 +41,6 @@ describe("live token request validation", () => {
       requestedTopicSlug: SLUG,
       requestedModel: undefined,
       resumptionHandle: "handle-one",
-      requestedExaminerPrompt: undefined,
     });
   });
 
@@ -132,7 +130,6 @@ describe("who may be minted a live token", () => {
     const gate = gateLiveToken({ access: owned, requestedTopicSlug: OTHER_SLUG });
     assert.deepEqual(gate, {
       decision: "mint",
-      examinerPrompt: undefined,
       topicSlug: SLUG,
       source: "sitting",
       model: LIVE_MODEL,
@@ -173,7 +170,6 @@ describe("who may be minted a live token", () => {
         gate,
         {
           decision: "mint",
-          examinerPrompt: undefined,
           topicSlug: SLUG,
           source: "request",
           model: LIVE_MODEL,
@@ -194,7 +190,6 @@ describe("who may be minted a live token", () => {
     });
     assert.deepEqual(gate, {
       decision: "mint",
-      examinerPrompt: undefined,
       topicSlug: OTHER_SLUG,
       source: "request",
       model: LIVE_MODEL,
@@ -279,91 +274,5 @@ describe("which examiner a token is minted for", () => {
     assert.equal(gate.decision === "mint" && gate.source, "request");
     assert.equal(gate.decision === "mint" && gate.model, OTHER_MODEL);
     assert.equal(gate.decision === "mint" && gate.modelSource, "sitting");
-  });
-});
-
-describe("the development examiner-prompt override (#148)", () => {
-  const owned: ExamAccess = {
-    status: "owned",
-    userId: "user_1",
-    examId: 42,
-    topicSlug: SLUG,
-    examinerModel: null,
-  };
-  const PROMPT = "Tu es un examinateur bien plus exigeant.";
-
-  it("parses a prompt the browser sent, without honouring it here", () => {
-    // Validation and authorisation are two steps, exactly as they are for the
-    // subject and the model: this one only says the field is text of a
-    // sendable size. The gate below is what decides whether it counts.
-    const parsed = parseLiveTokenRequest(body({ examinerPrompt: PROMPT }));
-    assert.equal(parsed.ok, true);
-    assert.equal(parsed.ok && parsed.request.requestedExaminerPrompt, PROMPT);
-  });
-
-  it("refuses a prompt that is not sendable text", () => {
-    // Refused where the reason can be read, rather than at Google, where an
-    // oversized constraint arrives as a socket that opens and dies.
-    for (const examinerPrompt of [42, "", "   ", "x".repeat(MAX_EXAMINER_PROMPT_LENGTH + 1)]) {
-      const parsed = parseLiveTokenRequest(body({ examinerPrompt }));
-      assert.equal(parsed.ok, false, String(examinerPrompt).slice(0, 20));
-      assert.equal(!parsed.ok && parsed.status, 400);
-    }
-  });
-
-  it("treats an absent prompt as the ordinary case", () => {
-    const parsed = parseLiveTokenRequest(body());
-    assert.equal(parsed.ok && parsed.request.requestedExaminerPrompt, undefined);
-  });
-
-  it("honours it on a build that carries the development tooling", () => {
-    const gate = gateLiveToken({
-      access: owned,
-      requestedTopicSlug: SLUG,
-      requestedExaminerPrompt: PROMPT,
-      devToolsEnabled: true,
-    });
-    assert.equal(gate.decision === "mint" && gate.examinerPrompt, PROMPT);
-  });
-
-  it("DROPS it where marks are real, which is the whole safety property", () => {
-    // The examiner prompt is server-owned. A production build must mint the
-    // instruction this repository built no matter what the browser sends, and
-    // it must do so silently — a production server that started rejecting
-    // requests over an unexpected field would be a worse failure than one
-    // that ignores it.
-    const gate = gateLiveToken({
-      access: owned,
-      requestedTopicSlug: SLUG,
-      requestedExaminerPrompt: PROMPT,
-      devToolsEnabled: false,
-    });
-    assert.equal(gate.decision, "mint");
-    assert.equal(gate.decision === "mint" && gate.examinerPrompt, undefined);
-  });
-
-  it("fails closed when nobody says whether the tooling is on", () => {
-    // The default matters more than the explicit `false` above: the route is
-    // the only caller that knows, and a future caller that forgets must get
-    // the production behaviour rather than the permissive one.
-    const gate = gateLiveToken({
-      access: owned,
-      requestedTopicSlug: SLUG,
-      requestedExaminerPrompt: PROMPT,
-    });
-    assert.equal(gate.decision === "mint" && gate.examinerPrompt, undefined);
-  });
-
-  it("carries it on the degraded path too, where no sitting can be read", () => {
-    // A reconnect during a database blip must come back as the SAME examiner,
-    // prompt included — the client re-sends it on every mint for exactly that
-    // reason, and this is the path a `no-sitting` answer takes.
-    const noRow = gateLiveToken({
-      access: { status: "no-sitting", userId: "user_1", reason: "lookup-failed" },
-      requestedTopicSlug: SLUG,
-      requestedExaminerPrompt: PROMPT,
-      devToolsEnabled: true,
-    });
-    assert.equal(noRow.decision === "mint" && noRow.examinerPrompt, PROMPT);
   });
 });
