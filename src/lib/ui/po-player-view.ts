@@ -379,6 +379,23 @@ export function secondsToMonologueFloor(elapsedSeconds: number): number {
 }
 
 /**
+ * A rewound start stamp that makes the derived elapsed time jump forward by
+ * `skipSeconds`. Because elapsed is `(now - start)`, moving the start *earlier*
+ * advances the clock — the mechanism behind the dev fast-forward tool, which
+ * lets a tester reach time-up (and the real close-out handshake) without waiting
+ * out the full épreuve. A non-positive skip is a no-op, so it never rewinds time.
+ *
+ * PORT NOTE: `rewindStartBy` from the reference's `po-player-view.ts`, verbatim
+ * in behaviour. There the tool was admin-gated on the live session; here it is
+ * development-gated (`DEV_TOOLS_ENABLED`) and the stamp it rewinds is the
+ * controller's `phaseStart`, but the arithmetic — and the property that nothing
+ * bypasses the finalize path — is the same.
+ */
+export function rewindStartBy(startMs: number, skipSeconds: number): number {
+  return startMs - Math.max(0, skipSeconds) * 1000;
+}
+
+/**
  * The topbar's step index: 0 Préparation, 1 Exposé, 2 Débat.
  *
  * **The stepper now names the épreuve's parts rather than this app's screens.**

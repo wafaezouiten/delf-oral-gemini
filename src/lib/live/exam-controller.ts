@@ -40,11 +40,13 @@ import {
   isPhaseTimeUp,
   monologueWasSilent,
   nextPhase,
+  phaseDurationSeconds,
   phaseUsesLiveSession,
   remainingSeconds,
   type OralPhase,
 } from "@/lib/delf/phases";
 import { readsAsClosing } from "@/lib/delf/early-closing";
+import { rewindStartBy } from "@/lib/ui/po-player-view";
 import {
   closingInstruction,
   examinerOpeningLine,
@@ -1104,6 +1106,60 @@ export class ExamController {
     void this.openSession(this.phase).catch((error) =>
       this.log("dev-examiner-session-restart-failed", String(error)),
     );
+  }
+
+  /**
+   * DEVELOPMENT ONLY — fast-forward the part's clock (#149).
+   *
+   * PORT NOTE: the reference's admin time-skip, whole. It rewinds the phase's
+   * start stamp so the derived elapsed jumps forward, then ticks once so the
+   * jump is applied now rather than on the next heartbeat. Because everything
+   * that ends a part reads that same clock — the time-cue grid, the last
+   * question's window, the closing lead, the safety timeout, the silent-
+   * monologue hold — a skip exercises the real end-game exactly as waiting
+   * would, and nothing here bypasses the closing handshake. That property is
+   * the reference's design and the reason to port it rather than invent one.
+   *
+   * What it deliberately does NOT touch: `examStart`. Transcript timestamps
+   * are `now - examStart`, so a skip moves no words; only this part's clock
+   * jumps. The cost, same as the reference's: `phaseSeconds` at the boundary
+   * claims the skipped time, so a skipped sitting reports minutes nobody
+   * spoke. The server measures a real sitting's duration from the audio bytes,
+   * so the claim travels no further than the payload — and no production build
+   * carries this method at all.
+   *
+   * Refused while the phase is armed (no clock to move), while a closing
+   * handshake owns the end of the part, and while the monologue is held —
+   * `tick()` re-anchors a held clock to keep it still, so a skip there would
+   * be silently undone, which is worse than a refusal.
+   */
+  devSkipTime(seconds: number): void {
+    if (!DEV_TOOLS_ENABLED) return;
+    if (this.phase !== "monologue" && this.phase !== "debate") return;
+    if (this.phaseStart === null || this.closing || this.monologueHeld) return;
+
+    this.phaseStart = rewindStartBy(this.phaseStart, seconds);
+    this.log("dev-time-skip", { seconds, phase: this.phase });
+    this.tick();
+  }
+
+  /**
+   * DEVELOPMENT ONLY — jump straight to the part's time-up (#149).
+   *
+   * « Fin du temps » : lands the clock exactly on the phase's duration
+   * regardless of how far it has run, so the very next tick is the ordinary
+   * time-up — the monologue thanks and hands over, the débat sends its led
+   * closing directive. Same guards, same mechanism, same port as
+   * {@link devSkipTime}.
+   */
+  devSkipToEnd(): void {
+    if (!DEV_TOOLS_ENABLED) return;
+    if (this.phase !== "monologue" && this.phase !== "debate") return;
+    if (this.phaseStart === null || this.closing || this.monologueHeld) return;
+
+    this.phaseStart = this.now() - phaseDurationSeconds(this.phase) * 1000;
+    this.log("dev-time-skip", { toEnd: true, phase: this.phase });
+    this.tick();
   }
 
   private buildSnapshot(): ExamState {
