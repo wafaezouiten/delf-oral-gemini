@@ -1,5 +1,5 @@
 /**
- * GET /api/dev/examiner-prompt — read the examiner's system instruction (#148).
+ * GET /api/dev/examiner-prompt — read the examiner's system instruction (#152).
  *
  * DEVELOPMENT ONLY, and a route rather than an import for one reason: the
  * instruction must not be in the client bundle. `buildExaminerInstruction` is a

@@ -13,7 +13,7 @@ import {
 } from "@/lib/ui/dev-examiner-prompt";
 
 /**
- * DEVELOPMENT ONLY — edit the examiner's system instruction mid-débat (#148).
+ * DEVELOPMENT ONLY — edit the examiner's system instruction mid-débat (#152).
  *
  * The examiner's behaviour is a prompt, and until this existed the only way to
  * try a different one was to edit `lib/delf/examiner-prompt.ts`, restart the

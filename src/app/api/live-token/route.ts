@@ -18,7 +18,7 @@
  *     One exception, and it is gated rather than carved out: on a build where
  *     `DEV_TOOLS_ENABLED` is true a browser may hand UP a replacement
  *     instruction, so the prompt editor can try a different examiner without a
- *     redeploy (#148). `gateLiveToken` drops that field on every other build,
+ *     redeploy (#152). `gateLiveToken` drops that field on every other build,
  *     so the production property above is unchanged — the server still decides
  *     the instruction, and still never sends it down.
  *  2. **A leaked token is worth almost nothing.** It is single-use, expires in
@@ -94,7 +94,7 @@ export async function POST(request: Request) {
     requestedTopicSlug,
     requestedModel,
     requestedExaminerPrompt,
-    // Read on the SERVER (#148). `DEV_TOOLS_ENABLED` fails closed in
+    // Read on the SERVER (#152). `DEV_TOOLS_ENABLED` fails closed in
     // production, so this is what makes a browser-supplied examiner prompt
     // unreachable there — the gate drops the field and mints the instruction
     // this repository built, exactly as it always has.

@@ -238,7 +238,7 @@ export interface ExamState {
   devTextMode: boolean;
   /**
    * DEVELOPMENT ONLY — the examiner is running under an edited system
-   * instruction (#148).
+   * instruction (#152).
    *
    * Always `false` where `DEV_TOOLS_ENABLED` is false, because
    * `setExaminerPrompt` refuses there. Rendered so the panel's badge reads the
@@ -249,7 +249,7 @@ export interface ExamState {
    */
   examinerPromptModified: boolean;
   /**
-   * DEVELOPMENT ONLY — a live examiner session exists right now (#148).
+   * DEVELOPMENT ONLY — a live examiner session exists right now (#152).
    *
    * Read off `this.session` rather than inferred from the connection state,
    * because the two disagree exactly where it matters: a session that is
@@ -365,7 +365,7 @@ export interface ExamControllerDeps {
      *  that had not been made when the controller was built. */
     examinerModel: string | undefined,
     /** DEVELOPMENT ONLY — the examiner prompt this session should run under
-     *  (#148), or undefined for the instruction the repository builds. An
+     *  (#152), or undefined for the instruction the repository builds. An
      *  argument for the same reason as the model above: it is edited during
      *  the épreuve, so a factory that captured it would pin the wrong one. */
     examinerPrompt: string | undefined,
@@ -678,7 +678,7 @@ export class ExamController {
 
   /**
    * DEVELOPMENT ONLY — the system instruction the next session opens under
-   * (#148), or undefined for the one this repository builds.
+   * (#152), or undefined for the one this repository builds.
    *
    * Undefined on every real sitting and in every production build:
    * `setExaminerPrompt` is the only writer and it returns before assigning
@@ -1045,7 +1045,7 @@ export class ExamController {
 
   /**
    * DEVELOPMENT ONLY — run the examiner under a different system instruction
-   * (#148).
+   * (#152).
    *
    * **Why this cannot touch the session that is open.** A Gemini Live session's
    * system instruction is fixed for its lifetime: it is pinned into the
@@ -1075,7 +1075,7 @@ export class ExamController {
 
   /**
    * DEVELOPMENT ONLY — close the examiner's session and open a fresh one
-   * (#148).
+   * (#152).
    *
    * What makes an edited prompt audible without waiting for the next phase.
    * Deliberately NOT `forceReconnect()`, which is a *resume*: it carries the

@@ -79,7 +79,7 @@ export function ExamClient({
   const [notes, setNotes] = useState("");
   const [notesOpen, setNotesOpen] = useState(false);
   /**
-   * DEVELOPMENT ONLY — whether the examiner-prompt editor is open (#148).
+   * DEVELOPMENT ONLY — whether the examiner-prompt editor is open (#152).
    *
    * Local state, unlike the transcription panel's, and the difference is the
    * point: that toggle lives on the controller because opening it PAUSES THE

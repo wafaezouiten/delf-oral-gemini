@@ -105,7 +105,7 @@ export interface LiveTokenClientRequest {
    */
   model?: string;
   /**
-   * DEVELOPMENT ONLY — a replacement examiner system instruction (#148).
+   * DEVELOPMENT ONLY — a replacement examiner system instruction (#152).
    *
    * Forwarded on every mint, including reconnects, for the same reason the
    * model is: a session that reconnects must come back as the same examiner,
@@ -221,7 +221,7 @@ export interface ExamLiveSessionOptions {
   /** The candidate's chosen examiner, forwarded on every mint (#99). Absent
    *  means "never chosen" — the server decides, exactly as before. */
   model?: string;
-  /** DEVELOPMENT ONLY — the examiner prompt this session runs under (#148).
+  /** DEVELOPMENT ONLY — the examiner prompt this session runs under (#152).
    *  Absent means the instruction this repository builds. */
   examinerPrompt?: string;
   callbacks: SessionManagerCallbacks;
