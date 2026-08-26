@@ -9,6 +9,7 @@ import {
   examinerOpeningLine,
   lastQuestionInstruction,
   presenceCheckInstruction,
+  resumeAfterReconnectInstruction,
   resumeDebateInstruction,
   silenceRelanceInstruction,
   timeRemainingInstruction,
@@ -55,6 +56,9 @@ describe("examiner prompt", () => {
       timeRemainingInstruction(7),
       resumeDebateInstruction(7),
       resumeDebateInstruction(1, true),
+      // Both wordings of the fresh-reconnect recovery answer to it too (#133).
+      resumeAfterReconnectInstruction(),
+      resumeAfterReconnectInstruction(true),
       lastQuestionInstruction(),
     ]) {
       assert.ok(!text.includes("—"), "a silence directive contains an em dash");
@@ -221,6 +225,44 @@ describe("examiner prompt", () => {
       assert.ok(resume.includes("environ 7 minutes"));
       assert.ok(resume.includes("Enchaîne immédiatement"));
       assert.ok(resume.includes("Ne t'excuse pas"), "an apology would be about the épreuve");
+    });
+  });
+
+  describe("the reconnect that could not resume (#133)", () => {
+    it("tells a fresh session the débat is already in progress", () => {
+      // The débat instruction's OUVERTURE section is a standing order to open
+      // the débat, and a fresh session reading it with no sense of how far the
+      // exchange has come opens it again — a second « first question ». The
+      // recovery says where the model actually is, and names the re-opening
+      // moves it must not make.
+      const resume = resumeAfterReconnectInstruction();
+      assert.ok(resume.includes("DÉJÀ en cours"));
+      assert.ok(resume.includes("Ne rouvre pas le débat"));
+      assert.ok(resume.includes("ne réintroduis pas le sujet"));
+      assert.ok(resume.includes("ne salue pas de nouveau le candidat"));
+      assert.ok(resume.includes("aucune remarque sur l'interruption"));
+    });
+
+    it("sends it back to the exchange rather than leaving it nothing to say", () => {
+      // Same rule as the goodbye recovery: a bare contradiction leaves the
+      // model with no next move, and silence is the dead end this is trying to
+      // get out of.
+      const resume = resumeAfterReconnectInstruction();
+      assert.ok(resume.includes("réagis à la dernière réponse du candidat"));
+      assert.ok(resume.includes("question ou objection nouvelle"));
+      assert.ok(resume.includes("sans répéter une objection déjà traitée"));
+    });
+
+    it("keeps « une dernière question » once it has been announced (#108)", () => {
+      // A fresh session has forgotten the announcement was made; the recovery
+      // must not have it broken through the examiner's mouth — a fresh
+      // question after « une dernière question », or the announcement said a
+      // second time.
+      const after = resumeAfterReconnectInstruction(true);
+      assert.ok(after.includes("ne l'annonce pas une seconde fois"));
+      assert.ok(after.includes("aucune question entièrement nouvelle"));
+      assert.ok(after.includes("Rebondis"));
+      assert.ok(!after.includes("objection nouvelle"), "the fresh-objection steer is gone");
     });
   });
 

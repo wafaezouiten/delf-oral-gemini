@@ -5,6 +5,7 @@ import {
   appendFragment,
   candidateSpeech,
   candidateWordCount,
+  debateSessionHistory,
   entriesForPhase,
   formatTranscript,
   monologueAsHistory,
@@ -152,5 +153,35 @@ describe("transcript", () => {
 
   it("seeds nothing when the monologue produced no speech", () => {
     assert.deepEqual(monologueAsHistory([]), []);
+  });
+
+  it("seeds a débat session with the monologue handover, then the exchange so far (#133)", () => {
+    // What a reconnect that lost its resumption handle is seeded with: a fresh
+    // session given the monologue alone believes the débat has not begun, and
+    // its standing order is then to open it — again.
+    const entries = build(
+      { text: "Je défends le télétravail.", phase: "monologue", speaker: "candidate" },
+      { text: "N'isole-t-il pas les salariés ?", phase: "debate", speaker: "examiner" },
+      { text: "Cela dépend des métiers.", phase: "debate", speaker: "candidate" },
+    );
+    const history = debateSessionHistory(entries);
+
+    assert.equal(history.length, 4);
+    assert.deepEqual(
+      history.slice(0, 2),
+      monologueAsHistory(entries),
+      "the handover comes first, unchanged",
+    );
+    assert.deepEqual(history[2], {
+      role: "model",
+      parts: [{ text: "N'isole-t-il pas les salariés ?" }],
+    });
+    assert.deepEqual(history[3], { role: "user", parts: [{ text: "Cela dépend des métiers." }] });
+  });
+
+  it("collapses to the plain monologue seed while the débat has not begun", () => {
+    const entries = build({ text: "Je défends le télétravail." });
+    assert.deepEqual(debateSessionHistory(entries), monologueAsHistory(entries));
+    assert.deepEqual(debateSessionHistory([]), []);
   });
 });

@@ -212,6 +212,9 @@ const GOAWAY_SAFETY_MS = 1500;
 const BACKOFF_BASE_MS = 400;
 const BACKOFF_CAP_MS = 5000;
 
+/** One turn of seedable history, in the shape `sendClientContent` takes. */
+export type LiveHistoryTurn = { role: "user" | "model"; parts: Array<{ text: string }> };
+
 export interface ExamLiveSessionOptions {
   /** The sitting this session belongs to. Sent to the token route, which binds
    *  the token to it after checking the caller owns it. */
@@ -225,8 +228,18 @@ export interface ExamLiveSessionOptions {
    *  Absent means the instruction this repository builds. */
   examinerPrompt?: string;
   callbacks: SessionManagerCallbacks;
-  /** History to seed a fresh session with (the monologue, for the débat). */
-  initialHistory?: Array<{ role: "user" | "model"; parts: Array<{ text: string }> }>;
+  /**
+   * History to seed a fresh session with (the monologue, for the débat).
+   *
+   * A provider is read again on EVERY fresh connect, and a reconnect whose
+   * socket died before the first resumption handle arrived is a fresh connect
+   * (#133): nothing restores the exchange, so what the provider returns is all
+   * the examiner will know. A caller whose history grows while the session
+   * runs — the débat, whose exchange is itself the history — passes the
+   * function; a plain array behaves as it always has, the same turns on every
+   * fresh connect.
+   */
+  initialHistory?: LiveHistoryTurn[] | (() => LiveHistoryTurn[]);
   transport?: LiveTransport;
   timers?: SessionTimers;
   maxReconnectAttempts?: number;
@@ -291,10 +304,7 @@ export class ExamLiveSession {
   private readonly model: string | undefined;
   private readonly examinerPrompt: string | undefined;
   private readonly callbacks: SessionManagerCallbacks;
-  private readonly initialHistory: Array<{
-    role: "user" | "model";
-    parts: Array<{ text: string }>;
-  }>;
+  private readonly initialHistory: () => LiveHistoryTurn[];
   private readonly transport: LiveTransport;
   private readonly timers: SessionTimers;
   private readonly maxReconnectAttempts: number;
@@ -306,7 +316,8 @@ export class ExamLiveSession {
     this.model = options.model;
     this.examinerPrompt = options.examinerPrompt;
     this.callbacks = options.callbacks;
-    this.initialHistory = options.initialHistory ?? [];
+    const history = options.initialHistory ?? [];
+    this.initialHistory = typeof history === "function" ? history : () => history;
     this.transport = options.transport ?? browserLiveTransport;
     this.timers = options.timers ?? realTimers;
     this.maxReconnectAttempts = options.maxReconnectAttempts ?? DEFAULT_MAX_RECONNECT_ATTEMPTS;
@@ -372,6 +383,12 @@ export class ExamLiveSession {
     }
 
     const resuming = Boolean(this.resumptionHandle);
+    // Read before anything can open a socket: `onopen` sets `everConnected`,
+    // so by the time the connect below has succeeded the field can no longer
+    // say whether this attempt was the session's first. A fresh connect that
+    // is NOT the first is the amnesia path (#133) — see the event at the
+    // bottom of the try block.
+    const everConnectedBefore = this.everConnected;
     this.setState(resuming ? "resuming" : "connecting");
 
     // Everything below belongs to this attempt. If a close or another reconnect
@@ -440,11 +457,17 @@ export class ExamLiveSession {
 
       // A brand-new débat session knows nothing about the monologue. Seed it
       // before the examiner speaks so its first objection can quote the
-      // candidate. On a RESUME the handle already carries the history, so
-      // re-seeding would duplicate the monologue in context.
-      if (!resuming && this.initialHistory.length > 0) {
-        this.socket.sendClientContent({ turns: this.initialHistory, turnComplete: false });
-        this.callbacks.onEvent("history-seeded", { turns: this.initialHistory.length });
+      // candidate. Read from the provider on every fresh connect, not captured
+      // at construction: a reconnect that lost its handle is a fresh connect
+      // (#133), and it must be seeded with the exchange as it stands NOW. On a
+      // RESUME the handle already carries the history, so re-seeding would
+      // duplicate it in context.
+      if (!resuming) {
+        const history = this.initialHistory();
+        if (history.length > 0) {
+          this.socket.sendClientContent({ turns: history, turnComplete: false });
+          this.callbacks.onEvent("history-seeded", { turns: history.length });
+        }
       }
 
       // BEFORE the flush below, and that order is the point: the buffered
@@ -460,6 +483,18 @@ export class ExamLiveSession {
       // both places is safe: it is a no-op on an empty queue, and it refuses
       // unless the state says connected.
       this.flushPendingAudio();
+
+      // The reconnect that could not resume (#133): this connect REPLACED a
+      // live session and presented no handle, so the model's own memory of the
+      // exchange is gone and the seed above is all it knows. Announced as its
+      // own event rather than left to `connected`, because the controller
+      // answers it with a directive and `connected` fires from `onopen`, while
+      // `this.socket` is still null and `sendDirective` would silently drop
+      // it. Last on purpose: the answer then lands on an installed, seeded
+      // socket, after the candidate's own buffered mid-sentence words.
+      if (!resuming && everConnectedBefore) {
+        this.callbacks.onEvent("reconnected-fresh");
+      }
     } catch (error) {
       // A superseded attempt failing is not this session's problem. Without
       // this check the rejection of an abandoned `mintToken`/`open` — an

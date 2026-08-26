@@ -192,3 +192,28 @@ export function monologueAsHistory(
     },
   ];
 }
+
+/**
+ * Everything a débat session must know at connect time: the monologue handover
+ * above, then every débat turn already exchanged, as literal turns.
+ *
+ * The second half exists for the reconnect that could not resume (#133). A
+ * socket that dies before its first resumption handle arrives reconnects
+ * FRESH, and a fresh session seeded with the monologue alone comes back
+ * believing the débat has not begun — its standing order is to open it, so the
+ * candidate hears a second « first question » minutes into the exchange.
+ * Seeding the turns already spoken is what lets the examiner come back
+ * mid-argument: what it asked, what was answered, and whether the last
+ * question is already out are all in the text. On the débat's first connect
+ * the second half is empty and this is exactly the monologue seed it has
+ * always been.
+ */
+export function debateSessionHistory(
+  entries: readonly TranscriptEntry[],
+): Array<{ role: "user" | "model"; parts: Array<{ text: string }> }> {
+  const exchange = entriesForPhase(entries, "debate").map((entry) => ({
+    role: entry.speaker === "candidate" ? ("user" as const) : ("model" as const),
+    parts: [{ text: entry.text }],
+  }));
+  return [...monologueAsHistory(entries), ...exchange];
+}
