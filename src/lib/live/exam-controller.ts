@@ -3119,13 +3119,30 @@ export class ExamController {
     // must be seeded with the exchange so far, not the monologue alone (#133).
     const history = target === "debate" ? () => debateSessionHistory(this.transcript) : () => [];
 
+    // The prompt override is the débat's, and only the débat's (#166).
+    //
+    // The editor was fixed to that part in #153 — the monologue's examiner is
+    // silent by design, so an experiment there has nothing observable to test —
+    // but this layer never knew it, and merely could not be caught out: the
+    // panel is the only thing that ever called `setExaminerPrompt`, and it does
+    // not exist before the débat. A SAVED prompt breaks that accident. It is
+    // applied at mount, during the préparation, and would otherwise hand the
+    // monologue's session a débat instruction: an examiner arguing through the
+    // exposé it is supposed to listen silently to.
+    //
+    // So the scope is stated here rather than defended by where the caller
+    // happens to be, which also means a restart during the monologue reopens
+    // on the shipped instruction. That is the honest reading of an override
+    // that only describes one part of the épreuve.
+    const examinerPrompt = target === "debate" ? this.examinerPrompt : undefined;
+
     const session = this.deps.createSession(
       target,
       this.deps.topic,
       callbacks,
       history,
       this.examinerModel,
-      this.examinerPrompt,
+      examinerPrompt,
     );
     this.session = session;
     await session.connect();

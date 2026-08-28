@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
 
 import { Notice } from "@/app/_components/notice";
@@ -23,6 +23,13 @@ import {
   type FinishFailure,
 } from "@/lib/ui/finish-failure";
 import { finishStage } from "@/lib/ui/finish-progress";
+import {
+  clearSavedExaminerPrompt,
+  saveExaminerPrompt,
+  savedPromptServerSnapshot,
+  savedPromptSnapshot,
+  subscribeSavedPrompt,
+} from "@/lib/ui/dev-examiner-prompt-storage";
 import type { OralTopic } from "@/lib/delf/topics";
 import { AnnouncementControl } from "./_components/announcement-control";
 import { DEV_TOOLS_ENABLED } from "@/lib/dev-tools";
@@ -385,6 +392,40 @@ export function ExamClient({
   const { state, controller } = useExamController({ examId, topic, examinerModel, onFinished });
 
   /**
+   * The examiner prompt saved for this sujet, if there is one (#166).
+   *
+   * Read as an external store rather than into state, for the reason the
+   * correction page reads its own stash that way: `localStorage` does not exist
+   * during the server render, and `useSyncExternalStore` is what lets the
+   * server snapshot be null without a hydration mismatch. The store notifies on
+   * every apply and reset, so the panel below sees its own writes.
+   */
+  const savedPrompt = useSyncExternalStore(
+    subscribeSavedPrompt,
+    () => (DEV_TOOLS_ENABLED ? savedPromptSnapshot(topic.slug) : null),
+    savedPromptServerSnapshot,
+  );
+
+  /**
+   * Put it in force, before anything opens a session.
+   *
+   * This is the whole reason the read is here and not in the panel: the panel
+   * renders on the débat, which is after the débat's first session has already
+   * been minted, and a system instruction is fixed for a session's lifetime. A
+   * saved prompt applied there would need a restart to take — and a restart at
+   * the débat's opening costs the examiner the exposé it is about to quote.
+   *
+   * Safe to run during the préparation because the controller scopes the
+   * override to the débat (#166): the monologue's session is not handed it.
+   * `setExaminerPrompt` is itself a no-op off a development build, and ignores
+   * a value it already holds, so this settles after one call.
+   */
+  useEffect(() => {
+    if (!savedPrompt) return;
+    controller.setExaminerPrompt(savedPrompt.prompt);
+  }, [controller, savedPrompt]);
+
+  /**
    * Start the épreuve on arrival (#55).
    *
    * The candidate has already committed: they pressed « Commencer » in the
@@ -731,18 +772,30 @@ export function ExamClient({
                   active={promptPanelOpen}
                   modified={state.examinerPromptModified}
                   sessionOpen={state.examinerSessionOpen}
+                  saved={savedPrompt}
                   onActiveChange={setPromptPanelOpen}
                   // Store, then make it govern something: a system instruction is
                   // fixed for a session's lifetime, so the restart is what turns an
                   // edit into behaviour. A no-op when no session is open, where the
                   // next connect picks the prompt up anyway.
-                  onApply={(prompt) => {
+                  //
+                  // Then write it down (#166), so the next sitting on this sujet
+                  // opens under it. Last of the three: the save is a promise about
+                  // later épreuves, and making it before this one is actually
+                  // running the prompt would be promising the wrong thing.
+                  onApply={(prompt, promptVersion) => {
                     controller.setExaminerPrompt(prompt);
                     controller.restartExaminerSession();
+                    saveExaminerPrompt(topic.slug, prompt, promptVersion);
                   }}
+                  // « Réinitialiser » erases the save too, and has to: it is
+                  // offered as the way back to the shipped instruction, and one
+                  // that left the prompt to return on the next sitting would be
+                  // the most confusing control in the panel.
                   onReset={() => {
                     controller.setExaminerPrompt(null);
                     controller.restartExaminerSession();
+                    clearSavedExaminerPrompt(topic.slug);
                   }}
                 />
               )}

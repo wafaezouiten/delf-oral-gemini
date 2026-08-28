@@ -13,6 +13,10 @@ import {
   normaliseExaminerPrompt,
   promptSubmitDisabled,
   promptSubmitState,
+  parseSavedPrompt,
+  savedPromptKey,
+  savedPromptStale,
+  serialiseSavedPrompt,
 } from "./dev-examiner-prompt";
 
 describe("normalising an edited prompt", () => {
@@ -164,6 +168,74 @@ describe("naming the examiner the prompt is tried on", () => {
     assert.equal(
       describeExaminerModel("gemini-9.9-flash-live-preview-04-2027"),
       "gemini-9.9-flash-live-preview-04-2027",
+    );
+  });
+});
+
+describe("a prompt that outlives the sitting (#166)", () => {
+  const VERSION = "2026-08-21.1";
+
+  it("keys the save by sujet, because the prompt has a sujet inside it", () => {
+    // `buildExaminerInstruction` interpolates the title and the document, so a
+    // single global slot would replay one sujet's document into another's
+    // épreuve and the examiner would follow the text rather than the room.
+    assert.notEqual(savedPromptKey("teletravail"), savedPromptKey("ecrans-enfants"));
+    assert.ok(savedPromptKey("teletravail").includes("teletravail"));
+  });
+
+  it("round-trips a prompt through storage", () => {
+    const saved = parseSavedPrompt(serialiseSavedPrompt("Sois plus exigeant.", VERSION));
+    assert.deepEqual(saved, { prompt: "Sois plus exigeant.", version: VERSION });
+  });
+
+  it("trims on the way in, so the record matches what was applied", () => {
+    const saved = parseSavedPrompt(serialiseSavedPrompt("  Sois exigeant. \n", VERSION));
+    assert.equal(saved?.prompt, "Sois exigeant.");
+  });
+
+  it("reads anything it cannot trust as nothing saved", () => {
+    // The input is a string a browser has held since some earlier build, and
+    // "nothing saved" is the one interpretation that cannot break a sitting.
+    assert.equal(parseSavedPrompt(null), null, "never written");
+    assert.equal(parseSavedPrompt(""), null, "empty");
+    assert.equal(parseSavedPrompt("{"), null, "truncated JSON");
+    assert.equal(parseSavedPrompt('"a string"'), null, "not an object");
+    assert.equal(parseSavedPrompt("null"), null, "the JSON null");
+    assert.equal(parseSavedPrompt('{"prompt":"Sois exigeant."}'), null, "no version");
+    assert.equal(parseSavedPrompt('{"version":"x"}'), null, "no prompt");
+    assert.equal(parseSavedPrompt('{"prompt":42,"version":"x"}'), null, "the wrong type");
+  });
+
+  it("refuses a blank prompt, as applying one is refused", () => {
+    // A session with no examiner in it is not an experiment, and a saved one
+    // would be that session on every future sitting.
+    assert.equal(parseSavedPrompt('{"prompt":"   \\n ","version":"x"}'), null);
+  });
+
+  it("refuses one past the length the token can carry", () => {
+    const tooLong = "a".repeat(MAX_EXAMINER_PROMPT_LENGTH + 1);
+    assert.equal(parseSavedPrompt(serialiseSavedPrompt(tooLong, VERSION)), null);
+    assert.ok(
+      parseSavedPrompt(serialiseSavedPrompt("a".repeat(MAX_EXAMINER_PROMPT_LENGTH), VERSION)),
+    );
+  });
+
+  it("calls a prompt stale when the instruction has moved on under it", () => {
+    const saved = parseSavedPrompt(serialiseSavedPrompt("Sois exigeant.", "2026-01-01.1"));
+    assert.equal(savedPromptStale(saved, "2026-08-21.1"), true);
+    assert.equal(savedPromptStale(saved, "2026-01-01.1"), false, "the same version is current");
+  });
+
+  it("never calls one stale against a version it does not know", () => {
+    // The current version is empty while the panel's fetch is in flight, and a
+    // warning shown for half a second on every open is read as noise.
+    const saved = parseSavedPrompt(serialiseSavedPrompt("Sois exigeant.", "2026-01-01.1"));
+    assert.equal(savedPromptStale(saved, ""), false, "nothing fetched yet");
+    assert.equal(savedPromptStale(null, "2026-08-21.1"), false, "nothing saved");
+    assert.equal(
+      savedPromptStale({ prompt: "Sois exigeant.", version: "" }, "2026-08-21.1"),
+      false,
+      "a record written before the route reported a version",
     );
   });
 });

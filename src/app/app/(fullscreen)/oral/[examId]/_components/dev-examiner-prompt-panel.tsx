@@ -7,10 +7,13 @@ import {
   ACTIVE_PROMPT_COPY,
   DEV_PROMPT_COPY,
   DEV_PROMPT_SUBMIT_COPY,
+  SAVED_PROMPT_COPY,
   describeExaminerModel,
   describePrompt,
   promptSubmitDisabled,
   promptSubmitState,
+  savedPromptStale,
+  type SavedExaminerPrompt,
 } from "@/lib/ui/dev-examiner-prompt";
 
 /**
@@ -49,6 +52,15 @@ import {
  * make it govern anything. The panel says so, and says what it costs: the new
  * examiner has no memory of the exchange so far.
  *
+ * **A prompt outlives the sitting (#166).** What is applied is written down,
+ * per sujet, and the next sitting on that sujet opens under it without this
+ * panel being touched — the parent reads it and hands the controller the prompt
+ * at mount, which is the only moment early enough for the débat's FIRST session
+ * to run it. This component neither reads nor writes that store: it is handed
+ * what was saved and reports an apply and a reset upwards. « Réinitialiser » is
+ * what erases it, and is therefore the only way back to the shipped
+ * instruction.
+ *
  * Amber like the transcription panel, and a popover in the same corner for the
  * same reasons — the bar is one row tall and this is not. The one visual
  * difference is the field, which is tall: a system instruction is thousands of
@@ -60,6 +72,7 @@ export function DevExaminerPromptPanel({
   active,
   modified,
   sessionOpen,
+  saved,
   onActiveChange,
   onApply,
   onReset,
@@ -72,17 +85,32 @@ export function DevExaminerPromptPanel({
   modified: boolean;
   /** A session is open, so applying restarts it rather than merely storing. */
   sessionOpen: boolean;
+  /** What was saved for this sujet, already in force on the controller (#166). */
+  saved: SavedExaminerPrompt | null;
   onActiveChange: (on: boolean) => void;
-  /** Store the prompt and put it in force. */
-  onApply: (prompt: string) => void;
-  /** Back to the instruction the repository builds. */
+  /**
+   * Put the prompt in force and write it down. `promptVersion` is what the dev
+   * route reported for the text this was edited from, saved beside the prompt
+   * so a later sitting can be told its prompt predates the current instruction
+   * — see `SavedExaminerPrompt.version` for why it travels this way rather than
+   * being imported.
+   */
+  onApply: (prompt: string, promptVersion: string) => void;
+  /** Back to the instruction the repository builds, and erase the save. */
   onReset: () => void;
 }) {
   /** The shipped instruction for this phase, as the server reports it. */
   const [original, setOriginal] = useState("");
-  /** What is in force: the original, or whatever was last applied. */
-  const [applied, setApplied] = useState("");
-  const [draft, setDraft] = useState("");
+  /** `EXAMINER_PROMPT_VERSION`, from the same answer. Empty until it arrives. */
+  const [version, setVersion] = useState("");
+  /**
+   * What is in force: the original, whatever was last applied — or, on the
+   * first open of a sitting that inherited one, the saved prompt. Seeded here
+   * rather than awaited from the fetch because it is already what the examiner
+   * is running under: the parent applied it at mount.
+   */
+  const [applied, setApplied] = useState(saved?.prompt ?? "");
+  const [draft, setDraft] = useState(saved?.prompt ?? "");
   const [loaded, setLoaded] = useState(false);
   const [failed, setFailed] = useState(false);
   const field = useRef<HTMLTextAreaElement>(null);
@@ -112,10 +140,11 @@ export function DevExaminerPromptPanel({
     let ignore = false;
     fetch(`/api/dev/examiner-prompt?phase=debate&topicSlug=${encodeURIComponent(topicSlug)}`)
       .then((response) => (response.ok ? response.json() : Promise.reject(response.status)))
-      .then((body: { prompt?: string }) => {
+      .then((body: { prompt?: string; version?: string }) => {
         if (ignore) return;
         const prompt = typeof body.prompt === "string" ? body.prompt : "";
         setOriginal(prompt);
+        setVersion(typeof body.version === "string" ? body.version : "");
         // Only the text in force and the draft are seeded, and only where the
         // developer has not already put something else in force: re-opening
         // the panel after applying an edit must show the edit rather than
@@ -149,7 +178,7 @@ export function DevExaminerPromptPanel({
 
   function apply() {
     const prompt = draft.trim();
-    onApply(prompt);
+    onApply(prompt, version);
     // What is now in force, so the button falls to `unchanged` and
     // « Réinitialiser » knows there is something to undo.
     setApplied(prompt);
@@ -366,6 +395,25 @@ export function DevExaminerPromptPanel({
           <p className="text-[0.625rem] leading-snug text-amber-700">
             {sessionOpen ? DEV_PROMPT_COPY.restartWarning : DEV_PROMPT_COPY.nextSessionNote}
           </p>
+
+          {/* How long the prompt stays in force, and whether it has aged (#166).
+              Below the restart warning because that one is about this press and
+              these are about every sitting after it. The stale line is the
+              louder of the two and is styled like it: a saved prompt is a
+              snapshot of an instruction that keeps changing in the repository,
+              and a developer reading an old examiner's behaviour as a bug in
+              the current one is the failure it exists to prevent. */}
+          {saved && (
+            <p className="text-[0.625rem] leading-snug text-amber-700">{SAVED_PROMPT_COPY.saved}</p>
+          )}
+          {saved && savedPromptStale(saved, version) && (
+            <p
+              role="status"
+              className="rounded border border-amber-500 bg-amber-100 px-1.5 py-1 text-[0.625rem] leading-snug font-semibold text-amber-900"
+            >
+              {SAVED_PROMPT_COPY.stale(saved.version, version)}
+            </p>
+          )}
         </form>
       )}
     </div>

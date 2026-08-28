@@ -4121,10 +4121,19 @@ describe("editing the examiner's prompt mid-épreuve (#152)", () => {
     await pressRecord(h);
   }
 
+  /** Preparation → monologue → a débat that has begun, which is the only part
+   *  the editor renders on (#153) and the only one the override reaches (#166). */
+  async function intoDebate(h: Harness): Promise<void> {
+    await intoMonologue(h);
+    h.advanceClock(MONOLOGUE_MIN_SECONDS + 10);
+    await h.controller.advanceEarly();
+    await completeClosing(h);
+  }
+
   /** Let the detached `openSession` a restart starts actually run. */
   const settle = () => new Promise((resolve) => setImmediate(resolve));
 
-  it("opens every later session under the applied prompt", async () => {
+  it("opens the débat under the applied prompt", async () => {
     // The instruction is pinned into the token before the socket exists, so
     // this is the only way a prompt reaches the examiner at all.
     const h = harness();
@@ -4152,13 +4161,40 @@ describe("editing the examiner's prompt mid-épreuve (#152)", () => {
     assert.equal(h.controller.getSnapshot().examinerPromptModified, false, "reset to the default");
   });
 
+  it("never lets an edit reach the monologue's session (#166)", async () => {
+    // The override describes the débat's examiner and nothing else: the
+    // monologue's is under orders to stay silent. Nothing could set one before
+    // the débat while the panel was the only caller — a saved prompt, applied
+    // at mount, is what made that reachable, and this is the assertion that
+    // keeps an exposé from being argued through.
+    const h = harness();
+    h.controller.start();
+    h.controller.setExaminerPrompt(PROMPT);
+
+    await intoMonologue(h);
+    assert.deepEqual(h.sessionPrompts, [undefined], "the exposé kept the shipped instruction");
+
+    h.controller.restartExaminerSession();
+    await settle();
+    assert.deepEqual(h.sessionPrompts, [undefined, undefined], "and a restart does not smuggle it");
+
+    h.advanceClock(MONOLOGUE_MIN_SECONDS + 10);
+    await h.controller.advanceEarly();
+    await completeClosing(h);
+    assert.deepEqual(
+      h.sessionPrompts,
+      [undefined, undefined, PROMPT],
+      "the débat is where it lands, without anything being pressed again",
+    );
+  });
+
   it("restarts the examiner so an edit is audible without waiting for the next part", async () => {
     // A session's system instruction is fixed for its lifetime, so applying
     // has to open a NEW session. Deliberately not a resume: `forceReconnect`
     // carries the resumption handle and would restore the session minted
     // under the old instruction.
     const h = harness();
-    await intoMonologue(h);
+    await intoDebate(h);
     const first = h.session();
 
     h.controller.setExaminerPrompt(PROMPT);
@@ -4167,14 +4203,14 @@ describe("editing the examiner's prompt mid-épreuve (#152)", () => {
 
     assert.equal(first.closed, true, "the session on the old prompt was closed");
     assert.equal(first.reconnects, 0, "and not resumed, which would restore the old instruction");
-    assert.equal(h.sessions.length, 2);
-    assert.deepEqual(h.sessionPrompts, [undefined, PROMPT]);
-    assert.equal(h.session().phase, "monologue", "still the same part of the épreuve");
+    assert.equal(h.sessions.length, 3);
+    assert.deepEqual(h.sessionPrompts, [undefined, undefined, PROMPT]);
+    assert.equal(h.session().phase, "debate", "still the same part of the épreuve");
   });
 
   it("puts the shipped instruction back", async () => {
     const h = harness();
-    await intoMonologue(h);
+    await intoDebate(h);
     h.controller.setExaminerPrompt(PROMPT);
     h.controller.restartExaminerSession();
     await settle();
@@ -4183,7 +4219,7 @@ describe("editing the examiner's prompt mid-épreuve (#152)", () => {
     h.controller.restartExaminerSession();
     await settle();
 
-    assert.deepEqual(h.sessionPrompts, [undefined, PROMPT, undefined]);
+    assert.deepEqual(h.sessionPrompts, [undefined, undefined, PROMPT, undefined]);
     assert.equal(h.controller.getSnapshot().examinerPromptModified, false);
   });
 
@@ -4232,7 +4268,7 @@ describe("editing the examiner's prompt mid-épreuve (#152)", () => {
 
     assert.equal(h.sessions.length, 0, "the préparation opens nobody");
     await intoMonologue(h);
-    assert.deepEqual(h.sessionPrompts, [PROMPT], "and the first session runs the edit");
+    assert.deepEqual(h.sessionPrompts, [undefined], "and the monologue is not the edit's part");
   });
 
   it("ignores an edit that changes nothing", async () => {
