@@ -25,6 +25,7 @@ import { Kicker, Tag } from "@/app/_components/po/tag";
 import { scoreInk } from "@/app/_components/score-band";
 import { cn } from "@/lib/ui/class-names";
 import { correctionNotices, earlyClosingNotice } from "@/lib/ui/correction-notices";
+import { formatScore25 } from "@/lib/ui/format-score";
 import {
   CORRECTION_TRANSCRIPT_COPY,
   correctionTranscriptView,
@@ -460,7 +461,7 @@ export function ResultsClient({
                     scoreInk(tone),
                   )}
                 >
-                  {evaluation.score25}
+                  {formatScore25(evaluation.score25)}
                   <span className="text-muted-foreground text-[1.375rem] font-semibold">
                     /{COMPETENCY_MAX}
                   </span>

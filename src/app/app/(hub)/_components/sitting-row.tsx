@@ -4,6 +4,7 @@ import { Tag } from "@/app/_components/po/tag";
 import { ScoreTag } from "@/app/_components/score-band";
 import { COMPETENCY_MAX } from "@/lib/delf/constants";
 import { formatClock } from "@/lib/delf/phases";
+import { formatScore25 } from "@/lib/ui/format-score";
 import {
   describeOutcome,
   formatSittingDate,
@@ -83,7 +84,7 @@ export function SittingRow({
       {abandoned ? (
         <Tag tone="danger">
           <span aria-hidden>—</span>
-          {sitting.score25}/{COMPETENCY_MAX}
+          {formatScore25(sitting.score25)}/{COMPETENCY_MAX}
         </Tag>
       ) : (
         <ScoreTag score25={sitting.score25} mark={sitting.meetsFloor ? "✓" : "✕"} />

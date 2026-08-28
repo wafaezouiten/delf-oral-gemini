@@ -22,6 +22,7 @@
 import { COMPETENCY_FLOOR, COMPETENCY_MAX } from "@/lib/delf/constants";
 import { scoreBand, type ScoreBand } from "@/lib/delf/grille";
 import { ORAL_CRITERIA, type OralCriterion } from "@/lib/delf/criteria";
+import { formatScore25 } from "@/lib/ui/format-score";
 
 /**
  * How a sitting ended. Only these two reach the candidate's record.
@@ -248,7 +249,7 @@ function buildTiles(sittings: readonly DashboardSitting[], today: Date): Dashboa
     {
       key: "moyenne",
       label: "Note moyenne",
-      value: `${average}`,
+      value: formatScore25(average),
       band: scoreBand(average),
       caption:
         abandoned > 0
