@@ -212,8 +212,13 @@ export function DevExaminerPromptPanel({
           // bar's height since the cluster was made to span it. The bar's
           // bottom edge IS the window's bottom edge, the épreuve being a
           // `h-dvh` column, so `100dvh - 100%` is exactly the room above the
-          // bar whatever height the bar happens to be, and `1.5rem` pays for
-          // the `mb-2` under the panel and leaves half of it above.
+          // bar whatever height the bar happens to be, and `4.5rem` pays for
+          // three things: the `mb-2` under the panel, the `h-14` top bar the
+          // épreuve draws above everything at `z-30`, and half a rem of gap
+          // between the two. The top bar is why the number is not `1.5rem`:
+          // stopping at the window's edge put the panel's header UNDER the
+          // clock and « Quitter », which is a header that is on screen and
+          // still cannot be read.
           //
           // The cap it replaces, `100vh - 6.5rem`, was the same sum with the
           // bar's height written down as a constant and the gap left out of
@@ -222,7 +227,7 @@ export function DevExaminerPromptPanel({
           // and the whole overshoot again on every width where the bar's row
           // wraps — which is where the header, the default/modifié badge and
           // « ✕ » went.
-          className="absolute right-4 bottom-full left-auto z-20 mb-2 flex max-h-[calc(100dvh-100%-1.5rem)] w-[min(22rem,calc(100vw-2rem))] flex-col gap-1.5 rounded-md border border-amber-300 bg-amber-50 p-2 shadow-lg xl:right-0"
+          className="absolute right-4 bottom-full left-auto z-20 mb-2 flex max-h-[calc(100dvh-100%-4.5rem)] w-[min(22rem,calc(100vw-2rem))] flex-col gap-1.5 rounded-md border border-amber-300 bg-amber-50 p-2 shadow-lg xl:right-0"
         >
           <div className="flex items-center gap-1.5">
             <span className="inline-flex items-center gap-1 rounded-full border border-amber-400 px-1.5 py-px text-[0.5625rem] font-bold tracking-[0.1em] text-amber-700 uppercase">

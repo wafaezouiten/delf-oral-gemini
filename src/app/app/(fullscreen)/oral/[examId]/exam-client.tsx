@@ -767,21 +767,13 @@ export function ExamClient({
                   onSubmit={(text, seconds) => controller.submitTypedExpose(text, seconds)}
                 />
               )}
-              {/* Drives the path a real GoAway takes, so the 13-minute
-                  resumption behaviour can be exercised in seconds instead of
-                  waiting for the connection limit. Stands down once the real
-                  recovery control is on screen in the notice above — two
-                  buttons doing the same thing side by side is how a developer
-                  ends up testing the wrong one. */}
-              {state.status !== "error" && (
-                <button
-                  type="button"
-                  onClick={() => void controller.forceReconnect()}
-                  className="border-border text-muted-foreground rounded-md border px-3 py-1.5 text-xs font-semibold"
-                >
-                  Forcer une reconnexion ({state.reconnectCount})
-                </button>
-              )}
+              {/* « Forcer une reconnexion » stood here and is gone (#163). It
+                  drove the path a real GoAway takes, which is worth exercising
+                  — but it did it from the control bar, in the row the dev
+                  popovers open out of, and a plain bordered button among them
+                  was the widest thing in that corner. `forceReconnect()` is
+                  untouched: the recovery notice's « Reprendre la connexion »
+                  is the same call, and it is the one a candidate can reach. */}
             </div>
           ) : undefined
         }
