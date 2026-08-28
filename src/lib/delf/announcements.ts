@@ -140,7 +140,21 @@ export const ANNOUNCEMENTS: Record<AnnouncementId, Announcement> = {
   },
   debate: {
     id: "debate",
-    text: `Je vous remercie, votre exposé est terminé. Nous passons à la seconde partie de l'épreuve, le débat. Pendant ${spokenMinutes(PHASE_DURATIONS.debate)} minutes, je vais revenir sur ce que vous venez de dire et contester certains de vos arguments. Défendez votre position, nuancez-la, et donnez-moi de nouveaux exemples. Vous pouvez me répondre dès que je vous adresse la parole.`,
+    // Cut from five sentences to two (#167). This is the one consigne that
+    // lands on a candidate who has just finished speaking for ten minutes, and
+    // it made them wait, mute, through twenty-two seconds of instruction. What
+    // was cut is what was already said elsewhere: the coaching sentence
+    // (« défendez, nuancez, donnez des exemples ») repeats the préparation's
+    // « vous présenterez ensuite votre point de vue … puis nous en discuterons
+    // ensemble », and the turn-taking sentence explained a rule the examiner's
+    // first question demonstrates a second later.
+    //
+    // What could not go: the handover, the part's name, and its duration. The
+    // last of those is said HERE and nowhere else — the préparation announces
+    // two parts without timing the second, and the monologue clip times only
+    // its own — so dropping the minutes to save a second would be the one cut
+    // that took a fact away rather than a repetition.
+    text: `Je vous remercie, votre exposé est terminé. Nous passons au débat : pendant ${spokenMinutes(PHASE_DURATIONS.debate)} minutes, je contesterai vos arguments, à vous de les défendre.`,
     src: "/announcements/debate.wav",
   },
   finished: {
