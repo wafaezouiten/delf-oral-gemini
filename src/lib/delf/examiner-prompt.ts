@@ -352,6 +352,33 @@ export function lastQuestionInstruction(): string {
  * reads as the app lying through the examiner's mouth — so the recovery asks
  * for a follow-up on the answer it just heard instead.
  */
+/**
+ * Putting a débat back on its feet after a reconnect that lost the examiner's
+ * memory (#133).
+ *
+ * The ordinary reconnect is a RESUME: the stored handle carries the whole
+ * exchange, and nothing needs saying. But a socket that dies before its first
+ * `sessionResumptionUpdate` arrives has no handle, so the replacement session
+ * is fresh — same system instruction, no memory beyond the transcript
+ * re-seeded at connect. That instruction's OUVERTURE section is a standing
+ * order to open the débat, and a model that cannot tell how far the exchange
+ * has come reads it correctly and opens it again: a second « first question »,
+ * minutes in. This is sent right after the re-seed to say where the model
+ * actually is — mid-débat, the exchange already in its context, nothing about
+ * it to re-open, re-introduce or comment on.
+ *
+ * Same fork at the end as the goodbye recovery (#108): once « une dernière
+ * question » has been announced, a fresh objection would break the
+ * announcement's promise, so the steer collapses to a follow-up on the answer
+ * already given.
+ */
+export function resumeAfterReconnectInstruction(afterLastQuestion = false): string {
+  const steer = afterLastQuestion
+    ? "La dernière question a déjà été annoncée : ne l'annonce pas une seconde fois et ne pose aucune question entièrement nouvelle. Rebondis brièvement sur la dernière réponse du candidat."
+    : "Poursuis le MÊME débat : réagis à la dernière réponse du candidat, puis enchaîne avec une seule question ou objection nouvelle sur le sujet, sans répéter une objection déjà traitée.";
+  return `[La connexion technique a été interrompue puis rétablie. Le débat est DÉJÀ en cours : l'échange qui précède t'a été transmis, tu t'en souviens, et tu ne recommences rien. Ne rouvre pas le débat, ne réintroduis pas le sujet, ne salue pas de nouveau le candidat, ne repose pas une question déjà posée et ne fais aucune remarque sur l'interruption. ${steer}]`;
+}
+
 export function resumeDebateInstruction(minutes: number, afterLastQuestion = false): string {
   const duration = minutes === 1 ? "1 minute" : `${minutes} minutes`;
   const steer = afterLastQuestion

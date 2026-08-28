@@ -52,6 +52,7 @@ import {
   examinerOpeningLine,
   lastQuestionInstruction,
   presenceCheckInstruction,
+  resumeAfterReconnectInstruction,
   resumeDebateInstruction,
   silenceRelanceInstruction,
   timeRemainingInstruction,
@@ -59,8 +60,8 @@ import {
 import type { OralTopic } from "@/lib/delf/topics";
 import {
   appendFragment,
+  debateSessionHistory,
   entriesForPhase,
-  monologueAsHistory,
   type TranscriptEntry,
   type TranscriptPhase,
 } from "@/lib/delf/transcript";
@@ -374,7 +375,12 @@ export interface ExamControllerDeps {
     phase: TranscriptPhase,
     topic: OralTopic,
     callbacks: SessionManagerCallbacks,
-    history: Array<{ role: "user" | "model"; parts: Array<{ text: string }> }>,
+    /** What a fresh connect is seeded with. A provider rather than an array
+     *  because the manager reads it again on every fresh connect, and a
+     *  reconnect that lost its resumption handle is one (#133): mid-débat it
+     *  must return the exchange as it stands, not as it stood at the phase
+     *  boundary. */
+    history: () => Array<{ role: "user" | "model"; parts: Array<{ text: string }> }>,
     /** The chosen examiner (#99), or undefined for the server's default. An
      *  argument rather than a closure so the factory cannot capture a choice
      *  that had not been made when the controller was built. */
@@ -3097,12 +3103,21 @@ export class ExamController {
         // the candidate's. That is the moment the silence window opens (#84).
         this.armSilenceWatch();
       },
-      onEvent: (name, detail) => this.log(name, detail),
+      onEvent: (name, detail) => {
+        this.log(name, detail);
+        // The reconnect that could not resume (#133): the manager has already
+        // re-seeded the transcript into the fresh session, and the examiner
+        // still needs telling where it stands. See {@link recoverFreshSession}.
+        if (name === "reconnected-fresh") this.recoverFreshSession();
+      },
     };
 
     // Only the débat is seeded: it is a fresh session that would otherwise know
-    // nothing about the monologue it is supposed to challenge.
-    const history = target === "debate" ? monologueAsHistory(this.transcript) : [];
+    // nothing about the monologue it is supposed to challenge. A provider
+    // rather than the turns themselves, because the manager reads it again on
+    // every fresh connect — and a mid-débat reconnect that lost its handle
+    // must be seeded with the exchange so far, not the monologue alone (#133).
+    const history = target === "debate" ? () => debateSessionHistory(this.transcript) : () => [];
 
     const session = this.deps.createSession(
       target,
@@ -3184,6 +3199,55 @@ export class ExamController {
     // Talking over the examiner is the loudest possible answer to « Vous
     // m'entendez ? », and it arrives before any transcription of it does (#84).
     this.noteCandidateAnswered();
+  }
+
+  /**
+   * Put a session that reconnected WITHOUT its memory back into the épreuve
+   * (#133).
+   *
+   * A socket that dies before its first `sessionResumptionUpdate` has no
+   * handle to resume with, so the manager reconnects fresh: same phase, same
+   * system instruction, and no memory of the exchange beyond the transcript it
+   * re-seeded at connect. For the monologue that seed is enough — the examiner
+   * there is silent by instruction, and the floor marker is re-sent by the
+   * manager itself. The débat's examiner is under a standing order to OPEN the
+   * débat, and with nothing telling it how far the exchange has come, its
+   * correct reading of that order is to open it again: a second « first
+   * question », minutes in, with an announced « une dernière question »
+   * forgotten along with everything else.
+   *
+   * Which directive it gets depends on how far the débat got:
+   *
+   *  - **Opening question never delivered.** The opening directive died with
+   *    the old socket and nothing was heard, so it is simply sent again —
+   *    without the re-send, nobody ever asks the débat's first question on the
+   *    new session, and the part opens into a silence the watch is not yet
+   *    armed to break.
+   *  - **Mid-exchange.** A recovery in the goodbye-recovery's family: the
+   *    débat is in progress, do not re-open it, continue from the last answer
+   *    — honouring an announced last question the same way that one does
+   *    (#108).
+   *
+   * Nothing during a closing handshake, deliberately: a fresh examiner told to
+   * continue the débat seconds before the clock falls would say exactly the
+   * wrong thing, and the handshake's own safety deadline already bounds a
+   * closing turn that never arrives.
+   */
+  private recoverFreshSession(): void {
+    if (this.phase !== "debate" || this.closing) return;
+    if (!this.openingTurnDelivered) {
+      const opening = examinerOpeningLine("debate");
+      if (opening) {
+        this.log("debate-reopened-after-reconnect");
+        this.sendControllerDirective("debate-reopening", opening);
+      }
+      return;
+    }
+    this.log("fresh-session-recovery", { afterLastQuestion: this.lastQuestionCue === "sent" });
+    this.sendControllerDirective(
+      "fresh-session-recovery",
+      resumeAfterReconnectInstruction(this.lastQuestionCue === "sent"),
+    );
   }
 
   /** Release the monologue floor exactly once. See `activityEnded`. */

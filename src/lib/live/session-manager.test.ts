@@ -280,7 +280,9 @@ function harness(
   overrides: {
     phase?: "monologue" | "debate";
     model?: string;
-    initialHistory?: Array<{ role: "user" | "model"; parts: Array<{ text: string }> }>;
+    initialHistory?:
+      | Array<{ role: "user" | "model"; parts: Array<{ text: string }> }>
+      | (() => Array<{ role: "user" | "model"; parts: Array<{ text: string }> }>);
     maxReconnectAttempts?: number;
   } = {},
 ): Harness {
@@ -1030,6 +1032,117 @@ describe("server messages", () => {
     await h.session.connect();
     h.transport.socket.emit({ serverContent: { interrupted: true } } as LiveServerMessage);
     assert.equal(h.log.interruptions, 1);
+  });
+});
+
+// ------------------------------------------- the reconnect that could not resume
+
+describe("the reconnect that could not resume (#133)", () => {
+  // A socket that dies BEFORE its first `sessionResumptionUpdate` leaves
+  // nothing to resume with: the replacement connect is fresh, and the
+  // examiner's memory of the exchange dies with the old socket. These pin the
+  // two halves of the recovery — the re-seed reads the provider again, and the
+  // amnesia is announced so the controller can tell the examiner where it
+  // stands.
+
+  it("re-seeds a fresh reconnect with what the provider returns NOW", async () => {
+    const turns: Array<{ role: "user" | "model"; parts: Array<{ text: string }> }> = [
+      { role: "user", parts: [{ text: "Mon exposé." }] },
+    ];
+    const h = harness({ phase: "debate", initialHistory: () => [...turns] });
+    await h.session.connect();
+    assert.equal(h.transport.socket.contents.length, 1);
+
+    // The exchange grows while the socket is up; it then dies with no handle
+    // ever received, so the replacement cannot resume.
+    turns.push({ role: "model", parts: [{ text: "Première objection." }] });
+    h.transport.socket.drop();
+    await flush();
+
+    assert.equal(h.session.connectionState, "connected");
+    assert.equal(h.transport.sockets.length, 2);
+    assert.deepEqual(
+      h.transport.socket.contents,
+      [{ turns, turnComplete: false }],
+      "the new session was seeded with the exchange as it stands, not as it started",
+    );
+  });
+
+  it("announces the amnesia, and only the amnesia", async () => {
+    const h = harness();
+    await h.session.connect();
+    assert.ok(!h.eventNames().includes("reconnected-fresh"), "a first connect lost nothing");
+
+    h.transport.socket.drop();
+    await flush();
+    assert.deepEqual(
+      h.eventNames().filter((name) => name === "reconnected-fresh"),
+      ["reconnected-fresh"],
+      "a no-handle reconnect lost the exchange, and says so",
+    );
+  });
+
+  it("stays quiet on a resume, which lost nothing", async () => {
+    const h = harness();
+    await h.session.connect();
+    h.transport.socket.emit(resumptionUpdate("handle-one"));
+    h.transport.socket.drop();
+    await flush();
+
+    assert.equal(h.session.connectionState, "connected");
+    assert.ok(!h.eventNames().includes("reconnected-fresh"));
+  });
+
+  it("announces it only once the new socket can carry the answer", async () => {
+    // The `connected` event fires from `onopen`, while the session's socket
+    // field is still null — a directive sent in response to it would be
+    // silently dropped. The recovery answers `reconnected-fresh` instead,
+    // which is emitted after the socket is installed and seeded, so the
+    // directive reaches the examiner, after the re-seeded history.
+    const transport = new FakeTransport();
+    const timers = new TestTimers();
+    const { callbacks, log } = recorder();
+    const session: ExamLiveSession = new ExamLiveSession({
+      examId: "42",
+      phase: "debate",
+      topic: TOPIC,
+      callbacks: {
+        ...callbacks,
+        onEvent: (name, detail) => {
+          callbacks.onEvent(name, detail);
+          if (name === "reconnected-fresh") session.sendDirective("[Reprends le débat.]");
+        },
+      },
+      initialHistory: () => [{ role: "user", parts: [{ text: "Mon exposé." }] }],
+      transport,
+      timers,
+    });
+
+    await session.connect();
+    transport.socket.drop();
+    await flush();
+
+    assert.equal(transport.socket.contents.length, 1, "the new socket was seeded first");
+    assert.deepEqual(transport.socket.realtime, [{ text: "[Reprends le débat.]" }]);
+    assert.ok(log.events.some((event) => event.name === "directive-sent"));
+  });
+
+  it("never degrades an exhausted resume to a fresh session", async () => {
+    // The amnesia path is exactly the no-handle one. A resume that runs out of
+    // attempts fails — it does not fall back to reopening the débat with no
+    // memory, which would trade a visible outage for a silent restart.
+    const h = harness({ maxReconnectAttempts: 2 });
+    await h.session.connect();
+    h.transport.socket.emit(resumptionUpdate("handle-one"));
+    h.transport.failMints = 99;
+    h.transport.socket.drop();
+    await flush();
+
+    assert.equal(h.session.connectionState, "failed");
+    assert.ok(!h.eventNames().includes("reconnected-fresh"));
+    for (const request of h.transport.tokenRequests.slice(1)) {
+      assert.equal(request.resumptionHandle, "handle-one", "every attempt presented the handle");
+    }
   });
 });
 

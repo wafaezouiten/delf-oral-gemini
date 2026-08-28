@@ -55,8 +55,17 @@ class FakeSession implements LiveSessionLike {
   constructor(
     readonly phase: "monologue" | "debate",
     readonly callbacks: SessionManagerCallbacks,
-    readonly history: Array<{ role: "user" | "model"; parts: Array<{ text: string }> }>,
+    private readonly historyProvider: () => Array<{
+      role: "user" | "model";
+      parts: Array<{ text: string }>;
+    }>,
   ) {}
+
+  /** What a fresh connect would be seeded with — read LIVE from the provider
+   *  the controller hands over, exactly as the real manager reads it (#133). */
+  get history(): Array<{ role: "user" | "model"; parts: Array<{ text: string }> }> {
+    return this.historyProvider();
+  }
 
   async connect(): Promise<void> {
     this.connects += 1;
@@ -82,6 +91,19 @@ class FakeSession implements LiveSessionLike {
     this.callbacks.onStateChange("resuming");
     this.open = true;
     this.callbacks.onStateChange("connected");
+  }
+
+  /** Mirrors the real manager's no-handle reconnect (#133): the socket died
+   *  before its first resumption handle, so the replacement is a fresh session
+   *  — `connecting`, never `resuming` — and the amnesia is announced once the
+   *  new socket is installed and seeded, able to carry a directive. */
+  reconnectWithoutHandle(): void {
+    this.reconnects += 1;
+    this.callbacks.onStateChange("reconnecting");
+    this.callbacks.onStateChange("connecting");
+    this.open = true;
+    this.callbacks.onStateChange("connected");
+    this.callbacks.onEvent("reconnected-fresh");
   }
 
   sendAudio(): void {
@@ -3916,6 +3938,136 @@ describe("the last question and the call of time (#108)", () => {
 
     h.advanceClock(5);
     assert.equal(h.controller.getSnapshot().closing, true, "the boundary itself has not moved");
+  });
+});
+
+describe("the reconnect that could not resume mid-débat (#133)", () => {
+  /** Preparation to a débat that has begun, clock at zero. */
+  async function intoDebate(h: Harness): Promise<void> {
+    h.controller.start();
+    await h.controller.advanceEarly();
+    await pressRecord(h);
+    h.session().candidateSays("Le télétravail a transformé le rapport au bureau.");
+    h.advanceClock(MONOLOGUE_MIN_SECONDS + 10);
+    await h.controller.advanceEarly();
+    await completeClosing(h);
+  }
+
+  /** The examiner's opening question, delivered — what makes the next fresh
+   *  reconnect a MID-débat one rather than a stumble at the threshold. */
+  function deliverOpening(h: Harness): void {
+    h.session().examinerSays("Vous avez dit que le télétravail isole. Vraiment ?");
+    h.session().finishTurn();
+  }
+
+  const recoveries = (h: Harness) =>
+    h.session().directives.filter((text) => text.includes("DÉJÀ en cours"));
+
+  it("tells the examiner the débat is in progress rather than letting it re-open", async () => {
+    // The failure this answers: a fresh session runs the débat instruction,
+    // whose OUVERTURE section is a standing order to open the débat — and with
+    // no sense of how far the exchange has come, the examiner opened it again,
+    // a second « first question » minutes in.
+    const h = harness();
+    await intoDebate(h);
+    deliverOpening(h);
+    h.session().candidateSays("Je pense que cela dépend beaucoup des métiers.");
+
+    h.session().reconnectWithoutHandle();
+
+    assert.equal(recoveries(h).length, 1);
+    assert.match(recoveries(h)[0], /Ne rouvre pas le débat/);
+    assert.match(recoveries(h)[0], /ne réintroduis pas le sujet/);
+    assert.match(recoveries(h)[0], /aucune remarque sur l'interruption/);
+  });
+
+  it("keeps « une dernière question » across the amnesia (#108)", async () => {
+    // The announcement is a promise the rest of the débat has to keep, and a
+    // fresh session was the one path left that could forget it was made.
+    const h = harness();
+    await intoDebate(h);
+    deliverOpening(h);
+    h.recorder.voiced.debate = 0;
+    h.advanceClock(687);
+    h.advanceClock(3);
+    assert.ok(
+      h.session().directives.some((text) => text.includes("dernière question")),
+      "the last question was announced before the drop",
+    );
+    h.session().finishTurn();
+
+    h.session().reconnectWithoutHandle();
+
+    const recovery = recoveries(h).at(-1);
+    assert.ok(recovery, "the recovery still goes out");
+    assert.match(recovery!, /ne l'annonce pas une seconde fois/);
+    assert.ok(!recovery!.includes("objection nouvelle"), "no fresh question after the promise");
+  });
+
+  it("re-sends the opening directive when the drop beat the first question", async () => {
+    // The opening directive died with the old socket and nothing was heard:
+    // re-opening IS the honest continuation, and without the re-send nobody
+    // ever asks the débat's first question on the new session.
+    const h = harness();
+    await intoDebate(h);
+    const openings = () => h.session().directives.filter((text) => text.includes("Ouvre le débat"));
+    assert.equal(openings().length, 1);
+
+    h.session().reconnectWithoutHandle();
+
+    assert.equal(openings().length, 2, "the new session is asked to open the débat");
+    assert.equal(recoveries(h).length, 0, "there is no exchange to put back on its feet");
+  });
+
+  it("says nothing into the monologue, whose examiner is silent by instruction", async () => {
+    const h = harness();
+    h.controller.start();
+    await h.controller.advanceEarly();
+    await pressRecord(h);
+    const before = h.session().directives.length;
+
+    h.session().reconnectWithoutHandle();
+
+    assert.equal(h.session().directives.length, before);
+  });
+
+  it("stays out of a closing handshake", async () => {
+    // A fresh examiner told to continue the débat seconds before the clock
+    // falls would say exactly the wrong thing; the handshake's own safety
+    // deadline already bounds a closing turn that never arrives.
+    const h = harness();
+    await intoDebate(h);
+    deliverOpening(h);
+    h.advanceClock(PHASE_DURATIONS.debate - 5);
+    assert.equal(h.controller.getSnapshot().closing, true);
+
+    h.session().reconnectWithoutHandle();
+
+    assert.equal(recoveries(h).length, 0);
+  });
+
+  it("hands the manager a seed that includes the débat so far", async () => {
+    // The directive is half the recovery; the seed is the other half. The
+    // provider handed to `createSession` reads the transcript LIVE, so a fresh
+    // reconnect is seeded with the exchange as it stands — what was asked,
+    // what was answered — not the monologue alone.
+    const h = harness();
+    await intoDebate(h);
+    assert.equal(h.session().history.length, 2, "at the opening: the monologue handover alone");
+
+    deliverOpening(h);
+    h.session().candidateSays("Je pense que cela dépend beaucoup des métiers.");
+
+    const seeded = h.session().history;
+    assert.equal(seeded.length, 4);
+    assert.deepEqual(seeded[2], {
+      role: "model",
+      parts: [{ text: "Vous avez dit que le télétravail isole. Vraiment ?" }],
+    });
+    assert.deepEqual(seeded[3], {
+      role: "user",
+      parts: [{ text: "Je pense que cela dépend beaucoup des métiers." }],
+    });
   });
 });
 
