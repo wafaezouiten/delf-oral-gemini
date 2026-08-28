@@ -21,6 +21,8 @@
  * be further apart in what they mean, so they do not share a panel.
  */
 
+import { LIVE_MODEL_OPTIONS } from "@/lib/gemini/constants";
+
 /**
  * The longest prompt the editor will send.
  *
@@ -156,6 +158,27 @@ export const ACTIVE_PROMPT_COPY: Record<ActivePromptSource, string> = {
   default: "Prompt par défaut",
   modified: "Prompt modifié (dev)",
 };
+
+/**
+ * The examiner's model, short enough to sit on the toggle.
+ *
+ * The pill has to name the model because the prompt is only half of what makes
+ * an examiner behave the way it does: the same instruction on 2.5 Native Audio
+ * and on 3.1 Flash Live is two different épreuves, and a developer reading a
+ * difference has to know which of the two they changed.
+ *
+ * « Gemini » is dropped and nothing else is: every option in the list starts
+ * with it, so it distinguishes nothing while costing a third of the width of a
+ * pill that exists in a control bar. An id outside the list — the env override
+ * — is returned raw, unreadable and honest, for the reason `liveModelChoices`
+ * gives: what actually ran must be visible, and a made-up short name for an
+ * unknown model would be neither short nor true.
+ */
+export function describeExaminerModel(id: string): string {
+  const option = LIVE_MODEL_OPTIONS.find((candidate) => candidate.id === id);
+  if (!option) return id;
+  return option.label.replace(/^Gemini\s+/, "");
+}
 
 /** `« 6 214 caractères »` — the counter under the field. */
 export function describePrompt(text: string): string {

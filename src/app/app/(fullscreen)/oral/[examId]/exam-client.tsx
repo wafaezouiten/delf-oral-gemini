@@ -727,6 +727,7 @@ export function ExamClient({
               {state.phase === "debate" && (
                 <DevExaminerPromptPanel
                   topicSlug={topic.slug}
+                  examinerModel={examinerModel}
                   active={promptPanelOpen}
                   modified={state.examinerPromptModified}
                   sessionOpen={state.examinerSessionOpen}

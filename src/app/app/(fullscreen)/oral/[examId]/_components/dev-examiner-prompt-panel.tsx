@@ -7,6 +7,7 @@ import {
   ACTIVE_PROMPT_COPY,
   DEV_PROMPT_COPY,
   DEV_PROMPT_SUBMIT_COPY,
+  describeExaminerModel,
   describePrompt,
   promptSubmitDisabled,
   promptSubmitState,
@@ -55,6 +56,7 @@ import {
  */
 export function DevExaminerPromptPanel({
   topicSlug,
+  examinerModel,
   active,
   modified,
   sessionOpen,
@@ -63,6 +65,8 @@ export function DevExaminerPromptPanel({
   onReset,
 }: {
   topicSlug: string;
+  /** The model id the examiner's sessions open with, named on the toggle. */
+  examinerModel: string;
   active: boolean;
   /** The examiner is running under an edited prompt, as the controller sees it. */
   modified: boolean;
@@ -174,7 +178,7 @@ export function DevExaminerPromptPanel({
         type="button"
         onClick={() => onActiveChange(!active)}
         aria-expanded={active}
-        title={DEV_PROMPT_COPY.triggerTitle}
+        title={`${DEV_PROMPT_COPY.triggerTitle} — ${examinerModel}`}
         className={cn(
           "flex items-center gap-1 rounded-full border border-dashed border-amber-400 px-1.5 py-0.5 text-[0.5625rem] font-semibold tracking-[0.06em] uppercase transition-colors",
           active ? "bg-amber-100 text-amber-900" : "text-amber-700 hover:bg-amber-50",
@@ -182,6 +186,19 @@ export function DevExaminerPromptPanel({
       >
         <SlidersIcon />
         <span className="whitespace-nowrap">{DEV_PROMPT_COPY.trigger}</span>
+        {/* Which examiner the prompt is being tried on. The prompt is only
+            half of the behaviour — the same instruction on 2.5 Native Audio
+            and on 3.1 Flash Live is two different épreuves — and the model is
+            chosen on the préparation screen, two screens back, where it is out
+            of sight by the time anything is being tested.
+
+            Set in sentence case against the uppercase label on purpose: it is
+            a name, not a heading, and the uppercase-plus-tracking the pill
+            uses for its own word would make the longest option half as wide
+            again. */}
+        <span className="border-l border-amber-400/70 pl-1 font-medium tracking-normal normal-case">
+          {describeExaminerModel(examinerModel)}
+        </span>
         {/* The dot is the whole reason the badge exists: a prompt left in place
             from an earlier experiment explains a behaviour change that would
             otherwise read as a bug in the examiner. Visible with the panel
