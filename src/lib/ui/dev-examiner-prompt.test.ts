@@ -143,26 +143,24 @@ describe("the counter under the field", () => {
   });
 });
 
-describe("naming the examiner on the toggle", () => {
-  it("drops « Gemini » from every option, which all share it", () => {
+describe("naming the examiner the prompt is tried on", () => {
+  it("gives every listed option its readable name", () => {
     for (const option of LIVE_MODEL_OPTIONS) {
-      const short = describeExaminerModel(option.id);
-      assert.equal(short, option.label.replace(/^Gemini /, ""));
-      assert.ok(!short.startsWith("Gemini"), `${short} still leads with the maker`);
-      assert.ok(short.length > 0);
+      assert.equal(describeExaminerModel(option.id), option.label);
     }
   });
 
   it("distinguishes the options from each other, which is the whole job", () => {
-    const shortened = LIVE_MODEL_OPTIONS.map((option) => describeExaminerModel(option.id));
-    assert.equal(new Set(shortened).size, shortened.length);
+    const names = LIVE_MODEL_OPTIONS.map((option) => describeExaminerModel(option.id));
+    assert.equal(new Set(names).size, names.length);
   });
 
   it("returns an unlisted id raw rather than inventing a name for it", () => {
     // The env override (`NEXT_PUBLIC_GEMINI_LIVE_MODEL`) can name a model that
     // is not in the list, and `liveModelChoices` shows it under its raw id for
-    // the same reason: what actually ran must be visible. A pill is a bad place
-    // for a 40-character id and a worse place for a guess at its short name.
+    // the same reason: what actually ran must be visible. The panel prints the
+    // id beside the name when they differ, so a guess here would be the one
+    // thing on that line nothing else corrects.
     assert.equal(
       describeExaminerModel("gemini-9.9-flash-live-preview-04-2027"),
       "gemini-9.9-flash-live-preview-04-2027",

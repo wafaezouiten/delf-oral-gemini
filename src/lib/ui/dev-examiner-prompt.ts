@@ -115,6 +115,8 @@ export const DEV_PROMPT_COPY = {
   trigger: "Prompt",
   /** The trigger's `title`: what the pill is, spelled out on hover. */
   triggerTitle: "Dev · prompt de l'examinateur",
+  /** Labels the examiner the open panel's prompt will be tried on. */
+  model: "Modèle",
   apply: "Appliquer le prompt",
   reset: "Réinitialiser",
   /** Said whenever a session is live, because then applying restarts it. */
@@ -160,24 +162,21 @@ export const ACTIVE_PROMPT_COPY: Record<ActivePromptSource, string> = {
 };
 
 /**
- * The examiner's model, short enough to sit on the toggle.
+ * The examiner's readable name, for the line under the panel's header.
  *
- * The pill has to name the model because the prompt is only half of what makes
- * an examiner behave the way it does: the same instruction on 2.5 Native Audio
- * and on 3.1 Flash Live is two different épreuves, and a developer reading a
- * difference has to know which of the two they changed.
+ * The prompt is only half of what makes an examiner behave the way it does:
+ * the same instruction on 2.5 Native Audio and on 3.1 Flash Live is two
+ * different épreuves, and the model is chosen two screens back, on the
+ * préparation, where it is out of sight by the time a prompt is being tested.
  *
- * « Gemini » is dropped and nothing else is: every option in the list starts
- * with it, so it distinguishes nothing while costing a third of the width of a
- * pill that exists in a control bar. An id outside the list — the env override
- * — is returned raw, unreadable and honest, for the reason `liveModelChoices`
- * gives: what actually ran must be visible, and a made-up short name for an
- * unknown model would be neither short nor true.
+ * An id outside the list — the env override — is returned raw, for the reason
+ * `liveModelChoices` gives: what actually ran must be visible, and a made-up
+ * readable name for an unknown model would be neither readable nor true. The
+ * panel prints the raw id beside this name whenever the two differ, so the
+ * name never has to be trusted on its own.
  */
 export function describeExaminerModel(id: string): string {
-  const option = LIVE_MODEL_OPTIONS.find((candidate) => candidate.id === id);
-  if (!option) return id;
-  return option.label.replace(/^Gemini\s+/, "");
+  return LIVE_MODEL_OPTIONS.find((candidate) => candidate.id === id)?.label ?? id;
 }
 
 /** `« 6 214 caractères »` — the counter under the field. */

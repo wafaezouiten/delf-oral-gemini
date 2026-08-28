@@ -145,6 +145,7 @@ export function DevExaminerPromptPanel({
   const submitCopy = DEV_PROMPT_SUBMIT_COPY[submitState];
   const refused = promptSubmitDisabled(submitState);
   const source = modified ? "modified" : "default";
+  const modelName = describeExaminerModel(examinerModel);
 
   function apply() {
     const prompt = draft.trim();
@@ -178,7 +179,7 @@ export function DevExaminerPromptPanel({
         type="button"
         onClick={() => onActiveChange(!active)}
         aria-expanded={active}
-        title={`${DEV_PROMPT_COPY.triggerTitle} — ${examinerModel}`}
+        title={DEV_PROMPT_COPY.triggerTitle}
         className={cn(
           "flex items-center gap-1 rounded-full border border-dashed border-amber-400 px-1.5 py-0.5 text-[0.5625rem] font-semibold tracking-[0.06em] uppercase transition-colors",
           active ? "bg-amber-100 text-amber-900" : "text-amber-700 hover:bg-amber-50",
@@ -186,19 +187,6 @@ export function DevExaminerPromptPanel({
       >
         <SlidersIcon />
         <span className="whitespace-nowrap">{DEV_PROMPT_COPY.trigger}</span>
-        {/* Which examiner the prompt is being tried on. The prompt is only
-            half of the behaviour — the same instruction on 2.5 Native Audio
-            and on 3.1 Flash Live is two different épreuves — and the model is
-            chosen on the préparation screen, two screens back, where it is out
-            of sight by the time anything is being tested.
-
-            Set in sentence case against the uppercase label on purpose: it is
-            a name, not a heading, and the uppercase-plus-tracking the pill
-            uses for its own word would make the longest option half as wide
-            again. */}
-        <span className="border-l border-amber-400/70 pl-1 font-medium tracking-normal normal-case">
-          {describeExaminerModel(examinerModel)}
-        </span>
         {/* The dot is the whole reason the badge exists: a prompt left in place
             from an earlier experiment explains a behaviour change that would
             otherwise read as a bug in the examiner. Visible with the panel
@@ -282,6 +270,26 @@ export function DevExaminerPromptPanel({
               <CloseIcon />
             </button>
           </div>
+
+          {/* Which examiner this prompt is being tried on (#163). The prompt is
+              only half of what makes an examiner behave the way it does: the
+              same instruction on 2.5 Native Audio and on 3.1 Flash Live is two
+              different épreuves, and the model is chosen on the préparation
+              screen, two screens back, where it is long out of sight by the
+              time anything is being tested.
+
+              Here rather than on the toggle, where it read as a second label
+              on a pill that had just been cut down to one word — and where
+              there was no room for the raw id. The id is the point of the
+              second half of this line: `liveModelChoices` keeps it visible
+              beside the readable name because a name alone cannot answer which
+              model actually ran. */}
+          <p className="text-[0.625rem] leading-snug text-amber-800">
+            {DEV_PROMPT_COPY.model} : <span className="font-semibold">{modelName}</span>
+            {modelName !== examinerModel && (
+              <span className="text-amber-700/80"> · {examinerModel}</span>
+            )}
+          </p>
 
           <textarea
             ref={field}
