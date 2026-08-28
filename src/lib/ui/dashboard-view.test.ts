@@ -163,9 +163,11 @@ describe("the dashboard view", () => {
 
   it("bands the fractional average off the number, not off the printed string", () => {
     // 5.5 is not "nearly 6": the coral band starts at 6, so this is still red.
+    // The tile prints the padded « 05.5 » (#161), and the band must be read off
+    // the 5.5 it was computed from, never re-parsed from that string.
     const view = buildDashboardView([sitting({ score25: 8 }), sitting({ score25: 3 })], today);
     const moyenne = view.tiles.find((tile) => tile.key === "moyenne");
-    assert.equal(moyenne?.value, "5.5");
+    assert.equal(moyenne?.value, "05.5");
     assert.equal(moyenne?.band?.tone, "red");
   });
 
@@ -300,7 +302,7 @@ describe("the dashboard view", () => {
   it("renders an empty history without dividing by zero", () => {
     const view = buildDashboardView([], today);
     assert.equal(view.count, 0);
-    assert.equal(view.tiles.find((tile) => tile.key === "moyenne")?.value, "0");
+    assert.equal(view.tiles.find((tile) => tile.key === "moyenne")?.value, "00");
     assert.equal(view.tiles.find((tile) => tile.key === "reussite")?.value, "0 %");
     assert.deepEqual(view.trajectory, { points: [], latest: null, delta: null });
   });

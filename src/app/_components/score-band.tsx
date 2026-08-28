@@ -2,6 +2,7 @@ import { tagShape } from "@/app/_components/po/tag";
 import { COMPETENCY_MAX } from "@/lib/delf/constants";
 import { scoreTone, type ScoreTone } from "@/lib/delf/grille";
 import { cn } from "@/lib/ui/class-names";
+import { formatScore25 } from "@/lib/ui/format-score";
 
 /**
  * A /25, drawn on the five-step scale — the total's counterpart to `BandScale`.
@@ -109,7 +110,7 @@ export function ScoreTag({
       {prefix && <span>{prefix} ·</span>}
       {mark && <span aria-hidden>{mark}</span>}
       <span>
-        {score25}/{COMPETENCY_MAX}
+        {formatScore25(score25)}/{COMPETENCY_MAX}
       </span>
     </span>
   );

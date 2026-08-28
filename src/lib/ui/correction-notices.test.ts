@@ -69,6 +69,16 @@ describe("the correction's penalty notices", () => {
     assert.doesNotMatch(notices.absence!, /que vous avez réalisée/);
   });
 
+  it("prints a raw score under 10 on two digits, like every /25 (#161)", () => {
+    const notices = correctionNotices({
+      rawScore25: 9,
+      absencePenalty: 5,
+      absentParts: ["debate"],
+    });
+
+    assert.match(notices.absence!, /sur celle que vous avez réalisée \(09\/25\)/);
+  });
+
   it("never promises a completed part it cannot point at", () => {
     // The sweep behind the two cases above: the phrase is allowed only when
     // exactly one part is named, which is the only time there is another one.

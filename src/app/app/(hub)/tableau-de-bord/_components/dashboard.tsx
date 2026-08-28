@@ -6,6 +6,7 @@ import { Kicker } from "@/app/_components/po/tag";
 import { ScoreTag, scoreFill, scoreInk } from "@/app/_components/score-band";
 import { cn } from "@/lib/ui/class-names";
 import { COMPETENCY_FLOOR, COMPETENCY_MAX } from "@/lib/delf/constants";
+import { formatScore25 } from "@/lib/ui/format-score";
 import { HUB_LINKS } from "@/lib/ui/epreuve-hub";
 import {
   formatScoreDelta,
@@ -138,7 +139,7 @@ function TrajectoryCard({ trajectory }: { trajectory: TrajectoryView }) {
                 scoreInk(latest.band.tone),
               )}
             >
-              {latest.score25}
+              {formatScore25(latest.score25)}
               <span className="text-muted-foreground text-sm font-normal">/{COMPETENCY_MAX}</span>
             </span>
             {/* The delta is a direction, not a mark: the caret and the sign

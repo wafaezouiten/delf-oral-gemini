@@ -24,6 +24,7 @@
  */
 
 import { COMPETENCY_MAX } from "@/lib/delf/constants";
+import { formatScore25 } from "@/lib/ui/format-score";
 
 export type CorrectionPart = "monologue" | "debate";
 
@@ -81,7 +82,7 @@ function absenceNotice(parts: readonly CorrectionPart[], rawScore25: number): st
         : "Vous n'avez pas participé au débat";
     return (
       `${named}. L'épreuve compte deux parties${NBSP}: la note obtenue sur celle ` +
-      `que vous avez réalisée (${rawScore25}/${COMPETENCY_MAX}) ${halved}`
+      `que vous avez réalisée (${formatScore25(rawScore25)}/${COMPETENCY_MAX}) ${halved}`
     );
   }
 
@@ -89,7 +90,7 @@ function absenceNotice(parts: readonly CorrectionPart[], rawScore25: number): st
     parts.length === 2
       ? "Vous n'avez pris la parole dans aucune des deux parties de l'épreuve"
       : "Une partie de l'épreuve n'a pas été réalisée";
-  return `${named}. La note obtenue (${rawScore25}/${COMPETENCY_MAX}) ${halved}`;
+  return `${named}. La note obtenue (${formatScore25(rawScore25)}/${COMPETENCY_MAX}) ${halved}`;
 }
 
 /**
