@@ -227,7 +227,16 @@ export function DevExaminerPromptPanel({
           // and the whole overshoot again on every width where the bar's row
           // wraps — which is where the header, the default/modifié badge and
           // « ✕ » went.
-          className="absolute right-4 bottom-full left-auto z-20 mb-2 flex max-h-[calc(100dvh-100%-4.5rem)] w-[min(22rem,calc(100vw-2rem))] flex-col gap-1.5 rounded-md border border-amber-300 bg-amber-50 p-2 shadow-lg xl:right-0"
+          //
+          // `min(22rem, …)` because clearing the top bar is not the same as
+          // staying away from it. A cap that is only the room available lets
+          // the panel take all of it — it opened against the header, which is
+          // legible and still wrong, since what is behind the panel is the
+          // épreuve it exists to be watched beside. 22rem is the ceiling that
+          // holds however tall the window is, or however far the field's own
+          // drag handle is pulled; the `dvh` term takes over below it, on a
+          // window with less than that to give.
+          className="absolute right-4 bottom-full left-auto z-20 mb-2 flex max-h-[min(22rem,calc(100dvh-100%-4.5rem))] w-[min(22rem,calc(100vw-2rem))] flex-col gap-1.5 rounded-md border border-amber-300 bg-amber-50 p-2 shadow-lg xl:right-0"
         >
           <div className="flex items-center gap-1.5">
             <span className="inline-flex items-center gap-1 rounded-full border border-amber-400 px-1.5 py-px text-[0.5625rem] font-bold tracking-[0.1em] text-amber-700 uppercase">
@@ -281,14 +290,16 @@ export function DevExaminerPromptPanel({
             // scrolls and resizes either way, so height is a starting point,
             // not a cap on what can be read.
             //
-            // `h-64` rather than `h-96` (#163). At 24rem the panel was tall
+            // `h-48` rather than `h-96` (#163). At 24rem the panel was tall
             // enough to reach its own ceiling on an ordinary laptop, so it
             // opened filling the screen from the top bar to the mic — and a
             // dev tool that takes the whole window is one the épreuve behind
-            // it cannot be watched through. 16rem still opens on sixteen
-            // lines of the instruction, and the drag handle is right there for
-            // the one edit that wants more.
-            className="h-64 min-h-24 shrink resize-y rounded border border-amber-300 bg-white p-1.5 font-mono text-[0.625rem] leading-relaxed text-amber-950 outline-none placeholder:text-amber-700/60 focus:border-amber-500 disabled:bg-amber-100/60"
+            // it cannot be watched through. 12rem opens on a dozen lines of
+            // the instruction and leaves the panel a third of the window
+            // instead of all of it; the drag handle is right there for the one
+            // edit that wants more, and the form's `min()` ceiling is what
+            // that handle stops against.
+            className="h-48 min-h-24 shrink resize-y rounded border border-amber-300 bg-white p-1.5 font-mono text-[0.625rem] leading-relaxed text-amber-950 outline-none placeholder:text-amber-700/60 focus:border-amber-500 disabled:bg-amber-100/60"
           />
 
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
