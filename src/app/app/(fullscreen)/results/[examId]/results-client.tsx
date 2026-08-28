@@ -14,6 +14,7 @@ import { Notice } from "@/app/_components/notice";
 import { RecordingPlayer } from "@/app/_components/recording-player";
 import { BandScale } from "@/app/_components/band-scale";
 import { secondaryButton } from "@/app/_components/button-styles";
+import { useStartExam } from "@/app/_components/use-start-exam";
 import {
   AlertIcon,
   CheckCircleIcon,
@@ -49,6 +50,7 @@ import {
   type OralCriterion,
 } from "@/lib/delf/criteria";
 import { scoreTone, type GrilleBand } from "@/lib/delf/grille";
+import { PHASE_DURATIONS } from "@/lib/delf/phases";
 import { meetsCompetencyFloor } from "@/lib/delf/orale-rubric";
 import { type TranscriptEntry } from "@/lib/delf/transcript";
 import type { OralTopic } from "@/lib/delf/topics";
@@ -81,7 +83,10 @@ import type { OralTopic } from "@/lib/delf/topics";
  *  - **"Recommencer" starts a NEW sitting.** The reference resets client state
  *    and re-runs the same conversation. A sitting here is a row with a
  *    correction in it; re-running one would overwrite a record that is already
- *    the candidate's. So it goes to the catalogue.
+ *    the candidate's. So it opens a fresh sitting — on the SAME sujet since
+ *    #165, rather than sending the candidate back to the catalogue to find the
+ *    card again. The word on the button is "again", and it now goes where it
+ *    says.
  */
 
 export interface StoredResult {
@@ -240,6 +245,9 @@ export function ResultsClient({
   // be the way this stops being true.
   const stashed = useSyncExternalStore(subscribe, getSnapshot, () => undefined);
   const [openKey, setOpenKey] = useState<OralCriterion | null>(null);
+
+  /** « Recommencer » (#165): a POST and then a navigation, not a link. */
+  const { start: startExam, pending: starting, error: startError } = useStartExam();
 
   /**
    * How wide the transcript rail is pulled (#141), in the pixels the pointer
@@ -406,13 +414,30 @@ export function ResultsClient({
         </Tag>
 
         <div className="no-print flex shrink-0 items-center gap-2 sm:ml-auto">
-          <Link
-            href="/app/sujets"
-            className="bg-primary text-primary-foreground inline-flex h-8 items-center gap-1.5 rounded-md px-4 text-xs font-semibold transition-opacity hover:opacity-90"
+          {/* Not a link (#165). It opens a NEW sitting on the sujet this
+              correction is about, and opening one is a POST before it is a
+              navigation — so this carries the pending state and the failure a
+              link never had. See `useStartExam`.
+
+              The clock it starts is said on `title` and on the accessible name,
+              and nowhere visible. The sujet sheet had a footer to put that line
+              in (#131); this header is a 56 px band that already wraps at `sm`
+              and hid the level the last time something was added to it, and the
+              consequence of a mistaken press here is recoverable — quitting
+              before the exposé archives the sitting rather than spending it
+              (#113). A dialog is what #131 removed, and it is not coming back
+              for the button that says "again". */}
+          <button
+            type="button"
+            onClick={() => void startExam(topic.slug)}
+            disabled={starting}
+            aria-label={`Recommencer : nouvelle épreuve sur le sujet « ${topic.title} ». La préparation (${PHASE_DURATIONS.preparation / 60} min) démarre dès l'ouverture.`}
+            title={`Nouvelle épreuve sur le même sujet. La préparation (${PHASE_DURATIONS.preparation / 60} min) démarre dès l'ouverture.`}
+            className="bg-primary text-primary-foreground inline-flex h-8 items-center gap-1.5 rounded-md px-4 text-xs font-semibold transition-opacity hover:opacity-90 disabled:opacity-60"
           >
             <RefreshIcon className="size-3.5" />
-            Recommencer
-          </Link>
+            {starting ? "Ouverture…" : "Recommencer"}
+          </button>
           <Link
             href="/app"
             className="border-border bg-card hover:bg-muted inline-flex h-8 items-center rounded-md border px-4 text-xs font-semibold transition-colors"
@@ -421,6 +446,19 @@ export function ResultsClient({
           </Link>
         </div>
       </header>
+
+      {/* Only when « Recommencer » fails, and below the band rather than inside
+          it: the header is the one row this shell has no spare height in, and a
+          message that appears on failure must not be the thing that reflows the
+          sujet and the level when it does. */}
+      {startError && (
+        <p
+          role="alert"
+          className="no-print border-danger/40 bg-danger-subtle text-danger shrink-0 border-b px-4 py-2 text-xs leading-relaxed sm:px-5"
+        >
+          {startError}
+        </p>
+      )}
 
       {/* Split body: the evaluation marks, the transcript stands by (#136).
           The rail's column is a CSS variable because the candidate can pull it

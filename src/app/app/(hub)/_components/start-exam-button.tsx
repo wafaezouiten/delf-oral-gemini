@@ -1,23 +1,16 @@
 "use client";
 
-import { useRouter } from "next/navigation";
-import { useState } from "react";
-
 import { primaryButton } from "@/app/_components/button-styles";
 import { ArrowRightIcon } from "@/app/_components/po/icons";
+import { useStartExam } from "@/app/_components/use-start-exam";
 
 /**
- * Creates the exam row, then navigates into it.
+ * The catalogue's launch CTA: creates the exam row, then navigates into it.
  *
- * The row is created BEFORE navigation so the exam page always has a real id to
- * report against, rather than minting one client-side and reconciling later.
- *
- * PORT NOTE: this is the action behind the reference's launch CTA. There the
- * CTA is a `<Link href={simulateurHref}>` — the reference's simulateur takes
- * its sujet in a query param, so entering an épreuve is a navigation and nothing
- * more. Here an épreuve is a row, so it is a POST first and a navigation second,
- * and the button therefore has a pending state and a failure the link never had.
- * Since #131 it sits on the sujet sheet's footer, with no dialog after it.
+ * Since #131 it sits on the sujet sheet's footer, with no dialog after it. The
+ * POST-then-navigate flow it runs on is `useStartExam`, shared since #165 with
+ * the correction header's « Recommencer » — see that hook for why entering an
+ * épreuve here is a request rather than a link.
  */
 export function StartExamButton({
   topicSlug,
@@ -28,34 +21,13 @@ export function StartExamButton({
   topicSlug: string;
   topicTitle: string;
 }) {
-  const router = useRouter();
-  const [pending, setPending] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  async function start() {
-    setPending(true);
-    setError(null);
-    try {
-      const response = await fetch("/api/exams", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ topicSlug }),
-      });
-      if (!response.ok) throw new Error(await response.text());
-      const { examId } = (await response.json()) as { examId: string };
-      router.push(`/app/oral/${examId}?sujet=${topicSlug}`);
-    } catch (cause) {
-      console.error(cause);
-      setError("L'épreuve n'a pas pu être ouverte. Vérifiez votre connexion, puis réessayez.");
-      setPending(false);
-    }
-  }
+  const { start, pending, error } = useStartExam();
 
   return (
     <div className="space-y-2">
       <button
         type="button"
-        onClick={start}
+        onClick={() => void start(topicSlug)}
         disabled={pending}
         aria-label={`Passer l'épreuve sur le sujet : ${topicTitle}`}
         className={primaryButton}
