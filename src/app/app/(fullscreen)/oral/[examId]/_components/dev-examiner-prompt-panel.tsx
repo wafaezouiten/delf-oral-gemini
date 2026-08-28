@@ -280,7 +280,15 @@ export function DevExaminerPromptPanel({
             // a short window — instead of pushing its chrome past the top. It
             // scrolls and resizes either way, so height is a starting point,
             // not a cap on what can be read.
-            className="h-96 min-h-24 shrink resize-y rounded border border-amber-300 bg-white p-1.5 font-mono text-[0.625rem] leading-relaxed text-amber-950 outline-none placeholder:text-amber-700/60 focus:border-amber-500 disabled:bg-amber-100/60"
+            //
+            // `h-64` rather than `h-96` (#163). At 24rem the panel was tall
+            // enough to reach its own ceiling on an ordinary laptop, so it
+            // opened filling the screen from the top bar to the mic — and a
+            // dev tool that takes the whole window is one the épreuve behind
+            // it cannot be watched through. 16rem still opens on sixteen
+            // lines of the instruction, and the drag handle is right there for
+            // the one edit that wants more.
+            className="h-64 min-h-24 shrink resize-y rounded border border-amber-300 bg-white p-1.5 font-mono text-[0.625rem] leading-relaxed text-amber-950 outline-none placeholder:text-amber-700/60 focus:border-amber-500 disabled:bg-amber-100/60"
           />
 
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
