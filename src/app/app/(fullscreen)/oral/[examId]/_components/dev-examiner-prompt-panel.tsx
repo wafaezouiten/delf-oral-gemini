@@ -7,6 +7,7 @@ import {
   ACTIVE_PROMPT_COPY,
   DEV_PROMPT_COPY,
   DEV_PROMPT_SUBMIT_COPY,
+  describeExaminerModel,
   describePrompt,
   promptSubmitDisabled,
   promptSubmitState,
@@ -55,6 +56,7 @@ import {
  */
 export function DevExaminerPromptPanel({
   topicSlug,
+  examinerModel,
   active,
   modified,
   sessionOpen,
@@ -63,6 +65,8 @@ export function DevExaminerPromptPanel({
   onReset,
 }: {
   topicSlug: string;
+  /** The model id the examiner's sessions open with, named on the toggle. */
+  examinerModel: string;
   active: boolean;
   /** The examiner is running under an edited prompt, as the controller sees it. */
   modified: boolean;
@@ -141,6 +145,7 @@ export function DevExaminerPromptPanel({
   const submitCopy = DEV_PROMPT_SUBMIT_COPY[submitState];
   const refused = promptSubmitDisabled(submitState);
   const source = modified ? "modified" : "default";
+  const modelName = describeExaminerModel(examinerModel);
 
   function apply() {
     const prompt = draft.trim();
@@ -162,13 +167,21 @@ export function DevExaminerPromptPanel({
     <div className="flex shrink-0 items-center">
       {/* Slimmer than the transcription toggle on purpose (#153): a flat pill
           rather than a button, because two full-height dev buttons side by side
-          were crowding a bar whose real control is the microphone. */}
+          were crowding a bar whose real control is the microphone.
+
+          Shorter again (#163), and this time along the only axis it had left:
+          the label. It is already 9px, so what was left to cut was the half of
+          the words that said « Dev · » to a pill that is dashed and amber
+          precisely so it does not have to. The tracking goes with them — 0.12em
+          on a word this small is a third of a letter between every pair — and
+          « Dev · prompt de l'examinateur » stays on `title`. */}
       <button
         type="button"
         onClick={() => onActiveChange(!active)}
         aria-expanded={active}
+        title={DEV_PROMPT_COPY.triggerTitle}
         className={cn(
-          "flex items-center gap-1 rounded-full border border-dashed border-amber-400 px-1.5 py-0.5 text-[0.5625rem] font-semibold tracking-[0.12em] uppercase transition-colors",
+          "flex items-center gap-1 rounded-full border border-dashed border-amber-400 px-1.5 py-0.5 text-[0.5625rem] font-semibold tracking-[0.06em] uppercase transition-colors",
           active ? "bg-amber-100 text-amber-900" : "text-amber-700 hover:bg-amber-50",
         )}
       >
@@ -197,7 +210,38 @@ export function DevExaminerPromptPanel({
           // stays, so « Appliquer le prompt » can never be pushed off screen.
           // The prompt itself gives nothing up: the textarea scrolls, resizes,
           // and holds the same nine thousand characters at any width.
-          className="absolute right-4 bottom-full left-auto z-20 mb-2 flex max-h-[calc(100vh-6.5rem)] w-[min(22rem,calc(100vw-2rem))] flex-col gap-1.5 rounded-md border border-amber-300 bg-amber-50 p-2 shadow-lg xl:right-0"
+          //
+          // The height cap is measured rather than guessed (#163). `100%` in a
+          // `max-height` resolves against the containing block — the corner
+          // cluster from `xl` up, the bar itself below it, and both are the
+          // bar's height since the cluster was made to span it. The bar's
+          // bottom edge IS the window's bottom edge, the épreuve being a
+          // `h-dvh` column, so `100dvh - 100%` is exactly the room above the
+          // bar whatever height the bar happens to be, and `4.5rem` pays for
+          // three things: the `mb-2` under the panel, the `h-14` top bar the
+          // épreuve draws above everything at `z-30`, and half a rem of gap
+          // between the two. The top bar is why the number is not `1.5rem`:
+          // stopping at the window's edge put the panel's header UNDER the
+          // clock and « Quitter », which is a header that is on screen and
+          // still cannot be read.
+          //
+          // The cap it replaces, `100vh - 6.5rem`, was the same sum with the
+          // bar's height written down as a constant and the gap left out of
+          // it. Measured in a replica of this bar: on any window short enough
+          // for the cap to bind it put the panel's top 8px above the window,
+          // and the whole overshoot again on every width where the bar's row
+          // wraps — which is where the header, the default/modifié badge and
+          // « ✕ » went.
+          //
+          // `min(22rem, …)` because clearing the top bar is not the same as
+          // staying away from it. A cap that is only the room available lets
+          // the panel take all of it — it opened against the header, which is
+          // legible and still wrong, since what is behind the panel is the
+          // épreuve it exists to be watched beside. 22rem is the ceiling that
+          // holds however tall the window is, or however far the field's own
+          // drag handle is pulled; the `dvh` term takes over below it, on a
+          // window with less than that to give.
+          className="absolute right-4 bottom-full left-auto z-20 mb-2 flex max-h-[min(22rem,calc(100dvh-100%-4.5rem))] w-[min(22rem,calc(100vw-2rem))] flex-col gap-1.5 rounded-md border border-amber-300 bg-amber-50 p-2 shadow-lg xl:right-0"
         >
           <div className="flex items-center gap-1.5">
             <span className="inline-flex items-center gap-1 rounded-full border border-amber-400 px-1.5 py-px text-[0.5625rem] font-bold tracking-[0.1em] text-amber-700 uppercase">
@@ -227,6 +271,26 @@ export function DevExaminerPromptPanel({
             </button>
           </div>
 
+          {/* Which examiner this prompt is being tried on (#163). The prompt is
+              only half of what makes an examiner behave the way it does: the
+              same instruction on 2.5 Native Audio and on 3.1 Flash Live is two
+              different épreuves, and the model is chosen on the préparation
+              screen, two screens back, where it is long out of sight by the
+              time anything is being tested.
+
+              Here rather than on the toggle, where it read as a second label
+              on a pill that had just been cut down to one word — and where
+              there was no room for the raw id. The id is the point of the
+              second half of this line: `liveModelChoices` keeps it visible
+              beside the readable name because a name alone cannot answer which
+              model actually ran. */}
+          <p className="text-[0.625rem] leading-snug text-amber-800">
+            {DEV_PROMPT_COPY.model} : <span className="font-semibold">{modelName}</span>
+            {modelName !== examinerModel && (
+              <span className="text-amber-700/80"> · {examinerModel}</span>
+            )}
+          </p>
+
           <textarea
             ref={field}
             value={draft}
@@ -250,7 +314,17 @@ export function DevExaminerPromptPanel({
             // a short window — instead of pushing its chrome past the top. It
             // scrolls and resizes either way, so height is a starting point,
             // not a cap on what can be read.
-            className="h-96 min-h-24 shrink resize-y rounded border border-amber-300 bg-white p-1.5 font-mono text-[0.625rem] leading-relaxed text-amber-950 outline-none placeholder:text-amber-700/60 focus:border-amber-500 disabled:bg-amber-100/60"
+            //
+            // `h-48` rather than `h-96` (#163). At 24rem the panel was tall
+            // enough to reach its own ceiling on an ordinary laptop, so it
+            // opened filling the screen from the top bar to the mic — and a
+            // dev tool that takes the whole window is one the épreuve behind
+            // it cannot be watched through. 12rem opens on a dozen lines of
+            // the instruction and leaves the panel a third of the window
+            // instead of all of it; the drag handle is right there for the one
+            // edit that wants more, and the form's `min()` ceiling is what
+            // that handle stops against.
+            className="h-48 min-h-24 shrink resize-y rounded border border-amber-300 bg-white p-1.5 font-mono text-[0.625rem] leading-relaxed text-amber-950 outline-none placeholder:text-amber-700/60 focus:border-amber-500 disabled:bg-amber-100/60"
           />
 
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1">

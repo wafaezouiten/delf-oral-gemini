@@ -21,6 +21,8 @@
  * be further apart in what they mean, so they do not share a panel.
  */
 
+import { LIVE_MODEL_OPTIONS } from "@/lib/gemini/constants";
+
 /**
  * The longest prompt the editor will send.
  *
@@ -103,7 +105,18 @@ export function promptSubmitDisabled(state: PromptSubmitState): boolean {
  */
 export const DEV_PROMPT_COPY = {
   title: "Prompt de l'examinateur",
-  trigger: "Dev · prompt",
+  /**
+   * One word (#163). « Dev · prompt » spent most of its width saying "dev" to
+   * a bar where the dashed amber pill, the icon and the panel's own `DEV`
+   * badge all say it already — and it says it in 9px uppercase with letter
+   * spacing, which is the most expensive way to spell anything. The pill's
+   * full name survives on `title`, for the one reader who needs it.
+   */
+  trigger: "Prompt",
+  /** The trigger's `title`: what the pill is, spelled out on hover. */
+  triggerTitle: "Dev · prompt de l'examinateur",
+  /** Labels the examiner the open panel's prompt will be tried on. */
+  model: "Modèle",
   apply: "Appliquer le prompt",
   reset: "Réinitialiser",
   /** Said whenever a session is live, because then applying restarts it. */
@@ -147,6 +160,24 @@ export const ACTIVE_PROMPT_COPY: Record<ActivePromptSource, string> = {
   default: "Prompt par défaut",
   modified: "Prompt modifié (dev)",
 };
+
+/**
+ * The examiner's readable name, for the line under the panel's header.
+ *
+ * The prompt is only half of what makes an examiner behave the way it does:
+ * the same instruction on 2.5 Native Audio and on 3.1 Flash Live is two
+ * different épreuves, and the model is chosen two screens back, on the
+ * préparation, where it is out of sight by the time a prompt is being tested.
+ *
+ * An id outside the list — the env override — is returned raw, for the reason
+ * `liveModelChoices` gives: what actually ran must be visible, and a made-up
+ * readable name for an unknown model would be neither readable nor true. The
+ * panel prints the raw id beside this name whenever the two differ, so the
+ * name never has to be trusted on its own.
+ */
+export function describeExaminerModel(id: string): string {
+  return LIVE_MODEL_OPTIONS.find((candidate) => candidate.id === id)?.label ?? id;
+}
 
 /** `« 6 214 caractères »` — the counter under the field. */
 export function describePrompt(text: string): string {

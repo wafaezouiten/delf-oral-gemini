@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
+import { LIVE_MODEL_OPTIONS } from "@/lib/gemini/constants";
 import {
   ACTIVE_PROMPT_COPY,
   DEV_PROMPT_COPY,
   DEV_PROMPT_SUBMIT_COPY,
   MAX_EXAMINER_PROMPT_LENGTH,
+  describeExaminerModel,
   describePrompt,
   isPromptModified,
   normaliseExaminerPrompt,
@@ -138,5 +140,30 @@ describe("the counter under the field", () => {
   it("keeps « caractère » singular, and reads zero for an empty box", () => {
     assert.equal(describePrompt("a"), "1 caractère");
     assert.equal(describePrompt("   "), "0 caractères");
+  });
+});
+
+describe("naming the examiner the prompt is tried on", () => {
+  it("gives every listed option its readable name", () => {
+    for (const option of LIVE_MODEL_OPTIONS) {
+      assert.equal(describeExaminerModel(option.id), option.label);
+    }
+  });
+
+  it("distinguishes the options from each other, which is the whole job", () => {
+    const names = LIVE_MODEL_OPTIONS.map((option) => describeExaminerModel(option.id));
+    assert.equal(new Set(names).size, names.length);
+  });
+
+  it("returns an unlisted id raw rather than inventing a name for it", () => {
+    // The env override (`NEXT_PUBLIC_GEMINI_LIVE_MODEL`) can name a model that
+    // is not in the list, and `liveModelChoices` shows it under its raw id for
+    // the same reason: what actually ran must be visible. The panel prints the
+    // id beside the name when they differ, so a guess here would be the one
+    // thing on that line nothing else corrects.
+    assert.equal(
+      describeExaminerModel("gemini-9.9-flash-live-preview-04-2027"),
+      "gemini-9.9-flash-live-preview-04-2027",
+    );
   });
 });

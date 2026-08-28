@@ -115,7 +115,17 @@ export function ConversationControls({
   const inert = locked || state === "closing";
 
   return (
-    <div className="border-border bg-card/95 relative shrink-0 border-t backdrop-blur">
+    // `z-20` on the bar, and it is the dev popovers that need it (#163).
+    // `backdrop-blur` makes this element a stacking context, so a popover
+    // inside it cannot climb out with a `z-` of its own however large — its
+    // twenty is counted among the bar's children. The débat's scene row is
+    // `sticky top-0 z-10` inside a `<main>` that is `relative` with no
+    // z-index, so no stacking context is formed there and that ten is counted
+    // against the page. The two were never in the same contest: the scene card
+    // painted over the prompt being edited, mid-word. Raising the bar puts
+    // both of its popovers above the column, and leaves the notes drawer's
+    // `z-40` where it was, covering the bar as it is meant to.
+    <div className="border-border bg-card/95 relative z-20 shrink-0 border-t backdrop-blur">
       {/* The controls stay in a centred 760px column; the alert is pushed out of
           it, into the bar's own right-hand corner — see the `xl:absolute` on it
           below. Positioning it against THIS element rather than the column is
@@ -223,9 +233,21 @@ export function ConversationControls({
               The alert and the development panel share one wrapper because they
               are about the same thing — the transcript, and its being empty —
               and because they must move together: two separately-positioned
-              elements in one corner is how they end up on top of each other. */}
+              elements in one corner is how they end up on top of each other.
+
+              `xl:inset-y-0` with `content-center` rather than the half-height
+              offset and translate that did the same centring before (#163),
+              and the difference is what the dev popover measures itself
+              against. A popover inside this cluster is positioned against IT
+              from `xl` up and against the bar below it, so a cap written in
+              percentages meant two different heights on two sides of one
+              breakpoint. Spanning the bar makes them the same height, and the
+              cap true at every width. The row still sits in the middle of the
+              bar — `items-center` centres one line, `content-center` centres
+              two — and the translate is gone with the offset, which also stops
+              this cluster forming a containing block of its own. */}
           {(emptyTranscript || devPanel) && (
-            <div className="flex flex-wrap items-center gap-2 xl:absolute xl:top-1/2 xl:right-6 xl:-translate-y-1/2">
+            <div className="flex flex-wrap items-center gap-2 xl:absolute xl:inset-y-0 xl:right-6 xl:content-center">
               {emptyTranscript && (
                 <div
                   role="alert"
