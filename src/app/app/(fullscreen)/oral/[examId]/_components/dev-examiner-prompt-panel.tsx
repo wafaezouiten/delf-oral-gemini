@@ -162,13 +162,21 @@ export function DevExaminerPromptPanel({
     <div className="flex shrink-0 items-center">
       {/* Slimmer than the transcription toggle on purpose (#153): a flat pill
           rather than a button, because two full-height dev buttons side by side
-          were crowding a bar whose real control is the microphone. */}
+          were crowding a bar whose real control is the microphone.
+
+          Shorter again (#163), and this time along the only axis it had left:
+          the label. It is already 9px, so what was left to cut was the half of
+          the words that said « Dev · » to a pill that is dashed and amber
+          precisely so it does not have to. The tracking goes with them — 0.12em
+          on a word this small is a third of a letter between every pair — and
+          « Dev · prompt de l'examinateur » stays on `title`. */}
       <button
         type="button"
         onClick={() => onActiveChange(!active)}
         aria-expanded={active}
+        title={DEV_PROMPT_COPY.triggerTitle}
         className={cn(
-          "flex items-center gap-1 rounded-full border border-dashed border-amber-400 px-1.5 py-0.5 text-[0.5625rem] font-semibold tracking-[0.12em] uppercase transition-colors",
+          "flex items-center gap-1 rounded-full border border-dashed border-amber-400 px-1.5 py-0.5 text-[0.5625rem] font-semibold tracking-[0.06em] uppercase transition-colors",
           active ? "bg-amber-100 text-amber-900" : "text-amber-700 hover:bg-amber-50",
         )}
       >

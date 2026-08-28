@@ -103,7 +103,16 @@ export function promptSubmitDisabled(state: PromptSubmitState): boolean {
  */
 export const DEV_PROMPT_COPY = {
   title: "Prompt de l'examinateur",
-  trigger: "Dev · prompt",
+  /**
+   * One word (#163). « Dev · prompt » spent most of its width saying "dev" to
+   * a bar where the dashed amber pill, the icon and the panel's own `DEV`
+   * badge all say it already — and it says it in 9px uppercase with letter
+   * spacing, which is the most expensive way to spell anything. The pill's
+   * full name survives on `title`, for the one reader who needs it.
+   */
+  trigger: "Prompt",
+  /** The trigger's `title`: what the pill is, spelled out on hover. */
+  triggerTitle: "Dev · prompt de l'examinateur",
   apply: "Appliquer le prompt",
   reset: "Réinitialiser",
   /** Said whenever a session is live, because then applying restarts it. */
