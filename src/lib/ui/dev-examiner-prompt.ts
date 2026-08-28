@@ -187,3 +187,116 @@ export function describePrompt(text: string): string {
   const grouped = count.toLocaleString("fr-FR").replace(/\u202f|\u00a0/g, "\u202f");
   return `${grouped} ${count === 1 ? "caractère" : "caractères"}`;
 }
+
+/**
+ * A prompt that outlives the sitting it was written in (#166).
+ *
+ * Applying used to last exactly as long as the controller instance: a reload,
+ * a new sitting or a StrictMode remount (#160) threw the edit away and the
+ * editor re-opened on the shipped default. Testing one variation across three
+ * sittings meant pasting it back in three times, from somewhere outside the
+ * app. Applying now writes it down, and the next sitting on that sujet opens
+ * under it.
+ *
+ * The pieces below are the rules only — the key, the record, what makes one
+ * stale. The `localStorage` half is `dev-examiner-prompt-storage.ts`, for the
+ * split this file's header describes.
+ */
+export interface SavedExaminerPrompt {
+  /** Exactly what was applied. Never empty: see {@link parseSavedPrompt}. */
+  prompt: string;
+  /**
+   * `EXAMINER_PROMPT_VERSION` as it stood when this was saved.
+   *
+   * The saved text is a snapshot of an instruction that lives in the repository
+   * and keeps changing, so a prompt written in August and replayed in November
+   * is running last quarter's examiner with none of the intervening fixes. The
+   * version is what lets the panel notice and say so. It is compared against
+   * the version `/api/dev/examiner-prompt` reports rather than an imported
+   * constant, and that is not a detail: importing anything out of
+   * `lib/delf/examiner-prompt.ts` would ship the whole instruction to every
+   * production browser, which is the one property the dev route exists to keep.
+   */
+  version: string;
+}
+
+/**
+ * One saved prompt per sujet, and the slug is in the key.
+ *
+ * `buildExaminerInstruction` interpolates `topic.title` and `topic.document`
+ * into the text, so what the editor holds is a prompt FOR ONE SUJET. A single
+ * global slot would hand the examiner the previous sujet's document while the
+ * candidate argues about a different one, and the examiner would follow the
+ * text rather than the room — the loudest possible failure, from a tool meant
+ * to make behaviour easier to read.
+ *
+ * The cost is that a variation to be tried on three sujets is applied three
+ * times. That is the honest price of the prompt not being sujet-independent,
+ * and much cheaper than the alternative that would fix it: storing the edit as
+ * a diff against the shipped text and replaying it over each new build.
+ */
+export function savedPromptKey(topicSlug: string): string {
+  return `delf-dev-examiner-prompt:${topicSlug}`;
+}
+
+/** What goes into storage. */
+export function serialiseSavedPrompt(prompt: string, version: string): string {
+  return JSON.stringify({ prompt: normaliseExaminerPrompt(prompt), version });
+}
+
+/**
+ * What comes back out, or null.
+ *
+ * Defensive to the point of paranoia about its own input, because that input is
+ * a string a browser has been holding since some earlier build: the shape may
+ * predate this code, the JSON may be truncated, and a developer may well have
+ * typed into it. Anything that is not a non-empty prompt with a version reads
+ * as "nothing saved", which is the one interpretation that cannot break a
+ * sitting. An empty prompt is refused here for the reason `promptSubmitState`
+ * refuses to apply one: a session with no examiner in it is not an experiment.
+ */
+export function parseSavedPrompt(raw: string | null): SavedExaminerPrompt | null {
+  if (!raw) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (typeof parsed !== "object" || parsed === null) return null;
+  const record = parsed as Partial<SavedExaminerPrompt>;
+  if (typeof record.prompt !== "string" || typeof record.version !== "string") return null;
+  const prompt = normaliseExaminerPrompt(record.prompt);
+  if (!prompt || prompt.length > MAX_EXAMINER_PROMPT_LENGTH) return null;
+  return { prompt, version: record.version };
+}
+
+/**
+ * Whether a saved prompt predates the instruction the repository now builds.
+ *
+ * Either version being unknown means "nothing to compare", never "stale". The
+ * current one is empty while the panel's fetch is in flight, and a warning
+ * shown for half a second on every open would be read as noise by the third
+ * time; the saved one is empty only for a record written by a build whose
+ * route did not report a version, where the comparison would be against
+ * nothing.
+ */
+export function savedPromptStale(saved: SavedExaminerPrompt | null, current: string): boolean {
+  if (saved === null || !saved.version || !current) return false;
+  return saved.version !== current;
+}
+
+/**
+ * The two lines a saved prompt adds to the panel.
+ *
+ * Both live next to the restart warning rather than in the badge. The badge
+ * says WHICH instruction is in force, which is a fact about this session; these
+ * say how long the instruction will stay in force and whether it has aged,
+ * which are facts about the save.
+ */
+export const SAVED_PROMPT_COPY = {
+  saved:
+    "Ce prompt est enregistré : il sera celui des prochaines épreuves sur ce sujet, jusqu'à « Réinitialiser ».",
+  stale: (saved: string, current: string) =>
+    `Ce prompt a été enregistré sur une version antérieure de l'instruction (${saved}, actuelle ${current}) : il ne contient aucune des corrections apportées depuis.`,
+} as const;
