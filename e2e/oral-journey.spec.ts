@@ -7,9 +7,19 @@ import { expect, test, type Page } from "@playwright/test";
  *
  * ── READ THIS BEFORE RUNNING ────────────────────────────────────────────────
  * This suite is SKIPPED unless `E2E_STORAGE_STATE` points at a Playwright
- * storage state holding a signed-in Clerk session, and it has therefore never
- * been executed green. It is written from the components it drives, not from a
- * passing run. Treat the first authenticated run as part of the work.
+ * storage state holding a signed-in Clerk session. It was written from the
+ * components it drives rather than from a passing run, and that is what step 1
+ * was wrong about (#179): the catalogue is a grid of CARDS, and the launch CTA
+ * lives on the sheet a card opens, not on the catalogue itself.
+ *
+ * The first authenticated run also found where this journey stops today. Steps
+ * 1-3 pass; step 4 does not, and not because of anything in this file — under
+ * `next dev` the exam room mounts dead (#160): StrictMode's double-mount
+ * destroys the memoized controller, so the clock stays at 30:00 and
+ * « Commencer la passation » does nothing at all. `playwright.config.ts` runs
+ * `pnpm dev`, so this journey walks straight into it. Until #160 is fixed,
+ * steps 4-12 stay unexercised: their names are checked against the components,
+ * which is exactly the state step 1 was in.
  *
  * Why it cannot sign itself in: every screen below `/app` is gated by
  * `lib/auth/exam-guard`, which calls Clerk's `auth()` on the SERVER. There is no
@@ -56,12 +66,18 @@ test.describe("one production orale, start to finish", () => {
 
     await test.step("1. the candidate reaches an épreuve", async () => {
       await page.goto("/app/sujets");
-      // The accessible name carries the sujet, so six identical CTAs stay
-      // distinguishable — see `StartExamButton`.
+      // Two clicks, not one. The catalogue is a grid of sujet CARDS, and the
+      // launch CTA lives on the sheet a card opens: #131 removed the dialog
+      // between the sheet and the épreuve, not the sheet itself. Both accessible
+      // names carry the sujet, so the six of them stay distinguishable
+      // (`SujetCard`, `StartExamButton`).
       await page
-        .getByRole("button", { name: /^Passer l'épreuve sur le sujet/ })
+        .getByRole("button", { name: /^Lire le sujet/ })
         .first()
         .click();
+      // No `.first()`: one sheet is mounted at a time, and saying so here is
+      // what would make a second one a failure rather than a silent pick.
+      await page.getByRole("button", { name: /^Passer l'épreuve sur le sujet/ }).click();
       await expect(page).toHaveURL(/\/app\/oral\/\d+/);
     });
 
