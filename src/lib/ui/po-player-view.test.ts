@@ -5,6 +5,7 @@ import {
   candidateStatus,
   examinerStatus,
   micCopy,
+  micState,
   passationStatus,
   poKicker,
   shortPartLabel,
@@ -60,6 +61,42 @@ describe("the exposé plan", () => {
       assert.ok(step.detail.length > 20, `"${step.title}" has no instruction`);
       assert.ok(!step.title.includes("—"), "no em dash in text a candidate reads");
     }
+  });
+});
+
+describe("the mic state", () => {
+  const armed = { awaitingStart: true, closing: false, connecting: false };
+
+  it("reads a part that has not begun as armed, whatever else is true of it", () => {
+    // Armed outranks the other two: a part that has not begun is not connecting,
+    // and it is not ending.
+    assert.equal(micState(armed), "armed");
+    assert.equal(micState({ ...armed, connecting: true }), "armed");
+    assert.equal(micState({ ...armed, closing: true }), "armed");
+  });
+
+  it("never calls a part that has not begun « recording »", () => {
+    // The regression in #176, in one line. `awaitingStart` used to go false for
+    // the length of the consigne, nothing else was true either, and the phase
+    // fell through the ladder into its last branch — so the débat spent its whole
+    // consigne saying « Vous parlez. Cliquez pour terminer le débat. » with a
+    // live stop button under it. The flag covers the consigne now, and the
+    // ladder's floor must never be where an unstarted part lands.
+    assert.notEqual(micState(armed), "recording");
+    assert.equal(micCopy("debate", micState(armed)).button, "Enregistrer");
+    assert.equal(micCopy("debate", micState(armed)).hint, "Cliquez pour commencer le débat.");
+  });
+
+  it("puts the closing handshake above the connection, and the part above both", () => {
+    assert.equal(micState({ awaitingStart: false, closing: true, connecting: true }), "closing");
+    assert.equal(
+      micState({ awaitingStart: false, closing: false, connecting: true }),
+      "connecting",
+    );
+    assert.equal(
+      micState({ awaitingStart: false, closing: false, connecting: false }),
+      "recording",
+    );
   });
 });
 

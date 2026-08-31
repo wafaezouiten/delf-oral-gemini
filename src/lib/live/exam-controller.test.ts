@@ -2079,7 +2079,16 @@ describe("spoken consignes", () => {
     assert.deepEqual(h.recorder.calls, [], "but no phase artefact has been opened");
     assert.equal(during.recording, false, "so the indicator must not claim to be recording");
     assert.equal(h.sessions.length, 0, "and the examiner has not been connected");
-    assert.equal(during.awaitingStart, false, "the consigne is talking, not the button waiting");
+    // The part has not begun, and the flag says so from the first word of the
+    // consigne (#176) — the control is « Enregistrer » throughout, disabled
+    // while the voice runs. What the consigne changes is whether the press is
+    // taken, and that is the next two assertions, not this one.
+    assert.equal(during.awaitingStart, true, "armed, and the consigne is still talking");
+    assert.equal(during.announcementPlaying, true);
+    h.controller.startSpeaking();
+    await settle();
+    assert.deepEqual(h.recorder.calls, [], "a press meanwhile starts nothing");
+    assert.equal(h.sessions.length, 0);
 
     // The clock has not started. This is the four per cent of a graded monologue
     // that a twenty-five second consigne would otherwise cost.
@@ -2211,6 +2220,53 @@ describe("spoken consignes", () => {
     // argument the candidate actually made.
     assert.equal(h.session().phase, "debate");
     assert.equal(h.session().directives.length, 1);
+  });
+
+  it("keeps the débat armed for the length of its consigne, and refuses the press", async () => {
+    // The screen reported in #176. The handover clip plays on the passation
+    // itself, and for all of it the débat has not begun: the control must read
+    // what it *starts*, not offer to end a part that has not opened. The
+    // controller's half of that is one flag — `awaitingStart` true throughout,
+    // `announcementPlaying` saying whether the press is taken yet.
+    const { h, announcer } = speaking("played");
+    h.controller.start();
+    h.advanceClock(120);
+    await h.controller.advanceEarly();
+    await pressRecord(h);
+
+    announcer.behaviour = "hold";
+    h.advanceClock(SPOKEN_MONOLOGUE_SECONDS);
+    await h.controller.advanceEarly();
+    h.session().finishTurn();
+    await settle();
+    await settle();
+
+    const during = h.controller.getSnapshot();
+    assert.equal(during.phase, "debate");
+    assert.equal(during.announcementPlaying, true, "the handover consigne is being spoken");
+    assert.equal(during.awaitingStart, true, "and the débat has not begun");
+    assert.equal(during.recording, false);
+    assert.equal(during.canAdvance, false, "so there is nothing for a press to terminate");
+
+    h.controller.startSpeaking();
+    await settle();
+    assert.equal(h.controller.getSnapshot().awaitingStart, true, "the press is not taken yet");
+    assert.deepEqual(
+      h.recorder.calls,
+      ["monologue", "end:monologue"],
+      "and the débat's artefact stays shut",
+    );
+
+    announcer.reachEnd();
+    await settle();
+    await settle();
+
+    // The same state, now pressable: nothing the candidate reads changes at the
+    // end of the consigne except that the button stops being greyed out.
+    assert.equal(h.controller.getSnapshot().announcementPlaying, false);
+    assert.equal(h.controller.getSnapshot().awaitingStart, true);
+    await pressRecord(h);
+    assert.deepEqual(h.recorder.calls, ["monologue", "end:monologue", "debate"]);
   });
 
   it("forfeits a consigne the browser refuses, and arms the phase anyway", async () => {

@@ -271,12 +271,18 @@ export interface ExamState {
    */
   announcement: AnnouncementId | null;
   /**
-   * The part is open, its consigne has been given, and it is waiting for the
-   * candidate to press « Enregistrer ».
+   * The part is open and waiting for the candidate to press « Enregistrer ».
    *
    * Nothing is running while this is true: the timer shows the part's full
    * length, no artefact is open, and the examiner is not connected. It is the
    * state the sujet and the plan are read in. See {@link ExamController.startSpeaking}.
+   *
+   * True from the moment the part opens, so it covers the consigne as well as
+   * the silence after it (#176) — one flag, one meaning: *this part has not
+   * begun*. It is deliberately not "the press would be taken now": that is
+   * `announcementPlaying`'s to answer, and the two are read together by a
+   * control that must say « Enregistrer » throughout and only accept the click
+   * at the end. `startSpeaking` refuses during a consigne on its own account.
    */
   awaitingStart: boolean;
   /** A consigne is audible right now. */
@@ -1236,9 +1242,14 @@ export class ExamController {
       examinerPromptModified: this.examinerPrompt !== undefined,
       examinerSessionOpen: this.session !== null,
       announcement: this.announcementId,
-      // Armed and waiting for the click — as distinct from waiting for the
-      // consigne to finish, which is the consigne control's business.
-      awaitingStart: this.phaseAwaitingStart && !this.announcementPlaying,
+      // The part has not begun — including while its consigne is still being
+      // spoken (#176). It used to exclude that window, and the control read the
+      // difference as « Vous parlez. Cliquez pour terminer le débat. » over the
+      // examiner's own voice: the mic's state ladder is total, so a phase that
+      // is neither armed, closing nor connecting falls through to "recording".
+      // Whether the click is *accepted* yet is `announcementPlaying`'s answer,
+      // and the control disables itself on it.
+      awaitingStart: this.phaseAwaitingStart,
       announcementPlaying: this.announcementPlaying,
     };
   }

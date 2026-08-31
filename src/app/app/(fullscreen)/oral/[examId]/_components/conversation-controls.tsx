@@ -4,7 +4,7 @@ import type { ReactNode } from "react";
 
 import { AlertIcon, LoadingIcon, MicIcon, PencilIcon, StopIcon } from "@/app/_components/po/icons";
 import { cn } from "@/lib/ui/class-names";
-import { micCopy, type MicState, type SpeakingPhase } from "@/lib/ui/po-player-view";
+import { micCopy, micState, type MicState, type SpeakingPhase } from "@/lib/ui/po-player-view";
 
 /**
  * The passation control bar, docked at the foot: the notes toggle on the left,
@@ -62,7 +62,15 @@ export function ConversationControls({
    * about to start speaking or stop.
    */
   awaitingStart?: boolean;
-  /** Armed, but not yet startable: the examiner is still giving the consigne. */
+  /**
+   * Armed, but not yet startable: the examiner is still giving the consigne.
+   *
+   * The control keeps « Enregistrer » and its hint throughout and only greys
+   * out (#176) — the candidate reads one label for the whole part-that-has-not-
+   * begun, and the only thing that changes when the voice ends is that the
+   * button becomes pressable. What is happening meanwhile is said next to the
+   * examiner, by `examinerStatus`, and by the consigne's own « Passer » button.
+   */
   startDisabled?: boolean;
   /**
    * The click has been taken and the part is ending: the examiner is delivering
@@ -88,22 +96,10 @@ export function ConversationControls({
    *  empty-transcript notice rather than under the conversation (#36). */
   devPanel?: ReactNode;
 }) {
-  // Armed outranks everything: a part that has not begun is not connecting, and
-  // it is not ending. Closing comes next, and for the same kind of reason — a
-  // part that is already concluding is not "recording", whatever the microphone
-  // is still doing.
-  //
-  // The ladder is total without consulting `canAdvance`, and only since the
-  // monologue's floor was removed (#171): the two things that still make that
-  // false — a closing handshake, and a part that has not begun — are both
-  // branches above it.
-  const state: MicState = awaitingStart
-    ? "armed"
-    : closing
-      ? "closing"
-      : connecting
-        ? "connecting"
-        : "recording";
+  // The ladder is `micState`'s, next to the copy it selects and tested there:
+  // its last branch is a fall-through, and what lands in it is exactly what this
+  // control will claim about a state nobody thought of (#176).
+  const state: MicState = micState({ awaitingStart, closing, connecting });
   const { hint, label, button } = micCopy(phase, state);
   const armed = state === "armed";
   /** Nothing the candidate presses now changes what happens next, so the control
