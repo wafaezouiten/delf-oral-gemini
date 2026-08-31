@@ -125,9 +125,12 @@ describe("transcript", () => {
       { text: "Ma défense.", phase: "debate", speaker: "candidate" },
     );
     const formatted = formatTranscript(entries);
-    assert.match(formatted, /^MONOLOGUE/);
-    assert.ok(formatted.includes("DEBAT"));
-    assert.ok(formatted.indexOf("MONOLOGUE") < formatted.indexOf("DEBAT"));
+    // Numbered, not merely named (#173): the corrector's criteria descriptions
+    // and its stage contract both pin a criterion to « la partie 1 » or « la
+    // partie 2 », so the transcript has to number the halves the same way.
+    assert.match(formatted, /^=== PARTIE 1 : MONOLOGUE SUIVI/);
+    assert.ok(formatted.includes("=== PARTIE 2 : DÉBAT"));
+    assert.ok(formatted.indexOf("PARTIE 1") < formatted.indexOf("PARTIE 2"));
     assert.ok(formatted.includes("CANDIDAT: Mon exposé."));
     assert.ok(formatted.includes("EXAMINATEUR: Une objection."));
   });

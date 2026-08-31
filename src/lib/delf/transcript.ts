@@ -137,25 +137,40 @@ const SPEAKER_LABELS: Record<TranscriptSpeaker, string> = {
 };
 
 /**
+ * The two part headings, worded as the main project words them
+ * (`delf-preps@5170f0dd`, `formatSittingTranscript`). The corrector's prompt
+ * talks about « la partie 1 » and « la partie 2 » throughout — the criteria
+ * descriptions and the stage contract both pin a pragmatic criterion to one of
+ * them by number — so the transcript has to number them the same way. They used
+ * to read « MONOLOGUE » and « DEBAT », which named the parts without numbering
+ * them (#173).
+ */
+const PHASE_HEADINGS: Record<TranscriptPhase, string> = {
+  monologue: "=== PARTIE 1 : MONOLOGUE SUIVI (exposé du candidat, sans interruption) ===",
+  debate: "=== PARTIE 2 : DÉBAT (exercice en interaction avec l'examinateur) ===",
+};
+
+/**
  * Render the transcript for the evaluator, preserving the phase split exactly as
- * the brief specifies: a MONOLOGUE block, then a DEBAT block. The evaluator is
- * told to grade the two tasks separately, so this shape is load-bearing, not
- * cosmetic — flattening it would silently change the grade.
+ * the brief specifies: a part 1 block, then a part 2 block. The evaluator is
+ * told to grade the two tasks on their own halves, so this shape is
+ * load-bearing, not cosmetic — flattening it would silently change the grade.
+ *
+ * A phase with nothing in it is skipped rather than printed empty: a walk-out
+ * before the débat has no part 2, and « (aucune donnée) » under a heading reads
+ * to a corrector as a part that happened in silence.
  */
 export function formatTranscript(entries: readonly TranscriptEntry[]): string {
   const sections: string[] = [];
 
-  for (const [phase, heading] of [
-    ["monologue", "MONOLOGUE"],
-    ["debate", "DEBAT"],
-  ] as const) {
+  for (const phase of ["monologue", "debate"] as const) {
     const phaseEntries = entriesForPhase(entries, phase);
     if (phaseEntries.length === 0) continue;
     const lines = phaseEntries.map((e) => `${SPEAKER_LABELS[e.speaker]}: ${e.text}`);
-    sections.push(`${heading}\n\n${lines.join("\n")}`);
+    sections.push(`${PHASE_HEADINGS[phase]}\n${lines.join("\n")}`);
   }
 
-  return sections.join("\n\n\n");
+  return sections.join("\n\n");
 }
 
 /**
