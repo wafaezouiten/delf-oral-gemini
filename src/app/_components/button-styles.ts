@@ -29,8 +29,9 @@ export const secondaryButton = `${BASE} border border-border bg-card text-foregr
  * It used to say "never a destructive one", which the exit dialog had already
  * outgrown and the reset finished off. The rule it is left with is narrower and
  * truer: **red appears once per decision.** The exit dialog spends it on
- * « Abandonner », which is the step itself; the reset spends it on the trigger
- * in the header, and its confirm is a plain button. Two reds in one flow is a
- * colour to click through rather than a warning to read.
+ * « Abandonner », which is the step itself; the reset spends it on the button in
+ * the account header, which since #175 is the decision — there is no
+ * confirmation behind it. Two reds in one flow would be a colour to click
+ * through rather than a warning to read.
  */
 export const dangerButton = `${BASE} border border-danger/40 bg-danger-subtle text-danger hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50`;
