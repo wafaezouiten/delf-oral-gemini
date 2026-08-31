@@ -127,7 +127,7 @@ describe("an épreuve walked out of mid-exposé", () => {
   it("still prints both headings where `formatTranscript` prints one", () => {
     // The divergence stated as a comparison, so that a future change to either
     // side has to be deliberate about the other.
-    assert.ok(!formatTranscript(WALKED_OUT).includes("DEBAT"));
+    assert.ok(!formatTranscript(WALKED_OUT).includes("PARTIE 2"));
     assert.equal(correctionTranscriptView(WALKED_OUT, DURATIONS).sections.length, 2);
   });
 });

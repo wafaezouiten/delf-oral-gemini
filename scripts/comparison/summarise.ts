@@ -12,7 +12,8 @@
  * THE ONE JOIN THAT NEEDS DEFENDING. This system returns five criteria for a
  * sitting; the incumbent returns five criteria twice, once per tâche. To compare
  * criterion by criterion, the incumbent's ten numbers have to become five, and
- * the rule used is this system's own attribution (`evaluate.ts`, TASK_ATTRIBUTION):
+ * the rule used is the sitting's own criterion attribution (`delf/criteria.ts`,
+ * COMPLETE_STAGE_DIRECTIVE; `evaluate.ts`'s TASK_ATTRIBUTION until #173):
  *
  *   realisationTache ← the incumbent's tâche 1 (the monologue)
  *   interaction      ← the incumbent's tâche 2 (the débat)

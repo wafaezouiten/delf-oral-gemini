@@ -33,7 +33,9 @@ runs and receives two separate marks that are never combined.
 So each sitting was put through each system in that system's own unit — one
 correction here, two over there — and the incumbent's ten criterion values per
 sitting were folded onto this system's five using **this system's own attribution
-rule** (`evaluate.ts`, `TASK_ATTRIBUTION`): réalisation de la tâche is read from
+rule** (`evaluate.ts`, `TASK_ATTRIBUTION` at the time of the run; since #173 the
+same rule is the incumbent's own `COMPLETE_STAGE_DIRECTIVE`, re-ported rather
+than paraphrased): réalisation de la tâche is read from
 the monologue correction, interaction from the débat correction, and the three
 linguistic criteria are shown from both because both are legitimate.
 
@@ -201,10 +203,12 @@ the one sitting whose candidate actually collapses under contradiction. Read as 
 judgement it is backwards; read correctly it is not a judgement at all, because
 there is no interaction in a monologue to judge.
 
-This system's `TASK_ATTRIBUTION` exists precisely to prevent it, and is documented
-in `evaluate.ts` as this project's addition rather than a ported rule. It is the
-clearest evidence in the run that the one-sitting-one-mark shape is worth what it
-costs.
+This system's `TASK_ATTRIBUTION` existed precisely to prevent it, and was
+documented in `evaluate.ts` as this project's addition rather than a ported rule.
+It is the clearest evidence in the run that the one-sitting-one-mark shape is
+worth what it costs — and the incumbent has since agreed: #173 replaced that
+block with the reference's own two-part-sitting wording, which says the same
+thing in the grid's words.
 
 ### 3.3 `interaction-faible`: the profile the incumbent structurally cannot see — **the headline structural result**
 
@@ -269,9 +273,11 @@ repeatably wrong.
 
 `b2-solide` scored a clean **25/25** here, twice, against the incumbent's 17–19
 and 23. Roughly 2 of those points are §3.1's phonologie. The rest is the
-`SCALE_USE` instruction, which is also this project's addition and exists for a
+`SCALE_USE` instruction, which was also this project's addition and exists for a
 measured reason (`docs/EVALUATION_FINDINGS.md`: without it the corrector put 3 on
-everything). It may simply be tuned a notch generous.
+everything). It may simply be tuned a notch generous. Since #173 the instruction
+is the reference's own, folded into `BAND_SCALE`, so the question is no longer
+whether this system has one the incumbent lacks.
 
 Not filed, because this corpus cannot settle it: `b2-solide` was _written_ to be
 a strong performance, and no sitting in it is designed to land at a uniform 3. See

@@ -20,13 +20,8 @@ import "server-only";
 
 import { GoogleGenAI, Type, createPartFromUri, type Part } from "@google/genai";
 
-import {
-  BAND_SCALE,
-  EVALUATION_RULES,
-  ORAL_CRITERIA,
-  ORAL_CRITERIA_DESCRIPTIONS,
-  type OralCriterion,
-} from "@/lib/delf/criteria";
+import { ORAL_CRITERIA, type OralCriterion } from "@/lib/delf/criteria";
+import { buildEvaluationPrompt } from "@/lib/delf/evaluation-prompt";
 import { scoreSitting, type CriteriaBands } from "@/lib/delf/orale-rubric";
 import {
   criterionJustifications,
@@ -38,7 +33,7 @@ import { EvaluationFailure } from "./evaluation-failure";
 import { readEvaluationUsage, type EvaluationUsage } from "./evaluation-usage";
 import { waitForFileActive } from "./file-activation";
 import { transientStatus, withTransientRetry } from "./transient";
-import { candidateWordCount, formatTranscript, type TranscriptEntry } from "@/lib/delf/transcript";
+import { candidateWordCount, type TranscriptEntry } from "@/lib/delf/transcript";
 import type { OralTopic } from "@/lib/delf/topics";
 import type { EvaluationFeedback, EvaluationMode, OralSpeakingPhase } from "@/lib/db/schema";
 import { earlyClosingInstruction } from "./early-closing-instruction";
@@ -77,63 +72,31 @@ export const EVAL_MODEL = process.env.GEMINI_EVAL_MODEL ?? "gemini-3.6-flash";
  * byte-identical to the previous version's — but the version is bumped
  * unconditionally, because "could this correction have carried the paragraph?"
  * is exactly the question the column answers.
+ *
+ * `2026-08-31.0` is the re-port (#173): the whole prompt is now the main
+ * project's, in the main project's order, from `delf/evaluation-prompt.ts`.
+ * Every block moved — the criterion prose became the FEI explicitation, the two
+ * pragmatic criteria took the grid's two-part-sitting wording, the band scale
+ * absorbed this file's `SCALE_USE`, the rules grew the fairness and
+ * self-correction bullets, and the complete-stage contract is appended last.
+ * This is the widest single change the column has ever recorded: scores either
+ * side of it are not comparable, which is exactly what the column is for.
  */
-export const EVAL_PROMPT_VERSION = "2026-08-21.0";
+export const EVAL_PROMPT_VERSION = "2026-08-31.0";
 
 /** Re-exported, not redeclared: the mode is a stored column, and `evaluations.mode`
  *  is where its legal values are defined. */
 export type { EvaluationMode };
 
 /**
- * Using the whole scale — this project's addition, not the grille's words.
+ * The corrector's prompt for one sitting.
  *
- * Kept separate from {@link BAND_SCALE} on purpose: that block is the ported
- * definition of what each band *means*, and paraphrasing it would change what
- * the model grades. This is a behavioural instruction about how to use it,
- * learned by running the corrector: without it, models put 3 on everything and
- * the result stops telling a good candidate from a weak one (see
- * docs/EVALUATION_FINDINGS.md).
- */
-const SCALE_USE = `UTILISEZ TOUTE L'ÉCHELLE. N'attribuez pas 3 par défaut. Un critère réellement réussi reçoit 5, un critère faible reçoit 1. Deux prestations de qualité différente DOIVENT recevoir des notes différentes. Des erreurs occasionnelles qui ne gênent pas la communication sont normales au niveau B2 et restent compatibles avec un 5 : n'exigez pas un niveau C1 pour l'accorder.`;
-
-/**
- * Which task each criterion is judged on — also this project's, and for a
- * structural reason rather than a stylistic one.
- *
- * The reference implementation corrects ONE task per correction, so it never
- * has to say where a criterion's evidence lives. Here the monologue and the
- * débat are one sitting and one mark, and the two pragmatic criteria are earned
- * in different halves of it: a candidate who argues well alone and folds under
- * contradiction is a real, common profile, and a corrector not told where to
- * look grades both criteria off whichever half it read last.
- */
-const TASK_ATTRIBUTION = `RÉPARTITION DES CRITÈRES SUR LES DEUX TÂCHES :
-- « realisationTache » se juge principalement sur le MONOLOGUE SUIVI : prise de position, structure, qualité des arguments et des exemples.
-- « interaction » se juge principalement sur le DEBAT : capacité à réagir aux objections, à défendre et à nuancer sa position, à apporter de NOUVEAUX exemples, à maintenir l'échange.
-- « lexique » et « morphosyntaxe » se jugent sur l'ENSEMBLE des deux tâches.
-- N'utilisez jamais de tiret cadratin ni de tiret demi-cadratin dans vos commentaires.`;
-
-/** The five criteria and what each measures, in the grille's own words. */
-function criteriaBlock(): string {
-  return ORAL_CRITERIA.map(
-    (key, index) => `${index + 1}. ${key} : ${ORAL_CRITERIA_DESCRIPTIONS[key]}`,
-  ).join("\n");
-}
-
-/**
- * The corrector's prompt.
- *
- * Note what it does NOT contain: any arithmetic. The band scale is stated so
- * the model knows which four numbers it may return, and nothing else about the
- * mark is asked of it — the sum, the duration penalty and the competency floor
- * are computed from what it returns, by `orale-rubric.ts`. A prompt that told
- * the model to subtract three points for a short épreuve would be a second
- * implementation of the rubric, written in French, unversioned and untestable
- * (#9).
- *
- * The durations are given for context only, so the model can read a thin
- * monologue as thin rather than as a bad one. They are the measured seconds,
- * from the recordings.
+ * A thin adapter since #173: the words are the main project's and live in
+ * `lib/delf/evaluation-prompt.ts`, which is pure and unit-tested. What this
+ * function still decides is the two paragraphs that depend on the artefacts —
+ * which recordings exist and how the phonologie criterion may therefore be
+ * judged, and whether the examiner tried to close the épreuve early — and it
+ * hands them over as directives, appended after the stage contract.
  */
 function buildPrompt(params: {
   mode: EvaluationMode;
@@ -146,41 +109,16 @@ function buildPrompt(params: {
   /** Which tasks the attached audio actually covers. See `phonology-instruction.ts`. */
   recordings?: readonly AttachedRecording[];
 }): string {
-  const { mode, topic, transcript, monologueSeconds, debateSeconds } = params;
-
-  return `Vous êtes un correcteur officiel du DELF B2, épreuve de production orale. Vous appliquez STRICTEMENT la grille d'évaluation de France Éducation international, notée sur 25 points.
-
-SUJET DE L'ÉPREUVE
-Titre : ${topic.title}
-Document déclencheur : ${topic.document}
-
-STRUCTURE DE L'ÉPREUVE PASSÉE
-L'épreuve comporte DEUX tâches, présentes toutes les deux dans la transcription ci-dessous :
-1. MONOLOGUE SUIVI (${Math.round(monologueSeconds)} secondes) : le candidat présente seul son point de vue. L'examinateur n'intervient pas.
-2. DEBAT (${Math.round(debateSeconds)} secondes) : l'examinateur conteste la position du candidat, qui doit la défendre et la nuancer.
-
-${BAND_SCALE}
-
-${SCALE_USE}
-
-LES CINQ CRITÈRES (chacun noté 0, 1, 3 ou 5 ; leur somme = total25) :
-${criteriaBlock()}
-
-${EVALUATION_RULES}
-
-${TASK_ATTRIBUTION}
-
-${
-  // Empty on the ordinary sitting, so the two joined this way rather than as
-  // two template slots — an unconditional slot would leave a stray blank line
-  // in every prompt that had no incident to report.
-  [phonologyInstruction(mode, params.recordings), earlyClosingInstruction(params.earlyClosingCount)]
-    .filter(Boolean)
-    .join("\n\n")
-}
-
-TRANSCRIPTION DE L'ÉPREUVE
-${formatTranscript(transcript) || "(aucune production)"}`;
+  return buildEvaluationPrompt({
+    topic: params.topic,
+    transcript: params.transcript,
+    monologueSeconds: params.monologueSeconds,
+    debateSeconds: params.debateSeconds,
+    directives: [
+      phonologyInstruction(params.mode, params.recordings),
+      earlyClosingInstruction(params.earlyClosingCount),
+    ],
+  });
 }
 
 /** The structured output contract. */

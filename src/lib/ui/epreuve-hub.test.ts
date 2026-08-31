@@ -63,7 +63,7 @@ describe("the hub view", () => {
     // Retyped, these drift: the hub would advertise an épreuve marked on
     // something the grille does not print.
     assert.equal(buildHubView().criteria.length, ORAL_CRITERIA.length);
-    assert.ok(buildHubView().criteria.includes("Maîtrise phonologique"));
+    assert.ok(buildHubView().criteria.includes("Maîtrise du système phonologique"));
   });
 
   it("names its icons by role, never by glyph", () => {

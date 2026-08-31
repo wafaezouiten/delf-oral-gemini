@@ -45,8 +45,8 @@ import { COMPETENCY_FLOOR, COMPETENCY_MAX } from "@/lib/delf/constants";
 import {
   ORAL_CRITERIA,
   ORAL_CRITERIA_COMPETENCE,
-  ORAL_CRITERIA_DESCRIPTIONS,
   ORAL_CRITERIA_LABELS,
+  ORAL_CRITERIA_SUMMARIES,
   type OralCriterion,
 } from "@/lib/delf/criteria";
 import { scoreTone, type GrilleBand } from "@/lib/delf/grille";
@@ -559,7 +559,7 @@ export function ResultsClient({
                       <CriterionRow
                         key={key}
                         label={ORAL_CRITERIA_LABELS[key]}
-                        description={ORAL_CRITERIA_DESCRIPTIONS[key]}
+                        description={ORAL_CRITERIA_SUMMARIES[key]}
                         band={evaluation.criteria[key] ?? 0}
                         justification={evaluation.feedback.justifications[key]}
                         note={key === "phonologie" ? phonoNote : undefined}
