@@ -4,7 +4,6 @@ import { describe, it } from "node:test";
 import { ORAL_PARTS_B2 } from "./constants";
 import {
   MIN_VOICED_SECONDS,
-  MONOLOGUE_MIN_SECONDS,
   monologueWasSilent,
   PHASE_DURATIONS,
   canAdvanceEarly,
@@ -59,11 +58,14 @@ describe("exam state machine", () => {
     assert.equal(isPhaseTimeUp("monologue", 900), true);
   });
 
-  it("holds the monologue open until the DELF five-minute floor", () => {
-    assert.equal(canAdvanceEarly("monologue", MONOLOGUE_MIN_SECONDS - 1), false);
-    assert.equal(canAdvanceEarly("monologue", MONOLOGUE_MIN_SECONDS), true);
-    assert.equal(canAdvanceEarly("preparation", 0), true);
-    assert.equal(canAdvanceEarly("finished", 999), false);
+  it("lets the candidate leave any part they are actually in", () => {
+    // The monologue used to be held shut for its first minute (#171). It is not
+    // any more, and the elapsed time it was measured against is gone from the
+    // signature — so the rule cannot quietly grow a clock back.
+    assert.equal(canAdvanceEarly("monologue"), true);
+    assert.equal(canAdvanceEarly("preparation"), true);
+    assert.equal(canAdvanceEarly("debate"), true);
+    assert.equal(canAdvanceEarly("finished"), false);
   });
 
   it("keeps Gemini out of the preparation phase", () => {

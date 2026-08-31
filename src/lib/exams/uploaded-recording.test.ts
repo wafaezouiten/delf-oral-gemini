@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import { muxOggOpus } from "@/lib/audio/ogg-opus";
-import { MONOLOGUE_MIN_SECONDS } from "@/lib/delf/phases";
 import { DEBATE_FLOOR_SECONDS, MONOLOGUE_FLOOR_SECONDS } from "@/lib/delf/orale-rubric";
 import { pcm16ToWav } from "@/lib/audio/pcm";
 import { INPUT_SAMPLE_RATE } from "@/lib/gemini/constants";
@@ -114,31 +113,31 @@ describe("what one request may carry", () => {
     assert.equal(fitsInOneRequest([200_000, asWav(7), asWav(13)]), false);
   });
 
-  it("carries about 98 seconds of WAV, whatever the monologue's own floor is", () => {
+  it("carries about 98 seconds of WAV, whatever the monologue's own length is", () => {
     // This test used to assert that a WAV of a minimum-length monologue could
-    // never fit, and that was true while the floor was 300 seconds: the cap is
-    // sized for Opus, so as PCM16 it is 98 seconds, and 300 > 98 by a wide
-    // margin. Dropping the floor to 60 makes it false — one minute of PCM16 is
-    // 1.9 MB and fits inside the 3 MB cap.
+    // never fit, which held while the UI kept a candidate in the monologue for
+    // 300 seconds: the cap is sized for Opus, so as PCM16 it is 98 seconds, and
+    // 300 > 98 by a wide margin. That floor dropped to 60, and is now gone
+    // altogether (#171) — a monologue can be any length at all.
     //
-    // The claim is therefore restated rather than deleted, because what it was
-    // really pinning is the cap's size in seconds, and that has not moved. What
-    // changed is a genuine consequence worth writing down: a browser without
-    // WebCodecs that records a SHORT monologue can now upload it, where before
-    // every WAV was dropped in the tab. That is an improvement — the audio gets
-    // graded — and `selectDeliverable` still decides, in the tab, which
-    // artefacts fit rather than discovering it at a 413.
+    // So the claim is stated the only way that stays true: what it really pins
+    // is the cap's size in seconds, and that has not moved. The consequence is
+    // worth writing down — a browser without WebCodecs that records a SHORT
+    // monologue can upload it, where before every WAV was dropped in the tab.
+    // That is an improvement (the audio gets graded), and `selectDeliverable`
+    // still decides in the tab which artefacts fit rather than discovering it at
+    // a 413.
     const asWav = (seconds: number) => 44 + seconds * INPUT_SAMPLE_RATE * 2;
 
     assert.equal(Math.floor(MAX_RECORDING_BYTES / (INPUT_SAMPLE_RATE * 2)), 98);
     assert.ok(asWav(98) < MAX_RECORDING_BYTES);
     assert.ok(asWav(99) > MAX_RECORDING_BYTES);
 
-    // A monologue at the new floor now fits on its own…
-    assert.ok(asWav(MONOLOGUE_MIN_SECONDS) < MAX_RECORDING_BYTES);
+    // A minute of monologue fits on its own…
+    assert.ok(asWav(60) < MAX_RECORDING_BYTES);
     // …but a full-length débat beside it still does not, which is the pairing
     // `selectDeliverable` exists to resolve.
-    assert.equal(fitsInOneRequest([1_000, asWav(MONOLOGUE_MIN_SECONDS), asWav(600)]), false);
+    assert.equal(fitsInOneRequest([1_000, asWav(60), asWav(600)]), false);
   });
 
   it("counts the multipart wrapping, not just the parts", () => {

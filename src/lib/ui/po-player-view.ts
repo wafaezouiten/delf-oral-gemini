@@ -22,7 +22,7 @@
  */
 
 import { ORAL_PARTS_B2 } from "@/lib/delf/constants";
-import { MONOLOGUE_MIN_SECONDS, type OralPhase } from "@/lib/delf/phases";
+import { type OralPhase } from "@/lib/delf/phases";
 
 /** The phases the candidate actually speaks in — the two that have a mic. */
 export type SpeakingPhase = "monologue" | "debate";
@@ -131,18 +131,19 @@ export const EXPOSE_PLAN: readonly PlanStep[] = [
  * sujet and the plan are on screen, and no clock is running until the candidate
  * says they are ready. The other three are the part in progress.
  */
-export type MicState = "armed" | "recording" | "locked" | "connecting" | "closing";
+export type MicState = "armed" | "recording" | "connecting" | "closing";
 
 /**
  * The word on the record control, the hint printed under it, and its accessible
  * name.
  *
  * All three name the actual task, per the reference: a débat is not an "exposé",
- * and the label is the only name a screen-reader user gets for the control. The
- * `locked` state is this project's own — the control ends the monologue, and the
- * monologue may not end before the DELF's floor (`canAdvanceEarly`). The
- * reference has no analogue because its mic ends the whole conversation and a
- * candidate may always do that.
+ * and the label is the only name a screen-reader user gets for the control.
+ *
+ * There used to be a fifth state here, `locked`, for a monologue that had not
+ * yet reached the floor `canAdvanceEarly` imposed on it. The floor is gone
+ * (#171), and so is the state: like the reference's, this control now always
+ * offers what it says.
  *
  * The visible `button` word is new with the sujet-on-screen layout. The control
  * used to be an icon alone, which was legible while it only ever meant "stop":
@@ -153,7 +154,6 @@ export type MicState = "armed" | "recording" | "locked" | "connecting" | "closin
 export function micCopy(
   phase: SpeakingPhase,
   state: MicState,
-  remainingToFloorSeconds = 0,
 ): { hint: string; label: string; button: string } {
   const act = phase === "monologue" ? "votre exposé" : "le débat";
 
@@ -190,17 +190,6 @@ export function micCopy(
           ? "Fin de l'exposé. L'examinateur conclut, puis vous donne la consigne du débat."
           : "Fin du débat. L'examinateur conclut, puis votre prestation part pour correction.",
       label: phase === "monologue" ? "Exposé terminé" : "Débat terminé",
-    };
-  }
-
-  if (state === "locked") {
-    const minutes = Math.ceil(remainingToFloorSeconds / 60);
-    return {
-      button: "Terminer",
-      // Said as time still to fill rather than as a refusal: the candidate is
-      // not being blocked, they are being told the task is not done yet.
-      hint: `Encore ${minutes} min avant de pouvoir conclure`,
-      label: `Terminer ${act} — disponible dans ${minutes} minutes`,
     };
   }
 
@@ -364,19 +353,14 @@ export function passationStatus(
  */
 
 // =====================================================
-// THE FLOOR
+// THE CLOCK
 // =====================================================
 
-/**
- * How long is still owed before the monologue may be ended early, floored at 0.
- *
- * The rule itself is `canAdvanceEarly`'s in `phases.ts`; this only turns it into
- * the number the mic hint prints, so the button's disabled state and the
- * sentence explaining it are computed from one subtraction rather than two.
+/*
+ * `secondsToMonologueFloor` counted down the minute a monologue had to run
+ * before « Terminer » unlocked. The floor is gone (#171) and it went with the
+ * `locked` copy it fed.
  */
-export function secondsToMonologueFloor(elapsedSeconds: number): number {
-  return Math.max(0, MONOLOGUE_MIN_SECONDS - Math.floor(elapsedSeconds));
-}
 
 /**
  * A rewound start stamp that makes the derived elapsed time jump forward by

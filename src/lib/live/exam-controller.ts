@@ -1205,8 +1205,7 @@ export class ExamController {
       // would ask an examiner that is not there for a closing sentence — then
       // wait for a turn that can never complete, on a frozen clock that never
       // reaches the safety timeout.
-      canAdvance:
-        canAdvanceEarly(this.phase, this.elapsed) && !this.closing && !this.phaseAwaitingStart,
+      canAdvance: canAdvanceEarly(this.phase) && !this.closing && !this.phaseAwaitingStart,
       closing: this.closing,
       micError: this.micError,
       // False during a stall too, not only after a lost device. The point of the
@@ -2331,7 +2330,7 @@ export class ExamController {
 
   /** The candidate ends the current phase early. */
   async advanceEarly(): Promise<void> {
-    if (!canAdvanceEarly(this.phase, this.elapsed)) return;
+    if (!canAdvanceEarly(this.phase)) return;
     // Refused rather than confirmed: a monologue with no speech on it has
     // nothing to grade, so the only way on is to attempt it. See
     // `holdMonologue` for the two things that stop this being a trap.
@@ -2410,8 +2409,8 @@ export class ExamController {
    *
    * Reached from « Réessayer la transcription », after they tried to move on
    * having recorded no speech (#39). The point is that a monologue nobody
-   * attempted cannot be spent: the clock restarts, the minimum before they may
-   * move on applies again, and the task is still there to do.
+   * attempted cannot be spent: the clock goes back to zero and the task is still
+   * there to do.
    *
    * Only during the monologue, and only before the closing handshake has begun —
    * once the examiner has been asked to wrap up, the turn is over and rewinding
@@ -2606,12 +2605,6 @@ export class ExamController {
    * The one refusal left is the consigne: while the examiner is speaking, the
    * candidate's turn has not been handed over, and starting underneath it would
    * record the instruction and charge the candidate for hearing it.
-   *
-   * **The five-minute floor does not apply, and that is the point.** `canAdvanceEarly`
-   * exists to stop a candidate skipping the task; here the task has been handed
-   * over complete, and the whole reason to type it was not to spend five minutes
-   * saying it. The floor still governs every real candidate, because this method
-   * cannot be reached in a build where the tooling is off.
    *
    * **No closing handshake, and no session for the monologue at all.** A spoken
    * monologue ends by asking the examiner for a closing sentence and waiting up

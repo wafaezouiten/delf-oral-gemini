@@ -5,7 +5,7 @@ import type { AnnouncementOutcome, AnnouncerLike } from "@/lib/audio/announcer";
 import type { PhaseRecording, RecordedPhase } from "@/lib/audio/archive";
 import { ANNOUNCEMENTS } from "@/lib/delf/announcements";
 import { countClosingTurns } from "@/lib/delf/early-closing";
-import { PHASE_DURATIONS, MONOLOGUE_MIN_SECONDS } from "@/lib/delf/phases";
+import { PHASE_DURATIONS } from "@/lib/delf/phases";
 import type { OralTopic } from "@/lib/delf/topics";
 import type { SessionManagerCallbacks } from "./session-manager";
 import {
@@ -29,6 +29,17 @@ import {
  * What it is really asserting is the lifetime layering: a reconnect must not
  * touch the transcript, the phase, or the phase clock.
  */
+
+/**
+ * A monologue with real time on it, in seconds.
+ *
+ * This was `MONOLOGUE_MIN_SECONDS + 10` — the minute the UI made a candidate
+ * sit through before « Terminer » unlocked, plus a little. That floor is gone
+ * (#171) and none of these tests are waiting for it any more; they spend the
+ * time because a monologue of a plausible length is the scenario they mean, and
+ * a zero-second one is a different scenario (silence, holds) tested elsewhere.
+ */
+const SPOKEN_MONOLOGUE_SECONDS = 70;
 
 const TOPIC: OralTopic = {
   slug: "teletravail",
@@ -574,7 +585,7 @@ describe("full DELF B2 exam, with a forced reconnect mid-debate", () => {
     );
 
     const elapsedInMonologue = h.controller.getSnapshot().elapsed;
-    assert.ok(elapsedInMonologue >= MONOLOGUE_MIN_SECONDS, "past the five-minute DELF floor");
+    assert.ok(elapsedInMonologue >= SPOKEN_MONOLOGUE_SECONDS, "a monologue of real length");
     assert.equal(h.controller.getSnapshot().canAdvance, true);
 
     // 6. The monologue ends via the closing handshake.
@@ -674,7 +685,7 @@ describe("full DELF B2 exam, with a forced reconnect mid-debate", () => {
     const monologue = h.report("monologue");
     const debate = h.report("debate");
     assert.ok(monologue && debate);
-    assert.ok(monologue.recordedSeconds >= MONOLOGUE_MIN_SECONDS);
+    assert.ok(monologue.recordedSeconds >= SPOKEN_MONOLOGUE_SECONDS);
     assert.ok(debate.recordedSeconds > 0);
     assert.notEqual(monologue.endedAt, null, "a phase that was left has an end stamp");
     assert.ok(
@@ -720,17 +731,35 @@ describe("full DELF B2 exam, with a forced reconnect mid-debate", () => {
     );
   });
 
-  it("keeps the monologue closed to early exit before the five-minute floor", async () => {
+  it("lets the candidate conclude the monologue as soon as it has begun", async () => {
+    // The inverse of what this test used to assert. « Terminer » was held shut
+    // for the monologue's first minute; it is not any more (#171), and the
+    // difference is visible one second in. Ending short is still charged — by
+    // the duration penalty, against the *recording* — which is the whole reason
+    // the button no longer has to do it.
     const h = harness();
     h.controller.start();
     await h.controller.advanceEarly();
     await pressRecord(h);
 
-    h.advanceClock(MONOLOGUE_MIN_SECONDS - 30);
-    assert.equal(h.controller.getSnapshot().canAdvance, false);
+    h.advanceClock(1);
+    assert.equal(
+      h.controller.getSnapshot().canAdvance,
+      true,
+      "one second in, and the way out is open",
+    );
 
+    // Ended at six seconds — a tenth of the old floor, and the part really does
+    // leave. Six rather than one because {@link MIN_VOICED_SECONDS} is the other
+    // thing standing between a candidate and the débat, and it is still standing:
+    // under five seconds of speech reads as a monologue nobody attempted, and the
+    // phase is held open to ask. That check survives this change untouched, which
+    // is why the button did not need to do its job as well.
+    h.advanceClock(5);
     await h.controller.advanceEarly();
-    assert.equal(h.controller.getSnapshot().phase, "monologue", "still in the monologue");
+    assert.equal(h.controller.getSnapshot().closing, true, "the examiner was asked to wrap up");
+    await completeClosing(h);
+    assert.equal(h.controller.getSnapshot().phase, "debate");
   });
 
   it("keeps the timer as the sole authority on when a phase ends", async () => {
@@ -830,7 +859,7 @@ describe("full DELF B2 exam, with a forced reconnect mid-debate", () => {
     h.controller.start();
     await h.controller.advanceEarly();
     await pressRecord(h);
-    h.advanceClock(MONOLOGUE_MIN_SECONDS);
+    h.advanceClock(SPOKEN_MONOLOGUE_SECONDS);
 
     await h.controller.advanceEarly();
     assert.equal(h.controller.getSnapshot().closing, true);
@@ -1284,7 +1313,11 @@ describe("recording the candidate", () => {
       const state = h.controller.getSnapshot();
       assert.equal(state.monologueHeld, false, "the hold is released");
       assert.equal(state.elapsed, 0, "the clock is back to zero");
-      assert.equal(state.canAdvance, false, "so the minimum applies again");
+      // And the way out is open again immediately — there is no floor to serve a
+      // second time (#171). What stops this being an escape is the silence check
+      // in `advanceEarly`, which holds the phase again for as long as nothing is
+      // said, however many times the clock is rewound.
+      assert.equal(state.canAdvance, true);
 
       // And it runs again, rather than staying frozen.
       h.advanceClock(30);
@@ -1382,7 +1415,7 @@ describe("recording the candidate", () => {
 
       h.controller.setDevTextMode(true);
       h.controller.injectCandidateSpeech("Le télétravail a transformé le rapport au bureau.");
-      h.advanceClock(MONOLOGUE_MIN_SECONDS);
+      h.advanceClock(SPOKEN_MONOLOGUE_SECONDS);
 
       assert.equal(h.controller.getSnapshot().monologueSilent, false);
       await h.controller.advanceEarly();
@@ -1425,7 +1458,7 @@ describe("recording the candidate", () => {
 
     /** Monologue → débat → finished, the way a whole sitting gets there. */
     async function runToFinish(h: Harness, inDebate: () => void): Promise<void> {
-      h.advanceClock(MONOLOGUE_MIN_SECONDS + 10);
+      h.advanceClock(SPOKEN_MONOLOGUE_SECONDS);
       await h.controller.advanceEarly();
       await completeClosing(h);
       inDebate();
@@ -1574,7 +1607,7 @@ describe("recording the candidate", () => {
       await intoMonologue(h);
       h.controller.setDevTextMode(true);
       h.controller.injectCandidateSpeech("Un exposé tapé.", 330);
-      h.advanceClock(MONOLOGUE_MIN_SECONDS + 10);
+      h.advanceClock(SPOKEN_MONOLOGUE_SECONDS);
       await h.controller.advanceEarly();
       await completeClosing(h);
 
@@ -1730,15 +1763,17 @@ describe("recording the candidate", () => {
         );
       });
 
-      it("does not wait out the five-minute floor", async () => {
-        // The floor stops a candidate skipping the task. Here the task has been
-        // handed over complete, and not spending five minutes saying it is the
-        // entire reason to type it.
+      it("leaves for the débat the moment the exposé is handed over", async () => {
+        // Five seconds into the part, and the whole of the task is already in:
+        // the point of typing it is not to spend the minutes saying it. This
+        // used to be the floor's exception — `canAdvanceEarly` refused here and
+        // `submitTypedExpose` went around it — and since #171 it is simply what
+        // the phase does. The assertion is unchanged because the behaviour was
+        // always meant to be this; only the reason it holds has moved.
         const h = harness();
         await intoMonologue(h);
         h.controller.setDevTextMode(true);
         h.advanceClock(5);
-        assert.equal(h.controller.getSnapshot().canAdvance, false, "the floor is still on");
 
         await h.controller.submitTypedExpose("Bien avant les cinq minutes.", 330);
         assert.equal(h.controller.getSnapshot().phase, "debate");
@@ -1844,7 +1879,7 @@ describe("recording the candidate", () => {
         const h = harness();
         await intoMonologue(h);
         h.controller.setDevTextMode(true);
-        h.advanceClock(MONOLOGUE_MIN_SECONDS + 10);
+        h.advanceClock(SPOKEN_MONOLOGUE_SECONDS);
         await h.controller.advanceEarly();
         assert.equal(h.controller.getSnapshot().closing, true);
 
@@ -1909,7 +1944,7 @@ describe("reporting a phase as it finalises", () => {
   async function intoDebate(h: Harness): Promise<void> {
     await intoMonologue(h);
     h.session().candidateSays("Le télétravail a transformé le rapport au bureau.");
-    h.advanceClock(MONOLOGUE_MIN_SECONDS + 10);
+    h.advanceClock(SPOKEN_MONOLOGUE_SECONDS);
     await h.controller.advanceEarly();
     await completeClosing(h);
   }
@@ -2156,7 +2191,7 @@ describe("spoken consignes", () => {
     await h.controller.advanceEarly();
     await pressRecord(h);
 
-    h.advanceClock(MONOLOGUE_MIN_SECONDS + 10);
+    h.advanceClock(SPOKEN_MONOLOGUE_SECONDS);
     await h.controller.advanceEarly();
     h.session().finishTurn();
     await settle();
@@ -2277,7 +2312,7 @@ describe("spoken consignes", () => {
     await h.controller.advanceEarly();
     await pressRecord(h);
 
-    h.advanceClock(MONOLOGUE_MIN_SECONDS + 10);
+    h.advanceClock(SPOKEN_MONOLOGUE_SECONDS);
     await h.controller.advanceEarly();
     h.session().finishTurn();
     await settle();
@@ -2402,7 +2437,7 @@ describe("a teardown step that throws does not strand the épreuve", () => {
     const h = harness();
     await intoStartedMonologue(h);
     h.session().candidateSays("Le télétravail a transformé le rapport au bureau.");
-    h.advanceClock(MONOLOGUE_MIN_SECONDS + 10);
+    h.advanceClock(SPOKEN_MONOLOGUE_SECONDS);
     h.session().sendDirective = gone;
     h.session().endCandidateActivity = gone;
 
@@ -2422,7 +2457,7 @@ describe("a teardown step that throws does not strand the épreuve", () => {
     // has already flipped by then, so the label has to have been read before.
     const h = harness();
     await intoStartedMonologue(h);
-    h.advanceClock(MONOLOGUE_MIN_SECONDS + 10);
+    h.advanceClock(SPOKEN_MONOLOGUE_SECONDS);
     await h.controller.advanceEarly();
     h.session().finishTurn();
     await settle();
@@ -2456,7 +2491,7 @@ describe("a teardown step that throws does not strand the épreuve", () => {
     const h = harness();
     await intoStartedMonologue(h);
     h.session().candidateSays("Le télétravail a transformé le rapport au bureau.");
-    h.advanceClock(MONOLOGUE_MIN_SECONDS + 10);
+    h.advanceClock(SPOKEN_MONOLOGUE_SECONDS);
     h.session().sendDirective = gone;
 
     await h.controller.advanceEarly();
@@ -2490,7 +2525,7 @@ describe("the examiner's opening question", () => {
     await h.controller.advanceEarly();
     await pressRecord(h);
     h.session().candidateSays("Le télétravail a transformé le rapport au bureau.");
-    h.advanceClock(MONOLOGUE_MIN_SECONDS + 10);
+    h.advanceClock(SPOKEN_MONOLOGUE_SECONDS);
     await h.controller.advanceEarly();
     // Ends the handshake and presses « Enregistrer » on the part it lands in.
     await completeClosing(h);
@@ -2591,7 +2626,7 @@ describe("the examiner's opening question", () => {
     await h.controller.advanceEarly();
     await pressRecord(h);
     h.session().candidateSays("Le télétravail a transformé le rapport au bureau.");
-    h.advanceClock(MONOLOGUE_MIN_SECONDS + 10);
+    h.advanceClock(SPOKEN_MONOLOGUE_SECONDS);
     await h.controller.advanceEarly();
     h.session().finishTurn(); // the monologue closes; the débat opens armed
     await settle();
@@ -2802,7 +2837,7 @@ describe("the monologue → débat handover (#135)", () => {
     await h.controller.advanceEarly();
     await pressRecord(h);
     h.session().candidateSays("Le télétravail a transformé le rapport au bureau.");
-    h.advanceClock(MONOLOGUE_MIN_SECONDS + 10);
+    h.advanceClock(SPOKEN_MONOLOGUE_SECONDS);
     await h.controller.advanceEarly();
   }
 
@@ -2910,7 +2945,7 @@ describe("breaking a silence in the débat (#84, #101)", () => {
     await h.controller.advanceEarly();
     await pressRecord(h);
     h.session().candidateSays("Le télétravail a transformé le rapport au bureau.");
-    h.advanceClock(MONOLOGUE_MIN_SECONDS + 10);
+    h.advanceClock(SPOKEN_MONOLOGUE_SECONDS);
     await h.controller.advanceEarly();
     await completeClosing(h);
     h.recorder.voiced.debate = 0;
@@ -3377,7 +3412,7 @@ describe("an examiner that says goodbye seven minutes early (#85)", () => {
     await h.controller.advanceEarly();
     await pressRecord(h);
     h.session().candidateSays("Le télétravail a transformé le rapport au bureau.");
-    h.advanceClock(MONOLOGUE_MIN_SECONDS + 10);
+    h.advanceClock(SPOKEN_MONOLOGUE_SECONDS);
     await h.controller.advanceEarly();
     await completeClosing(h);
   }
@@ -3711,7 +3746,7 @@ describe("where a phase started, in the transcript's own time base (#70)", () =>
   async function intoDebate(h: Harness): Promise<void> {
     await intoMonologue(h);
     h.session().candidateSays("Le télétravail a transformé le rapport au bureau.");
-    h.advanceClock(MONOLOGUE_MIN_SECONDS + 10);
+    h.advanceClock(SPOKEN_MONOLOGUE_SECONDS);
     await h.controller.advanceEarly();
     await completeClosing(h);
   }
@@ -3752,7 +3787,7 @@ describe("where a phase started, in the transcript's own time base (#70)", () =>
     const monologue = h.controller.getSnapshot().phaseStartedAt;
 
     h.session().candidateSays("Le télétravail a transformé le rapport au bureau.");
-    h.advanceClock(MONOLOGUE_MIN_SECONDS + 10);
+    h.advanceClock(SPOKEN_MONOLOGUE_SECONDS);
     await h.controller.advanceEarly();
     await completeClosing(h);
 
@@ -3771,7 +3806,7 @@ describe("the last question and the call of time (#108)", () => {
     await h.controller.advanceEarly();
     await pressRecord(h);
     h.session().candidateSays("Le télétravail a transformé le rapport au bureau.");
-    h.advanceClock(MONOLOGUE_MIN_SECONDS + 10);
+    h.advanceClock(SPOKEN_MONOLOGUE_SECONDS);
     await h.controller.advanceEarly();
     await completeClosing(h);
   }
@@ -3948,7 +3983,7 @@ describe("the reconnect that could not resume mid-débat (#133)", () => {
     await h.controller.advanceEarly();
     await pressRecord(h);
     h.session().candidateSays("Le télétravail a transformé le rapport au bureau.");
-    h.advanceClock(MONOLOGUE_MIN_SECONDS + 10);
+    h.advanceClock(SPOKEN_MONOLOGUE_SECONDS);
     await h.controller.advanceEarly();
     await completeClosing(h);
   }
@@ -4092,7 +4127,7 @@ describe("which examiner the controller's sessions are created for (#99)", () =>
 
     await intoMonologue(h);
     h.session().candidateSays("Le télétravail a transformé le rapport au bureau.");
-    h.advanceClock(MONOLOGUE_MIN_SECONDS + 10);
+    h.advanceClock(SPOKEN_MONOLOGUE_SECONDS);
     await h.controller.advanceEarly();
     await completeClosing(h);
 
@@ -4125,7 +4160,7 @@ describe("editing the examiner's prompt mid-épreuve (#152)", () => {
    *  the editor renders on (#153) and the only one the override reaches (#166). */
   async function intoDebate(h: Harness): Promise<void> {
     await intoMonologue(h);
-    h.advanceClock(MONOLOGUE_MIN_SECONDS + 10);
+    h.advanceClock(SPOKEN_MONOLOGUE_SECONDS);
     await h.controller.advanceEarly();
     await completeClosing(h);
   }
@@ -4141,7 +4176,7 @@ describe("editing the examiner's prompt mid-épreuve (#152)", () => {
     assert.deepEqual(h.sessionPrompts, [undefined], "the monologue ran the shipped instruction");
 
     h.controller.setExaminerPrompt(PROMPT);
-    h.advanceClock(MONOLOGUE_MIN_SECONDS + 10);
+    h.advanceClock(SPOKEN_MONOLOGUE_SECONDS);
     await h.controller.advanceEarly();
     await completeClosing(h);
 
@@ -4178,7 +4213,7 @@ describe("editing the examiner's prompt mid-épreuve (#152)", () => {
     await settle();
     assert.deepEqual(h.sessionPrompts, [undefined, undefined], "and a restart does not smuggle it");
 
-    h.advanceClock(MONOLOGUE_MIN_SECONDS + 10);
+    h.advanceClock(SPOKEN_MONOLOGUE_SECONDS);
     await h.controller.advanceEarly();
     await completeClosing(h);
     assert.deepEqual(
@@ -4301,7 +4336,7 @@ describe("editing the examiner's prompt mid-épreuve (#152)", () => {
     await intoMonologue(h);
     h.session().candidateSays("Le télétravail a transformé le rapport au bureau.");
     h.controller.setExaminerPrompt(OTHER);
-    h.advanceClock(MONOLOGUE_MIN_SECONDS + 10);
+    h.advanceClock(SPOKEN_MONOLOGUE_SECONDS);
     await h.controller.advanceEarly();
     await completeClosing(h);
     h.advanceClock(PHASE_DURATIONS.debate);
@@ -4335,7 +4370,7 @@ describe("the dev time-skip (#149)", () => {
   async function intoDebate(h: Harness): Promise<void> {
     await intoMonologue(h);
     h.session().candidateSays("Le télétravail a transformé le rapport au bureau.");
-    h.advanceClock(MONOLOGUE_MIN_SECONDS + 10);
+    h.advanceClock(SPOKEN_MONOLOGUE_SECONDS);
     await h.controller.advanceEarly();
     await completeClosing(h);
   }

@@ -138,11 +138,13 @@ const DEBATE_TACHE = 2;
  * the part's expected speaking time, floored at 30 s. 168 s of monologue and
  * 312 s of débat.
  *
- * Not to be confused with `phases.ts`'s `MONOLOGUE_MIN_SECONDS` (300 s), which
- * is how long the candidate must stay in the monologue before the UI lets them
- * advance. That one is a clock the candidate watches; these are floors the
- * *recording* is measured against afterwards, and the two answer different
- * questions — a phase can run its full 300 s and record 40 s of audio.
+ * These are the only floors left, and since #171 they are the only ones the
+ * candidate can meet or miss. `phases.ts` used to hold a second, unrelated one —
+ * how long they had to stay in the monologue before the UI let them advance —
+ * and the two were forever being read as the same rule. They never were: that
+ * one was a clock the candidate watched, these are measured against the
+ * *recording* afterwards, and a phase can run its full seven minutes with 40 s
+ * of audio on it.
  */
 export const MONOLOGUE_FLOOR_SECONDS = minDurationSeconds(MONOLOGUE_TACHE);
 export const DEBATE_FLOOR_SECONDS = minDurationSeconds(DEBATE_TACHE);

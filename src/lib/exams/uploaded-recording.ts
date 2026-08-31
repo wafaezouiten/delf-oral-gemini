@@ -176,16 +176,14 @@ export interface MeasuredRecording {
  *
  * **WAV** is what the archive falls back to when a browser cannot encode Opus.
  * It is measured just as exactly, but be clear about how little of it can get
- * here: at 32 kB a second, {@link MAX_RECORDING_BYTES} is **98 seconds** of it,
- * against a monologue the candidate cannot leave before 300
- * (`MONOLOGUE_MIN_SECONDS`). So the only WAV this route will ever accept is one
- * whose capture failed inside the first minute and a half — not "a capture that
- * failed early" in general. `archive.ts`'s own example, a headset unplugged four
- * minutes in, is 7.7 MB as WAV and does not fit; it fits as Opus, which is what
- * it will be on any browser that has WebCodecs at all. A candidate who spoke
- * normally into a browser that does not is graded from audio not at all: the
- * client weighs each artefact and sends what it can rather than a request that
- * cannot be delivered.
+ * here: at 32 kB a second, {@link MAX_RECORDING_BYTES} is **98 seconds** of it.
+ * So the only WAV this route will ever accept is one whose capture failed inside
+ * the first minute and a half — not "a capture that failed early" in general.
+ * `archive.ts`'s own example, a headset unplugged four minutes in, is 7.7 MB as
+ * WAV and does not fit; it fits as Opus, which is what it will be on any browser
+ * that has WebCodecs at all. A candidate who spoke normally into a browser that
+ * does not is graded from audio not at all: the client weighs each artefact and
+ * sends what it can rather than a request that cannot be delivered.
  *
  * It stays accepted because refusing it would throw away the one audio a broken
  * capture does produce, and because it costs one branch to keep — not because it

@@ -1,14 +1,12 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { MONOLOGUE_MIN_SECONDS } from "@/lib/delf/phases";
 import {
   candidateStatus,
   examinerStatus,
   micCopy,
   passationStatus,
   poKicker,
-  secondsToMonologueFloor,
   shortPartLabel,
   partieKicker,
   EXPOSE_PLAN,
@@ -80,23 +78,17 @@ describe("the mic copy", () => {
     assert.match(hint, /Cliquez pour terminer votre exposé\.$/);
   });
 
-  it("says how much time is still owed rather than refusing", () => {
-    const { hint, label } = micCopy("monologue", "locked", 150);
-    // 150 s rounds UP to 3 minutes: promising "2 min" and then still refusing at
-    // 2:00 is the version of this that gets clicked twice.
-    assert.match(hint, /Encore 3 min/);
-    assert.match(label, /3 minutes/);
-  });
-
   it("says what it is waiting for while the socket opens", () => {
     assert.match(micCopy("debate", "connecting").hint, /Connexion/);
   });
 
-  it("stops counting down to a floor once the part is closing", () => {
-    // `canAdvance` goes false the moment the handshake starts, so the control
-    // used to fall back to `locked` and print « Encore 0 min avant de pouvoir
-    // conclure » over a monologue that was already concluding (#55).
-    const { hint, button } = micCopy("monologue", "closing", 0);
+  it("says the part is ending rather than offering to end it", () => {
+    // This used to be the countdown's test: `canAdvance` goes false the moment
+    // the handshake starts, the control fell back to `locked`, and it printed
+    // « Encore 0 min avant de pouvoir conclure » over a monologue that was
+    // already concluding (#55). The floor is gone (#171) and so is the wrong
+    // copy's source, but the state is still the one that has to say « ending ».
+    const { hint, button } = micCopy("monologue", "closing");
     assert.doesNotMatch(hint, /Encore/);
     assert.match(hint, /Fin de l'exposé/);
     // The button is no longer an offer, and stops being worded as one.
@@ -106,18 +98,6 @@ describe("the mic copy", () => {
   it("names what comes next at the close, per part", () => {
     assert.match(micCopy("monologue", "closing").hint, /consigne du débat/);
     assert.match(micCopy("debate", "closing").hint, /correction/);
-  });
-});
-
-describe("the floor", () => {
-  it("counts down to the DELF's five-minute minimum", () => {
-    assert.equal(secondsToMonologueFloor(0), MONOLOGUE_MIN_SECONDS);
-    assert.equal(secondsToMonologueFloor(60), MONOLOGUE_MIN_SECONDS - 60);
-  });
-
-  it("never goes negative once the floor is passed", () => {
-    assert.equal(secondsToMonologueFloor(MONOLOGUE_MIN_SECONDS), 0);
-    assert.equal(secondsToMonologueFloor(MONOLOGUE_MIN_SECONDS + 999), 0);
   });
 });
 

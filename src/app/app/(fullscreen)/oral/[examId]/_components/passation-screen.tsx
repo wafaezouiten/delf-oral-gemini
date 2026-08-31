@@ -355,7 +355,6 @@ export function PassationScreen({
           awaitingStart={awaitingStart}
           startDisabled={awaitingConsigne}
           closing={closing}
-          elapsed={elapsed}
           hasNotes={hasNotes}
           notesOpen={notesOpen}
           onToggleNotes={onToggleNotes}
