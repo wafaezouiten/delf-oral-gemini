@@ -4,12 +4,7 @@ import type { ReactNode } from "react";
 
 import { AlertIcon, LoadingIcon, MicIcon, PencilIcon, StopIcon } from "@/app/_components/po/icons";
 import { cn } from "@/lib/ui/class-names";
-import {
-  micCopy,
-  secondsToMonologueFloor,
-  type MicState,
-  type SpeakingPhase,
-} from "@/lib/ui/po-player-view";
+import { micCopy, type MicState, type SpeakingPhase } from "@/lib/ui/po-player-view";
 
 /**
  * The passation control bar, docked at the foot: the notes toggle on the left,
@@ -31,11 +26,10 @@ import {
  * to a correction, and a button that silently skipped the débat would be
  * offering one.
  *
- * The monologue's five-minute floor (`canAdvanceEarly`) is shown as time still
- * owed under the mic rather than baked into a long button label. The reference
- * has no analogue; this project's previous screen carried it as the button's
- * own text, which meant the label changed every sixty seconds under a candidate
- * who might be reading it.
+ * The mic also used to have a fifth state: a monologue that had not yet run the
+ * minute `canAdvanceEarly` demanded showed a greyed-out control with a countdown
+ * under it. The floor is gone (#171), so the control is an offer in every state
+ * a candidate can reach — which is what the reference's always was.
  */
 export function ConversationControls({
   phase,
@@ -45,7 +39,6 @@ export function ConversationControls({
   awaitingStart = false,
   startDisabled = false,
   closing = false,
-  elapsed,
   hasNotes,
   notesOpen,
   onToggleNotes,
@@ -75,12 +68,13 @@ export function ConversationControls({
    * The click has been taken and the part is ending: the examiner is delivering
    * its closing sentence (#55).
    *
-   * Without this the control fell back to `locked` — `canAdvance` goes false the
-   * moment the handshake starts — and printed « Encore 0 min avant de pouvoir
-   * conclure » over a monologue that was already concluding.
+   * It has to be said here rather than inferred: `canAdvance` goes false the
+   * moment the handshake starts, and with no floor left to explain that
+   * (#171) the control would read a part that is already concluding as one the
+   * candidate could still press — the spinner, the disabled state and « Terminé »
+   * all come from this flag alone.
    */
   closing?: boolean;
-  elapsed: number;
   hasNotes: boolean;
   notesOpen: boolean;
   onToggleNotes: () => void;
@@ -95,24 +89,26 @@ export function ConversationControls({
   devPanel?: ReactNode;
 }) {
   // Armed outranks everything: a part that has not begun is not connecting, and
-  // it is not locked behind a floor it has not started counting towards. Closing
-  // comes next, and for the same kind of reason: a part that is ending is not
-  // waiting for a floor it passed, whatever `canAdvance` says about it.
+  // it is not ending. Closing comes next, and for the same kind of reason — a
+  // part that is already concluding is not "recording", whatever the microphone
+  // is still doing.
+  //
+  // The ladder is total without consulting `canAdvance`, and only since the
+  // monologue's floor was removed (#171): the two things that still make that
+  // false — a closing handshake, and a part that has not begun — are both
+  // branches above it.
   const state: MicState = awaitingStart
     ? "armed"
     : closing
       ? "closing"
       : connecting
         ? "connecting"
-        : canAdvance
-          ? "recording"
-          : "locked";
-  const { hint, label, button } = micCopy(phase, state, secondsToMonologueFloor(elapsed));
+        : "recording";
+  const { hint, label, button } = micCopy(phase, state);
   const armed = state === "armed";
-  const locked = state === "locked";
   /** Nothing the candidate presses now changes what happens next, so the control
    *  stops looking like an offer. */
-  const inert = locked || state === "closing";
+  const inert = state === "closing";
 
   return (
     // `z-20` on the bar, and it is the dev popovers that need it (#163).
@@ -177,9 +173,9 @@ export function ConversationControls({
             )}
           >
             {/* The ring says "you are live", so it follows the microphone and
-                not the button's enabled state: it keeps pulsing through the
-                locked minutes, when the candidate is very much being recorded.
-                Never while armed — nothing is being captured yet, and a pulsing
+                not the button's enabled state — it keeps pulsing through the
+                closing handshake, when the candidate is still being recorded.
+                Never while armed: nothing is being captured yet, and a pulsing
                 ring over a part that has not started is the same false claim the
                 recording badge is written to avoid. */}
             {recording && !armed && (
@@ -197,17 +193,16 @@ export function ConversationControls({
               // The same spinner the connection uses, for the same reason: the
               // épreuve is waiting on the examiner and the candidate is not.
               <LoadingIcon className="size-6 animate-spin" />
-            ) : locked ? (
-              <MicIcon className="size-6" />
             ) : (
               <StopIcon className="size-6" />
             )}
           </button>
-          {/* Not a live region: it changes once a minute during the locked
-              window, and a screen reader reciting the countdown over the
-              examiner is the fault the clock's milestones exist to avoid. The
-              button's own name carries the same fact on demand, and the close is
-              announced by the status line above the controls. */}
+          {/* Not a live region. It used to change every minute, counting a
+              monologue down to its floor, and a screen reader reciting that over
+              the examiner is the fault the clock's milestones exist to avoid.
+              The floor is gone (#171), but the reason holds for the close this
+              line still describes: the status line above the controls is what
+              says that one out loud. */}
           <span className="text-muted-foreground text-center text-[0.6875rem]">{hint}</span>
         </div>
 
