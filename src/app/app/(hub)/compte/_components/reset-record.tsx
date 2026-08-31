@@ -40,8 +40,18 @@ import { requestRecordReset } from "@/lib/account/reset";
  *
  * No count is promised beforehand: a number would mean handing this client
  * component the candidate's record every time the account page mounts. The route
- * reports what it archived, so the panel says the number *after*, where it is a
- * fact rather than a promise.
+ * reports what it archived, so the number is said *after*, where it is a fact
+ * rather than a promise.
+ *
+ * **What it says after goes in the line that was already there, and never in a
+ * block of its own.** A notice added under the button grows the header cell,
+ * and the header is above Clerk's card: a candidate who presses the button
+ * watches their profile jump down the page to make room for a sentence. So the
+ * slot under the button carries whichever of the three is true — what the
+ * button does, what went wrong, or what it archived — and the header keeps its
+ * height whichever it is. It also means the failure is no longer a bordered
+ * panel; it is the same line in `text-danger`, which is enough on a screen with
+ * one control.
  */
 export function ResetRecord() {
   const router = useRouter();
@@ -99,35 +109,32 @@ export function ResetRecord() {
         >
           {pending ? "Réinitialisation…" : failed ? "Réessayer" : "Réinitialiser"}
         </button>
-        {/* Capped, so the line wraps into a short block under the button
-            instead of stretching the header cell and dragging the button back
-            in from the edge. It is the whole warning now — and it already says
-            *archive* rather than *supprime*, which is the one thing a candidate
-            has to know before pressing. */}
-        <p className="text-muted-foreground max-w-56 text-xs leading-relaxed sm:text-right">
-          Archive vos épreuves passées et remet vos tableaux de bord à zéro.
-        </p>
+        {/* One slot under the button, three things it can say: what the button
+            does, what went wrong, what it archived. Capped, so the line wraps
+            into a short block instead of stretching the header cell and
+            dragging the button back in from the edge. */}
+        {failed ? (
+          <p role="alert" className="text-danger max-w-56 text-xs leading-relaxed sm:text-right">
+            {failed}
+          </p>
+        ) : archived !== null ? (
+          <p
+            role="status"
+            className="text-muted-foreground max-w-56 text-xs leading-relaxed sm:text-right"
+          >
+            {archived === 0
+              ? "Il n'y avait aucune épreuve à archiver."
+              : `${archived} épreuve${archived > 1 ? "s" : ""} ${archived > 1 ? "sont passées" : "est passée"} aux archives. Vous ${archived > 1 ? "les" : "la"} retrouvez dans l'historique.`}
+          </p>
+        ) : (
+          // The whole warning now — and it already says *archive* rather than
+          // *supprime*, which is the one thing a candidate has to know before
+          // pressing.
+          <p className="text-muted-foreground max-w-56 text-xs leading-relaxed sm:text-right">
+            Archive vos épreuves passées et remet vos tableaux de bord à zéro.
+          </p>
+        )}
       </div>
-
-      {failed && (
-        <p
-          role="alert"
-          className="border-danger/40 bg-danger-subtle text-danger mt-3 w-full border p-3 text-sm leading-relaxed sm:w-72"
-        >
-          {failed}
-        </p>
-      )}
-
-      {archived !== null && (
-        <p
-          role="status"
-          className="border-border bg-muted mt-3 w-full border p-3 text-sm leading-relaxed sm:w-72"
-        >
-          {archived === 0
-            ? "Il n'y avait aucune épreuve à archiver."
-            : `${archived} épreuve${archived > 1 ? "s" : ""} ${archived > 1 ? "sont passées" : "est passée"} aux archives. Vous ${archived > 1 ? "les" : "la"} retrouvez dans l'historique.`}
-        </p>
-      )}
     </div>
   );
 }
