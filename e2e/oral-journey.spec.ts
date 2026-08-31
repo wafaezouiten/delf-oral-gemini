@@ -12,14 +12,22 @@ import { expect, test, type Page } from "@playwright/test";
  * was wrong about (#179): the catalogue is a grid of CARDS, and the launch CTA
  * lives on the sheet a card opens, not on the catalogue itself.
  *
- * The first authenticated run also found where this journey stops today. Steps
- * 1-3 pass; step 4 does not, and not because of anything in this file — under
- * `next dev` the exam room mounts dead (#160): StrictMode's double-mount
- * destroys the memoized controller, so the clock stays at 30:00 and
- * « Commencer la passation » does nothing at all. `playwright.config.ts` runs
- * `pnpm dev`, so this journey walks straight into it. Until #160 is fixed,
- * steps 4-12 stay unexercised: their names are checked against the components,
- * which is exactly the state step 1 was in.
+ * WHICH SERVER THIS PASSES AGAINST. All twelve steps have now been run green,
+ * against a live examiner and a real correction — but on a PRODUCTION build:
+ *
+ *     NEXT_PUBLIC_DEV_TOOLS=1 pnpm build
+ *     NEXT_PUBLIC_DEV_TOOLS=1 pnpm start
+ *
+ * The flag is there because a production build otherwise switches the typed
+ * exposé off (`lib/dev-tools.ts`), and step 5 is that panel.
+ *
+ * `playwright.config.ts` starts `pnpm dev` instead, and against that server this
+ * journey still dies at step 4 — not on anything in this file, but on #160:
+ * under `next dev` React StrictMode's double-mount destroys the memoized exam
+ * controller, so the clock sits at 30:00 and « Commencer la passation » does
+ * nothing at all. Green on a production build is what says the test is right;
+ * until #160 is fixed, `pnpm test:e2e` against its own default server cannot
+ * show it.
  *
  * Why it cannot sign itself in: every screen below `/app` is gated by
  * `lib/auth/exam-guard`, which calls Clerk's `auth()` on the SERVER. There is no
@@ -47,6 +55,30 @@ import { expect, test, type Page } from "@playwright/test";
 const STORAGE_STATE = process.env.E2E_STORAGE_STATE;
 const SIGNED_IN = !!STORAGE_STATE && existsSync(STORAGE_STATE);
 
+/**
+ * A microphone, because the épreuve does not start without one.
+ *
+ * « Commencer votre exposé » runs `prepareAudio()`, which is
+ * `browserMicrophone` and therefore `getUserMedia`. An automated Chromium
+ * refuses that by default and the room says so — « Le microphone n'est pas
+ * accessible » — and stays on the préparation, which is not a stale locator but
+ * a browser with no input device.
+ *
+ * The fake device rather than the real one: a laptop's own microphone makes the
+ * run depend on the room it is run in, and there is no assertion here about what
+ * the candidate says. The exposé is typed (« Dev · transcription ») and the
+ * débat only has to prove the examiner took a turn.
+ *
+ * At the top of the file rather than in the describe below, because
+ * `launchOptions` forces its own worker and Playwright refuses it in a group.
+ */
+test.use({
+  permissions: ["microphone"],
+  launchOptions: {
+    args: ["--use-fake-device-for-media-stream", "--use-fake-ui-for-media-stream"],
+  },
+});
+
 test.describe("one production orale, start to finish", () => {
   test.skip(
     !SIGNED_IN,
@@ -61,8 +93,16 @@ test.describe("one production orale, start to finish", () => {
   // (`ORAL_PHASES` — there is no path back into an earlier phase to re-enter).
   test("a candidate sits an épreuve and reads the correction", async ({ page }) => {
     // The examiner speaks a consigne at each boundary and the controls stay shut
-    // until it has, so the waits here are longer than a click normally deserves.
-    test.slow();
+    // until it has, so the waits below are longer than a click normally
+    // deserves — and the twelve of them together outlast anything
+    // `test.slow()` can buy. That is Playwright's 30 s default tripled, 90 s,
+    // and the measured journey is about 1.6 min: it used to die between the
+    // débat and the correction, one step from the end.
+    //
+    // A ceiling, not a target. Every step carries its own timeout, so this only
+    // decides how long a genuinely stuck run hangs before it is called stuck,
+    // and step 10 alone may wait 5 min for the /25 to come back.
+    test.setTimeout(15 * 60_000);
 
     await test.step("1. the candidate reaches an épreuve", async () => {
       await page.goto("/app/sujets");
