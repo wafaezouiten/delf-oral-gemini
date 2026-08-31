@@ -1574,9 +1574,21 @@ export class ExamController {
    * an effect rather than a click, and a controller torn down between the two
    * would otherwise start a ticker counting a phase nobody is in and speak into
    * a closed announcer.
+   *
+   * That refusal now says so out loud (#160). It was silent, and a silent one is
+   * how a dead room — no clock, no consigne, no answer to any button — went a
+   * month without a diagnosis: nothing on screen or in the console named the
+   * reason. `console.warn` rather than {@link log} because a controller nobody
+   * can revive has an event buffer nobody will read, and because this is a bug
+   * report rather than a fact about the épreuve, so it should be audible on a
+   * production build too.
    */
   start(): void {
-    if (this.started || this.destroyed) return;
+    if (this.started) return;
+    if (this.destroyed) {
+      console.warn("[exam] start() on a destroyed controller: this room will not run");
+      return;
+    }
     this.started = true;
     this.examStart = this.now();
     this.phaseStart = this.now();
@@ -1591,7 +1603,13 @@ export class ExamController {
    * candidate is about to speak, not thirty minutes earlier.
    */
   async prepareAudio(): Promise<boolean> {
-    if (this.destroyed) return false;
+    // Loud for the same reason `start()`'s refusal is (#160): this is the far end
+    // of « Commencer la passation », and a button that answers with nothing is the
+    // hardest kind of failure to report.
+    if (this.destroyed) {
+      console.warn("[exam] prepareAudio() on a destroyed controller: no devices will open");
+      return false;
+    }
     if (this.recorder) return true;
     // A second attempt after a failed one used to build a second player and
     // abandon the first, still holding an open AudioContext. `advanceEarly()`
