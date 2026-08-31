@@ -1,9 +1,12 @@
 /**
  * POST /api/account/reset — the candidate is starting over (#69).
  *
- * Sent from « Repartir de zéro », the page this product adds to Clerk's account
- * screens at /app/compte, after an explicit confirmation. It archives everything
- * currently on the record: the tableau de bord goes back to its empty state, the
+ * Sent from « Réinitialiser », in the header of the account page this product
+ * adds to Clerk's screens at /app/compte. The button sends it on the first press
+ * — the confirmation panel that used to stand in front of it was removed on the
+ * candidate's instruction (#175), which is only defensible because of the
+ * paragraph below: this route archives, it does not delete. It archives
+ * everything currently on the record: the tableau de bord goes back to its empty state, the
  * sujet cards go back to « Commencer », and the historique keeps every sitting
  * under its archive.
  *
