@@ -127,11 +127,45 @@ export const EXPOSE_PLAN: readonly PlanStep[] = [
 /**
  * What the record control is doing.
  *
- * `armed` is the part that has not started: the consigne has been given, the
- * sujet and the plan are on screen, and no clock is running until the candidate
- * says they are ready. The other three are the part in progress.
+ * `armed` is the part that has not started: the sujet and the plan are on
+ * screen, and no clock is running until the candidate says they are ready. The
+ * other three are the part in progress.
+ *
+ * It spans the consigne as well (#176). The control is disabled while the voice
+ * plays and enabled when it ends, but it is the same state and reads the same
+ * words in both — a part that has not begun cannot be terminated, whether or not
+ * the examiner is still explaining it.
  */
 export type MicState = "armed" | "recording" | "connecting" | "closing";
+
+/**
+ * Which of the four the control is in, from the three facts the passation has.
+ *
+ * Armed outranks everything: a part that has not begun is not connecting, and it
+ * is not ending. Closing comes next, and for the same kind of reason — a part
+ * that is already concluding is not "recording", whatever the microphone is
+ * still doing. The ladder is total without consulting `canAdvance`, and has been
+ * only since the monologue's floor was removed (#171): the two things that still
+ * make that false are both branches above.
+ *
+ * Total means the last branch catches everything the others do not claim, which
+ * is why it is written down here with a test rather than inline in the bar. It
+ * caught an unstarted débat for the length of its consigne, and the screen said
+ * « Vous parlez. Cliquez pour terminer le débat. » over the examiner's voice,
+ * with a live stop button under it (#176). `awaitingStart` covers the consigne
+ * now; whether the press is *taken* is a separate flag, and a separate word:
+ * disabled.
+ */
+export function micState(flags: {
+  awaitingStart: boolean;
+  closing: boolean;
+  connecting: boolean;
+}): MicState {
+  if (flags.awaitingStart) return "armed";
+  if (flags.closing) return "closing";
+  if (flags.connecting) return "connecting";
+  return "recording";
+}
 
 /**
  * The word on the record control, the hint printed under it, and its accessible
@@ -157,10 +191,10 @@ export function micCopy(
 ): { hint: string; label: string; button: string } {
   const act = phase === "monologue" ? "votre exposé" : "le débat";
 
-  // The part has not begun. The candidate has read the sujet and the plan with
-  // no clock running, and this is the button that starts both the clock and the
-  // recording — so it is the one state where the control says what it *starts*
-  // rather than what it ends.
+  // The part has not begun — the consigne may still be playing. The candidate
+  // reads the sujet and the plan with no clock running, and this is the button
+  // that starts both the clock and the recording — so it is the one state where
+  // the control says what it *starts* rather than what it ends.
   if (state === "armed") {
     return {
       button: "Enregistrer",
