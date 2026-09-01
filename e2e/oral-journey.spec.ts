@@ -12,22 +12,25 @@ import { expect, test, type Page } from "@playwright/test";
  * was wrong about (#179): the catalogue is a grid of CARDS, and the launch CTA
  * lives on the sheet a card opens, not on the catalogue itself.
  *
- * WHICH SERVER THIS PASSES AGAINST. All twelve steps have now been run green,
- * against a live examiner and a real correction — but on a PRODUCTION build:
+ * WHICH SERVER THIS PASSES AGAINST. Both of them, against a live examiner and a
+ * real correction. All twelve steps run green on `pnpm dev` — the server
+ * `playwright.config.ts` starts, so `pnpm test:e2e` needs nothing added to it —
+ * and on a PRODUCTION build:
  *
  *     NEXT_PUBLIC_DEV_TOOLS=1 pnpm build
  *     NEXT_PUBLIC_DEV_TOOLS=1 pnpm start
  *
  * The flag is there because a production build otherwise switches the typed
- * exposé off (`lib/dev-tools.ts`), and step 5 is that panel.
+ * exposé off (`lib/dev-tools.ts`), and step 5 is that panel. `next dev` needs no
+ * flag: the tooling is on for every non-production build.
  *
- * `playwright.config.ts` starts `pnpm dev` instead, and against that server this
- * journey still dies at step 4 — not on anything in this file, but on #160:
- * under `next dev` React StrictMode's double-mount destroys the memoized exam
- * controller, so the clock sits at 30:00 and « Commencer la passation » does
- * nothing at all. Green on a production build is what says the test is right;
- * until #160 is fixed, `pnpm test:e2e` against its own default server cannot
- * show it.
+ * Only the production build could pass until #160 was fixed. Under `next dev`,
+ * React StrictMode's double-mount destroyed the memoized exam controller: the
+ * clock sat at 30:00, « Commencer la passation » did nothing at all, and this
+ * journey died at step 4 on the app rather than on anything in this file. The
+ * cure is in `use-exam-controller.ts`, and this journey run on `pnpm dev` is what
+ * holds it — nothing else in the repository exercises a StrictMode remount of
+ * the exam room.
  *
  * Why it cannot sign itself in: every screen below `/app` is gated by
  * `lib/auth/exam-guard`, which calls Clerk's `auth()` on the SERVER. There is no
