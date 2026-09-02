@@ -30,6 +30,13 @@ import { micCopy, micState, type MicState, type SpeakingPhase } from "@/lib/ui/p
  * minute `canAdvanceEarly` demanded showed a greyed-out control with a countdown
  * under it. The floor is gone (#171), so the control is an offer in every state
  * a candidate can reach — which is what the reference's always was.
+ *
+ * **The round control is 48 px rather than 56, and the armed pill 40 rather than
+ * 44 (#183).** Both are still well past the 44 px a touch target needs, and the
+ * red disc was reading as the loudest thing on a screen whose subject is the
+ * examiner: it is the control you press twice in twenty minutes, at the end of
+ * each half. Shrinking it also gives the hint under it and the two buttons
+ * beside it room in the 56 px bar on a phone, where the row was wrapping.
  */
 export function ConversationControls({
   phase,
@@ -158,8 +165,8 @@ export function ConversationControls({
               // Armed, the control is a pill with a word in it: it is starting
               // something, and the round stop-button shape reads as ending one.
               armed
-                ? "bg-danger h-11 rounded-full px-5 text-sm font-semibold text-white hover:opacity-90"
-                : "size-14 rounded-full",
+                ? "bg-danger h-10 rounded-full px-5 text-sm font-semibold text-white hover:opacity-90"
+                : "size-12 rounded-full",
               !armed &&
                 (recording && !inert
                   ? "bg-danger text-white hover:opacity-90"
@@ -188,9 +195,9 @@ export function ConversationControls({
             ) : connecting || state === "closing" ? (
               // The same spinner the connection uses, for the same reason: the
               // épreuve is waiting on the examiner and the candidate is not.
-              <LoadingIcon className="size-6 animate-spin" />
+              <LoadingIcon className="size-5 animate-spin" />
             ) : (
-              <StopIcon className="size-6" />
+              <StopIcon className="size-5" />
             )}
           </button>
           {/* Not a live region. It used to change every minute, counting a

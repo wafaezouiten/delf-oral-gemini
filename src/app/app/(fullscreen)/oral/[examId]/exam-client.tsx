@@ -337,7 +337,8 @@ export function ExamClient({
           // finishes on the server and the historique will have it.
           if (outcome === "cancelled") return;
           if (outcome === "corrected") {
-            router.push(`/app/results/${examId}`);
+            // `replace`, not `push` (#183). See the finish path below.
+            router.replace(`/app/results/${examId}`);
             return;
           }
           setAwaitingCorrection(false);
@@ -372,7 +373,14 @@ export function ExamClient({
             examinerModel: examinerModelRef.current,
           }),
         );
-        router.push(`/app/results/${examId}`);
+        // `replace` rather than `push` (#183). The correction now offers a
+        // « Retour », and the entry it would go back to is this passation — a
+        // finished épreuve whose socket is closed, whose clock has run out and
+        // which cannot be sat again. Replacing the entry sends that Retour to
+        // wherever the épreuve was opened from, which is the page the candidate
+        // actually came from; nothing else about the navigation changes, and
+        // nothing linked to this url in the first place.
+        router.replace(`/app/results/${examId}`);
       } catch (error) {
         // Almost always: the request never got an answer — offline, DNS, a
         // dropped upload. The one other arrival is the throw above, a 200
@@ -821,6 +829,29 @@ export function ExamClient({
                   onSubmit={(text, seconds) => controller.submitTypedExpose(text, seconds)}
                 />
               )}
+              {/* The time skip, underneath the prompt (#183). It used to be a
+                  `fixed bottom-24 left-4` pill rendered beside the passation
+                  screen — the reference's own placement (#149) — which put it
+                  on top of the conversation column the candidate is reading.
+                  In the cluster it is the last row of the one corner every
+                  other dev control already occupies.
+
+                  The conditions are unchanged and still the reference's: only
+                  while the part is actually running and not closing, since a
+                  skip on an armed clock has nothing to move and one during the
+                  handshake would race the end it is asking for. The held
+                  monologue hides it too, because `tick()` re-anchors a held
+                  clock and would silently undo the jump. */}
+              {(state.phase === "monologue" || state.phase === "debate") &&
+                state.phaseStartedAt !== null &&
+                !state.closing &&
+                !state.monologueHeld && (
+                  <DevTimeSkip
+                    onSkip={(seconds) => controller.devSkipTime(seconds)}
+                    onSkipToEnd={() => controller.devSkipToEnd()}
+                  />
+                )}
+
               {/* « Forcer une reconnexion » stood here and is gone (#163). It
                   drove the path a real GoAway takes, which is worth exercising
                   — but it did it from the control bar, in the row the dev
@@ -832,23 +863,6 @@ export function ExamClient({
           ) : undefined
         }
       />
-      {/* PORT NOTE (#149): the reference renders its admin time-skip exactly
-          here — a fixed pill beside the passation screen, not inside it — and
-          shows it only while the part is actually running and not closing: a
-          skip on an armed clock has nothing to move, and one during the
-          handshake would race the end it is asking for. The held monologue
-          hides it too, because `tick()` re-anchors a held clock and would
-          silently undo the jump. */}
-      {DEV_TOOLS_ENABLED &&
-        (state.phase === "monologue" || state.phase === "debate") &&
-        state.phaseStartedAt !== null &&
-        !state.closing &&
-        !state.monologueHeld && (
-          <DevTimeSkip
-            onSkip={(seconds) => controller.devSkipTime(seconds)}
-            onSkipToEnd={() => controller.devSkipToEnd()}
-          />
-        )}
       {exitDialog}
     </>
   );

@@ -118,7 +118,16 @@ function TrajectoryCard({ trajectory }: { trajectory: TrajectoryView }) {
 
   return (
     <section className="border-border bg-card sheet mt-6 border">
-      <div className="rule-double flex flex-wrap items-start justify-between gap-x-6 gap-y-2 px-6 py-4">
+      {/* The note is aligned with the section it belongs to (#183), on both
+          screens and by two different rules because the row behaves differently
+          on each. `items-baseline` sits the /25 on the same baseline as
+          « Votre trajectoire » instead of the two blocks' top edges, which is
+          what left a 24 px numeral floating above a 16 px heading. And below
+          `sm` the row wraps, so the note gets its own line: right-aligned there
+          it hung off the opposite edge from everything above and below it, and
+          it now reads down the same left margin as the heading, the ruler and
+          the caption. */}
+      <div className="rule-double flex flex-wrap items-baseline justify-between gap-x-6 gap-y-2 px-6 py-4">
         <div>
           <div className="flex items-center gap-2">
             <ChartIcon className="text-muted-foreground size-4" />
@@ -128,8 +137,8 @@ function TrajectoryCard({ trajectory }: { trajectory: TrajectoryView }) {
             Score /{COMPETENCY_MAX} · par simulation
           </p>
         </div>
-        <div className="text-right">
-          <p className="flex items-baseline justify-end gap-2">
+        <div className="text-left sm:text-right">
+          <p className="flex items-baseline justify-start gap-2 sm:justify-end">
             {/* The note is a /25, so it is tinted on the /25 scale — the same
                 rule as the « Note moyenne » tile, band computed in the view
                 model. */}

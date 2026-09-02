@@ -1,14 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import {
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-  useSyncExternalStore,
-  type CSSProperties,
-} from "react";
+import { useRouter } from "next/navigation";
+import { useCallback, useState, useSyncExternalStore } from "react";
 
 import { Notice } from "@/app/_components/notice";
 import { RecordingPlayer } from "@/app/_components/recording-player";
@@ -17,6 +11,7 @@ import { secondaryButton } from "@/app/_components/button-styles";
 import { useStartExam } from "@/app/_components/use-start-exam";
 import {
   AlertIcon,
+  ArrowLeftIcon,
   CheckCircleIcon,
   ChevronDownIcon,
   IdeaIcon,
@@ -27,19 +22,11 @@ import { scoreInk } from "@/app/_components/score-band";
 import { cn } from "@/lib/ui/class-names";
 import { correctionNotices, earlyClosingNotice } from "@/lib/ui/correction-notices";
 import { formatScore25 } from "@/lib/ui/format-score";
+import { HUB_LINKS } from "@/lib/ui/epreuve-hub";
 import {
   CORRECTION_TRANSCRIPT_COPY,
   correctionTranscriptView,
 } from "@/lib/ui/correction-transcript";
-import {
-  EVALUATION_MIN_PX,
-  RAIL_CONTENT_MAX_PX,
-  RAIL_DEFAULT_PX,
-  clampRailPx,
-  railMaxPx,
-  railPxFromPointer,
-  steppedRailPx,
-} from "@/lib/ui/transcript-rail";
 import { speakerLabel, turnKey } from "@/lib/ui/debate-conversation";
 import { COMPETENCY_FLOOR, COMPETENCY_MAX } from "@/lib/delf/constants";
 import {
@@ -56,7 +43,8 @@ import { type TranscriptEntry } from "@/lib/delf/transcript";
 import type { OralTopic } from "@/lib/delf/topics";
 
 /**
- * The correction, as a two-column report on the fullscreen shell.
+ * The correction, as one column on the fullscreen shell: the évaluation, and
+ * the conversation under it.
  *
  * PORT NOTE: the reference's `OralResultReport` in `evaluation-resultats.tsx`. A
  * slim header (sujet · level · correction-IA pill · actions), a transcript
@@ -64,10 +52,21 @@ import type { OralTopic } from "@/lib/delf/topics";
  * with its floor warning, the five criteria as collapsible rows grouped by
  * compétence, points forts / axes, the appréciation and one conseil.
  * Reproduced block for block, in that order — but no longer in the reference's
- * PLACES: #136 swapped the columns, on the user's call. The evaluation is what
- * a candidate opens this page for, so it takes the wide main pane and the
- * transcript stands by in the fixed rail. Everything inside each column is
- * still the reference's blocks.
+ * PLACES: #136 swapped the columns, on the user's call, and #183 stopped them
+ * being columns at all. Everything inside each block is still the reference's.
+ *
+ * **One column, at every width (#183).** The two panes used to sit side by side
+ * from `lg` up, each scrolling on its own, with a draggable separator between
+ * them (#141) — so the correction and the transcript competed for the width and
+ * for the reader, and neither had enough of either. Reading order settles it
+ * instead: the évaluation first, whole, and the conversation below it. That is
+ * what the phone always did and what the printed sheet always did; the desktop
+ * now agrees with both, and the page has one scrollbar rather than three.
+ *
+ * The rail's whole apparatus went with it — the resize handle, the pointer
+ * arithmetic, the observer that re-clamped a stored width against a resized
+ * window, and `lib/ui/transcript-rail.ts`. None of it has a caller once there is
+ * nothing to resize.
  *
  * Three things are this project's and stay:
  *
@@ -249,48 +248,7 @@ export function ResultsClient({
   /** « Recommencer » (#165): a POST and then a navigation, not a link. */
   const { start: startExam, pending: starting, error: startError } = useStartExam();
 
-  /**
-   * How wide the transcript rail is pulled (#141), in the pixels the pointer
-   * speaks. State rather than a ref because the grid template renders from it;
-   * component state rather than storage because a pulled-open rail is a
-   * reading posture, not a setting — the next correction opens at the default
-   * like this one did. The arithmetic — what a pointer means, where the pull
-   * stops — is `lib/ui/transcript-rail.ts`, where it is tested.
-   */
-  const [railPx, setRailPx] = useState(RAIL_DEFAULT_PX);
-  /** The widest the pull can actually reach in the CURRENT body — kept honest
-   *  by the observer below, so the separator's announced range is the range
-   *  the keyboard's End really takes it to. */
-  const [railMax, setRailMax] = useState(RAIL_CONTENT_MAX_PX);
-  const bodyRef = useRef<HTMLDivElement | null>(null);
-  /** The width mid-drag, written straight to the DOM (see `pullRail`) and
-   *  committed to state on the gesture's end. Null between gestures. */
-  const draggedPx = useRef<number | null>(null);
-
   const result = initial ?? stashed;
-  const hasResult = result !== null && result !== undefined;
-
-  /**
-   * The clamps re-run when the WINDOW moves, not only when the handle does
-   * (#144's review). A rail pulled to 720 px on a wide screen and then
-   * resized under it kept its 720: `railPx` was only ever clamped at
-   * interaction time, so the evaluation — the pane with no CSS floor of its
-   * own — silently gave up the minimum the arithmetic promises. The observer
-   * keeps the stored width valid against the body it actually sits in, and
-   * refreshes the achievable maximum for the same reason.
-   */
-  useEffect(() => {
-    const body = bodyRef.current;
-    if (!body || typeof ResizeObserver === "undefined") return;
-    const observer = new ResizeObserver(() => {
-      const width = body.getBoundingClientRect().width;
-      if (width === 0) return;
-      setRailMax(railMaxPx(width));
-      setRailPx((current) => clampRailPx(current, width));
-    });
-    observer.observe(body);
-    return () => observer.disconnect();
-  }, [hasResult]);
 
   if (result === null) {
     return (
@@ -353,46 +311,16 @@ export function ResultsClient({
     ? "La phonologie n'a pas pu être évaluée de façon fiable sur cette production."
     : undefined;
 
-  /**
-   * The pull itself (#141): a pointer position, read as a rail width against
-   * the body's own rectangle — not the viewport's, since the two differ by
-   * whatever chrome the shell puts around the page.
-   *
-   * Written straight to the grid's CSS variable rather than through state,
-   * because a per-pixel `setRailPx` re-rendered the entire correction — every
-   * turn of the transcript, all five criterion rows — for a style only the
-   * grid reads, and a long transcript made the drag visibly stutter (#144's
-   * review). State catches up at the gesture's end (`commitRail`), which is
-   * also all the separator's `aria-valuenow` needs: mid-drag values are as
-   * transient to a screen reader as they are to the layout.
-   */
-  const pullRail = (clientX: number) => {
-    const body = bodyRef.current;
-    if (!body) return;
-    const rect = body.getBoundingClientRect();
-    const px = railPxFromPointer(clientX, rect.right, rect.width);
-    body.style.setProperty("--rail-w", `${px}px`);
-    draggedPx.current = px;
-  };
-
-  /** The gesture is over — pointer up, or capture lost to a cancel — so the
-   *  width the drag reached becomes the width the component knows. */
-  const commitRail = () => {
-    if (draggedPx.current === null) return;
-    setRailPx(draggedPx.current);
-    draggedPx.current = null;
-  };
-
-  // `print:*` on all four of this page's scroll containers — the shell, the
-  // grid, the transcript column and the rail. On screen the correction is a
-  // fixed-height, independently-scrolling pair of columns, and a scroll
-  // container prints as one clipped screenful. Releasing the clipping is what
-  // lets the sheet paginate at all — and therefore what makes the section
-  // headings' `break-*` rules further down mean anything.
+  // `print:*` on both of this page's scroll containers — the shell, and the
+  // column inside it. On screen the correction is a fixed-height pane that
+  // scrolls, and a scroll container prints as one clipped screenful. Releasing
+  // the clipping is what lets the sheet paginate at all — and therefore what
+  // makes the section headings' `break-*` rules further down mean anything.
   //
-  // All four, not just the transcript's: the rail is the half carrying the /25,
-  // so a page that paginates on one side and clips on the other loses the grade
-  // rather than the words.
+  // Two rather than the four this took before #183, for the reason the layout
+  // has one column rather than two: the grid and the rail were scroll
+  // containers of their own, and each needed releasing separately or the half
+  // carrying the /25 clipped while the other paginated.
   return (
     <div className="bg-background text-foreground flex h-full min-h-0 flex-col overflow-hidden print:h-auto print:overflow-visible">
       {/* Header. `no-print` on the actions only: the correction is the thing a
@@ -404,6 +332,15 @@ export function ResultsClient({
           one fact on this header a candidate cannot reconstruct from the rail
           below it. `min-h-14` keeps the desktop band exactly as it was. */}
       <header className="border-border bg-card z-20 flex min-h-14 shrink-0 flex-wrap items-center gap-x-3 gap-y-2 border-b px-4 py-2 sm:flex-nowrap sm:px-5 sm:py-0">
+        {/* « Retour », first in the row on both screens (#183). The correction
+            is opened from three places — the finish, the historique and the
+            tableau de bord — and until now the only way off it was
+            « L'épreuve », which is not where any of those three are. It is an
+            icon plus a word above `sm` and the icon alone below, which is the
+            treatment « Mes notes » already uses in the passation's bar: the
+            same 36 px target either way, and no wrap on a 375 px header that
+            already carries the sujet and the level. */}
+        <BackButton />
         <div className="min-w-0">
           <p className="truncate text-[0.84375rem] font-semibold">Production orale · Correction</p>
           <p className="text-muted-foreground truncate text-[0.6875rem]">{topic.title}</p>
@@ -460,36 +397,18 @@ export function ResultsClient({
         </p>
       )}
 
-      {/* Split body: the evaluation marks, the transcript stands by (#136).
-          The rail's column is a CSS variable because the candidate can pull it
-          wider (#141); the middle `auto` track is the handle, which only
-          exists at `lg` — below it the grid is the one stacked column it
-          always was. */}
-      <div
-        ref={bodyRef}
-        // Both variables the template reads come from here, so the CSS half of
-        // the evaluation's floor is `EVALUATION_MIN_PX` itself rather than a
-        // hand-copied 24rem that could silently drift from it (#144's review).
-        // The floor holds the pane's minimum even in the frame between a
-        // window resize and the observer's re-clamp of `--rail-w`.
-        style={
-          {
-            "--rail-w": `${railPx}px`,
-            "--eval-min": `${EVALUATION_MIN_PX}px`,
-          } as CSSProperties
-        }
-        className="grid min-h-0 flex-1 grid-cols-1 overflow-y-auto lg:grid-cols-[minmax(var(--eval-min),1fr)_auto_var(--rail-w)] lg:overflow-hidden print:overflow-visible"
-      >
-        {/* The evaluation, as the main column (#136). The /25 and the five
-            criteria are what a candidate opens this page for, and they used to
-            sit in the 26 rem rail while the transcript held the wide pane.
-            First in the DOM as well as widest, which is what puts the verdict
-            on top of the single-column stack on a phone and first on the
-            printed sheet. The centred measure is the treatment the transcript
-            column established for a main pane; the verdict keeps its card so
-            the mark still reads as the page's one headline. */}
-        <section className="bg-muted/30 min-h-0 lg:overflow-y-auto print:overflow-visible">
-          <div className="mx-auto max-w-[46rem] px-4 py-6 pb-16 sm:px-7">
+      {/* One column, and one scrollbar (#183): the évaluation, then the
+          conversation. The order is the DOM's alone now — no grid, no
+          breakpoint and no stored width — which is also the order the sheet
+          prints in and the order a phone always showed. */}
+      <div className="min-h-0 flex-1 overflow-y-auto print:overflow-visible">
+        {/* The evaluation, first (#136). The /25 and the five criteria are what
+            a candidate opens this page for. The centred measure is the
+            treatment the transcript column established for a main pane; the
+            verdict keeps its card so the mark still reads as the page's one
+            headline. */}
+        <section className="bg-muted/30">
+          <div className="mx-auto max-w-[46rem] px-4 py-6 pb-10 sm:px-7">
             {/* Verdict */}
             <div className="border-border bg-card sheet border px-6 pt-5 pb-4">
               <div className="flex flex-wrap items-baseline gap-x-3 gap-y-2">
@@ -635,73 +554,9 @@ export function ResultsClient({
           </div>
         </section>
 
-        {/* The rail's edge is a handle (#141): pull it left and the transcript
-            gets the room to be read in full, push it back when done. Desktop
-            only — the phone stacks both columns full-width already — and gone
-            from print, which lays the sheet out on its own terms. Double-click
-            snaps back to the default; the keyboard gets the same gesture
-            through `role="separator"`, ArrowLeft widening because that is the
-            direction the drag itself teaches. The handle carries the divider
-            line the transcript column used to draw, so there is one hairline
-            between the panes, and it is the one you can grab. */}
-        <div
-          role="separator"
-          aria-orientation="vertical"
-          aria-label="Largeur de la transcription"
-          aria-valuemin={RAIL_DEFAULT_PX}
-          aria-valuemax={railMax}
-          aria-valuenow={railPx}
-          tabIndex={0}
-          title="Tirer pour ajuster la largeur de la transcription"
-          onPointerDown={(event) => {
-            // The drag must not start a text selection in either column, and
-            // capture keeps the gesture on the handle however far the pointer
-            // strays from an 8 px strip. The explicit focus() is Safari's
-            // share of the deal: preventDefault() on pointerdown suppresses
-            // its focus-on-click, and the arrow keys the handle promises only
-            // work on a handle that is actually focused.
-            event.preventDefault();
-            event.currentTarget.focus();
-            event.currentTarget.setPointerCapture(event.pointerId);
-          }}
-          onPointerMove={(event) => {
-            if (!event.currentTarget.hasPointerCapture(event.pointerId)) return;
-            pullRail(event.clientX);
-          }}
-          // Both ends of a gesture: the ordinary release, and a capture lost
-          // to a cancel. Either way the width the drag reached is committed.
-          onPointerUp={commitRail}
-          onLostPointerCapture={commitRail}
-          onDoubleClick={() => setRailPx(RAIL_DEFAULT_PX)}
-          onKeyDown={(event) => {
-            const width = bodyRef.current?.getBoundingClientRect().width;
-            if (!width) return;
-            if (event.key === "ArrowLeft") {
-              setRailPx((current) => steppedRailPx(current, "wider", width));
-            } else if (event.key === "ArrowRight") {
-              setRailPx((current) => steppedRailPx(current, "narrower", width));
-            } else if (event.key === "Home") {
-              setRailPx(RAIL_DEFAULT_PX);
-            } else if (event.key === "End") {
-              setRailPx(railMaxPx(width));
-            } else {
-              return;
-            }
-            event.preventDefault();
-          }}
-          className="border-border hover:bg-primary/10 active:bg-primary/15 focus-visible:bg-primary/15 relative hidden w-2 shrink-0 cursor-col-resize touch-none border-l outline-none lg:block print:hidden"
-        >
-          <span
-            aria-hidden
-            className="text-muted-foreground/70 absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-[0.625rem] leading-none select-none"
-          >
-            ⋮
-          </span>
-        </div>
-
-        {/* The transcript, standing by in the rail the evaluation vacated.
-            Still whole, still printed, still the only place the recordings
-            play (#116) — it lost the spotlight, not the page. */}
+        {/* The conversation, under the correction (#183). Still whole, still
+            printed, still the only place the recordings play (#116) — it lost
+            the rail, not the page. */}
         <TranscriptColumn
           title={topic.title}
           transcript={transcript}
@@ -717,9 +572,10 @@ export function ResultsClient({
 
 /**
  * The transcript: the épreuve as it was spoken, set as one printed page — in
- * the two parts it was sat in (#70). Since #136 it stands in the fixed rail
- * rather than the wide pane; nothing about its content, its print treatment or
- * its players moved with it.
+ * the two parts it was sat in (#70). It stood in the wide pane, then in the
+ * fixed rail (#136), and since #183 it is simply the second half of one
+ * column, under the correction. Nothing about its content, its print treatment
+ * or its players changed at any of the three.
  *
  * The turns are paragraphs with a speaker label above them rather than the
  * reference's chat bubbles. Two reasons, and the second is the one that decides
@@ -790,12 +646,14 @@ function TranscriptColumn({
   });
 
   return (
-    <section className="border-border bg-muted/30 min-h-0 border-t lg:overflow-y-auto lg:border-t-0 print:overflow-visible">
-      {/* The measure caps the phone and print renderings, where this section
-          is full-width; in the 26.25 rem rail it never binds. The paddings
-          slimmed with the column (#136): p-9 of paper margin inside a 420 px
-          rail left the words a third of it. */}
-      <div className="mx-auto max-w-[42.5rem] px-4 py-6 pb-16 sm:px-5">
+    <section className="border-border bg-muted/30 border-t">
+      {/* The same 46 rem measure the correction above it is set in (#183), so
+          the two halves of the column share one left margin instead of the
+          transcript sitting 3.5 rem narrower than the block it now follows.
+          The paddings stay the slim ones the rail forced (#136): they were
+          right for a 420 px column and they are right for a centred measure —
+          it is the sheet inside that carries the paper margin. */}
+      <div className="mx-auto max-w-[46rem] px-4 py-6 pb-16 sm:px-7">
         <article className="border-paper-border bg-paper sheet border p-5 sm:p-6">
           <div className="border-border border-b pb-3">
             <Kicker>{CORRECTION_TRANSCRIPT_COPY.kicker}</Kicker>
@@ -907,12 +765,53 @@ function TranscriptColumn({
 }
 
 /**
+ * « Retour » (#183): back to wherever the candidate came from.
+ *
+ * `router.back()` and not a link, because there is no single page behind this
+ * one — the correction is opened from the finish of an épreuve, from a row of
+ * the historique and from the tableau de bord's « Dernières épreuves », and a
+ * fixed href would be wrong two times in three. The passation is not among the
+ * three: it navigates here with `replace`, so the entry this goes back to is
+ * whatever opened the épreuve rather than the finished épreuve itself.
+ *
+ * The fallback is the historique, for the one arrival with nothing behind it:
+ * a correction opened in a fresh tab from a pasted or bookmarked url, where
+ * `back()` leaves the browser sitting on the page it is already on. `length`
+ * counts this session's entries in this tab, so 1 is exactly "arrived here
+ * directly" — and the historique is the list this correction is one row of,
+ * which is the nearest true answer to « retour » when there is no history to
+ * read one from.
+ */
+function BackButton() {
+  const router = useRouter();
+
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        if (typeof window !== "undefined" && window.history.length <= 1) {
+          router.push(HUB_LINKS.historique);
+          return;
+        }
+        router.back();
+      }}
+      aria-label="Retour à la page précédente"
+      className="no-print border-border bg-card hover:bg-muted text-muted-foreground hover:text-foreground inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border px-2.5 text-xs font-semibold transition-colors sm:px-3"
+    >
+      <ArrowLeftIcon className="size-3.5" />
+      <span className="hidden sm:inline">Retour</span>
+    </button>
+  );
+}
+
+/**
  * One criterion: a collapsible row carrying the grille's own scale, the /5, and
  * the model's justification behind the disclosure.
  *
  * Collapsed by default, one open at a time — the reference's behaviour. Five
- * justifications open at once is a wall of prose in a 420 px rail, and the thing
- * a candidate opens this page for is the number.
+ * justifications open at once is a wall of prose between the verdict and the
+ * conversation below it, and the thing a candidate opens this page for is the
+ * number.
  */
 function CriterionRow({
   label,

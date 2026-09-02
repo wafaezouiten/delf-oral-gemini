@@ -4,6 +4,7 @@ import { Kicker } from "@/app/_components/po/tag";
 import { requireUserId } from "@/lib/auth/exam-guard";
 import { AccountProfile } from "../_components/account-profile";
 import { ResetRecord } from "../_components/reset-record";
+import { SignOut } from "../_components/sign-out";
 
 /**
  * Mon compte — one page, two blocks, one column.
@@ -74,6 +75,17 @@ export default async function ComptePage() {
           A Clerk card stretched to 4xl is a login form the width of a desk. */}
       <div className="mt-6 w-full lg:max-w-2xl">
         <AccountProfile />
+      </div>
+
+      {/* « Se déconnecter », under the card (#183). It arrived with the avatar:
+          the rail's `<UserButton>` popover carried « Gérer le compte » and this,
+          the avatar now goes straight to the first, and the second belongs on
+          the page that manages the account rather than in a menu that no longer
+          exists. Below Clerk's card rather than in the header, because the
+          header is where the one control that changes the record lives, and two
+          buttons up there would put a sign out beside a reset. */}
+      <div className="border-border mt-6 w-full border-t pt-6 lg:max-w-2xl">
+        <SignOut />
       </div>
     </main>
   );

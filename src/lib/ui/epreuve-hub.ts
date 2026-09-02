@@ -47,9 +47,10 @@ export interface HubLinks {
   tableauDeBord: string;
   historique: string;
   /**
-   * Mon compte (#69) — the account screens and « Repartir de zéro », in one
-   * page. In the map but not in the rail: it is reached by clicking the avatar,
-   * which is where an account is reached, and the four destinations stay four.
+   * Mon compte (#69) — the account screens, « Repartir de zéro » and the sign
+   * out, in one page. It is the avatar's href: since #183 the avatar is a link
+   * at the foot of the rail and the fifth tab on the phone, rather than a menu
+   * offering this page as one of its two entries.
    */
   compte: string;
 }
