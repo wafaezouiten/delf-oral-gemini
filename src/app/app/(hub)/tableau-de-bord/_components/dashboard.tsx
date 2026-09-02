@@ -60,9 +60,15 @@ export function Dashboard({ view }: { view: DashboardView }) {
           four readings of one record — a mark, a rate, a duration and a run —
           and four separate frames stacked down a phone read as four unrelated
           things and cost three extra gaps of vertical space. They now share a
-          sheet and are told apart by rules: a hairline between the rows on a
-          phone, between the columns from `lg` up, and both on the 2×2 in
-          between.
+          sheet and are told apart by rules.
+
+          **Two by two on a phone, four across from `lg`** — never one under
+          another (#185). Stacked, the section was four full-width bands and
+          read as the four separate cards it had just stopped being; quartered,
+          the division is visible without scrolling and the whole standing fits
+          one glance. Four across on a 390 px screen is not the alternative: it
+          leaves 69 px of content per cell, and « sur 25, 2 épreuves dont 2
+          abandonnées » does not go in 69 px.
 
           The rules are the grid's own gaps rather than borders — `gap-px` over
           a `bg-border` container, each cell painted `bg-card` — which leaves
@@ -71,10 +77,14 @@ export function Dashboard({ view }: { view: DashboardView }) {
           could not: it rules DOM order rather than visual rows, so on the 2×2
           it draws a line down the left edge of the third cell, which is the
           sheet's own border. */}
-      <ul className="border-border bg-border sheet mt-5 grid grid-cols-1 gap-px border sm:grid-cols-2 lg:grid-cols-4">
+      <ul className="border-border bg-border sheet mt-5 grid grid-cols-2 gap-px border lg:grid-cols-4">
         {view.tiles.map((tile) => (
-          <li key={tile.key} className="bg-card p-3.5 sm:p-4">
-            <p className="text-muted-foreground text-[0.6875rem] font-semibold tracking-[0.16em] uppercase">
+          <li key={tile.key} className="bg-card p-3 sm:p-4">
+            {/* The kicker loses a little of its tracking on a phone: at
+                0.16em « AU-DESSUS DU SEUIL » takes three lines in half a
+                390 px screen, and the four cells then have four different
+                heights. */}
+            <p className="text-muted-foreground text-[0.625rem] font-semibold tracking-[0.1em] uppercase sm:text-[0.6875rem] sm:tracking-[0.16em]">
               {tile.label}
             </p>
             {/* The one tile whose figure is a /25 is tinted on the /25 scale.
@@ -89,7 +99,9 @@ export function Dashboard({ view }: { view: DashboardView }) {
             >
               {tile.value}
             </p>
-            <p className="text-muted-foreground mt-1.5 text-xs leading-snug">{tile.caption}</p>
+            <p className="text-muted-foreground mt-1.5 text-[0.6875rem] leading-snug sm:text-xs">
+              {tile.caption}
+            </p>
           </li>
         ))}
       </ul>
@@ -310,14 +322,14 @@ function TrajectoryBar({ point, align }: { point: TrajectoryPoint; align: string
       <div
         aria-hidden
         className={cn(
-          "pointer-events-none absolute z-10 hidden w-max max-w-60 group-hover:block group-focus-visible:block",
+          "pointer-events-none absolute z-10 hidden w-max max-w-52 group-hover:block group-focus-visible:block",
           align,
         )}
         style={{ bottom: `calc(${point.percent}% + 8px)` }}
       >
-        <div className="border-border bg-card border px-3 py-2 text-left shadow-sm">
-          <p className="text-xs leading-snug font-medium">{point.topicTitle}</p>
-          <p className="mt-1.5 flex items-center gap-2">
+        <div className="border-border bg-card border px-2.5 py-1.5 text-left shadow-sm">
+          <p className="text-[0.6875rem] leading-snug font-medium">{point.topicTitle}</p>
+          <p className="mt-1 flex items-center gap-2">
             <ScoreTag score25={point.score25} />
             <span className="text-muted-foreground text-xs">{point.date}</span>
           </p>

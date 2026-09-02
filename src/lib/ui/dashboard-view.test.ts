@@ -36,6 +36,7 @@ function sitting(overrides: Partial<DashboardSitting> = {}): DashboardSitting {
     phase: "finished",
     endedAt: new Date("2026-08-16T10:00:00Z"),
     archivedAt: null,
+    recordings: [],
     ...overrides,
   };
 }

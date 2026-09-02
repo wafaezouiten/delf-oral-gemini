@@ -1035,7 +1035,7 @@ function CentredCard({
     <main className="bg-background flex h-full items-center justify-center p-6">
       <div
         role={tone === "danger" ? "alert" : "status"}
-        className="border-border bg-card sheet flex max-w-md flex-col items-center border px-8 py-14 text-center"
+        className="border-border bg-card sheet flex max-w-md flex-col items-center border px-6 py-10 text-center"
       >
         {tone === "danger" && (
           <span className="bg-danger-subtle text-danger flex size-14 items-center justify-center rounded-full">
