@@ -25,6 +25,7 @@ import { formatScore25 } from "@/lib/ui/format-score";
 import { HUB_LINKS } from "@/lib/ui/epreuve-hub";
 import {
   CORRECTION_TRANSCRIPT_COPY,
+  PHASE_HEADINGS,
   correctionTranscriptView,
 } from "@/lib/ui/correction-transcript";
 import { speakerLabel, turnKey } from "@/lib/ui/debate-conversation";
@@ -37,7 +38,7 @@ import {
   type OralCriterion,
 } from "@/lib/delf/criteria";
 import { scoreTone, type GrilleBand } from "@/lib/delf/grille";
-import { PHASE_DURATIONS } from "@/lib/delf/phases";
+import { PHASE_DURATIONS, formatClock } from "@/lib/delf/phases";
 import { meetsCompetencyFloor } from "@/lib/delf/orale-rubric";
 import { type TranscriptEntry } from "@/lib/delf/transcript";
 import type { OralTopic } from "@/lib/delf/topics";
@@ -408,9 +409,9 @@ export function ResultsClient({
             verdict keeps its card so the mark still reads as the page's one
             headline. */}
         <section className="bg-muted/30">
-          <div className="mx-auto max-w-[46rem] px-4 py-6 pb-10 sm:px-7">
+          <div className="mx-auto max-w-[46rem] px-4 py-5 pb-8 sm:px-6">
             {/* Verdict */}
-            <div className="border-border bg-card sheet border px-6 pt-5 pb-4">
+            <div className="border-border bg-card sheet border px-4 pt-4 pb-3.5 sm:px-5">
               <div className="flex flex-wrap items-baseline gap-x-3 gap-y-2">
                 <p
                   className={cn(
@@ -459,6 +460,13 @@ export function ResultsClient({
               )}
             </div>
 
+            <RecordingsCard
+              examId={examId}
+              playable={result.playable ?? []}
+              monologueSeconds={monologueSeconds}
+              debateSeconds={debateSeconds}
+            />
+
             {evaluation.mode === "text" && (
               <div className="mt-4">
                 <Notice tone="warning" title="Corrigé sans l'audio">
@@ -471,7 +479,7 @@ export function ResultsClient({
 
             <div className="mt-5">
               {CRITERIA_GROUPS.map((group) => (
-                <div key={group.competence} className="mb-4">
+                <div key={group.competence} className="mb-3">
                   <Kicker className="text-[0.625rem]">{group.competence}</Kicker>
                   <div className="mt-2 flex flex-col gap-2">
                     {group.criteria.map((key) => (
@@ -498,7 +506,7 @@ export function ResultsClient({
                 emptyLabel="Aucun point fort identifié."
               />
 
-              <div className="mt-2.5">
+              <div className="mt-2">
                 <FeedbackPanel
                   tone="warning"
                   title="Axes prioritaires"
@@ -509,7 +517,7 @@ export function ResultsClient({
               </div>
 
               {evaluation.feedback.appreciationGlobale && (
-                <div className="border-border bg-muted/40 sheet mt-2.5 border p-4">
+                <div className="border-border bg-muted/40 sheet mt-2 border p-3.5">
                   <h3 className="text-xs font-bold">Appréciation globale</h3>
                   <p className="text-muted-foreground mt-1.5 text-xs leading-relaxed">
                     {evaluation.feedback.appreciationGlobale}
@@ -518,7 +526,7 @@ export function ResultsClient({
               )}
 
               {evaluation.feedback.conseil && (
-                <div className="border-primary/30 bg-primary-subtle sheet mt-2.5 flex items-start gap-2.5 border p-4">
+                <div className="border-primary/30 bg-primary-subtle sheet mt-2 flex items-start gap-2.5 border p-3.5">
                   <IdeaIcon className="text-primary mt-0.5 size-4 shrink-0" />
                   <p className="text-foreground/85 text-xs leading-relaxed">
                     <span className="text-primary font-semibold">Conseil : </span>
@@ -554,16 +562,14 @@ export function ResultsClient({
           </div>
         </section>
 
-        {/* The conversation, under the correction (#183). Still whole, still
-            printed, still the only place the recordings play (#116) — it lost
-            the rail, not the page. */}
+        {/* The conversation, under the correction (#183). Still whole and still
+            printed — it lost the rail (#183) and then the players (#185), not
+            the page. */}
         <TranscriptColumn
           title={topic.title}
           transcript={transcript}
           monologueSeconds={monologueSeconds}
           debateSeconds={debateSeconds}
-          examId={examId}
-          playable={result.playable ?? []}
         />
       </div>
     </div>
@@ -617,6 +623,12 @@ export function ResultsClient({
  * prints its own duration beside its own heading, and leaving the combined line
  * up top would print both numbers twice.
  *
+ * The players that sat on those heading lines are gone from here (#185): they
+ * are one block up in the correction column, under the verdict. Still one
+ * playback surface, as #116 left it — it moved rather than multiplied — and the
+ * durations stay, because they are the transcript's own anchor for every
+ * timestamp under them.
+ *
  * Everything decided rather than drawn — the order, the headings, which
  * duration goes where, and which of the two "nothing was said" messages fires —
  * is in `lib/ui/correction-transcript.ts`, where it is tested.
@@ -626,19 +638,11 @@ function TranscriptColumn({
   transcript,
   monologueSeconds,
   debateSeconds,
-  examId,
-  playable,
 }: {
   title: string;
   transcript: readonly TranscriptEntry[];
   monologueSeconds: number;
   debateSeconds: number;
-  examId: string;
-  playable: ReadonlyArray<{
-    phase: "monologue" | "debate";
-    mimeType: string;
-    durationSeconds: number;
-  }>;
 }) {
   const { sections, silentNotice } = correctionTranscriptView(transcript, {
     monologueSeconds,
@@ -653,8 +657,8 @@ function TranscriptColumn({
           The paddings stay the slim ones the rail forced (#136): they were
           right for a 420 px column and they are right for a centred measure —
           it is the sheet inside that carries the paper margin. */}
-      <div className="mx-auto max-w-[46rem] px-4 py-6 pb-16 sm:px-7">
-        <article className="border-paper-border bg-paper sheet border p-5 sm:p-6">
+      <div className="mx-auto max-w-[46rem] px-4 py-5 pb-12 sm:px-6">
+        <article className="border-paper-border bg-paper sheet border p-4 sm:p-5">
           <div className="border-border border-b pb-3">
             <Kicker>{CORRECTION_TRANSCRIPT_COPY.kicker}</Kicker>
           </div>
@@ -683,24 +687,6 @@ function TranscriptColumn({
                   {section.durationLabel}
                 </span>
               </div>
-
-              {/* The half's own recording, on the line that already says how
-                  long it was (#98). Only where the bytes were kept — a sitting
-                  from before the vault, or one whose upload failed, keeps its
-                  duration and offers nothing, which is the honest rendering of
-                  a recording that existed and is gone. */}
-              {playable
-                .filter((recording) => recording.phase === section.phase)
-                .map((recording) => (
-                  <RecordingPlayer
-                    key={recording.phase}
-                    src={`/api/exams/${examId}/recordings/${section.phase}`}
-                    deleteHref={`/api/exams/${examId}/recordings/${section.phase}`}
-                    mimeType={recording.mimeType}
-                    durationSeconds={recording.durationSeconds}
-                    className="mt-3"
-                  />
-                ))}
 
               {section.emptyNote ? (
                 <p className="text-muted-foreground mt-3 text-xs leading-relaxed italic">
@@ -759,6 +745,106 @@ function TranscriptColumn({
             {CORRECTION_TRANSCRIPT_COPY.footnote}
           </p>
         </article>
+      </div>
+    </section>
+  );
+}
+
+/**
+ * « Vous réécouter » (#185): the two halves of the épreuve, as audio, in the
+ * correction column.
+ *
+ * The players existed since #98 and were tucked beside each part's heading in
+ * the transcript. That was the right place while the transcript held the wide
+ * pane; it stopped being one when the correction became a single column (#183)
+ * and the transcript moved below the whole évaluation — a candidate opening
+ * their correction to listen back had to scroll past five criteria, two
+ * feedback panels and the provenance line to find out whether there was
+ * anything to listen to. They are one block now, under the verdict, where a
+ * candidate looks.
+ *
+ * **One playback surface still** — the rule #116 set. The players are not in
+ * two places; they moved.
+ *
+ * **A part with no kept audio says so.** Before, nothing rendered at all: a
+ * sitting from before the vault, one whose upload failed, and one whose
+ * recording the candidate deleted were indistinguishable from a page that had
+ * simply not drawn them. The duration is still printed — it is the honest
+ * record of a recording that existed — and the sentence beside it says the
+ * audio itself is not available. A part with no audio AND no duration is a
+ * part that was never spoken; the transcript's own quiet line covers that one,
+ * so this card stays out of it.
+ *
+ * The whole card stands down when the sitting kept nothing at all, rather than
+ * printing two apologies under a heading promising recordings.
+ *
+ * `no-print` like the players inside it: the correction prints as a grade
+ * sheet, and audio has no printed form.
+ */
+function RecordingsCard({
+  examId,
+  playable,
+  monologueSeconds,
+  debateSeconds,
+}: {
+  examId: string;
+  playable: ReadonlyArray<{
+    phase: "monologue" | "debate";
+    mimeType: string;
+    durationSeconds: number;
+  }>;
+  monologueSeconds: number;
+  debateSeconds: number;
+}) {
+  const seconds: Record<"monologue" | "debate", number> = {
+    monologue: monologueSeconds,
+    debate: debateSeconds,
+  };
+
+  // A part earns a row when there is audio to play OR audio there once was.
+  // Both absent is a part that never happened, and the transcript says so.
+  const rows = (["monologue", "debate"] as const)
+    .map((phase) => ({
+      phase,
+      recording: playable.find((entry) => entry.phase === phase) ?? null,
+      seconds: seconds[phase],
+    }))
+    .filter((row) => row.recording !== null || row.seconds > 0);
+
+  if (rows.length === 0) return null;
+
+  return (
+    <section className="no-print border-border bg-card sheet mt-4 border">
+      <div className="border-border flex items-baseline justify-between gap-3 border-b px-4 py-2.5 sm:px-5">
+        <h2 className="text-[0.8125rem] font-bold">Vous réécouter</h2>
+        <p className="text-muted-foreground text-[0.6875rem]">Audio de l&apos;épreuve</p>
+      </div>
+      <div className="divide-border divide-y">
+        {rows.map((row) => (
+          <div key={row.phase} className="px-4 py-3 sm:px-5">
+            <div className="flex items-baseline justify-between gap-3">
+              <h3 className="text-xs font-semibold">{PHASE_HEADINGS[row.phase]}</h3>
+              <span className="text-muted-foreground tabular shrink-0 text-[0.6875rem]">
+                {formatClock(row.seconds)}
+              </span>
+            </div>
+            {row.recording ? (
+              <RecordingPlayer
+                src={`/api/exams/${examId}/recordings/${row.phase}`}
+                deleteHref={`/api/exams/${examId}/recordings/${row.phase}`}
+                mimeType={row.recording.mimeType}
+                durationSeconds={row.recording.durationSeconds}
+                className="mt-2.5"
+              />
+            ) : (
+              <p className="text-muted-foreground mt-1.5 text-xs leading-relaxed">
+                L&apos;enregistrement de cette partie n&apos;est plus disponible : il a été
+                supprimé, ou il n&apos;a pas pu être conservé. La durée ci-dessus reste celle de
+                l&apos;audio réellement enregistré.
+              </p>
+            )}
+          </div>
+        ))}
       </div>
     </section>
   );
@@ -845,7 +931,7 @@ function CriterionRow({
         onClick={onToggle}
         aria-expanded={open}
         aria-controls={panelId}
-        className="hover:bg-muted/40 block w-full px-3.5 py-3 text-left transition-colors"
+        className="hover:bg-muted/40 block w-full px-3.5 py-2.5 text-left transition-colors"
       >
         <span className="flex items-center gap-2.5">
           <span className="min-w-0 flex-1 truncate text-[0.8125rem] font-bold">{label}</span>
@@ -856,12 +942,12 @@ function CriterionRow({
             )}
           />
         </span>
-        <span className="mt-2.5 block">
+        <span className="mt-2 block">
           <BandScale band={band} />
         </span>
       </button>
 
-      <div id={panelId} hidden={!open} className="px-3.5 pb-3">
+      <div id={panelId} hidden={!open} className="px-3.5 pb-2.5">
         <p className="text-muted-foreground text-[0.71875rem] leading-relaxed">{description}</p>
         {justification && (
           <p className="border-border mt-2.5 border-t pt-2.5 text-xs leading-relaxed">
@@ -897,7 +983,7 @@ function FeedbackPanel({
   return (
     <div
       className={cn(
-        "sheet border p-4",
+        "sheet border p-3.5",
         tone === "success"
           ? "border-success/30 bg-success-subtle/50"
           : "border-warning/40 bg-warning-subtle/50",

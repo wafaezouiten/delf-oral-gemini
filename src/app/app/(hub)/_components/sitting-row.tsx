@@ -43,7 +43,7 @@ export function SittingRow({
   const abandoned = sitting.outcome === "abandoned";
 
   return (
-    <li className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2 px-6 py-3.5">
+    <li className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2 px-4 py-3 sm:px-6">
       <div className="min-w-0 flex-1">
         {abandoned ? (
           <p className="text-muted-foreground truncate text-sm font-medium">{sitting.topicTitle}</p>

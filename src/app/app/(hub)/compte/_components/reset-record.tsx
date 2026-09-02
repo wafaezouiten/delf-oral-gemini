@@ -90,23 +90,22 @@ export function ResetRecord() {
   }
 
   return (
-    // Full width on a phone, where the header stacks. From `sm` up it shrinks to
-    // its contents and is pushed to the far right by `ml-auto` — the flex row
-    // above already puts it there, and this makes it independent of what the
-    // title beside it happens to be doing. `items-end` then takes the button to
-    // the container's last pixel instead of leaving it inside a block that ends
-    // there.
-    <div className="ml-auto flex w-full flex-col items-stretch sm:w-auto sm:shrink-0 sm:items-end">
-      {/* Only as wide as its label: it is the header's second element, not a
-          form control, and a button stretched to the width of a column reads as
-          the page's main action. */}
-      <div className="flex w-full flex-col gap-2 sm:w-auto sm:items-end">
-        <button
-          type="button"
-          onClick={reset}
-          disabled={pending}
-          className={`${dangerButton} w-full sm:w-auto`}
-        >
+    // Only as wide as its label, at every width since #185. It used to stretch
+    // to the full width of a phone, which made the one red control on this page
+    // the biggest thing on it — read as the page's main action, directly under
+    // the title, on the screen where a mis-tap is easiest. It is the header's
+    // second element, not a form control. From `sm` up nothing changed: it
+    // shrinks to its contents and is pushed to the far right by `ml-auto`,
+    // independently of what the title beside it is doing, and `items-end` takes
+    // it to the container's last pixel rather than leaving it inside a block
+    // that ends there.
+    <div className="flex w-full flex-col items-start sm:ml-auto sm:w-auto sm:shrink-0 sm:items-end">
+      {/* `items-start` on the phone as well as `items-end` from `sm`: a
+          flex column stretches its children by default, so the button would
+          have gone back to full width by the box that holds it rather than by
+          a class on it. */}
+      <div className="flex w-full flex-col items-start gap-2 sm:w-auto sm:items-end">
+        <button type="button" onClick={reset} disabled={pending} className={dangerButton}>
           {pending ? "Réinitialisation…" : failed ? "Réessayer" : "Réinitialiser"}
         </button>
         {/* One slot under the button, three things it can say: what the button

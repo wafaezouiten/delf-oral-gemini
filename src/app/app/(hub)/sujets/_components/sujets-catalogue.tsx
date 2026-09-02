@@ -67,7 +67,7 @@ export function SujetsCatalogue({
 
   return (
     <main className="mx-auto w-full max-w-5xl px-4 pb-16 sm:px-6">
-      <header className="pt-10 sm:pt-14">
+      <header className="pt-6 sm:pt-10">
         <h1 className="font-serif text-[2.125rem] leading-[1.06] font-semibold tracking-tight text-balance sm:text-[2.75rem]">
           Production orale · Sujets
         </h1>
@@ -131,11 +131,11 @@ export function SujetsCatalogue({
       </div>
 
       {filtered.length === 0 ? (
-        <p className="border-border text-muted-foreground sheet mt-6 border border-dashed px-6 py-12 text-center text-sm">
+        <p className="border-border text-muted-foreground sheet mt-5 border border-dashed px-4 py-10 text-center text-sm sm:px-6">
           Aucun sujet ne correspond à « {query} ».
         </p>
       ) : (
-        <ul className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <ul className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {filtered.map((sujet) => (
             <li key={sujet.slug} className="flex">
               <SujetCard
@@ -188,7 +188,7 @@ function SujetCard({
       aria-label={`Lire le sujet : ${sujet.title}`}
       // Paper stock, matching the hub's row and the sheet behind it: a stack of
       // sujets rather than a grid of cards.
-      className="group border-paper-border bg-paper hover:border-primary/60 sheet flex h-full w-full cursor-pointer flex-col items-start border p-5 text-left transition-colors"
+      className="group border-paper-border bg-paper hover:border-primary/60 sheet flex h-full w-full cursor-pointer flex-col items-start border p-4 text-left transition-colors sm:p-5"
     >
       <div className="flex w-full items-center justify-between gap-2.5">
         <span className="text-muted-foreground tabular text-[0.65625rem] font-medium tracking-[0.06em]">
@@ -258,7 +258,7 @@ function SujetSheet({ sujet, onClose }: { sujet: KioskSujet | null; onClose: () 
     >
       {sujet && (
         <div className="flex h-full flex-col">
-          <div className="border-border flex shrink-0 items-center justify-between gap-3 border-b px-6 py-4">
+          <div className="border-border flex shrink-0 items-center justify-between gap-3 border-b px-4 py-3 sm:px-6">
             <Kicker>Sujet · Production orale</Kicker>
             <button
               type="button"
@@ -270,7 +270,7 @@ function SujetSheet({ sujet, onClose }: { sujet: KioskSujet | null; onClose: () 
             </button>
           </div>
 
-          <div className="min-h-0 flex-1 overflow-y-auto px-6 py-6">
+          <div className="min-h-0 flex-1 overflow-y-auto px-4 py-5 sm:px-6">
             <h2
               id="sujet-sheet-title"
               className="font-serif text-2xl leading-snug font-semibold text-balance"
@@ -287,7 +287,7 @@ function SujetSheet({ sujet, onClose }: { sujet: KioskSujet | null; onClose: () 
             {/* The same paper stock the épreuve prints it on, so the thing the
                 candidate reads here and the thing they meet inside the exam are
                 visibly the same object. */}
-            <div className="border-paper-border bg-paper sheet mt-6 border p-5 sm:p-6">
+            <div className="border-paper-border bg-paper sheet mt-5 border p-4 sm:p-5">
               <h3 className="text-muted-foreground border-border border-b pb-2 text-[0.6875rem] font-semibold tracking-[0.16em] uppercase">
                 Document déclencheur
               </h3>
@@ -300,7 +300,7 @@ function SujetSheet({ sujet, onClose }: { sujet: KioskSujet | null; onClose: () 
             </div>
           </div>
 
-          <div className="border-border flex shrink-0 flex-wrap items-center justify-between gap-3 border-t px-6 py-4">
+          <div className="border-border flex shrink-0 flex-wrap items-center justify-between gap-3 border-t px-4 py-3 sm:px-6">
             {/* The dead dialog's one load-bearing line, folded into the durée it
                 sat next to: the clock starts the moment the button is pressed. */}
             <span className="text-muted-foreground inline-flex items-center gap-1.5 text-xs">

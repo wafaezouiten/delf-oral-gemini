@@ -23,11 +23,16 @@ import { secondaryButton } from "@/app/_components/button-styles";
  * visitor can read. Left to Clerk's default it returns to `/app/compte`, which
  * the middleware bounces straight back to the sign-in form, so the candidate
  * signs out and is immediately asked to sign in again.
+ *
+ * Full width on a phone and only as wide as its label from `sm` up (#185) —
+ * the reverse of « Réinitialiser », which took the full width there. Of the
+ * two buttons on this page the one that changes nothing is the one worth
+ * making easy to hit, and the one that archives a record is not.
  */
 export function SignOut() {
   return (
     <SignOutButton redirectUrl="/">
-      <button type="button" className={secondaryButton}>
+      <button type="button" className={`${secondaryButton} w-full shrink-0 sm:w-auto`}>
         Se déconnecter
       </button>
     </SignOutButton>
