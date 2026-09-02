@@ -82,9 +82,9 @@ export function ExitDialog({
         onCancel();
       }}
       aria-labelledby="exit-dialog-title"
-      className="bg-card text-foreground border-border m-auto w-[min(30rem,92vw)] border p-0 backdrop:bg-black/50"
+      className="bg-card text-foreground border-border m-auto w-[min(27rem,92vw)] border p-0 backdrop:bg-black/50"
     >
-      <div className="space-y-4 p-6">
+      <div className="space-y-3 p-4 sm:p-5">
         <h2 id="exit-dialog-title" className="font-serif text-lg font-semibold">
           Abandonner l&apos;épreuve ?
         </h2>
@@ -93,7 +93,7 @@ export function ExitDialog({
             three sentences — the score, the historique, the moyenne, and a
             comparison to leaving the exam room — and a candidate mid-épreuve
             reads none of it. What they need to know is the number. */}
-        <div className="border-danger/40 bg-danger-subtle text-danger flex items-center gap-2.5 border p-3.5">
+        <div className="border-danger/40 bg-danger-subtle text-danger flex items-center gap-2.5 border p-3">
           <AlertIcon className="size-4 shrink-0" />
           <p className="text-sm font-semibold">Vous aurez 0/{COMPETENCY_MAX} à cette épreuve.</p>
         </div>
@@ -108,7 +108,7 @@ export function ExitDialog({
         {failed && (
           <p
             role="alert"
-            className="border-border bg-muted text-foreground border p-3 text-sm leading-relaxed"
+            className="border-border bg-muted text-foreground border p-2.5 text-sm leading-relaxed"
           >
             L&apos;abandon n&apos;a pas pu être enregistré. Vous pouvez réessayer, ou quitter quand
             même — cette épreuve restera alors en cours et ne comptera pas.

@@ -61,7 +61,7 @@ export default async function HistoriquePage() {
 
   if (history.length === 0) {
     return (
-      <main className="mx-auto w-full max-w-3xl px-6 py-16 text-center">
+      <main className="mx-auto w-full max-w-3xl px-4 py-12 text-center sm:px-6 sm:py-16">
         <span className="bg-primary-subtle text-primary mx-auto flex size-14 items-center justify-center rounded-lg">
           <ClockIcon className="size-7" />
         </span>
@@ -85,7 +85,7 @@ export default async function HistoriquePage() {
   // on a wide monitor it read as half a page of margin (#114). The empty state
   // above keeps `max-w-3xl`, like the dashboard's.
   return (
-    <main className="mx-auto w-full max-w-4xl px-6 py-10">
+    <main className="mx-auto w-full max-w-4xl px-4 py-6 sm:px-6 sm:py-8">
       <Kicker>DELF B2 · Production orale</Kicker>
       <h1 className="mt-1 font-serif text-2xl leading-tight font-semibold">Historique</h1>
       <p className="text-muted-foreground mt-2 text-sm leading-relaxed">
@@ -116,7 +116,7 @@ export default async function HistoriquePage() {
         /* Reachable only after a reset: the page-level empty state above needs
            the whole table to be empty, and it is not. Saying "aucune épreuve"
            here would contradict the archive sitting directly underneath. */
-        <p className="border-border bg-card sheet mt-6 border px-6 py-5 text-sm leading-relaxed">
+        <p className="border-border bg-card sheet mt-5 border px-4 py-4 text-sm leading-relaxed sm:px-6">
           Vous êtes reparti de zéro. Vos épreuves précédentes sont dans les archives, ci-dessous.{" "}
           <Link href={HUB_LINKS.sujets} className="font-semibold underline">
             Choisir un sujet

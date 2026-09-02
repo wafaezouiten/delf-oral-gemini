@@ -20,6 +20,18 @@
  *  - **Its own SVGs.** The reference pulls FastForward/Next from hugeicons;
  *    this repo inlines its dev-tool icons (see the dev panels), so these two
  *    are drawn here the same way.
+ *
+ * **It is no longer fixed to the corner of the viewport (#183).** It sat
+ * `fixed bottom-24 left-4`, floating over the conversation column — over the
+ * transcript on the monologue and over the examiner's questions on the débat —
+ * which is where a candidate is reading. It now renders in the control bar's
+ * development cluster, underneath the examiner-prompt panel, so every dev
+ * control on the passation is in one corner and none of them is on top of the
+ * épreuve. The caller places it; this component only draws the pill, which is
+ * why the positioning classes are gone rather than merely changed.
+ *
+ * Smaller with the move: the row it joins is a stack of dev controls beside a
+ * 48 px mic, not a lone pill on an empty margin.
  */
 
 const SKIP_STEPS = [
@@ -37,8 +49,8 @@ export function DevTimeSkip({
   onSkipToEnd: () => void;
 }) {
   return (
-    <div className="border-warning/50 bg-warning-subtle text-warning pointer-events-auto fixed bottom-24 left-4 z-20 flex items-center gap-1.5 rounded-full border px-2 py-1.5 shadow-sm">
-      <span className="border-warning/60 mr-0.5 inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-bold tracking-wide uppercase">
+    <div className="border-warning/50 bg-warning-subtle text-warning flex w-fit items-center gap-1 rounded-full border px-1.5 py-1">
+      <span className="border-warning/60 inline-flex items-center gap-0.5 rounded-full border px-1.5 py-0.5 text-[9px] font-bold tracking-wide uppercase">
         <FastForwardIcon />
         Dev
       </span>
@@ -47,7 +59,7 @@ export function DevTimeSkip({
           key={step.seconds}
           type="button"
           onClick={() => onSkip(step.seconds)}
-          className="hover:bg-warning/20 rounded-full px-2 py-1 text-[11.5px] font-semibold transition-colors"
+          className="hover:bg-warning/20 rounded-full px-1.5 py-0.5 text-[10.5px] font-semibold transition-colors"
         >
           {step.label}
         </button>
@@ -55,7 +67,7 @@ export function DevTimeSkip({
       <button
         type="button"
         onClick={onSkipToEnd}
-        className="hover:bg-warning/20 inline-flex items-center gap-1 rounded-full px-2 py-1 text-[11.5px] font-semibold transition-colors"
+        className="hover:bg-warning/20 inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10.5px] font-semibold transition-colors"
       >
         <NextIcon />
         Fin du temps
@@ -69,7 +81,7 @@ function FastForwardIcon() {
     <svg
       viewBox="0 0 24 24"
       aria-hidden="true"
-      className="size-3 shrink-0"
+      className="size-2.5 shrink-0"
       fill="none"
       stroke="currentColor"
       strokeWidth={2}
@@ -86,7 +98,7 @@ function NextIcon() {
     <svg
       viewBox="0 0 24 24"
       aria-hidden="true"
-      className="size-3.5 shrink-0"
+      className="size-3 shrink-0"
       fill="none"
       stroke="currentColor"
       strokeWidth={2}

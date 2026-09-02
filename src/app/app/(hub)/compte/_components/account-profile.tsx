@@ -7,10 +7,10 @@ import { clerkAppearance } from "@/lib/ui/clerk-appearance";
 /**
  * Clerk's account screens, drawn in this product's palette.
  *
- * The avatar keeps its menu — « Gérer le compte » and « Se déconnecter », as it
- * always had. What changed is that the first of those two lands here rather than
- * opening Clerk's modal over the app: `userProfileMode="navigation"` in the
- * sidebar points it at this route.
+ * The avatar has no menu any more (#183): it is a link, and this is where it
+ * lands. « Gérer le compte » was one of the two entries of the `<UserButton>`
+ * popover that used to stand at the foot of the rail and was already this page;
+ * the other, « Se déconnecter », is now the button below this card.
  *
  * Embedded rather than reproduced. Name, e-mail, password and sessions are
  * Clerk's to draw: they change when the provider changes, and a hand-written

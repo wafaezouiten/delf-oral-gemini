@@ -39,7 +39,13 @@ export function Dashboard({ view }: { view: DashboardView }) {
   if (view.count === 0) return <EmptyDashboard />;
 
   return (
-    <main className="mx-auto w-full max-w-4xl px-6 py-10">
+    // The density rule this pass applies across the product (#185): a card's
+    // interior is 14 px on a phone and 16-24 px above it, a section's header
+    // band is 12 px tall rather than 16, and a page's own rhythm is 24/32
+    // rather than 40. Nothing is removed and no type shrinks below the sizes
+    // the product already uses — the screens simply stopped spending a third
+    // of a phone on white space between figures a candidate is comparing.
+    <main className="mx-auto w-full max-w-4xl px-4 py-6 sm:px-6 sm:py-8">
       <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-3">
         <div>
           <Kicker>DELF B2 · Production orale</Kicker>
@@ -50,10 +56,35 @@ export function Dashboard({ view }: { view: DashboardView }) {
         </Link>
       </div>
 
-      <ul className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      {/* One section divided in four, not four cards (#185). The figures are
+          four readings of one record — a mark, a rate, a duration and a run —
+          and four separate frames stacked down a phone read as four unrelated
+          things and cost three extra gaps of vertical space. They now share a
+          sheet and are told apart by rules.
+
+          **Two by two on a phone, four across from `lg`** — never one under
+          another (#185). Stacked, the section was four full-width bands and
+          read as the four separate cards it had just stopped being; quartered,
+          the division is visible without scrolling and the whole standing fits
+          one glance. Four across on a 390 px screen is not the alternative: it
+          leaves 69 px of content per cell, and « sur 25, 2 épreuves dont 2
+          abandonnées » does not go in 69 px.
+
+          The rules are the grid's own gaps rather than borders — `gap-px` over
+          a `bg-border` container, each cell painted `bg-card` — which leaves
+          exactly one hairline between every pair of neighbours and none at the
+          edges, at one, two or four columns, with no arithmetic. `divide-x`
+          could not: it rules DOM order rather than visual rows, so on the 2×2
+          it draws a line down the left edge of the third cell, which is the
+          sheet's own border. */}
+      <ul className="border-border bg-border sheet mt-5 grid grid-cols-2 gap-px border lg:grid-cols-4">
         {view.tiles.map((tile) => (
-          <li key={tile.key} className="border-border bg-card sheet border p-4">
-            <p className="text-muted-foreground text-[0.6875rem] font-semibold tracking-[0.16em] uppercase">
+          <li key={tile.key} className="bg-card p-3 sm:p-4">
+            {/* The kicker loses a little of its tracking on a phone: at
+                0.16em « AU-DESSUS DU SEUIL » takes three lines in half a
+                390 px screen, and the four cells then have four different
+                heights. */}
+            <p className="text-muted-foreground text-[0.625rem] font-semibold tracking-[0.1em] uppercase sm:text-[0.6875rem] sm:tracking-[0.16em]">
               {tile.label}
             </p>
             {/* The one tile whose figure is a /25 is tinted on the /25 scale.
@@ -62,21 +93,23 @@ export function Dashboard({ view }: { view: DashboardView }) {
                 set in — tinting them would claim a 40 % pass rate was orange. */}
             <p
               className={cn(
-                "tabular mt-2 font-serif text-3xl leading-none font-semibold",
+                "tabular mt-1.5 font-serif text-2xl leading-none font-semibold sm:text-3xl",
                 tile.band && scoreInk(tile.band.tone),
               )}
             >
               {tile.value}
             </p>
-            <p className="text-muted-foreground mt-2 text-xs leading-snug">{tile.caption}</p>
+            <p className="text-muted-foreground mt-1.5 text-[0.6875rem] leading-snug sm:text-xs">
+              {tile.caption}
+            </p>
           </li>
         ))}
       </ul>
 
       <TrajectoryCard trajectory={view.trajectory} />
 
-      <section className="border-border bg-card sheet mt-6 border">
-        <div className="rule-double flex flex-wrap items-baseline justify-between gap-3 px-6 py-4">
+      <section className="border-border bg-card sheet mt-5 border">
+        <div className="rule-double flex flex-wrap items-baseline justify-between gap-3 px-4 py-3 sm:px-6">
           <h2 className="font-serif text-base font-semibold">Dernières épreuves</h2>
           {view.count > view.recent.length && (
             <Link
@@ -117,30 +150,41 @@ function TrajectoryCard({ trajectory }: { trajectory: TrajectoryView }) {
   if (!latest) return null;
 
   return (
-    <section className="border-border bg-card sheet mt-6 border">
-      <div className="rule-double flex flex-wrap items-start justify-between gap-x-6 gap-y-2 px-6 py-4">
-        <div>
+    <section className="border-border bg-card sheet mt-5 border">
+      {/* The note stays on the heading's line, at its right, at every width
+          (#185). It wrapped onto a line of its own below `sm`, which put the
+          one figure this card exists for under the caption rather than beside
+          the title — so the row no longer wraps, the two blocks are held apart
+          by `justify-between`, and the note shrinks its numeral on a phone
+          rather than taking a second line. `items-baseline` sits the /25 on
+          the same baseline as « Votre trajectoire » instead of aligning the
+          two blocks' top edges, which is what left a 24 px numeral floating
+          above a 16 px heading (#183). */}
+      <div className="rule-double flex flex-nowrap items-baseline justify-between gap-x-3 px-4 py-3 sm:gap-x-6 sm:px-6">
+        <div className="min-w-0">
           <div className="flex items-center gap-2">
-            <ChartIcon className="text-muted-foreground size-4" />
-            <h2 className="font-serif text-base font-semibold">Votre trajectoire</h2>
+            <ChartIcon className="text-muted-foreground size-4 shrink-0" />
+            <h2 className="truncate font-serif text-base font-semibold">Votre trajectoire</h2>
           </div>
           <p className="text-muted-foreground mt-0.5 text-xs">
             Score /{COMPETENCY_MAX} · par simulation
           </p>
         </div>
-        <div className="text-right">
-          <p className="flex items-baseline justify-end gap-2">
+        <div className="shrink-0 text-right">
+          <p className="flex items-baseline justify-end gap-1.5 sm:gap-2">
             {/* The note is a /25, so it is tinted on the /25 scale — the same
                 rule as the « Note moyenne » tile, band computed in the view
                 model. */}
             <span
               className={cn(
-                "tabular font-serif text-2xl leading-none font-semibold",
+                "tabular font-serif text-xl leading-none font-semibold sm:text-2xl",
                 scoreInk(latest.band.tone),
               )}
             >
               {formatScore25(latest.score25)}
-              <span className="text-muted-foreground text-sm font-normal">/{COMPETENCY_MAX}</span>
+              <span className="text-muted-foreground text-xs font-normal sm:text-sm">
+                /{COMPETENCY_MAX}
+              </span>
             </span>
             {/* The delta is a direction, not a mark: the caret and the sign
                 carry it, and the green/red is a redundant tint of that
@@ -148,7 +192,7 @@ function TrajectoryCard({ trajectory }: { trajectory: TrajectoryView }) {
             {delta !== null && (
               <span
                 className={cn(
-                  "tabular text-sm font-semibold",
+                  "tabular text-xs font-semibold sm:text-sm",
                   delta > 0 && "text-score-green",
                   delta < 0 && "text-score-red",
                   delta === 0 && "text-muted-foreground",
@@ -163,13 +207,13 @@ function TrajectoryCard({ trajectory }: { trajectory: TrajectoryView }) {
               </span>
             )}
           </p>
-          <p className="text-muted-foreground mt-1 text-xs">
+          <p className="text-muted-foreground mt-1 text-[0.6875rem] sm:text-xs">
             {delta !== null ? "dernière simulation" : "première simulation"} · {latest.date}
           </p>
         </div>
       </div>
 
-      <div className="flex gap-3 px-6 pt-5 pb-6">
+      <div className="flex gap-3 px-4 pt-4 pb-5 sm:px-6">
         {/* The ruler: 25 at the top, 0 on the floor. Decoration — every figure
             it carries is also in each bar's accessible text. */}
         <div className="text-muted-foreground tabular relative h-44 w-6 shrink-0 text-right text-[0.6875rem]">
@@ -234,7 +278,7 @@ function TrajectoryCard({ trajectory }: { trajectory: TrajectoryView }) {
         </div>
       </div>
 
-      <p className="text-muted-foreground border-border border-t px-6 py-3 text-xs leading-relaxed">
+      <p className="text-muted-foreground border-border border-t px-4 py-2.5 text-xs leading-relaxed sm:px-6">
         Chaque barre est une simulation, de la première à la plus récente. Survolez une barre pour
         voir le sujet et la note ; une épreuve abandonnée compte 0/{COMPETENCY_MAX}.
       </p>
@@ -278,14 +322,14 @@ function TrajectoryBar({ point, align }: { point: TrajectoryPoint; align: string
       <div
         aria-hidden
         className={cn(
-          "pointer-events-none absolute z-10 hidden w-max max-w-60 group-hover:block group-focus-visible:block",
+          "pointer-events-none absolute z-10 hidden w-max max-w-52 group-hover:block group-focus-visible:block",
           align,
         )}
         style={{ bottom: `calc(${point.percent}% + 8px)` }}
       >
-        <div className="border-border bg-card border px-3 py-2 text-left shadow-sm">
-          <p className="text-xs leading-snug font-medium">{point.topicTitle}</p>
-          <p className="mt-1.5 flex items-center gap-2">
+        <div className="border-border bg-card border px-2.5 py-1.5 text-left shadow-sm">
+          <p className="text-[0.6875rem] leading-snug font-medium">{point.topicTitle}</p>
+          <p className="mt-1 flex items-center gap-2">
             <ScoreTag score25={point.score25} />
             <span className="text-muted-foreground text-xs">{point.date}</span>
           </p>
@@ -308,7 +352,7 @@ function TrajectoryBar({ point, align }: { point: TrajectoryPoint; align: string
  */
 function EmptyDashboard() {
   return (
-    <main className="mx-auto w-full max-w-3xl px-6 py-16 text-center">
+    <main className="mx-auto w-full max-w-3xl px-4 py-12 text-center sm:px-6 sm:py-16">
       <span className="bg-primary-subtle text-primary mx-auto flex size-14 items-center justify-center rounded-lg">
         <MicIcon className="size-7" />
       </span>

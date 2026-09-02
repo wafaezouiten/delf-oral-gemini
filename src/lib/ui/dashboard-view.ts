@@ -47,6 +47,21 @@ export type SittingOutcome = "corrected" | "abandoned";
  * not a grading of one, and the criteria are all zero for the same reason
  * they would be on a blank paper.
  */
+/**
+ * One kept recording of one half, as the historique needs it to offer playback
+ * (#185).
+ *
+ * The same three facts `StoredResult.playable` carries on the correction, and
+ * for the same reason: the mime type so the browser can be asked `canPlayType`
+ * before a control is drawn, and the measured duration so the clock reads
+ * « 0:00 / 7:02 » before a byte has moved.
+ */
+export interface SittingRecording {
+  phase: "monologue" | "debate";
+  mimeType: string;
+  durationSeconds: number;
+}
+
 export interface DashboardSitting {
   examId: number;
   topicSlug: string;
@@ -78,6 +93,18 @@ export interface DashboardSitting {
    * to know which is which.
    */
   archivedAt: Date | null;
+  /**
+   * The halves whose audio is still stored and can be played back (#185), in
+   * the order they were sat.
+   *
+   * Empty for a sitting from before the vault, one whose upload failed, one
+   * whose recordings the candidate deleted, and every abandoned sitting. The
+   * historique is the only screen that reads it — the tableau de bord's short
+   * list is a list of scores — and it reads it to decide whether a row has a
+   * « Réécouter » to offer at all, which is why an empty array is a meaningful
+   * value here and not a missing one.
+   */
+  recordings: SittingRecording[];
 }
 
 /** The zero an abandoned sitting scores, on every criterion. */

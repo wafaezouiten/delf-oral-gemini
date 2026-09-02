@@ -34,7 +34,7 @@ export function NotesDrawer({
         open ? "translate-x-0" : "translate-x-full",
       )}
     >
-      <div className="border-border flex shrink-0 items-center gap-2 border-b px-4 py-3">
+      <div className="border-border flex shrink-0 items-center gap-2 border-b px-3.5 py-2.5">
         <PencilIcon className="text-muted-foreground size-3.5" />
         <h2 className="text-[0.78125rem] font-bold">Mes notes de préparation</h2>
         <button
@@ -46,7 +46,7 @@ export function NotesDrawer({
           <CloseIcon className="size-3.5" />
         </button>
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
+      <div className="min-h-0 flex-1 overflow-y-auto px-3.5 py-3">
         <p className="text-foreground/85 text-[0.84375rem] leading-[1.75] whitespace-pre-wrap">
           {notes}
         </p>

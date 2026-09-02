@@ -96,9 +96,9 @@ export function HubFormat({ view }: { view: HubView }) {
     <section className="mt-10">
       <SectionHeading n="01">Le format de l&apos;épreuve</SectionHeading>
 
-      <div className="mt-4 grid gap-4">
+      <div className="mt-4 grid gap-3">
         {view.format.map((item, index) => (
-          <div key={item.key} className="border-border bg-card sheet border p-5 sm:p-6">
+          <div key={item.key} className="border-border bg-card sheet border p-4 sm:p-5">
             <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
               <Tag>{item.pill}</Tag>
               <h3 className="text-base font-semibold tracking-tight">{item.title}</h3>
@@ -171,7 +171,7 @@ export function HubSujets({
         Sujets à la une
       </SectionHeading>
 
-      <ul className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      <ul className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {sujets.map((sujet) => (
           <li key={sujet.slug} className="flex">
             <Link
@@ -182,7 +182,7 @@ export function HubSujets({
               // the thing they read inside the épreuve are visibly the same
               // object, and a grid of sheets is nothing like the reference's
               // grid of cards.
-              className="group border-paper-border bg-paper hover:border-primary/60 sheet flex w-full flex-col border p-5 transition-colors"
+              className="group border-paper-border bg-paper hover:border-primary/60 sheet flex w-full flex-col border p-4 transition-colors sm:p-5"
             >
               <div className="flex items-center justify-between gap-2">
                 <Tag>{sujet.kind}</Tag>
@@ -240,8 +240,8 @@ export function HubCapabilities({ view }: { view: HubView }) {
             key={capability.title}
             className={
               index > 0
-                ? "border-border flex items-start gap-3 border-t p-5 sm:border-t-0 sm:border-l"
-                : "flex items-start gap-3 p-5"
+                ? "border-border flex items-start gap-3 border-t p-4 sm:border-t-0 sm:border-l"
+                : "flex items-start gap-3 p-4"
             }
           >
             <span className="bg-muted text-muted-foreground flex size-9 shrink-0 items-center justify-center rounded-md">

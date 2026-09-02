@@ -64,15 +64,15 @@ export function QuitPreparationDialog({
         onCancel();
       }}
       aria-labelledby="quit-preparation-title"
-      className="bg-card text-foreground border-border m-auto w-[min(30rem,92vw)] border p-0 backdrop:bg-black/50"
+      className="bg-card text-foreground border-border m-auto w-[min(27rem,92vw)] border p-0 backdrop:bg-black/50"
     >
-      <div className="space-y-4 p-6">
+      <div className="space-y-3 p-4 sm:p-5">
         <h2 id="quit-preparation-title" className="font-serif text-lg font-semibold">
           Quitter la préparation ?
         </h2>
 
         {/* The one fact that decides the click: what leaving costs. */}
-        <div className="border-warning/40 bg-warning-subtle text-warning flex items-center gap-2.5 border p-3.5">
+        <div className="border-warning/40 bg-warning-subtle text-warning flex items-center gap-2.5 border p-3">
           <AlertIcon className="size-4 shrink-0" />
           <p className="text-sm font-semibold">
             Votre temps de préparation et vos notes seront perdus.

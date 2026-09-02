@@ -3,13 +3,18 @@ import "server-only";
 import { and, desc, eq, isNotNull, isNull, or, sql } from "drizzle-orm";
 
 import { ORAL_CRITERIA, type OralCriterion } from "@/lib/delf/criteria";
-import { zeroCriteria, type DashboardSitting } from "@/lib/ui/dashboard-view";
+import {
+  zeroCriteria,
+  type DashboardSitting,
+  type SittingRecording,
+} from "@/lib/ui/dashboard-view";
 import {
   evaluations,
   getDb,
   isDatabaseConfigured,
   oralExamPhases,
   oralExams,
+  oralRecordings,
   oralTopics,
 } from "./index";
 
@@ -80,6 +85,52 @@ const spokenSecondsByExam = (userId: string) =>
     .groupBy(oralExamPhases.examId)
     .as("phase_totals");
 
+/**
+ * The kept recordings per sitting, as one JSON array per exam (#185).
+ *
+ * A second aggregating subquery, for exactly the reason the one above is:
+ * joining `oral_recordings` alongside `evaluations` multiplies the evaluation
+ * row by however many halves were recorded, and every average computed off it
+ * would double for the sittings that kept both. Aggregating first is the fix
+ * that does not depend on remembering the fan-out.
+ *
+ * **Kept means playable**, and the filter says which: a `uri` to fetch and no
+ * purge stamp. That is the same test the correction's `playable` applies, so a
+ * row here offers a player exactly when the correction it links to does — the
+ * alternative is a historique advertising audio the correction then refuses.
+ *
+ * `filter (where …)` rather than a WHERE on the subquery: a sitting whose only
+ * recording was purged must still produce a row, carrying `[]`, so the left
+ * join below distinguishes "no audio kept" from "no such exam". A bare WHERE
+ * would drop the group and the two would be indistinguishable — which matters
+ * on a landing page that must not throw.
+ */
+const recordingsByExam = (userId: string) =>
+  getDb()
+    .select({
+      examId: oralRecordings.examId,
+      recordings: sql<SittingRecording[] | null>`coalesce(
+        json_agg(
+          json_build_object(
+            'phase', ${oralRecordings.phase},
+            'mimeType', ${oralRecordings.mimeType},
+            'durationSeconds', coalesce(${oralRecordings.durationSeconds}, 0)
+          )
+        ) filter (
+          where ${oralRecordings.uri} is not null and ${oralRecordings.deletedAt} is null
+        ),
+        '[]'::json
+      )`.as("recordings"),
+    })
+    .from(oralRecordings)
+    .innerJoin(oralExams, eq(oralRecordings.examId, oralExams.id))
+    .where(eq(oralExams.userId, userId))
+    .groupBy(oralRecordings.examId)
+    .as("recording_lists");
+
+/** The parts in the order they were sat — `json_agg` has no opinion about it. */
+const PHASE_ORDER: ReadonlyArray<SittingRecording["phase"]> = ["monologue", "debate"];
+
 /** What a caller can ask for beyond "this candidate's sittings". */
 export interface CandidateHistoryOptions {
   /**
@@ -117,6 +168,7 @@ export async function readCandidateHistory(
   if (!isDatabaseConfigured()) return [];
 
   const totals = spokenSecondsByExam(userId);
+  const recordings = recordingsByExam(userId);
 
   try {
     const rows = await getDb()
@@ -132,6 +184,7 @@ export async function readCandidateHistory(
         meetsFloor: evaluations.meetsFloor,
         mode: evaluations.mode,
         spokenSeconds: totals.spokenSeconds,
+        recordings: recordings.recordings,
         realisationTache: evaluations.realisationTache,
         interaction: evaluations.interaction,
         lexique: evaluations.lexique,
@@ -142,6 +195,7 @@ export async function readCandidateHistory(
       .leftJoin(evaluations, eq(evaluations.examId, oralExams.id))
       .innerJoin(oralTopics, eq(oralExams.topicId, oralTopics.id))
       .leftJoin(totals, eq(totals.examId, oralExams.id))
+      .leftJoin(recordings, eq(recordings.examId, oralExams.id))
       .where(
         and(
           eq(oralExams.userId, userId),
@@ -182,6 +236,15 @@ export async function readCandidateHistory(
         // is what lets the historique partition one list instead of running a
         // second query whose ordering could disagree with this one.
         archivedAt: row.archivedAt,
+        // Null when the sitting has no `oral_recordings` rows at all, which the
+        // left join reports as an absent group rather than an empty one. Sorted
+        // into the order the halves were sat: `json_agg` returns them in
+        // whatever order the scan produced, and a « Débat » player above a
+        // « Monologue suivi » one is a record of the épreuve in the wrong
+        // order.
+        recordings: [...(row.recordings ?? [])].sort(
+          (a, b) => PHASE_ORDER.indexOf(a.phase) - PHASE_ORDER.indexOf(b.phase),
+        ),
       };
     });
   } catch (error) {
