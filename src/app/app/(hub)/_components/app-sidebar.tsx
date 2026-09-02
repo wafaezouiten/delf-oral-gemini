@@ -78,7 +78,14 @@ function Avatar({ px }: { px: number }) {
         className="border-border bg-muted text-muted-foreground flex shrink-0 items-center justify-center rounded-full border"
         style={{ width: px, height: px }}
       >
-        <UserIcon style={{ width: Math.round(px * 0.6), height: Math.round(px * 0.6) }} />
+        {/* `className` explicitly, and not for the `shrink-0`: `Icon` defaults
+            it to `size-4`, and a 16 px class sitting under a 12 px inline
+            style reads as the size the glyph is. Passing one replaces the
+            default, so the style is the only thing sizing this. */}
+        <UserIcon
+          className="shrink-0"
+          style={{ width: Math.round(px * 0.6), height: Math.round(px * 0.6) }}
+        />
       </span>
     );
   }
