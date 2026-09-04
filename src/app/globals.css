@@ -353,6 +353,23 @@ body {
 }
 
 /**
+ * A criterion's bar on the correction grows in from the left on arrival (#190).
+ * The main project animates the width with `motion`; a keyframe on the
+ * transform does the same without the dependency, and the reduced-motion rule
+ * below shortens it to nothing for a candidate who asked for that.
+ */
+@keyframes criterion-bar {
+  from {
+    transform: scaleX(0);
+  }
+}
+
+.criterion-bar {
+  transform-origin: left;
+  animation: criterion-bar 0.7s ease-out;
+}
+
+/**
  * Motion is a statement here, not a flourish: the recording dot pulses because a
  * static red dot reads as a decoration. A candidate who has asked their system
  * for less motion gets the dot without the pulse — the badge still says
