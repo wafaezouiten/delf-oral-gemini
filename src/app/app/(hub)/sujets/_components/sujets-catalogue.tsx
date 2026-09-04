@@ -2,10 +2,11 @@
 
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 
-import { ArrowRightIcon, ClockIcon, CloseIcon, SearchIcon } from "@/app/_components/po/icons";
+import { ClockIcon, CloseIcon, SearchIcon } from "@/app/_components/po/icons";
 import { Kicker, Tag } from "@/app/_components/po/tag";
 import { ScoreTag } from "@/app/_components/score-band";
 import { StartExamButton } from "@/app/app/(hub)/_components/start-exam-button";
+import { SujetCard } from "@/app/app/(hub)/_components/sujet-card";
 import { COMPETENCY_MAX } from "@/lib/delf/constants";
 import { PHASE_DURATIONS } from "@/lib/delf/phases";
 import type { OralTopic } from "@/lib/delf/topics";
@@ -143,7 +144,10 @@ export function SujetsCatalogue({
                 // The catalogue's own numbering, not the filtered list's: a
                 // search that renumbered the cards would make "Sujet 03" mean
                 // something different for every query.
-                position={sujets.indexOf(sujet) + 1}
+                eyebrow={<SujetNumber position={sujets.indexOf(sujet) + 1} />}
+                action="Lire le sujet"
+                headingLevel="h2"
+                ariaLabel={`Lire le sujet : ${sujet.title}`}
                 onOpen={() => setOpenSlug(sujet.slug)}
               />
             </li>
@@ -166,59 +170,15 @@ function normalise(value: string): string {
 }
 
 /**
- * One sujet on the newsstand.
- *
- * The whole card is the button — the headline is not a separate link — because
- * there is exactly one thing to do with a card, and a card you can only click in
- * one small place is a card that feels broken. The reference's rule, kept.
+ * The kiosk's eyebrow on a card: its number in the catalogue. The card itself
+ * is `SujetCard`, shared with the hub since #188 — what the kiosk adds is this
+ * numbering and the sheet the card opens.
  */
-function SujetCard({
-  sujet,
-  position,
-  onOpen,
-}: {
-  sujet: KioskSujet;
-  position: number;
-  onOpen: () => void;
-}) {
+function SujetNumber({ position }: { position: number }) {
   return (
-    <button
-      type="button"
-      onClick={onOpen}
-      aria-label={`Lire le sujet : ${sujet.title}`}
-      // Paper stock, matching the hub's row and the sheet behind it: a stack of
-      // sujets rather than a grid of cards.
-      className="group border-paper-border bg-paper hover:border-primary/60 sheet flex h-full w-full cursor-pointer flex-col items-start border p-4 text-left transition-colors sm:p-5"
-    >
-      <div className="flex w-full items-center justify-between gap-2.5">
-        <span className="text-muted-foreground tabular text-[0.65625rem] font-medium tracking-[0.06em]">
-          Sujet {position.toString().padStart(2, "0")}
-        </span>
-        {/* No ✓ beside it any more: the pill is coloured on the /25 scale now,
-            and a tick on a 6/25 in a red pill reads as approval of the mark
-            rather than as "already sat". */}
-        {sujet.score !== null && <ScoreTag score25={sujet.score} />}
-      </div>
-
-      {/* Sans, not the serif: the serif is spent on the masthead and on the
-          sheet's own headline. Repeating it across a grid turns every card into
-          a flourish and none of them into a hierarchy. */}
-      <h2 className="mt-3.5 line-clamp-3 text-lg leading-snug font-semibold tracking-tight">
-        {sujet.title}
-      </h2>
-
-      <p className="text-muted-foreground mt-2 line-clamp-2 text-xs leading-relaxed">
-        {sujet.teaser}
-      </p>
-
-      <div className="mt-auto flex w-full items-center justify-between gap-2 pt-4">
-        <span className="text-muted-foreground tabular text-[0.65625rem]">{sujet.meta}</span>
-        <span className="text-primary inline-flex shrink-0 items-center gap-1 text-xs font-semibold">
-          Lire le sujet
-          <ArrowRightIcon className="size-3.5 transition-transform group-hover:translate-x-0.5" />
-        </span>
-      </div>
-    </button>
+    <span className="text-muted-foreground tabular text-[0.65625rem] font-medium tracking-[0.06em]">
+      Sujet {position.toString().padStart(2, "0")}
+    </span>
   );
 }
 

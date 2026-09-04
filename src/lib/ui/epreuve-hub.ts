@@ -301,3 +301,25 @@ export function buildHubSujets(
     score: latestScores.get(topic.slug) ?? null,
   }));
 }
+
+/**
+ * How many sujets the hub features (#188).
+ *
+ * Three — one row of the grid at its widest. « Sujets à la une » had been
+ * printing the whole catalogue, which made it a second kiosk under a heading
+ * that promised a selection, and left « Tous les sujets » beside it linking to a
+ * page with nothing more on it.
+ */
+export const HUB_FEATURED_SUJETS = 3;
+
+/**
+ * The hub's cards: the first `HUB_FEATURED_SUJETS` of the catalogue, in its
+ * order. The kiosk keeps `buildHubSujets` and prints everything; the cut lives
+ * here rather than in the page so the number is tested and named once.
+ */
+export function buildFeaturedSujets(
+  topics: ReadonlyArray<{ slug: string; title: string; document: string }>,
+  latestScores: ReadonlyMap<string, number>,
+): HubSujet[] {
+  return buildHubSujets(topics.slice(0, HUB_FEATURED_SUJETS), latestScores);
+}

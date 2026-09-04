@@ -3,7 +3,12 @@ import { currentUser } from "@clerk/nextjs/server";
 import { requireUserId } from "@/lib/auth/exam-guard";
 import { readCandidateHistory } from "@/lib/db/history";
 import { ORAL_TOPICS } from "@/lib/delf/topics";
-import { buildHubSujets, buildHubView, HUB_LINKS, latestScoreBySujet } from "@/lib/ui/epreuve-hub";
+import {
+  buildFeaturedSujets,
+  buildHubView,
+  HUB_LINKS,
+  latestScoreBySujet,
+} from "@/lib/ui/epreuve-hub";
 import { HubCapabilities, HubFormat, HubMasthead, HubSujets } from "./_components/hub-sections";
 
 /**
@@ -36,7 +41,9 @@ export default async function ProductionOraleHub() {
   const [user, history] = await Promise.all([currentUser(), readCandidateHistory(userId)]);
 
   const view = buildHubView();
-  const sujets = buildHubSujets(ORAL_TOPICS, latestScoreBySujet(history));
+  // The first three of the catalogue (#188), not the whole of it: the kiosk is
+  // one click away for the rest.
+  const sujets = buildFeaturedSujets(ORAL_TOPICS, latestScoreBySujet(history));
   const firstName = user?.firstName;
 
   return (

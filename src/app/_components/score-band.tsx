@@ -83,6 +83,36 @@ export function scoreInk(tone: ScoreTone): string {
 }
 
 /**
+ * The band worn by a whole surface rather than a pill — the sujet cards (#188),
+ * which take their last score's fill and ring so a grid of them reads at a
+ * glance. The ink is deliberately not part of it: the card's own text stays on
+ * the foreground and the muted tokens, both of which hold AA on every one of
+ * the five subtle fills (see the `--score-*` block in `globals.css`), and a
+ * whole paragraph set in the band's ink would be colour doing the talking.
+ */
+export function scoreSurface(score25: number): string {
+  const tone = TONE_CLASSES[scoreTone(score25)];
+  return cn(tone.fill, tone.ring);
+}
+
+/**
+ * The pill inverted: the band's solid fill under white text, for a pill that
+ * sits on a surface already wearing the band's tint (`scoreSurface`), where the
+ * tinted pill would be a ring on its own colour. Every ink holds ≥ 6.2:1 under
+ * white. On paper it falls back to an outline, since a mono printer that drops
+ * fills would otherwise print white text on nothing.
+ */
+const SOLID_CLASSES: Record<ScoreTone, string> = {
+  red: "bg-score-red",
+  coral: "bg-score-coral",
+  orange: "bg-score-orange",
+  yellow: "bg-score-yellow",
+  green: "bg-score-green",
+};
+const solidInk =
+  "border-transparent text-white print:border-current print:bg-transparent print:text-foreground";
+
+/**
  * A /25 as a pill, tinted on its band.
  *
  * `mark` is the floor's verdict (`✓` / `✕`) where a surface shows one, and it is
@@ -94,19 +124,25 @@ export function ScoreTag({
   score25,
   mark,
   prefix,
+  variant = "tint",
   className,
 }: {
   score25: number;
+  /** `solid` for a pill on a surface that already wears the band (#188). */
+  variant?: "tint" | "solid";
   /** `✓` / `✕` — whether the mark clears the DELF floor, where that is shown. */
   mark?: string;
   /** A phrase before the note, e.g. « Déjà passé ». */
   prefix?: string;
   className?: string;
 }) {
-  const tone = TONE_CLASSES[scoreTone(score25)];
+  const band = scoreTone(score25);
+  const tone = TONE_CLASSES[band];
+  const colour =
+    variant === "solid" ? cn(SOLID_CLASSES[band], solidInk) : cn(tone.fill, tone.ink, tone.ring);
 
   return (
-    <span className={cn(tagShape, tone.fill, tone.ink, tone.ring, className)}>
+    <span className={cn(tagShape, colour, className)}>
       {prefix && <span>{prefix} ·</span>}
       {mark && <span aria-hidden>{mark}</span>}
       <span>

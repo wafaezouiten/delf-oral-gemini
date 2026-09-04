@@ -265,6 +265,19 @@ body {
 }
 
 /**
+ * The one rounded surface (#188): a sujet card, on the hub and on the kiosk.
+ *
+ * A sujet is the thing the candidate picks up, not a form they fill in, so it is
+ * allowed the softness the rest of the stationery refuses. One class rather than
+ * a `rounded-*` utility on the card, for `.sheet`'s reason: the two catalogues
+ * draw the same component, and this is what keeps them from rounding
+ * differently the day one of them is touched.
+ */
+.sujet-card {
+  border-radius: 0.75rem;
+}
+
+/**
  * The rule that closes a section: a heavy line over a hairline, the way a
  * corrector's grid separates one compétence from the next. Drawn with a border
  * plus a box-shadow rather than two elements, because it is decoration and has
