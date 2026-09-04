@@ -14,7 +14,8 @@ import type { HubSujet } from "@/lib/ui/epreuve-hub";
  * header and the same footer, hand-copied, and already drifting (the kiosk had
  * grown a number and a teaser the hub never got). One component now, and the
  * two differ only in what they are handed: an `eyebrow` for the top-left
- * corner, an `action` for the footer's verb, and where the card leads.
+ * corner (the kiosk's numbering; the hub has none, so its score sits alone at
+ * the right), an `action` for the footer's verb, and where the card leads.
  *
  * Where it leads is the one structural difference. The kiosk opens a sheet, so
  * its card is a `<button>`; the hub sends the candidate to that sheet on the
@@ -43,8 +44,8 @@ export function SujetCard({
   ...target
 }: {
   sujet: HubSujet;
-  /** The top-left corner: the kiosk's « Sujet 03 », the hub's kind pill. */
-  eyebrow: ReactNode;
+  /** The top-left corner: the kiosk's « Sujet 03 ». Omitted on the hub. */
+  eyebrow?: ReactNode;
   /** The footer's verb: « Lire le sujet », « Commencer », « Refaire ». */
   action: string;
   /** The hub sits under `h2` section headings; the kiosk's cards are its `h2`s. */
@@ -60,18 +61,25 @@ export function SujetCard({
 
   const body = (
     <>
-      <div className="flex w-full items-center justify-between gap-2.5">
-        {eyebrow}
-        {/* No ✓ beside it: a tick on a 6/25 in a red pill reads as approval of
-            the mark rather than as "already sat", and the footer's verb already
-            says « Refaire » for that. */}
-        {sujet.score !== null && <ScoreTag score25={sujet.score} variant="solid" />}
-      </div>
+      {/* The header row is only drawn when it has something in it, so a card
+          with neither eyebrow nor score starts at its title rather than under
+          an empty line. `ml-auto` keeps the pill at the right when it is alone. */}
+      {(eyebrow || sujet.score !== null) && (
+        <div className="flex w-full items-center justify-between gap-2.5">
+          {eyebrow}
+          {/* No ✓ beside it: a tick on a 6/25 in a red pill reads as approval
+              of the mark rather than as "already sat", and the footer's verb
+              already says « Refaire » for that. */}
+          {sujet.score !== null && (
+            <ScoreTag score25={sujet.score} variant="solid" className="ml-auto" />
+          )}
+        </div>
+      )}
 
       {/* Sans, not the serif: the serif is spent on the masthead and on the
           sheet's own headline. Repeating it across a grid turns every card into
           a flourish and none of them into a hierarchy. */}
-      <Heading className="mt-3.5 line-clamp-3 text-lg leading-snug font-semibold tracking-tight">
+      <Heading className="mt-3.5 line-clamp-3 text-lg leading-snug font-semibold tracking-tight first:mt-0">
         {sujet.title}
       </Heading>
 
