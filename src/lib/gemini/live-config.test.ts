@@ -39,6 +39,19 @@ describe("monologue Live configuration", () => {
     assert.ok(config.outputAudioTranscription, "the examiner's two lines are transcribed");
   });
 
+  it("tells the transcriber the candidate is speaking French, in both phases (#186)", () => {
+    // Left to guess, it rendered a whole débat answer in Portuguese, and the
+    // corrector charged the candidate for it. A hint, not a lock: a candidate
+    // who really switches language is still transcribed. Probe-verified
+    // against the live service on both configs (PR for #186).
+    for (const config of [monologueConfig({ topic: TOPIC }), debateConfig({ topic: TOPIC })]) {
+      assert.deepEqual(config.inputAudioTranscription?.languageCodes, ["fr-FR"]);
+      // The examiner's own transcription is left alone: it speaks French by
+      // instruction, and its lines are not what was mis-heard.
+      assert.deepEqual(config.outputAudioTranscription, {});
+    }
+  });
+
   it("carries the monologue instruction, not the debate one", () => {
     const config = monologueConfig({ topic: TOPIC });
     const instruction = String(config.systemInstruction);
