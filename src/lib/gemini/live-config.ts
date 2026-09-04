@@ -36,6 +36,7 @@ import {
   EndSensitivity,
   Modality,
   StartSensitivity,
+  type AudioTranscriptionConfig,
   type LiveConnectConfig,
 } from "@google/genai";
 
@@ -103,6 +104,22 @@ export interface LiveConfigOptions {
 }
 
 /**
+ * How the candidate's speech is transcribed — in French, told so (#186).
+ *
+ * Left to detect the language on its own, the transcriber rendered one whole
+ * débat answer in Portuguese: the candidate had answered in French, and what
+ * was stored was a Portuguese paraphrase of it, which the corrector then cited
+ * as « un passage impromptu en langue portugaise » against the lexique band.
+ * This is a DELF épreuve; every word the candidate says into it is meant to be
+ * French, and a hint is exactly the strength this deserves — a candidate who
+ * really does drop into another language is still transcribed, the transcriber
+ * is merely no longer guessing which language a hesitant accent belongs to.
+ * The corrector is separately told that the text is automatic and the audio
+ * outranks it (`transcript-reliability-instruction.ts`).
+ */
+const CANDIDATE_TRANSCRIPTION: AudioTranscriptionConfig = { languageCodes: ["fr-FR"] };
+
+/**
  * The monologue configuration: the examiner listens and cannot interrupt.
  *
  * `responseModalities: [AUDIO]` is kept (rather than dropping to TEXT) because
@@ -118,7 +135,7 @@ export function monologueConfig({
     responseModalities: [Modality.AUDIO],
     speechConfig: EXAMINER_SPEECH,
     systemInstruction: instructionOverride ?? buildExaminerInstruction("monologue", topic),
-    inputAudioTranscription: {},
+    inputAudioTranscription: CANDIDATE_TRANSCRIPTION,
     outputAudioTranscription: {},
     sessionResumption: resumptionHandle ? { handle: resumptionHandle, ...RESUMPTION } : RESUMPTION,
     contextWindowCompression: COMPRESSION,
@@ -204,7 +221,7 @@ export function debateConfig({
     responseModalities: [Modality.AUDIO],
     speechConfig: EXAMINER_SPEECH,
     systemInstruction: instructionOverride ?? buildExaminerInstruction("debate", topic),
-    inputAudioTranscription: {},
+    inputAudioTranscription: CANDIDATE_TRANSCRIPTION,
     outputAudioTranscription: {},
     sessionResumption: resumptionHandle ? { handle: resumptionHandle, ...RESUMPTION } : RESUMPTION,
     contextWindowCompression: COMPRESSION,

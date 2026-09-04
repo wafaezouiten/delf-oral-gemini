@@ -1,7 +1,8 @@
 /**
- * The phonologie instruction: the ONE place the two evaluation modes genuinely
- * differ, and the only part of the corrector's prompt that depends on which
- * recordings actually exist.
+ * The phonologie instruction: where the two evaluation modes first differed,
+ * and the only part of the corrector's prompt that depends on which recordings
+ * actually exist. (The other mode-dependent paragraph, what the transcript is
+ * worth against the audio, is `transcript-reliability-instruction.ts`, #186.)
  *
  * It lives in its own module, away from `evaluate.ts`, for the same reason
  * `lib/delf/examiner-prompt.ts` does: `evaluate.ts` imports `server-only` and

@@ -38,6 +38,7 @@ import type { OralTopic } from "@/lib/delf/topics";
 import type { EvaluationFeedback, EvaluationMode, OralSpeakingPhase } from "@/lib/db/schema";
 import { earlyClosingInstruction } from "./early-closing-instruction";
 import { phonologyInstruction, type AttachedRecording } from "./phonology-instruction";
+import { transcriptReliabilityInstruction } from "./transcript-reliability-instruction";
 
 /**
  * The corrector model. Deliberately NOT the Live model: grading is a careful
@@ -81,8 +82,15 @@ export const EVAL_MODEL = process.env.GEMINI_EVAL_MODEL ?? "gemini-3.6-flash";
  * self-correction bullets, and the complete-stage contract is appended last.
  * This is the widest single change the column has ever recorded: scores either
  * side of it are not comparable, which is exactly what the column is for.
+ *
+ * `2026-09-04.0` tells the corrector what the transcript is (#186): an
+ * automatic, unreviewed transcription that can mis-hear a word, render a
+ * passage in the wrong language or duplicate a turn, and that the audio —
+ * where there is audio — outranks it for every criterion, not only
+ * phonologie. Same sitting: the app's presence check now reaches the corrector
+ * under its own label rather than as an examiner question (#187).
  */
-export const EVAL_PROMPT_VERSION = "2026-08-31.0";
+export const EVAL_PROMPT_VERSION = "2026-09-04.0";
 
 /** Re-exported, not redeclared: the mode is a stored column, and `evaluations.mode`
  *  is where its legal values are defined. */
@@ -116,6 +124,7 @@ function buildPrompt(params: {
     debateSeconds: params.debateSeconds,
     directives: [
       phonologyInstruction(params.mode, params.recordings),
+      transcriptReliabilityInstruction(params.mode),
       earlyClosingInstruction(params.earlyClosingCount),
     ],
   });

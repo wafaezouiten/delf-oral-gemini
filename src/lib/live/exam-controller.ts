@@ -60,6 +60,7 @@ import {
 import type { OralTopic } from "@/lib/delf/topics";
 import {
   appendFragment,
+  separateDirectiveEcho,
   debateSessionHistory,
   entriesForPhase,
   type TranscriptEntry,
@@ -901,6 +902,17 @@ export class ExamController {
    * {@link sendControllerDirective}.
    */
   private examinerTurnBreakPending = false;
+  /**
+   * The opening of a directive the examiner is reading aloud, waiting for the
+   * fragment that closes it (#187). See `separateDirectiveEcho`: the bracket
+   * that ends « [Information de service, … ] » is routinely in a later
+   * transcription fragment than the one that opened it, so the opener is held
+   * here, prepended to the next examiner fragment, and either closed by it (and
+   * dropped whole) or discarded when the turn completes. Never persisted, never
+   * shown: an examiner does not open square brackets, so what is held is the
+   * app's own text on its way back, and nothing about the sitting.
+   */
+  private heldDirectiveEcho = "";
 
   /**
    * The débat's time cue: which cue has gone out, and how long the room has been
@@ -1369,6 +1381,25 @@ export class ExamController {
     // typed turns count as answers too — a developer typing into the débat is
     // exactly as present as one speaking into it (#84).
     if (speaker === "candidate") this.noteCandidateAnswered();
+    // A directive the examiner narrates instead of obeying never reaches the
+    // transcript (#187): its output transcription then carries the app's own
+    // bracketed paragraph, which was being persisted, printed on the correction,
+    // graded as examiner speech, and — when it said « nous avons terminé » —
+    // counted by `watchForEarlyClosing` below as the examiner leaving early.
+    // Done here, before the append, so the goodbye detector and the turn-break
+    // bookkeeping both see what was actually said and nothing else. A
+    // candidate's fragment ends any examiner turn an unclosed bracket could
+    // still belong to, so it also lets the held opener go.
+    if (speaker === "examiner") {
+      const { spoken, held } = separateDirectiveEcho(this.heldDirectiveEcho + text);
+      if (spoken !== this.heldDirectiveEcho + text && !this.heldDirectiveEcho) {
+        this.log("examiner-directive-echo-dropped");
+      }
+      this.heldDirectiveEcho = held;
+      text = spoken;
+    } else {
+      this.heldDirectiveEcho = "";
+    }
     const startsTurn = speaker === "examiner" && this.examinerTurnBreakPending;
     this.transcript = appendFragment(this.transcript, {
       phase: this.phase,
@@ -3084,6 +3115,12 @@ export class ExamController {
       onExaminerAudio: (base64) => this.player?.enqueue(base64),
       onInterrupted: () => this.handleInterruption(),
       onTurnComplete: () => {
+        // A bracket the examiner opened and never closed dies with its turn
+        // (#187): what was held was a directive being read aloud, and nothing
+        // the next turn says can be the rest of it. Discarded rather than
+        // appended — bracket-less, it would be exactly the leak the hold
+        // prevents.
+        this.heldDirectiveEcho = "";
         // Whatever else this turn ending means below, it means the examiner has
         // finished the first thing it said on this session. This one is the
         // server's own word and needs no grace — unlike the drained speaker,

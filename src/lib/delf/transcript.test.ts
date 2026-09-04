@@ -2,13 +2,25 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import {
+  closingInstruction,
+  lastQuestionInstruction,
+  presenceCheckInstruction,
+  resumeAfterReconnectInstruction,
+  resumeDebateInstruction,
+  silenceRelanceInstruction,
+  timeRemainingInstruction,
+} from "./examiner-prompt";
+import {
   appendFragment,
   candidateSpeech,
   candidateWordCount,
   debateSessionHistory,
   entriesForPhase,
   formatTranscript,
+  isPresenceCheck,
   monologueAsHistory,
+  separateDirectiveEcho,
+  stripDirectiveEchoes,
   type TranscriptEntry,
 } from "./transcript";
 
@@ -94,6 +106,32 @@ describe("transcript", () => {
 
     assert.equal(entries.length, 2);
     assert.equal(entries[1].text, "Autrement dit, y perd-on des collègues ?");
+  });
+
+  it("ignores a fragment that repeats the whole turn so far, word for word (#186)", () => {
+    // A reconnect replays the audio held during the outage into the new socket,
+    // which transcribes it again: the same answer arrived twice and the
+    // corrector graded the candidate for repeating themself.
+    const answer = "Je suis d'accord, un déjeuner de temps en temps ne remplace pas les échanges.";
+    const entries = build({ text: answer }, { text: ` ${answer}` });
+    assert.equal(entries.length, 1);
+    assert.equal(entries[0].text, answer);
+  });
+
+  it("still lets a candidate restart a sentence (#186)", () => {
+    // Exact and whole is the rule: three repeated words are a false start,
+    // which is graded fluency, and stay.
+    const entries = build({ text: "Je pense que" }, { text: " je pense que c'est un choix." });
+    assert.equal(entries[0].text, "Je pense que je pense que c'est un choix.");
+  });
+
+  it("keeps a short turn said twice, which is a person and not a replay (#186)", () => {
+    // « Au revoir. » twice is the examiner insisting, and #85 counts every one.
+    const entries = build(
+      { text: "Au revoir.", speaker: "examiner" },
+      { text: " Au revoir.", speaker: "examiner" },
+    );
+    assert.equal(entries[0].text, "Au revoir. Au revoir.");
   });
 
   it("drops empty fragments instead of creating silent turns", () => {
@@ -186,5 +224,136 @@ describe("transcript", () => {
     const entries = build({ text: "Je défends le télétravail." });
     assert.deepEqual(debateSessionHistory(entries), monologueAsHistory(entries));
     assert.deepEqual(debateSessionHistory([]), []);
+  });
+});
+
+describe("a directive the examiner read aloud (#187)", () => {
+  /** Every bracketed paragraph the app can send the examiner mid-épreuve. */
+  const DIRECTIVES = [
+    closingInstruction("monologue"),
+    closingInstruction("debate"),
+    silenceRelanceInstruction(),
+    silenceRelanceInstruction(2),
+    silenceRelanceInstruction(1, true),
+    presenceCheckInstruction(),
+    timeRemainingInstruction(7),
+    lastQuestionInstruction(),
+    resumeDebateInstruction(7),
+    resumeDebateInstruction(1, true),
+    resumeAfterReconnectInstruction(),
+    resumeAfterReconnectInstruction(true),
+  ];
+
+  it("keeps only what was spoken, for every directive the app can send", () => {
+    // The observed shape: the directive, verbatim, then the line it ordered.
+    for (const directive of DIRECTIVES) {
+      const { spoken, held } = separateDirectiveEcho(
+        `${directive}\n\nJe vous remercie, nous avons terminé.`,
+      );
+      assert.equal(spoken.trim(), "Je vous remercie, nous avons terminé.", directive.slice(0, 40));
+      assert.equal(held, "");
+    }
+  });
+
+  it("holds back a bracket that has not closed yet, and only that", () => {
+    // Transcription arrives in fragments, and the closing bracket is routinely
+    // in a later one than the opening. The opener must neither leak nor be
+    // dropped: dropped, the rest of the span arrives bracket-less and leaks.
+    const first = separateDirectiveEcho("[Information de service, à ne");
+    assert.equal(first.spoken, "");
+    assert.equal(first.held, "[Information de service, à ne");
+
+    const second = separateDirectiveEcho(`${first.held} jamais prononcer : conclus.] Merci.`);
+    assert.equal(second.spoken, " Merci.");
+    assert.equal(second.held, "");
+  });
+
+  it("leaves ordinary speech, and speech before the bracket, alone", () => {
+    const { spoken, held } = separateDirectiveEcho("Vous parlez d'organisation, mais [Erreur :");
+    assert.equal(spoken, "Vous parlez d'organisation, mais ");
+    assert.equal(held, "[Erreur :");
+    assert.deepEqual(separateDirectiveEcho("Ne pensez-vous pas ?"), {
+      spoken: "Ne pensez-vous pas ?",
+      held: "",
+    });
+  });
+
+  it("scrubs a stored transcript's examiner turns and drops the ones that were only the echo", () => {
+    const stored: TranscriptEntry[] = [
+      { phase: "debate", speaker: "candidate", timestamp: 1, text: "Je pense [sic] que oui." },
+      {
+        phase: "debate",
+        speaker: "examiner",
+        timestamp: 2,
+        text: `${closingInstruction("debate")}\n\nJe vous remercie, nous avons terminé.`,
+      },
+      { phase: "debate", speaker: "examiner", timestamp: 3, text: timeRemainingInstruction(4) },
+      { phase: "debate", speaker: "examiner", timestamp: 4, text: "Une dernière question ?" },
+    ];
+    const clean = stripDirectiveEchoes(stored);
+    assert.deepEqual(
+      clean.map((entry) => entry.text),
+      [
+        "Je pense [sic] que oui.",
+        "Je vous remercie, nous avons terminé.",
+        "Une dernière question ?",
+      ],
+    );
+    // The bracket rule is about what the app says; the candidate is untouched.
+    assert.equal(clean[0], stored[0]);
+    // Timestamps survive the scrub: the correction re-anchors on them.
+    assert.equal(clean[1].timestamp, 2);
+  });
+
+  it("never reaches the corrector, nor a fresh session's seed", () => {
+    const entries: TranscriptEntry[] = [
+      { phase: "monologue", speaker: "candidate", timestamp: 1, text: "Mon exposé." },
+      {
+        phase: "debate",
+        speaker: "examiner",
+        timestamp: 2,
+        text: `${closingInstruction("debate")}\n\nJe vous remercie, nous avons terminé.`,
+      },
+    ];
+    const formatted = formatTranscript(entries);
+    assert.ok(!formatted.includes("["), formatted);
+    assert.ok(formatted.includes("EXAMINATEUR: Je vous remercie, nous avons terminé."));
+
+    const seed = debateSessionHistory(entries);
+    const model = seed.filter((turn) => turn.role === "model").map((turn) => turn.parts[0].text);
+    assert.ok(model.includes("Je vous remercie, nous avons terminé."));
+    assert.ok(!model.some((text) => text.includes("[")), "the directive is not history");
+  });
+});
+
+describe("the app's presence check in the corrector's transcript (#187)", () => {
+  it("recognises « Vous m'entendez » as Gemini renders it, and nothing near it", () => {
+    assert.ok(isPresenceCheck("Vous m'entendez ?"));
+    assert.ok(isPresenceCheck("Vous m'entendez"), "the question mark is dropped half the time");
+    assert.ok(isPresenceCheck("Vous m\u2019entendez ?"), "typographic apostrophe");
+    assert.ok(!isPresenceCheck("Vous m'entendez dire que le télétravail isole ?"));
+    assert.ok(!isPresenceCheck("Est-ce que vous m'entendez ?"));
+  });
+
+  it("labels it as the app's technical check, not as an examiner question", () => {
+    const entries: TranscriptEntry[] = [
+      { phase: "debate", speaker: "examiner", timestamp: 1, text: "Ne pensez-vous pas ?" },
+      { phase: "debate", speaker: "examiner", timestamp: 2, text: "Vous m'entendez" },
+      { phase: "debate", speaker: "candidate", timestamp: 3, text: "Oui, je pense que non." },
+    ];
+    const formatted = formatTranscript(entries);
+    assert.ok(formatted.includes("EXAMINATEUR: Ne pensez-vous pas ?"));
+    assert.ok(
+      formatted.includes(
+        "LOGICIEL (vérification technique de la connexion, hors épreuve, à ne pas évaluer): Vous m'entendez",
+      ),
+      formatted,
+    );
+    assert.ok(!formatted.includes("EXAMINATEUR: Vous m'entendez"));
+    // A candidate's « vous m'entendez » is theirs and stays theirs.
+    const candidate = formatTranscript([
+      { phase: "debate", speaker: "candidate", timestamp: 1, text: "Vous m'entendez ?" },
+    ]);
+    assert.ok(candidate.includes("CANDIDAT: Vous m'entendez ?"));
   });
 });

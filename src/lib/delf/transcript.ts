@@ -68,6 +68,18 @@ export function appendFragment(
     last.speaker === fragment.speaker;
 
   if (continuesTurn) {
+    // A fragment that repeats the whole turn so far, verbatim, is the turn
+    // arriving twice, not the speaker saying it twice (#186): a reconnect
+    // replays the audio held during the outage into the new socket, which
+    // transcribes it again, and the corrector then read « Je suis d'accord… »
+    // back to back and graded the repetition. Exact, whole and long, on
+    // purpose. A candidate really does restart a sentence and an examiner
+    // really does say « Au revoir. » twice (#85 counts on it); a fragment that
+    // repeats a few words is that. Nobody re-says a whole answer word for word.
+    const repeated = fragment.text.trim();
+    if (repeated === last.text && repeated.length >= DUPLICATE_TURN_MIN_CHARS) {
+      return entries as TranscriptEntry[];
+    }
     const merged: TranscriptEntry = { ...last, text: joinFragments(last.text, fragment.text) };
     return [...entries.slice(0, -1), merged];
   }
@@ -86,6 +98,13 @@ export function appendFragment(
     },
   ];
 }
+
+/**
+ * How long a repeated fragment has to be before it is a replay rather than
+ * speech. Two short sentences of French; the observed replay was 170
+ * characters, and a repeated « Au revoir. » or « Oui, oui. » is a person.
+ */
+const DUPLICATE_TURN_MIN_CHARS = 40;
 
 /**
  * Glue two transcription fragments. Gemini's fragments already carry their own
@@ -131,6 +150,75 @@ export function candidateWordCount(
   return speech ? speech.split(/\s+/).length : 0;
 }
 
+/**
+ * A directive the examiner read aloud instead of obeying (#187).
+ *
+ * Every instruction the app sends the examiner mid-épreuve is one bracketed
+ * paragraph — the relances, the clock, the last question, the closing line,
+ * and whatever a developer types into the prompt panel. They go down the same
+ * text channel as everything else, and now and then the model narrates one:
+ * its output transcription then carries « [Information de service, à ne
+ * jamais prononcer : …] » followed by the sentence it was told to say. One such
+ * turn was persisted, printed on the correction, handed to the corrector as
+ * examiner speech, and — because the directive said « nous avons terminé » —
+ * counted by the goodbye detector as the examiner closing early.
+ *
+ * An examiner never opens a square bracket, so a bracket in examiner text is
+ * the app's, whatever it says. What is returned is the part that was spoken,
+ * with every closed span removed, and — separately — an unterminated span cut
+ * off from the point it opens. The split matters at the source: transcription
+ * arrives in fragments, so the bracket that closes a directive is routinely in
+ * a later fragment than the one that opened it, and the opener has to be held
+ * back rather than either kept (it would leak) or dropped (the rest of the
+ * span would then arrive bracket-less and leak instead). The controller holds
+ * `held`, prepends it to the next fragment of the same turn, and discards it
+ * when the turn completes.
+ */
+export function separateDirectiveEcho(text: string): { spoken: string; held: string } {
+  const withoutClosed = text.replace(/\[[^\]]*\]/g, "");
+  const open = withoutClosed.indexOf("[");
+  if (open === -1) return { spoken: withoutClosed, held: "" };
+  return { spoken: withoutClosed.slice(0, open), held: withoutClosed.slice(open) };
+}
+
+/**
+ * A stored transcript with the examiner's directive echoes removed (#187).
+ *
+ * For the transcripts written before the controller learned to hold them
+ * back: every reader that turns a record into something a person or a model
+ * sees — the corrector's prompt, the correction page, the reconnect seed —
+ * runs the record through this first. An examiner turn that was nothing but
+ * the echo is dropped rather than kept as an empty turn. Candidate turns are
+ * never touched: the bracket rule is about what the app says, and a candidate
+ * who somehow pronounces one is on the record as they were.
+ */
+export function stripDirectiveEchoes(entries: readonly TranscriptEntry[]): TranscriptEntry[] {
+  const out: TranscriptEntry[] = [];
+  for (const entry of entries) {
+    if (entry.speaker !== "examiner" || !entry.text.includes("[")) {
+      out.push(entry);
+      continue;
+    }
+    const spoken = separateDirectiveEcho(entry.text).spoken.trim();
+    if (spoken) out.push({ ...entry, text: spoken });
+  }
+  return out;
+}
+
+/**
+ * The app's presence check, « Vous m'entendez ? » (#84, #101), as the
+ * examiner's output transcription renders it — with or without the question
+ * mark, since Gemini drops it about half the time. It is the one examiner
+ * line that is not the épreuve: a fixed-wording check that the connection is
+ * alive, said into ten seconds of nothing. The corrector is told so
+ * (`formatTranscript`), because read as a question of the débat it looks like
+ * an examiner reduced to asking whether the candidate is there, and the
+ * candidate's next answer looks like a non-answer to it.
+ */
+export function isPresenceCheck(text: string): boolean {
+  return /^\s*vous m['’]entendez\s*\??\s*$/i.test(text);
+}
+
 const SPEAKER_LABELS: Record<TranscriptSpeaker, string> = {
   candidate: "CANDIDAT",
   examiner: "EXAMINATEUR",
@@ -151,6 +239,21 @@ const PHASE_HEADINGS: Record<TranscriptPhase, string> = {
 };
 
 /**
+ * How the corrector sees a presence check (#187). Not « EXAMINATEUR », because
+ * it was not the examiner's idea: the app said it, in fixed words, to find out
+ * whether anyone was still on the line. Named as the app's and marked as
+ * outside the épreuve, so a débat with three of them is not read as an
+ * examiner who kept having to ask whether the candidate was there.
+ */
+const PRESENCE_CHECK_LABEL =
+  "LOGICIEL (vérification technique de la connexion, hors épreuve, à ne pas évaluer)";
+
+function lineLabel(entry: TranscriptEntry): string {
+  if (entry.speaker === "examiner" && isPresenceCheck(entry.text)) return PRESENCE_CHECK_LABEL;
+  return SPEAKER_LABELS[entry.speaker];
+}
+
+/**
  * Render the transcript for the evaluator, preserving the phase split exactly as
  * the brief specifies: a part 1 block, then a part 2 block. The evaluator is
  * told to grade the two tasks on their own halves, so this shape is
@@ -162,11 +265,12 @@ const PHASE_HEADINGS: Record<TranscriptPhase, string> = {
  */
 export function formatTranscript(entries: readonly TranscriptEntry[]): string {
   const sections: string[] = [];
+  const clean = stripDirectiveEchoes(entries);
 
   for (const phase of ["monologue", "debate"] as const) {
-    const phaseEntries = entriesForPhase(entries, phase);
+    const phaseEntries = entriesForPhase(clean, phase);
     if (phaseEntries.length === 0) continue;
-    const lines = phaseEntries.map((e) => `${SPEAKER_LABELS[e.speaker]}: ${e.text}`);
+    const lines = phaseEntries.map((e) => `${lineLabel(e)}: ${e.text}`);
     sections.push(`${PHASE_HEADINGS[phase]}\n${lines.join("\n")}`);
   }
 
@@ -226,7 +330,9 @@ export function monologueAsHistory(
 export function debateSessionHistory(
   entries: readonly TranscriptEntry[],
 ): Array<{ role: "user" | "model"; parts: Array<{ text: string }> }> {
-  const exchange = entriesForPhase(entries, "debate").map((entry) => ({
+  // Scrubbed (#187): a directive the examiner once read aloud must not be
+  // seeded back into a fresh session as something it said.
+  const exchange = entriesForPhase(stripDirectiveEchoes(entries), "debate").map((entry) => ({
     role: entry.speaker === "candidate" ? ("user" as const) : ("model" as const),
     parts: [{ text: entry.text }],
   }));

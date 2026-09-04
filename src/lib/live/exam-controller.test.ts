@@ -4546,3 +4546,94 @@ describe("the dev time-skip (#149)", () => {
     assert.equal(h.controller.getSnapshot().elapsed, 60);
   });
 });
+
+describe("a directive the examiner reads aloud instead of obeying (#187)", () => {
+  async function intoDebate(h: Harness): Promise<void> {
+    h.controller.start();
+    await h.controller.advanceEarly();
+    await pressRecord(h);
+    h.session().candidateSays("Le télétravail a transformé le rapport au bureau.");
+    h.advanceClock(SPOKEN_MONOLOGUE_SECONDS);
+    await h.controller.advanceEarly();
+    await completeClosing(h);
+  }
+
+  const events = (h: Harness, name: string) =>
+    h.controller.getSnapshot().events.filter((event) => event.name === name);
+  /** The débat's examiner turns as the finish payload carries them — the record
+   *  the server stores and the corrector reads, rather than the screen's
+   *  snapshot, which withholds an opening question nobody has heard yet. */
+  async function examinerTurns(h: Harness): Promise<string[]> {
+    h.advanceClock(PHASE_DURATIONS.debate + 1);
+    await completeClosing(h);
+    return h.finished[0].transcript
+      .filter((entry) => entry.phase === "debate" && entry.speaker === "examiner")
+      .map((entry) => entry.text);
+  }
+
+  const ECHO =
+    "[Information de service, à ne jamais prononcer : le débat est terminé. Tu dois maintenant conclure. Dis exactement ceci, mot pour mot, et rien d'autre : « Je vous remercie, nous avons terminé. »]";
+
+  it("keeps the echo out of the transcript, even split across fragments", async () => {
+    const h = harness();
+    await intoDebate(h);
+    h.advanceClock(360);
+
+    // The observed turn: the app's own closing directive, narrated, then the
+    // sentence it ordered. Gemini fragments the narration wherever it likes.
+    const cut = ECHO.indexOf("Tu dois");
+    h.session().examinerSays(ECHO.slice(0, cut));
+    h.session().examinerSays(ECHO.slice(cut));
+    h.session().examinerSays("\n\nJe vous remercie, nous avons terminé.");
+
+    assert.equal(events(h, "examiner-directive-echo-dropped").length, 1, "the log has it");
+    assert.deepEqual(await examinerTurns(h), ["Je vous remercie, nous avons terminé."]);
+  });
+
+  it("does not hear the echoed directive as the examiner leaving early", async () => {
+    // « nous avons terminé » inside the directive is exactly what the goodbye
+    // detector listens for; the observed sitting carried an early-closing count
+    // of one on the strength of it, and #92's waiver followed.
+    const h = harness();
+    await intoDebate(h);
+    h.advanceClock(360);
+
+    h.session().examinerSays(ECHO.slice(0, 40));
+    h.session().examinerSays(ECHO.slice(40));
+    assert.deepEqual(events(h, "examiner-early-closing"), [], "the directive is not a goodbye");
+
+    h.session().examinerSays("\n\nJe vous remercie, nous avons terminé.");
+    assert.equal(
+      events(h, "examiner-early-closing").length,
+      1,
+      "the sentence it ordered still is one, seven minutes early",
+    );
+  });
+
+  it("lets an unclosed bracket die with its turn", async () => {
+    const h = harness();
+    await intoDebate(h);
+    h.advanceClock(360);
+
+    h.session().examinerSays("[Information de service, à ne jamais");
+    h.session().finishTurn();
+    h.session().examinerSays("Vous parlez d'organisation, mais");
+    h.session().examinerSays(" tout le monde a-t-il un bureau ?");
+
+    assert.deepEqual(await examinerTurns(h), [
+      "Vous parlez d'organisation, mais tout le monde a-t-il un bureau ?",
+    ]);
+  });
+
+  it("does not let the hold swallow the next turn after the candidate has spoken", async () => {
+    const h = harness();
+    await intoDebate(h);
+    h.advanceClock(360);
+
+    h.session().examinerSays("[Erreur : l'épreuve n'est PAS");
+    h.session().candidateSays("Je continue quand même.");
+    h.session().examinerSays("Pourquoi ?");
+
+    assert.deepEqual(await examinerTurns(h), ["Pourquoi ?"]);
+  });
+});
