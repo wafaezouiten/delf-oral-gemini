@@ -3539,20 +3539,71 @@ describe("an examiner that says goodbye seven minutes early (#85)", () => {
       assert.equal(cues(h).length, 1, "nine is a reply that is not coming");
     });
 
-    it("does not hold the cue once the examiner has replied", async () => {
-      // The hold is for the gap before a rebound, not a new floor rule: an
-      // answer the examiner has already replied to leaves the ordinary
-      // two-second pause in charge again.
+    it("holds the cue after the examiner's reply until the candidate answers it (#193)", async () => {
+      // The mirror of the hold above. Once the examiner has replied, the quiet
+      // is the candidate thinking, and a cue sent into it told an examiner
+      // that had just asked a question to move on to a new one — which it did
+      // by asking the same one again, word for word. This test used to assert
+      // the opposite: that the reply left the two-second pause in charge.
       const h = harness();
       await intoDebate(h);
 
       h.advanceClock(120);
       h.advanceClock(70);
+      quiet(h, 3);
       h.session().examinerSays("Dans ce cas, le lien social se construit où ?");
       h.session().finishTurn();
 
       quiet(h, 4);
-      assert.equal(cues(h).length, 1, "nothing is owed, so the pause is enough");
+      assert.deepEqual(cues(h), [], "four quiet seconds after a question is a candidate thinking");
+
+      h.advanceClock(3); // the candidate starts answering
+      quiet(h, 9); // and finishes; the reply gap (#130) is waited out as before
+      assert.equal(cues(h).length, 1, "the cue rides the first settled pause after the answer");
+    });
+
+    it("re-asks nothing: the observed double question (#193)", async () => {
+      // Sitting 229, twice: the grid fell due behind a long examiner question,
+      // the cue went out two seconds after its voice stopped, and the examiner
+      // asked the same question again twenty seconds after the first.
+      const h = harness();
+      await intoDebate(h);
+
+      h.advanceClock(170);
+      quiet(h, 9); // the candidate's answer, and the reply gap
+      h.session().examinerSays(
+        "Vous évoquez des rencontres, mais comment cela fonctionnerait-il dans une grande entreprise ?",
+      );
+      h.session().finishTurn(); // 179 s: the grid falls due at 180, mid-question
+      quiet(h, 5);
+      assert.deepEqual(cues(h), [], "no cue lands between the question and its answer");
+
+      h.advanceClock(20); // the candidate answers at length
+      quiet(h, 9);
+      assert.equal(cues(h).length, 1, "the cue arrives after the answer, once");
+    });
+
+    it("lets the cue out of a silent room, but after the presence check (#193)", async () => {
+      // A candidate who never answers must not hold the cue for ever, and must
+      // be asked « Vous m'entendez ? » before any cue makes the examiner speak
+      // again: the twelve-second hold sits between the silence watch's two
+      // steps for exactly this ordering.
+      const h = harness();
+      await intoDebate(h);
+
+      h.advanceClock(170);
+      quiet(h, 9);
+      h.session().examinerSays("Pensez-vous que tout le monde dispose des mêmes conditions ?");
+      h.session().finishTurn();
+
+      quiet(h, 11);
+      assert.deepEqual(cues(h), [], "eleven quiet seconds: still the candidate's floor");
+      const presence = h.session().directives.filter((text) => text.includes("Vous m'entendez"));
+      assert.equal(presence.length, 1, "the silence watch has asked whether anyone is there");
+      h.session().finishTurn(); // « Vous m'entendez ? » spoken
+
+      quiet(h, 13);
+      assert.equal(cues(h).length, 1, "and the cue follows it, before the next relance step");
     });
 
     it("owes one cue for a stretch it could not speak into, not a queue of them", async () => {
@@ -3611,11 +3662,24 @@ describe("an examiner that says goodbye seven minutes early (#85)", () => {
       h.session().finishTurn();
       h.advanceClock(11);
 
-      assert.equal(cues(h).length, 1, "three minutes have passed and the cue is due");
+      // Three minutes have passed, but the question is unanswered, so the cue
+      // is held (#193) and the silence watch's first step goes out alone.
+      assert.deepEqual(cues(h), [], "no cue behind an unanswered question");
+      assert.equal(
+        h.session().directives.filter((text) => text.includes("Vous m'entendez")).length,
+        1,
+        "the presence check has the tick to itself",
+      );
+      h.session().finishTurn(); // « Vous m'entendez ? » spoken, still nothing back
+
+      // Fifteen seconds on, the cue (twelve) and the relance step (fifteen) are
+      // both due on the same tick.
+      h.advanceClock(15);
+      assert.equal(cues(h).length, 1, "the cue takes the tick");
       assert.equal(
         h.session().directives.filter((text) => text.includes("Relance-le sur le fond")).length,
         0,
-        "and the eight-second relance waits its turn",
+        "and the relance waits its turn",
       );
     });
 
@@ -4079,7 +4143,12 @@ describe("the reconnect that could not resume mid-débat (#133)", () => {
     await intoDebate(h);
     deliverOpening(h);
     h.recorder.voiced.debate = 0;
-    h.advanceClock(687);
+    // Three ticks rather than one: the floor's quiet clock is kept by the
+    // ticks, and a single 687-second tick would establish it at 687 — from
+    // which the unanswered opening question holds the cue twelve seconds
+    // (#193). A running controller ticks every second.
+    h.advanceClock(600);
+    h.advanceClock(87);
     h.advanceClock(3);
     assert.ok(
       h.session().directives.some((text) => text.includes("dernière question")),
