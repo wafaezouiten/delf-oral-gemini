@@ -332,10 +332,18 @@ export function ResultsDrawer({
           scrolling the transcript underneath — the two scrollers are stacked,
           and chaining between them reads as the drawer "leaking". The height
           is driven imperatively above, to the visible slice of the drawer. */}
+      {/* `inert` rather than `aria-hidden` alone. The closed drawer clips its
+          content to nothing, but the criterion buttons inside are still real
+          buttons: without this a keyboard user tabs into a zero-height panel
+          with no visible focus, and `aria-hidden` over focusable descendants is
+          the ARIA anti-pattern that leaves what a screen reader does with them
+          undefined. `inert` takes them out of the tab order and out of the
+          accessibility tree together, which is the one thing that is true of a
+          drawer resting as a bar. */}
       <div
         ref={bodyRef}
         id={panelId}
-        aria-hidden={!isOpen}
+        inert={!isOpen}
         className={cn(
           "shrink-0 overscroll-contain",
           isOpen ? "overflow-y-auto" : "overflow-hidden",

@@ -238,7 +238,15 @@ export function TranscriptDocument({
                       line of a printed page sends the candidate over the fold
                       to find out which half they are reading. */}
                   <div className="flex break-inside-avoid break-after-avoid items-baseline justify-between gap-3">
-                    <Kicker>{section.heading}</Kicker>
+                    {/* An `h3` wearing the kicker's recipe, not `Kicker` —
+                        that renders a `<p>`, and these two labels are the only
+                        sub-headings under the sheet's `h2`. A transcript set as
+                        a document has to be navigable as one: losing them
+                        leaves a screen reader no way to jump from the exposé to
+                        the débat. */}
+                    <h3 className="text-muted-foreground text-[0.6875rem] font-semibold tracking-[0.16em] uppercase">
+                      {section.heading}
+                    </h3>
                     <span className="text-muted-foreground tabular shrink-0 text-[0.6875rem]">
                       {section.durationLabel}
                     </span>
