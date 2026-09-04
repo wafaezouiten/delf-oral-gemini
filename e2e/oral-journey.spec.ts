@@ -189,7 +189,7 @@ test.describe("one production orale, start to finish", () => {
     await test.step("10. the correction is displayed", async () => {
       // The finished screen navigates itself once the correction lands.
       await expect(page).toHaveURL(/\/app\/results\/\d+/, { timeout: 300_000 });
-      await expect(page.getByText("Production orale · Correction")).toBeVisible();
+      await expect(page.getByText("Production orale · Résultats")).toBeVisible();
     });
 
     await test.step("11. the correction carries a score out of 25", async () => {

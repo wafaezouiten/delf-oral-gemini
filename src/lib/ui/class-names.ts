@@ -5,8 +5,8 @@
  * component. The merge half of that is not reproduced here: it exists to let a
  * caller override a component's own utility with a conflicting one from a
  * `className` prop, and no component in this project takes a `className` it then
- * has to lose a specificity fight with — the two that come close (`BandScale`,
- * `Notice`) take a tone, not a class string. Shipping a 6 kB parser of Tailwind's
+ * has to lose a specificity fight with — the ones that come close (`Notice`,
+ * `ScoreTag`) take a tone or a score, not a class string. Shipping a 6 kB parser of Tailwind's
  * class grammar to resolve conflicts nobody creates would be paying for the
  * problem rather than the solution.
  *

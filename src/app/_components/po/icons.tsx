@@ -164,6 +164,21 @@ export function UserIcon(props: IconProps) {
   );
 }
 
+/**
+ * The examiner's face on the correction's transcript (#190): a mortarboard, so
+ * the two speakers are told apart by shape and never by hue alone. The
+ * candidate is `UserIcon` above.
+ */
+export function TeacherIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="m3 9.5 9-4.5 9 4.5-9 4.5-9-4.5Z" />
+      <path d="M7 11.5v4c0 1.7 2.3 3 5 3s5-1.3 5-3v-4" />
+      <path d="M21 9.5v5" />
+    </Icon>
+  );
+}
+
 /** The sujets catalogue: a sheet with lines on it, not a book. */
 export function DocumentIcon(props: IconProps) {
   return (

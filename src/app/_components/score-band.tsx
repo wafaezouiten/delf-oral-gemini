@@ -83,6 +83,16 @@ export function scoreInk(tone: ScoreTone): string {
 }
 
 /**
+ * The band worn by the verdict's pill (#190): the subtle fill, the ink and the
+ * ring, for a pill that carries a band's *name* beside the mark rather than the
+ * mark itself. `ScoreTag` prints the figure; this dresses the word.
+ */
+export function scorePill(tone: ScoreTone): string {
+  const { fill, ink, ring } = TONE_CLASSES[tone];
+  return cn(fill, ink, ring);
+}
+
+/**
  * The band worn by a whole surface rather than a pill — the sujet cards (#188),
  * which take their last score's wash and ring so a grid of them reads at a
  * glance. The recipe is the main project's (delf-preps, `TONE_CARD`): the

@@ -24,7 +24,16 @@
  *    changes the viewport, and a `100vh` control bar sits under it until the
  *    candidate scrolls — during the passation, where scrolling is the last thing
  *    they should be doing.
+ *
+ * `print:h-auto print:overflow-visible` (#190): on paper `100dvh` is one page
+ * and `overflow-hidden` clips the correction to it, whatever the report inside
+ * releases. The shell has to grow with the sheet for Ctrl+P to paginate at
+ * all; the passation never prints, so nothing else changes.
  */
 export default function FullscreenLayout({ children }: LayoutProps<"/app">) {
-  return <div className="h-dvh min-h-0 overflow-hidden">{children}</div>;
+  return (
+    <div className="h-dvh min-h-0 overflow-hidden print:h-auto print:overflow-visible">
+      {children}
+    </div>
+  );
 }
