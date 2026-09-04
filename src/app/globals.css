@@ -268,13 +268,15 @@ body {
  * The one rounded surface (#188): a sujet card, on the hub and on the kiosk.
  *
  * A sujet is the thing the candidate picks up, not a form they fill in, so it is
- * allowed the softness the rest of the stationery refuses. One class rather than
- * a `rounded-*` utility on the card, for `.sheet`'s reason: the two catalogues
- * draw the same component, and this is what keeps them from rounding
- * differently the day one of them is touched.
+ * allowed the softness the rest of the stationery refuses. The number is the
+ * main project's (delf-preps draws the same card `rounded-2xl`, which its radius
+ * scale resolves to 0.9rem). One class rather than a `rounded-*` utility on the
+ * card, for `.sheet`'s reason: the two catalogues draw the same component, and
+ * this is what keeps them from rounding differently the day one of them is
+ * touched.
  */
 .sujet-card {
-  border-radius: 0.75rem;
+  border-radius: 0.9rem;
 }
 
 /**

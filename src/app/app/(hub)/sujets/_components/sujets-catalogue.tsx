@@ -142,10 +142,9 @@ export function SujetsCatalogue({
               <SujetCard
                 sujet={sujet}
                 // The catalogue's own numbering, not the filtered list's: a
-                // search that renumbered the cards would make "Sujet 03" mean
+                // search that renumbered the cards would make « N° 03 » mean
                 // something different for every query.
-                eyebrow={<SujetNumber position={sujets.indexOf(sujet) + 1} />}
-                action="Lire le sujet"
+                position={sujets.indexOf(sujet) + 1}
                 headingLevel="h2"
                 ariaLabel={`Lire le sujet : ${sujet.title}`}
                 onOpen={() => setOpenSlug(sujet.slug)}
@@ -167,19 +166,6 @@ function normalise(value: string): string {
     .replace(/\p{Diacritic}/gu, "")
     .toLowerCase()
     .trim();
-}
-
-/**
- * The kiosk's eyebrow on a card: its number in the catalogue. The card itself
- * is `SujetCard`, shared with the hub since #188 — what the kiosk adds is this
- * numbering and the sheet the card opens.
- */
-function SujetNumber({ position }: { position: number }) {
-  return (
-    <span className="text-muted-foreground tabular text-[0.65625rem] font-medium tracking-[0.06em]">
-      Sujet {position.toString().padStart(2, "0")}
-    </span>
-  );
 }
 
 /**

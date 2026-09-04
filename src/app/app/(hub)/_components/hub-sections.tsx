@@ -142,9 +142,10 @@ export function HubFormat({ view }: { view: HubView }) {
  * The reference's colour rule, kept because it is what stops this grid turning
  * into a fruit salad: the score is the card's one accent. Only some cards have
  * a score, so that is the one allowed to mean something — and since #188 it
- * colours the whole card, not only the pill. The kind pill the reference put
- * beside it is gone from this grid: every sujet here is the same épreuve, so it
- * classified nothing (the sheet on the kiosk still names the kind).
+ * colours the whole card, not only the pill. The kind pill the reference once
+ * put beside it is gone from this grid, as it is from the main project's: every
+ * sujet here is the same épreuve, so it classified nothing (the sheet on the
+ * kiosk still names the kind).
  *
  * The card is one `<Link>` rather than a card with a button in it, so the whole
  * surface is the target and there is exactly one tab stop per sujet.
@@ -175,14 +176,15 @@ export function HubSujets({
       </SectionHeading>
 
       <ul className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        {sujets.map((sujet) => (
+        {sujets.map((sujet, index) => (
           <li key={sujet.slug} className="flex">
             <SujetCard
               sujet={sujet}
-              // No kind pill: every card here is « Monologue et débat », so the
-              // pill classified nothing, and the section heading already says
-              // what these are. The score alone sits in the header row.
-              action={sujet.score === null ? "Commencer" : "Refaire"}
+              // The featured row is the top of the catalogue in its own order,
+              // so the row's index is the kiosk's position for the same sujet:
+              // the number a reader sees here is the one they find on the card
+              // the link lands them on.
+              position={index + 1}
               // Straight to this sujet's sheet on the kiosk, rather than to the
               // top of the page with a hash the grid would have to hunt for.
               href={`${allSujetsHref}?sujet=${sujet.slug}`}

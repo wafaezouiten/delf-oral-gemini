@@ -84,33 +84,40 @@ export function scoreInk(tone: ScoreTone): string {
 
 /**
  * The band worn by a whole surface rather than a pill — the sujet cards (#188),
- * which take their last score's fill and ring so a grid of them reads at a
- * glance. The ink is deliberately not part of it: the card's own text stays on
- * the foreground and the muted tokens, both of which hold AA on every one of
- * the five subtle fills (see the `--score-*` block in `globals.css`), and a
- * whole paragraph set in the band's ink would be colour doing the talking.
+ * which take their last score's wash and ring so a grid of them reads at a
+ * glance. The recipe is the main project's (delf-preps, `TONE_CARD`): the
+ * subtle fill over the whole card, the band's hue as the hairline, deepening on
+ * hover where a neutral card's hairline goes navy. The wash is the subtle token
+ * at 70 % rather than full — a shade lighter than the pill's own fill, by the
+ * user's call, so the card reads as tinted paper rather than as a coloured
+ * block. The ink is deliberately not part of it: the card's text stays on the
+ * foreground and the muted tokens, which hold AA on every one of the five
+ * subtle fills at full strength (see the `--score-*` block in `globals.css`)
+ * and therefore on the lighter wash too.
+ *
+ * Literal class strings per tone rather than `${fill}/70`: Tailwind only
+ * generates what it can read in the source.
  */
+const SURFACE_CLASSES: Record<ScoreTone, string> = {
+  red: "bg-score-red-subtle/70 border-score-red/40 hover:border-score-red/70",
+  coral: "bg-score-coral-subtle/70 border-score-coral/40 hover:border-score-coral/70",
+  orange: "bg-score-orange-subtle/70 border-score-orange/40 hover:border-score-orange/70",
+  yellow: "bg-score-yellow-subtle/70 border-score-yellow/40 hover:border-score-yellow/70",
+  green: "bg-score-green-subtle/70 border-score-green/40 hover:border-score-green/70",
+};
+
 export function scoreSurface(score25: number): string {
-  const tone = TONE_CLASSES[scoreTone(score25)];
-  return cn(tone.fill, tone.ring);
+  return SURFACE_CLASSES[scoreTone(score25)];
 }
 
 /**
- * The pill inverted: the band's solid fill under white text, for a pill that
- * sits on a surface already wearing the band's tint (`scoreSurface`), where the
- * tinted pill would be a ring on its own colour. Every ink holds ≥ 6.2:1 under
- * white. On paper it falls back to an outline, since a mono printer that drops
- * fills would otherwise print white text on nothing.
+ * The pill on a chip: the band's ink and ring on `bg-card`, for a pill that
+ * sits on a surface already wearing the band's wash (`scoreSurface`), where the
+ * tinted pill would sink into its own colour. The main project's rule for the
+ * same pill on the same card: keep the ink, swap the one fill that no longer
+ * separates it from the surface.
  */
-const SOLID_CLASSES: Record<ScoreTone, string> = {
-  red: "bg-score-red",
-  coral: "bg-score-coral",
-  orange: "bg-score-orange",
-  yellow: "bg-score-yellow",
-  green: "bg-score-green",
-};
-const solidInk =
-  "border-transparent text-white print:border-current print:bg-transparent print:text-foreground";
+const chipFill = "bg-card";
 
 /**
  * A /25 as a pill, tinted on its band.
@@ -128,8 +135,8 @@ export function ScoreTag({
   className,
 }: {
   score25: number;
-  /** `solid` for a pill on a surface that already wears the band (#188). */
-  variant?: "tint" | "solid";
+  /** `chip` for a pill on a surface that already wears the band (#188). */
+  variant?: "tint" | "chip";
   /** `✓` / `✕` — whether the mark clears the DELF floor, where that is shown. */
   mark?: string;
   /** A phrase before the note, e.g. « Déjà passé ». */
@@ -138,8 +145,7 @@ export function ScoreTag({
 }) {
   const band = scoreTone(score25);
   const tone = TONE_CLASSES[band];
-  const colour =
-    variant === "solid" ? cn(SOLID_CLASSES[band], solidInk) : cn(tone.fill, tone.ink, tone.ring);
+  const colour = cn(variant === "chip" ? chipFill : tone.fill, tone.ink, tone.ring);
 
   return (
     <span className={cn(tagShape, colour, className)}>
