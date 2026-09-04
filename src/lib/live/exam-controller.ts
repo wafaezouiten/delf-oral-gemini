@@ -655,6 +655,30 @@ const TIME_CUE_QUIET_MS = 2_000;
 const EXAMINER_REPLY_WAIT_MS = 8_000;
 
 /**
+ * How long an unanswered EXAMINER question holds the floor (#193) — the mirror
+ * of {@link EXAMINER_REPLY_WAIT_MS}.
+ *
+ * That hold covers the gap after a candidate answer, while Gemini composes.
+ * This one covers the gap after an examiner question, while the candidate
+ * thinks. Two seconds of quiet there used to read as a free floor, and a cue
+ * sent into it told an examiner that had just asked a question to « enchaîner
+ * avec une question nouvelle » — which it did by asking the same one again,
+ * word for word, twenty seconds after the first. Sitting 229 has two of them,
+ * each exactly where the three-minute grid fell due behind a long question.
+ *
+ * So while the examiner's last turn ended after the candidate's last voice,
+ * an answer is presumed owed and the cue waits this long from the moment the
+ * floor went quiet. Twelve seconds sits between the silence watch's two
+ * steps on purpose: LONGER than {@link SILENCE_NUDGE_MS}, so a candidate who
+ * has gone quiet is asked « Vous m'entendez ? » before any cue makes the
+ * examiner re-ask, and SHORTER than {@link SILENCE_STEP_MS}, so in a room
+ * that stays silent the cue still gets out between two relances rather than
+ * never. A candidate who starts answering ends the hold at once — their voice
+ * hands the floor to the other rule.
+ */
+const CANDIDATE_ANSWER_WAIT_MS = 12_000;
+
+/**
  * How many times one débat will contradict an examiner that has said goodbye.
  *
  * Rationed for the same reason as the presence check: a model that has decided
@@ -2339,6 +2363,14 @@ export class ExamController {
    * composing its rebound, and a cue sent there produces two examiner questions
    * back to back. That stretch holds the floor for up to
    * {@link EXAMINER_REPLY_WAIT_MS} from the candidate's last voiced moment.
+   *
+   * And the other way round (#193): after an examiner question that no
+   * candidate voice has yet followed, the quiet is the candidate thinking, and
+   * a cue sent there makes the examiner ask its question again. That stretch
+   * holds the floor for up to {@link CANDIDATE_ANSWER_WAIT_MS} from the moment
+   * it went quiet. Between them the two holds cover both gaps of a turn — the
+   * one before the examiner speaks and the one before the candidate does — and
+   * leave the bare two-second pause in charge only mid-answer.
    */
   private floorIsQuiet(now: number): boolean {
     const voiced = this.recorder?.voicedSeconds("debate") ?? 0;
@@ -2365,7 +2397,19 @@ export class ExamController {
     const replyOwed =
       lastVoice !== null &&
       (this.examinerTurnEndedAt === null || this.examinerTurnEndedAt < lastVoice);
-    return !replyOwed || now - lastVoice >= EXAMINER_REPLY_WAIT_MS;
+    if (replyOwed) return now - lastVoice >= EXAMINER_REPLY_WAIT_MS;
+
+    // The examiner has spoken since the candidate last did: its question is
+    // out and unanswered (#193). Measured from the quiet rather than from the
+    // turn's completion, because the server reports a turn complete when the
+    // text is generated, and a long question is still being spoken for twenty
+    // seconds after that.
+    if (this.examinerTurnEndedAt === null) return true;
+    // From whichever came last: the turn completing or its voice stopping. A
+    // floor that was already quiet when a short turn completed would otherwise
+    // count quiet from before the question was asked.
+    const answerWindowOpened = Math.max(this.floorQuietSince, this.examinerTurnEndedAt);
+    return now - answerWindowOpened >= CANDIDATE_ANSWER_WAIT_MS;
   }
 
   /** Make the examiner speak on the app's initiative rather than the model's —
