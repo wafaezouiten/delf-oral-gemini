@@ -106,11 +106,15 @@ export interface StoredResult {
     /**
      * What the rubric docked for a short épreuve, and which halves were short.
      *
-     * Part of the stored payload and still computed, persisted and used by the
-     * corrector — but nothing on this page renders either any more: the
-     * « Note avant pénalité de durée » paragraph was removed on the user's
-     * call (#137). Kept on the type because they describe what the stash and
-     * the row actually carry, not what this page shows of them.
+     * `durationPenalty` is what gates the explanation below the mark: #137
+     * removed the old « Note avant pénalité de durée » paragraph and left the
+     * penalty firing unexplained, and #189 reversed that on the user's call —
+     * « the candidate should know why he got penalized ». So this field is
+     * read, and `durationCharges` beside it carries the reason.
+     *
+     * `shortParts` is still the one nothing renders: it names which halves
+     * fell short without saying what that cost, which is the half of the
+     * sentence `durationCharges` now carries properly.
      */
     durationPenalty?: number;
     shortParts?: Array<"monologue" | "debate">;
@@ -332,10 +336,11 @@ export function ResultsClient({
   });
 
   /**
-   * The paragraph below the mark, built and tested in
-   * `lib/ui/correction-notices.ts`. Only the halving speaks now: the duration
-   * penalty still fires in the rubric, but its « Note avant pénalité de
-   * durée » paragraph was removed on the user's call (#137).
+   * The paragraphs below the mark, built and tested in
+   * `lib/ui/correction-notices.ts`. Two can speak: the halving, and — since
+   * #189 reversed #137 on the user's call — the duration charge, which names
+   * the part that ran short, what it cost and which criterion it came off.
+   * Neither claims a band was lowered, because neither was.
    */
   const notices = correctionNotices(evaluation);
 

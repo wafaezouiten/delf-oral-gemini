@@ -217,16 +217,14 @@ export interface EvaluationResult {
    * carried in the finish response so a mark can be explained from one payload
    * without re-deriving a rule the browser must not own a second copy of.
    *
-   * **Nothing shows these to a candidate, and #189 did not ask for it.**
-   * `toCorrectionRow` drops them, so on the ordinary persisted path they are
-   * gone by the time the results page loads; only the degraded no-database
-   * path returns them to a browser at all, and no component reads them there
-   * either. What they are for today is the corrector's own explanation of a
-   * figure — `verify-eval.ts` asserts on them, and a future page that wanted
-   * to say « votre débat a duré deux minutes » could reconstruct them the way
-   * `absentParts` already is. Surfacing that sentence is out of scope here:
-   * #137 removed the duration paragraph from the correction page by the user's
-   * call, so there is currently no reader to lose.
+   * **These are what the candidate's explanation is built from (#189).** The
+   * user asked for it late in the branch — « the candidate should know why he
+   * got penalized » — reversing the silence #137 had left. On the degraded
+   * no-database path the browser reads `durationCharges` straight out of this
+   * response; on the ordinary persisted path `toCorrectionRow` still drops
+   * them, and the results page reconstructs the equivalent by re-running
+   * `applySittingDurationPenalty` over the stored bands and the server's
+   * measured durations. So there is no column, and there is a reader.
    */
   durationTiers: Record<"monologue" | "debate", DurationTier>;
   durationCharges: DurationCharge[];

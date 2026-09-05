@@ -751,9 +751,10 @@ export interface SittingScore {
   shortParts: Array<"monologue" | "debate">;
   /**
    * Both parts' duration tiers (#189), reported whether or not either was
-   * charged — a part that ran its full eight minutes is a fact about the
-   * sitting, and « full » is the answer to the question `shortParts` leaves
-   * open on a part it does not name.
+   * charged — a part that ran its own full development time is a fact about
+   * the sitting, and « full » is the answer to the question `shortParts`
+   * leaves open on a part it does not name. Note "its own": the two ceilings
+   * differ (see {@link FULL_DEVELOPMENT_SECONDS}).
    */
   durationTiers: Record<"monologue" | "debate", DurationTier>;
   /**
