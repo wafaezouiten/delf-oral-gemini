@@ -13,7 +13,10 @@
  * (`delf-preps@5170f0dd`, `DEFAULT_ORAL_EVAL_TEMPLATE` and
  * `renderOralEvaluationPrompt`): header, attendus, partie évaluée, échelle,
  * critères, style, règles, appréciation and conseil, durée, transcription,
- * contrat de réponse — then the directives, appended last and unremovable. The
+ * contrat de réponse — then the directives, appended last and unremovable.
+ * One block is inserted into that order and is not the reference's:
+ * `PRODUCTION_CASES` (#189), immediately after the rules it extends, because a
+ * corrector reads "how to grade a thin performance" as part of how to grade. The
  * reference appends its own that way (the stage contract, and the audio
  * phonologie judgment when the passation produced one); this project appends the
  * stage contract, the phonologie instruction for the mode being run, and the
@@ -50,6 +53,7 @@ import {
   STYLE_RULE,
   renderOralCriteriaList,
 } from "./criteria";
+import { PRODUCTION_CASES } from "./production-cases";
 import type { OralTopic } from "./topics";
 import { formatTranscript, type TranscriptEntry } from "./transcript";
 
@@ -105,6 +109,8 @@ ${renderOralCriteriaList()}
 ${STYLE_RULE}
 
 ${EVALUATION_RULES}
+
+${PRODUCTION_CASES}
 
 APPRÉCIATION GLOBALE (« appreciationGlobale ») : un paragraphe de correcteur (3 à 5 phrases) synthétisant le niveau global de la prestation, ce qui la situe à B2 ou non, et l'impression d'ensemble.
 

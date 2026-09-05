@@ -22,7 +22,12 @@ import { GoogleGenAI, Type, createPartFromUri, type Part } from "@google/genai";
 
 import { ORAL_CRITERIA, type OralCriterion } from "@/lib/delf/criteria";
 import { buildEvaluationPrompt } from "@/lib/delf/evaluation-prompt";
-import { scoreSitting, type CriteriaBands } from "@/lib/delf/orale-rubric";
+import {
+  scoreSitting,
+  type CriteriaBands,
+  type DurationCharge,
+  type DurationTier,
+} from "@/lib/delf/orale-rubric";
 import {
   criterionJustifications,
   criterionScores,
@@ -38,6 +43,7 @@ import type { OralTopic } from "@/lib/delf/topics";
 import type { EvaluationFeedback, EvaluationMode, OralSpeakingPhase } from "@/lib/db/schema";
 import { earlyClosingInstruction } from "./early-closing-instruction";
 import { phonologyInstruction, type AttachedRecording } from "./phonology-instruction";
+import { technicalIncidentInstruction } from "./technical-incident-instruction";
 import { transcriptReliabilityInstruction } from "./transcript-reliability-instruction";
 
 /**
@@ -89,8 +95,28 @@ export const EVAL_MODEL = process.env.GEMINI_EVAL_MODEL ?? "gemini-3.6-flash";
  * where there is audio — outranks it for every criterion, not only
  * phonologie. Same sitting: the app's presence check now reaches the corrector
  * under its own label rather than as an examiner question (#187).
+ *
+ * `2026-09-04.1` is #189, and it moves marks twice over. The prompt gains
+ * `PRODUCTION_CASES` — how to read a prestation that is partial, brief or
+ * interrupted, case by case — and, on a sitting whose Live session dropped, the
+ * technical-incident paragraph that says a gap in the transcript may be the
+ * app's rather than a candidate who would not answer. Beside it, and not
+ * recorded by this column at all, the rubric's duration rule became three tiers
+ * charged against « réalisation de la tâche » and « interaction »
+ * (`orale-rubric.ts`). A correction stamped with this version was graded by a
+ * corrector told what to do with silence, and scored by a rule that no longer
+ * takes a flat 3 off the total.
+ *
+ * The same version also scopes `EVALUATION_RULES`' « CAS LIMITE » to the whole
+ * sitting. It said « si aucune réplique CANDIDAT ne contient de contenu
+ * évaluable, mettez 0 à TOUS les critères » without saying which replies, and
+ * `verify:eval` caught the corrector applying it to ONE empty part: a real
+ * monologue came back 0 on lexique and morphosyntaxe. Not a separate version,
+ * because `2026-09-04.1` has never graded a stored sitting — it was introduced
+ * and corrected inside the same unmerged branch, so there is no row on either
+ * side of the difference for the column to distinguish.
  */
-export const EVAL_PROMPT_VERSION = "2026-09-04.0";
+export const EVAL_PROMPT_VERSION = "2026-09-04.1";
 
 /** Re-exported, not redeclared: the mode is a stored column, and `evaluations.mode`
  *  is where its legal values are defined. */
@@ -101,10 +127,11 @@ export type { EvaluationMode };
  *
  * A thin adapter since #173: the words are the main project's and live in
  * `lib/delf/evaluation-prompt.ts`, which is pure and unit-tested. What this
- * function still decides is the two paragraphs that depend on the artefacts —
- * which recordings exist and how the phonologie criterion may therefore be
- * judged, and whether the examiner tried to close the épreuve early — and it
- * hands them over as directives, appended after the stage contract.
+ * function still decides is the paragraphs that depend on the artefacts — which
+ * recordings exist and how the phonologie criterion may therefore be judged,
+ * what the transcript is worth against them, whether the session dropped, and
+ * whether the examiner tried to close the épreuve early — and it hands them
+ * over as directives, appended after the stage contract.
  */
 function buildPrompt(params: {
   mode: EvaluationMode;
@@ -114,6 +141,8 @@ function buildPrompt(params: {
   debateSeconds: number;
   /** How many times the examiner tried to close the épreuve early (#92). */
   earlyClosingCount: number;
+  /** How many times the Live session dropped and was reopened (#189). */
+  reconnectCount: number;
   /** Which tasks the attached audio actually covers. See `phonology-instruction.ts`. */
   recordings?: readonly AttachedRecording[];
 }): string {
@@ -125,6 +154,7 @@ function buildPrompt(params: {
     directives: [
       phonologyInstruction(params.mode, params.recordings),
       transcriptReliabilityInstruction(params.mode),
+      technicalIncidentInstruction(params.reconnectCount),
       earlyClosingInstruction(params.earlyClosingCount),
     ],
   });
@@ -181,6 +211,23 @@ export interface EvaluationResult {
    */
   durationPenalty: number;
   shortParts: Array<"monologue" | "debate">;
+  /**
+   * How developed each part was in time, and where the shortfall was charged
+   * (#189). Corrector's working like `shortParts`: no column, never stored,
+   * carried in the finish response so a mark can be explained from one payload
+   * without re-deriving a rule the browser must not own a second copy of.
+   *
+   * **These are what the candidate's explanation is built from (#189).** The
+   * user asked for it late in the branch — « the candidate should know why he
+   * got penalized » — reversing the silence #137 had left. On the degraded
+   * no-database path the browser reads `durationCharges` straight out of this
+   * response; on the ordinary persisted path `toCorrectionRow` still drops
+   * them, and the results page reconstructs the equivalent by re-running
+   * `applySittingDurationPenalty` over the stored bands and the server's
+   * measured durations. So there is no column, and there is a reader.
+   */
+  durationTiers: Record<"monologue" | "debate", DurationTier>;
+  durationCharges: DurationCharge[];
   /**
    * What halving the mark cost, and which parts the candidate never produced.
    * Zero and empty for a sitting where both parts happened; on a walk-out from
@@ -270,6 +317,23 @@ export interface EvaluateParams {
    */
   earlyClosingCount?: number;
   /**
+   * How many times the Live session dropped and was reopened mid-épreuve
+   * (#189), as the controller counted it and the finish payload carried it.
+   * Positive, it adds the technical-incident paragraph to the prompt, which
+   * tells the corrector that a gap or an unanswered question in the transcript
+   * may be the app's rather than the candidate's.
+   *
+   * It reaches the prompt ONLY. Unlike `earlyClosingCount` it waives no
+   * penalty: the recording is made in the browser and runs straight through a
+   * dropped socket, so a reconnect shortens the transcript and never the
+   * measured seconds the duration rule reads. See
+   * `technical-incident-instruction.ts`.
+   *
+   * Optional, defaulting to 0, for `earlyClosingCount`'s reason: the scripts
+   * and the experiment grade artefacts that had no session to drop.
+   */
+  reconnectCount?: number;
+  /**
    * The candidate's recording. Required for `audio` mode, ignored otherwise.
    *
    * Two shapes, because there are two kinds of caller. Phase 6's exam produces
@@ -340,8 +404,13 @@ export async function evaluateExam(params: EvaluateParams): Promise<EvaluationRe
   // differently: the paragraph and the waiver describe one incident and must
   // fire together or not at all.
   const earlyClosingCount = params.earlyClosingCount ?? 0;
+  // Read once here too, though only the prompt consumes it: a default resolved
+  // at the point of use is a default the next consumer gets to choose again.
+  const reconnectCount = params.reconnectCount ?? 0;
 
-  const parts: Part[] = [{ text: buildPrompt({ ...params, earlyClosingCount, recordings }) }];
+  const parts: Part[] = [
+    { text: buildPrompt({ ...params, earlyClosingCount, reconnectCount, recordings }) },
+  ];
 
   const uploadStartedAt = Date.now();
   if (params.mode === "audio") {
@@ -525,6 +594,8 @@ export async function evaluateExam(params: EvaluateParams): Promise<EvaluationRe
     absentParts: scored.absentParts,
     durationPenalty: scored.durationPenalty,
     shortParts: scored.shortParts,
+    durationTiers: scored.durationTiers,
+    durationCharges: scored.durationCharges,
     excusedParts: scored.excusedParts,
     phonologyCapped: scored.phonologyCapped,
     score25: scored.score25,

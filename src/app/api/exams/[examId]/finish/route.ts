@@ -465,6 +465,13 @@ export async function POST(request: Request, context: { params: Promise<{ examId
       // Positive, this adds the incident paragraph to the prompt and excuses
       // the débat from both penalties.
       earlyClosingCount,
+      // How many times the Live session dropped and was reopened mid-épreuve
+      // (#189). Passed straight from the payload, unlike the goodbyes above,
+      // and deliberately unclamped: there is nothing in the transcript that
+      // corroborates a reconnect, and nothing this number can buy — it reaches
+      // the prompt and no penalty, so the worst a wrong one does is ask the
+      // corrector to be charitable about gaps in a transcript that has none.
+      reconnectCount: payload.reconnectCount,
       // Labelled, not just ordered: when only one phase recorded — a microphone
       // denied before the monologue, a headset unplugged mid-débat — the
       // corrector has to be told which task it is listening to, or it assumes

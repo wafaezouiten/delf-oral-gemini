@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import { muxOggOpus } from "@/lib/audio/ogg-opus";
-import { DEBATE_FLOOR_SECONDS, MONOLOGUE_FLOOR_SECONDS } from "@/lib/delf/orale-rubric";
+import { SHORT_DEVELOPMENT_SECONDS } from "@/lib/delf/orale-rubric";
 import { pcm16ToWav } from "@/lib/audio/pcm";
 import { INPUT_SAMPLE_RATE } from "@/lib/gemini/constants";
 import {
@@ -222,13 +222,13 @@ describe("what a stub of seconds is", () => {
   // safety rests on two relations to the rubric; if either moves, the floor has
   // to be re-argued rather than silently kept.
 
-  it("sits far under both duration floors, so it can never change a mark", () => {
-    // A phase measuring under the floor is short whether it reads 8 seconds or
-    // 0 — the drop turns one already-penalised reading into the other, and
-    // nothing else. Were this floor ever to reach a part's own floor, dropping
-    // a recording could START a penalty, which is exactly what it must not do.
-    assert.ok(MIN_RECORDING_SECONDS < MONOLOGUE_FLOOR_SECONDS / 2);
-    assert.ok(MIN_RECORDING_SECONDS < DEBATE_FLOOR_SECONDS / 2);
+  it("sits far under the heaviest duration tier, so it can never change a mark", () => {
+    // A phase measuring under `SHORT_DEVELOPMENT_SECONDS` is in the bottom tier
+    // whether it reads 8 seconds or 0 — the drop turns one already-charged
+    // reading into the other, and nothing else. Were this floor ever to reach
+    // that threshold, dropping a recording could move a part between tiers,
+    // which is exactly what it must not do.
+    assert.ok(MIN_RECORDING_SECONDS < SHORT_DEVELOPMENT_SECONDS / 2);
   });
 
   it("still measures a stub — the floor is a decision about grading, not format", async () => {

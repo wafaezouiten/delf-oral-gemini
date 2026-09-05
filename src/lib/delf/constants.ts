@@ -83,9 +83,21 @@ export function getOralPartSpec(tache: number): OralPartSpec | null {
 }
 
 /**
- * Minimum expected candidate duration per part, in seconds. A submission below
- * this floor incurs a small rubric penalty (see `applyDurationPenalty`). Derived
- * from the part durations so the two never drift.
+ * The incumbent's minimum expected candidate duration per part, in seconds:
+ * ~40 % of the expected speaking time, floored at 30 s. 168 s for the monologue
+ * and 312 s for the débat.
+ *
+ * **No longer this project's grading rule (#189), and kept deliberately.** It
+ * was the single per-part threshold behind a flat −3; the sitting is now placed
+ * in one of three tiers against `FULL_DEVELOPMENT_SECONDS` and
+ * `SHORT_DEVELOPMENT_SECONDS` in `orale-rubric.ts`, which are absolute figures
+ * rather than a fraction of the part. Nothing in `src/` computes a mark from
+ * this function any more.
+ *
+ * It survives because it is the incumbent's rule, and `scripts/comparison`
+ * exists to compare marks with the incumbent: deleting it would silently drop
+ * the only statement in this tree of the threshold the other side still uses.
+ * Do not wire it back into the rubric without reopening #189.
  */
 export function minDurationSeconds(tache: number): number {
   const spec = getOralPartSpec(tache);

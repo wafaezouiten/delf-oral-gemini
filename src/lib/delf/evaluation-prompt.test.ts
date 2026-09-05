@@ -8,6 +8,7 @@ import {
   ORAL_CRITERIA,
   STYLE_RULE,
 } from "./criteria";
+import { PRODUCTION_CASES } from "./production-cases";
 import { buildEvaluationPrompt } from "./evaluation-prompt";
 import { ORAL_TOPICS } from "./topics";
 import type { TranscriptEntry } from "./transcript";
@@ -53,8 +54,9 @@ describe("the corrector's prompt", () => {
 
   it("carries every ported block, in the main project's order", () => {
     // The order is the reference template's: attendus, partie évaluée, échelle,
-    // critères, style, règles, appréciation and conseil, durée, transcription,
-    // contrat de réponse — then the directives. Asserted as positions rather
+    // critères, style, règles, cas particuliers (#189, this project's own),
+    // appréciation and conseil, durée, transcription, contrat de réponse —
+    // then the directives. Asserted as positions rather
     // than as presence, because a block that has moved above the transcript is
     // still present and no longer read the same way.
     const text = prompt();
@@ -71,6 +73,7 @@ describe("the corrector's prompt", () => {
       at("CRITÈRES DE LA GRILLE À NOTER"),
       at(STYLE_RULE),
       at(EVALUATION_RULES),
+      at(PRODUCTION_CASES),
       at("APPRÉCIATION GLOBALE"),
       at("Durée de production du candidat"),
       at("Transcript :"),

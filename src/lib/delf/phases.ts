@@ -137,10 +137,10 @@ export function isPhaseTimeUp(phase: OralPhase, elapsedSeconds: number): boolean
  * **The monologue used to be the exception, and is not any more (#171).** It
  * held the button shut for a minute — five, before that — so a candidate could
  * not skip the task outright. That was a UI gate standing in for a grading rule
- * it never was: the penalty for a short part is `minDurationSeconds(tache)` in
- * `constants.ts`, computed from the *measured audio*, and it never depended on
- * this. A candidate who concludes after twenty seconds may now do so, and still
- * loses exactly the points the DELF's own floor costs them — while one who says
+ * it never was: the penalty for a short part is the duration tier in
+ * `orale-rubric.ts`, computed from the *measured audio*, and it never depended
+ * on this. A candidate who concludes after twenty seconds may now do so, and
+ * still loses exactly the points that tier costs them — while one who says
  * nothing at all is caught by {@link monologueWasSilent}, which asks rather than
  * refuses. Neither of those needed a clock in front of it, and what the clock
  * did cost was real: a minute of dead time before the débat, which is the half

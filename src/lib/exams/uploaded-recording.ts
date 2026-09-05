@@ -53,10 +53,10 @@ export const MAX_RECORDING_BYTES = 3 * 1024 * 1024;
  *
  * Dropping one is free where it matters, and that is why 10 seconds is safe:
  *
- *  - **The duration penalty cannot move.** Both part floors are minutes
- *    (`MONOLOGUE_FLOOR_SECONDS`, `DEBATE_FLOOR_SECONDS` in `orale-rubric.ts`),
- *    so a phase measuring 8 seconds and one measuring 0 are equally short —
- *    the same rule a dead microphone already meets.
+ *  - **The duration penalty cannot move.** The thresholds are minutes
+ *    (`SHORT_DEVELOPMENT_SECONDS`, `FULL_DEVELOPMENT_SECONDS` in
+ *    `orale-rubric.ts`), so a phase measuring 8 seconds and one measuring 0 are
+ *    in the same tier — the same reading a dead microphone already gets.
  *  - **The absence halving (#71) is charged in words**, out of the transcript,
  *    and never reads the recording at all.
  *  - **Phonologie loses nothing it had.** Ten seconds of audio is not evidence

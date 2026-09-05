@@ -24,6 +24,7 @@
  */
 
 import { COMPETENCY_MAX } from "@/lib/delf/constants";
+import { FULL_DEVELOPMENT_SECONDS, type DurationCharge } from "@/lib/delf/orale-rubric";
 import { formatScore25 } from "@/lib/ui/format-score";
 
 export type CorrectionPart = "monologue" | "debate";
@@ -42,12 +43,18 @@ export interface CorrectionScores {
   rawScore25: number;
   absencePenalty?: number;
   absentParts?: readonly CorrectionPart[];
+  /** What the duration rule took, and where from (#189). Optional for the
+   *  reason the halving's fields are: a stash or a row may predate them. */
+  durationPenalty?: number;
+  durationCharges?: readonly DurationCharge[];
 }
 
 /** One paragraph, or the absence of one. */
 export interface CorrectionNotices {
   /** The halving, when a part of the épreuve was not produced. */
   absence: string | null;
+  /** The duration charge, when a part ran short of what the épreuve asks. */
+  duration: string | null;
 }
 
 /** No-break space, as French typography wants it before a colon. */
@@ -124,10 +131,95 @@ export function earlyClosingNotice(earlyClosingCount: number | undefined): strin
   );
 }
 
+/** How each part is named to the candidate. */
+const PART_SUBJECT: Record<CorrectionPart, string> = {
+  monologue: "votre monologue",
+  debate: "votre débat",
+};
+
+/** Which criterion a part's charge came off, worded as the grille rows are. */
+const CHARGED_CRITERION: Record<CorrectionPart, string> = {
+  monologue: "la réalisation de la tâche",
+  debate: "l'interaction",
+};
+
+/** Whole minutes, for a sentence a candidate reads rather than a measurement. */
+function wholeMinutes(seconds: number): number {
+  return Math.max(0, Math.round(seconds / 60));
+}
+
+/** The spoken half of the comparison, where the unit is said once. */
+function minutes(seconds: number): string {
+  const whole = wholeMinutes(seconds);
+  return whole === 1 ? "1 minute" : `${whole} minutes`;
+}
+
+function points(n: number): string {
+  return n === 1 ? "1 point" : `${n} points`;
+}
+
+/** « votre débat a duré 6 minutes sur les 10 attendues, ce qui a coûté 2 points
+ *  au titre de l'interaction » — one part's share of the paragraph. */
+function chargeClause(charge: DurationCharge): string {
+  return (
+    `${PART_SUBJECT[charge.part]} a duré ${minutes(charge.seconds)} ` +
+    `sur les ${wholeMinutes(FULL_DEVELOPMENT_SECONDS[charge.part])} attendues, ` +
+    `ce qui a coûté ${points(charge.points)} au titre de ${CHARGED_CRITERION[charge.part]}`
+  );
+}
+
+/**
+ * Explain the duration charge — the paragraph the user asked for in #189:
+ * « the candidate should know why he got penalized ».
+ *
+ * **This is not the paragraph #137 removed, and the difference is the point.**
+ * That one printed « Note avant pénalité de durée : N/25 » beside a mark it did
+ * not explain, and the user had it taken off. What was missing then and is here
+ * now is the *because*: which part fell short of which announced length, what
+ * that cost, and — the half a candidate cannot infer — that the points came off
+ * one pragmatic criterion and touched none of the three language ones.
+ *
+ * **What it must never say is that a band was lowered.** The charge is priced
+ * from the band and the band itself is left exactly as the corrector set it
+ * (`applySittingDurationPenalty`), so « Interaction » can read 5 on the same
+ * page as this sentence. « Votre note d'interaction a été abaissée » would
+ * describe something the reader can see is untrue on the row above. The points
+ * are « au titre de » the criterion, which is what actually happened.
+ *
+ * Charges worth 0 points are dropped rather than listed: a criterion already at
+ * the bottom of the grille loses nothing to the clock, and « cela a coûté 0
+ * point » explains a penalty nobody received.
+ */
+function durationNotice(charges: readonly DurationCharge[]): string | null {
+  const charged = charges.filter((charge) => charge.points > 0);
+  if (charged.length === 0) return null;
+
+  const sentence =
+    charged.length === 1
+      ? capitalise(chargeClause(charged[0]))
+      : `Les deux parties ont été plus courtes que ce que l'épreuve demande${NBSP}: ` +
+        charged.map(chargeClause).join(`${NBSP}; `);
+
+  return (
+    `${sentence}. Votre lexique, votre morphosyntaxe et votre prononciation ne sont ` +
+    `jamais pénalisés par la durée${NBSP}: ils portent sur ce que vous avez ` +
+    `réellement dit, et les notes affichées ci-dessus sont bien celles du correcteur.`
+  );
+}
+
+function capitalise(text: string): string {
+  return `${text.charAt(0).toUpperCase()}${text.slice(1)}`;
+}
+
 export function correctionNotices(scores: CorrectionScores): CorrectionNotices {
   const absencePenalty = scores.absencePenalty ?? 0;
 
   return {
     absence: absencePenalty > 0 ? absenceNotice(scores.absentParts ?? [], scores.rawScore25) : null,
+    // Guarded on the penalty as the halving is, so a row written before the
+    // duration rule could ever charge (or a stash that predates the field) is
+    // never captioned with a charge it did not take.
+    duration:
+      (scores.durationPenalty ?? 0) > 0 ? durationNotice(scores.durationCharges ?? []) : null,
   };
 }
