@@ -239,6 +239,21 @@ async function main() {
     `strong ${strong.score25}/25 vs weak ${weak.score25}/25 (gap of ${strong.score25 - weak.score25})`,
   );
 
+  // The regression this fixture caught once, now asserted on every run (#189).
+  // WEAK is a real if poor monologue beside a débat of four monosyllables —
+  // exactly the shape that satisfied « CAS LIMITE » on a literal reading and
+  // came back 0 on all five criteria, including the two language criteria the
+  // exposé gives real evidence for. It cost an API call to find and nothing to
+  // keep: the correction is already in hand, so this is a `record()` and not a
+  // fourth call.
+  const weakLanguage = ["lexique", "morphosyntaxe"] as const;
+  record(
+    "an evaluable monologue is not zeroed by a near-empty débat",
+    weakLanguage.some((criterion) => weak.criteria[criterion] > 0),
+    weakLanguage.map((criterion) => `${criterion}=${weak.criteria[criterion]}`).join(" ") +
+      ` — 0 on both would mean the corrector read one empty part as an empty sitting`,
+  );
+
   // The discriminating case: rich argumentation carried by broken grammar.
   const mixed = await evaluateExam({
     mode: "text",

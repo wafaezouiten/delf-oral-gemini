@@ -14,7 +14,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { ORAL_CRITERIA } from "./criteria";
+import { EVALUATION_RULES, ORAL_CRITERIA } from "./criteria";
 import { PRODUCTION_CASES } from "./production-cases";
 
 /** Case-insensitive and accent-tolerant enough to survive a re-wording. */
@@ -71,19 +71,41 @@ describe("the behaviour cases the corrector is given", () => {
     assert.ok(says("silence complet sur toute l'épreuve", "très basse ou nulle"));
   });
 
-  it("10b. and one empty part is NOT that case, whatever `CAS LIMITE` seems to say", () => {
-    // The prompt has two blocks that can each claim an all-zero sitting. The
-    // rules block's « CAS LIMITE » is right about a sitting and catastrophic
-    // about a part: a thin but real exposé plus four monosyllables of débat
-    // satisfies it on a quick reading, and 0 on lexique and morphosyntaxe for a
-    // monologue the corrector actually had is precisely the automatic zero the
-    // issue forbids. So this block says which of the two it is.
+  it("10b. and one empty part is NOT that case", () => {
+    // A thin but real exposé plus four monosyllables of débat used to satisfy
+    // the all-zero rule on a literal reading, and 0 on lexique and
+    // morphosyntaxe for a monologue the corrector actually had is precisely the
+    // automatic zero the issue forbids. `pnpm verify:eval` caught the corrector
+    // doing it. This block now says which of the two cases it is.
     assert.ok(
       says(
         "dans AUCUNE des deux parties",
         "le seul qui autorise 0 partout",
         "une seule partie vide ne le déclenche PAS",
       ),
+    );
+  });
+
+  it("10c. and the rules block it used to contradict now says the same thing", () => {
+    // The fix the third review of #196 asked for, and the guard that makes it
+    // stick. Scoping this block alone left two sentences in one prompt that
+    // disagreed on a literal reading, with only the model's sense of
+    // precedence between them — and a later edit to `EVALUATION_RULES` could
+    // silently widen the gap again, where only a live-model run would notice.
+    //
+    // So `CAS LIMITE` is scoped at the source too, and the two are pinned
+    // against each other here: the unit suite now fails on the contradiction
+    // that previously cost an API call to find.
+    assert.match(EVALUATION_RULES, /CAS LIMITE/);
+    assert.match(
+      EVALUATION_RULES,
+      /dans AUCUNE des deux parties/,
+      "the all-zero rule must name the whole sitting, not one part",
+    );
+    assert.match(
+      EVALUATION_RULES,
+      /Une seule partie vide ne suffit PAS/,
+      "and must say so in the same breath",
     );
   });
 

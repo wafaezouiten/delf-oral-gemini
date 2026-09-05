@@ -40,13 +40,25 @@
  *  - `MONOLOGUE_STAGE_DIRECTIVE` and the /20 partial stage. There is no partial
  *    correction here: a sitting is graded once, over both parts.
  *  - `EVALUATION_RULES` omits the reference's « PHONOLOGIE À PARTIR D'UN TEXTE »
- *    bullet — the audit's one deliberate break, unchanged since #2. That wording
- *    tells the model to infer fluency from filler counts *because the
+ *    bullet — the audit's first deliberate break, unchanged since #2. That
+ *    wording tells the model to infer fluency from filler counts *because the
  *    incumbent's corrector has no audio*; porting it into a project whose
  *    justification is real audio would discard the reason the project exists.
  *    The criterion, its weight, its bands and its label all survive unchanged;
  *    only the evidence it reasons from is replaced, by
  *    `gemini/phonology-instruction.ts`.
+ *  - `EVALUATION_RULES`' « CAS LIMITE » is SCOPED to the whole sitting — the
+ *    second deliberate break, and the only one measured rather than reasoned
+ *    (#189). The reference says « si aucune réplique CANDIDAT ne contient de
+ *    contenu évaluable, mettez 0 à TOUS les critères », which never says which
+ *    replies: a corrector reading one part with four monosyllables in it
+ *    satisfies the sentence on a literal reading. `pnpm verify:eval` caught it
+ *    doing exactly that — a real, evaluable monologue beside a near-empty débat
+ *    came back 0 on lexique AND morphosyntaxe, which is the automatic zero #189
+ *    forbids twice over. The reference grades ONE task per correction, so the
+ *    ambiguity cannot bite over there and is ours to fix here. The rule is
+ *    unchanged in substance: no evaluable content anywhere still means 0
+ *    everywhere.
  *
  * One addition that is this project's and is marked as such below:
  * {@link ORAL_CRITERIA_SUMMARIES}. The reference's UI reads only the label and
@@ -250,7 +262,7 @@ export const EVALUATION_RULES = `RÈGLES D'ÉVALUATION (PRIORITÉ ABSOLUE) :
 - ÉQUITÉ ENVERS LE CANDIDAT : la performance en interaction dépend en grande partie de la qualité des relances de l'examinateur. Si l'examinateur a peu questionné, a posé des questions faibles ou n'a pas contredit le candidat, ne pénalisez PAS le candidat pour un échange qu'il n'a pas eu l'occasion de mener : notez ce qu'il a fait des relances reçues.
 - AUTOCORRECTIONS : elles se lisent différemment selon le critère. En « morphosyntaxe », une autocorrection réussie est un signe de contrôle, à porter au CRÉDIT du candidat. En « phonologie », des autocorrections nombreuses restent un indice de débit haché. Ne comptez donc pas la même autocorrection deux fois contre le candidat.
 - Adaptez vos attentes au niveau B2 : n'exigez pas d'argumentation complexe à un niveau A, exigez-la à B2.
-- CAS LIMITE : si aucune réplique « CANDIDAT: » ne contient de contenu évaluable, mettez 0 à TOUS les critères.
+- CAS LIMITE : si, dans AUCUNE des deux parties, une réplique « CANDIDAT: » ne contient de contenu évaluable, mettez 0 à TOUS les critères. Une seule partie vide ne suffit PAS : notez alors les critères de langue sur la partie qui a eu lieu.
 - total25 est EXACTEMENT la somme des cinq notes de critères (0 à 25). Ne le calculez pas autrement.
 - Chaque justification doit être concrète et FONDÉE SUR LA TRANSCRIPTION : citez une réplique ou une tournure du candidat, nommez la bande atteinte (en dessous / B2 / B2+) et dites pourquoi.
 - Restez bienveillant mais rigoureux. Les points forts portent uniquement sur ce que le candidat a réellement produit.`;

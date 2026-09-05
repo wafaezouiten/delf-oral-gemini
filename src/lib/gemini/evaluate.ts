@@ -106,6 +106,15 @@ export const EVAL_MODEL = process.env.GEMINI_EVAL_MODEL ?? "gemini-3.6-flash";
  * (`orale-rubric.ts`). A correction stamped with this version was graded by a
  * corrector told what to do with silence, and scored by a rule that no longer
  * takes a flat 3 off the total.
+ *
+ * The same version also scopes `EVALUATION_RULES`' « CAS LIMITE » to the whole
+ * sitting. It said « si aucune réplique CANDIDAT ne contient de contenu
+ * évaluable, mettez 0 à TOUS les critères » without saying which replies, and
+ * `verify:eval` caught the corrector applying it to ONE empty part: a real
+ * monologue came back 0 on lexique and morphosyntaxe. Not a separate version,
+ * because `2026-09-04.1` has never graded a stored sitting — it was introduced
+ * and corrected inside the same unmerged branch, so there is no row on either
+ * side of the difference for the column to distinguish.
  */
 export const EVAL_PROMPT_VERSION = "2026-09-04.1";
 
@@ -207,6 +216,17 @@ export interface EvaluationResult {
    * (#189). Corrector's working like `shortParts`: no column, never stored,
    * carried in the finish response so a mark can be explained from one payload
    * without re-deriving a rule the browser must not own a second copy of.
+   *
+   * **Nothing shows these to a candidate, and #189 did not ask for it.**
+   * `toCorrectionRow` drops them, so on the ordinary persisted path they are
+   * gone by the time the results page loads; only the degraded no-database
+   * path returns them to a browser at all, and no component reads them there
+   * either. What they are for today is the corrector's own explanation of a
+   * figure — `verify-eval.ts` asserts on them, and a future page that wanted
+   * to say « votre débat a duré deux minutes » could reconstruct them the way
+   * `absentParts` already is. Surfacing that sentence is out of scope here:
+   * #137 removed the duration paragraph from the correction page by the user's
+   * call, so there is currently no reader to lose.
    */
   durationTiers: Record<"monologue" | "debate", DurationTier>;
   durationCharges: DurationCharge[];
