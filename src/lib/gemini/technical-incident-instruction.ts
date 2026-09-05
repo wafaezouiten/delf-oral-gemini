@@ -43,11 +43,27 @@
  * The count is stated rather than rounded to "the session dropped" because one
  * drop and six are different readings of the same transcript — six is a sitting
  * whose exchange should barely be trusted to show interaction at all.
+ *
+ * **The leniency is scoped to what is MISSING, and the last sentence is what
+ * scopes it.** The count arrives from the browser unclamped — unlike
+ * `earlyClosingCount`, which the route corroborates against the goodbyes the
+ * transcript actually shows, there is nothing in a transcript that evidences a
+ * reconnect, and the browser is the only observer this architecture has of the
+ * Live session. So a forged count is possible, and the only thing standing
+ * between it and a leniency it did not earn is how far this paragraph excuses:
+ * absences it can excuse, because an interruption really does produce them;
+ * the answers that ARE on the record it must never excuse, because no
+ * interruption made those weak. A rewording that dropped that sentence would
+ * turn a self-reported number into a blanket amnesty, which is why a test pins
+ * it.
+ *
+ * The residual risk is the one #92 accepted knowingly for the same reason, and
+ * the blast radius is identical: the sender's own practice mark.
  */
 export function technicalIncidentInstruction(reconnectCount: number): string {
   if (!Number.isFinite(reconnectCount) || reconnectCount <= 0) return "";
 
   const times = reconnectCount === 1 ? "une fois" : `${reconnectCount} fois`;
 
-  return `INCIDENT TECHNIQUE PENDANT L'ÉPREUVE : la connexion avec l'examinateur a été interrompue ${times} et rétablie. Pendant ces interruptions, le candidat n'entendait plus l'examinateur et ses paroles n'étaient pas transcrites. Le transcript peut donc comporter des blancs, une question restée sans réponse, une reprise abrupte ou un passage manquant qui ne sont PAS le fait du candidat. Ne les traitez pas comme un refus de répondre, un abandon de l'échange ni une rupture de la continuité du discours, et ne pénalisez le candidat sur AUCUN critère à cause d'eux : notez uniquement ce qu'il a effectivement produit ailleurs dans l'épreuve.`;
+  return `INCIDENT TECHNIQUE PENDANT L'ÉPREUVE : la connexion avec l'examinateur a été interrompue ${times} et rétablie. Pendant ces interruptions, le candidat n'entendait plus l'examinateur et ses paroles n'étaient pas transcrites. Le transcript peut donc comporter des blancs, une question restée sans réponse, une reprise abrupte ou un passage manquant qui ne sont PAS le fait du candidat. Ne les traitez pas comme un refus de répondre, un abandon de l'échange ni une rupture de la continuité du discours, et ne pénalisez le candidat sur AUCUN critère à cause d'eux. Cette consigne ne vaut QUE pour ce qui manque : tout ce que le candidat a effectivement dit reste évalué normalement, et une réponse présente mais brève, hors sujet, non argumentée ou fautive se note exactement comme elle se noterait sans incident.`;
 }

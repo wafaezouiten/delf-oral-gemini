@@ -36,6 +36,25 @@ describe("the technical-incident paragraph (#189)", () => {
     assert.match(technicalIncidentInstruction(6), /interrompue 6 fois/);
   });
 
+  it("excuses only what is MISSING, never a weak answer that is on the record", () => {
+    // The guard that bounds an unclamped, self-reported number. Nothing in a
+    // transcript evidences a reconnect — the browser is the only observer of
+    // the Live session — so the route cannot corroborate this count the way it
+    // corroborates #92's goodbyes against the transcript, and a forged one is
+    // possible. What stops that buying a leniency it did not earn is how far
+    // this paragraph reaches: an interruption really does produce gaps, and it
+    // never made a present answer brief, off-topic or unargued.
+    //
+    // So this is pinned rather than left to wording. A rewording that dropped
+    // the scoping sentence would turn `reconnectCount: 3` into a blanket
+    // amnesty over the whole correction.
+    const paragraph = technicalIncidentInstruction(3);
+
+    assert.match(paragraph, /ne vaut QUE pour ce qui manque/);
+    assert.match(paragraph, /tout ce que le candidat a effectivement dit reste évalué normalement/);
+    assert.match(paragraph, /brève, hors sujet, non argumentée ou fautive se note exactement/);
+  });
+
   it("promises nothing about the mark", () => {
     // The paragraph changes what the corrector believes about the transcript
     // and nothing else. Unlike #92's waiver there is no penalty behind it: the
