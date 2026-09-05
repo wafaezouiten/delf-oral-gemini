@@ -16,6 +16,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
+import { ORAL_PARTS_B2 } from "../constants";
 import { ORAL_CRITERIA } from "../criteria";
 import {
   FULL_DEVELOPMENT_SECONDS,
@@ -77,6 +78,31 @@ describe("the three tiers", () => {
       monologue: "full",
       debate: "strong",
     });
+  });
+
+  it("puts the épreuve's OWN announced monologue one tier short of full", () => {
+    // Surfaced here rather than left implicit. Every other fixture in this
+    // repository that is about some other rule was moved past
+    // `FULL_DEVELOPMENT_SECONDS` so it measures one rule at a time, which is
+    // right for those tests and would leave nothing in the suite stating the
+    // thing a reader most needs to know: #189's thresholds are absolute, and
+    // the exam's own are not the same numbers.
+    //
+    // `ORAL_PARTS_B2` announces the monologue to the candidate as 5 to 7
+    // minutes and the débat as 10 to 13. So a candidate who does exactly what
+    // the épreuve asks of them is charged one band of « réalisation de la
+    // tâche » for the exposé, and nothing for the débat. That asymmetry is the
+    // open question on #189, and it is asserted AS IT STANDS: changing either
+    // constant to follow the announced duration fails this test, which is the
+    // point. It should be a decision, not a drift.
+    const monologue = ORAL_PARTS_B2.find((part) => part.type === "monologue");
+    const debate = ORAL_PARTS_B2.find((part) => part.type === "debat");
+
+    assert.equal(monologue?.durationSeconds, 420, "the announced exposé, in seconds");
+    assert.equal(durationTier(420), "moderate", "and it is not a full development");
+
+    assert.equal(debate?.durationSeconds, 780, "the announced débat");
+    assert.equal(durationTier(780), "full", "which the same threshold does clear");
   });
 });
 
