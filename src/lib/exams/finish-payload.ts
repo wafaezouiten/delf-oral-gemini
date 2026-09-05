@@ -123,10 +123,10 @@ export const finishPayloadSchema = z.object({
    * The route clamps it to the goodbyes the submitted transcript shows, which
    * bounds an incoherent or buggy claim but not a fabricated one, because the
    * transcript is this same payload; why that trust is accepted is
-   * `resolveEarlyClosingCount`'s to say. The clamp is also why there is no
-   * `.max()` here, where `reconnectCount` now has one: the clamp bounds the
-   * stored value by the transcript's own turn
-   * limit.
+   * `resolveEarlyClosingCount`'s to say. That clamp is also why this field has
+   * no `.max()` where `reconnectCount` now does: it already bounds the stored
+   * value by the transcript's own turn limit, which is the protection
+   * `MAX_RECONNECTS` buys a count that has no clamp behind it.
    *
    * Defaulted rather than required, unlike `reconnectCount`, because it is
    * being added to a payload that already exists in the wild: a candidate
