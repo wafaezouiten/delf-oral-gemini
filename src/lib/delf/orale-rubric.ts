@@ -58,7 +58,7 @@
  * not comparable with the incumbent's; everything else here still is.
  */
 
-import { COMPETENCY_MAX, COMPETENCY_FLOOR } from "./constants";
+import { COMPETENCY_MAX, COMPETENCY_FLOOR, getOralPartSpec } from "./constants";
 import { ORAL_CRITERIA, type OralCriterion } from "./criteria";
 import { GRILLE_BANDS, snapToBand, type GrilleBand } from "./grille";
 
@@ -141,27 +141,45 @@ export function applyDurationPenalty(
 }
 
 /**
- * How long each part has to run before it is developed enough to cost nothing,
- * and how short it has to be to cost the most. Eight minutes and four minutes,
- * the same pair for both parts (#189).
+ * How long each part has to run before it is developed enough to cost nothing.
  *
- * THE USER'S FIGURES, and they are not the ones the DELF's own format implies.
- * The official B2 monologue is announced to the candidate as five to seven
- * minutes (`ORAL_PARTS_B2`, 420 s) and the débat as ten to thirteen (780 s), so
- * a textbook seven-minute exposé now lands in the middle tier and is charged
- * one band of « réalisation de la tâche ». That is the rule as #189 specifies
- * it, twice — once per part and again in its combined table — and it is
- * deliberately not softened here. Both numbers are constants in one place so
- * the decision can be revisited by editing two lines and re-reading the tests
- * that name them.
+ * **The monologue's is its own announced maximum, and that is the user's
+ * correction to #189.** The issue asked for eight minutes on both parts; the
+ * exposé cannot last eight minutes, because the épreuve announces it to the
+ * candidate as five to SEVEN (`ORAL_PARTS_B2`, 420 s). A threshold above the
+ * longest the task can legally run would charge a band of « réalisation de la
+ * tâche » to every candidate who did exactly what they were told, with no
+ * length available to them that would avoid it. So the monologue's ceiling is
+ * read off the part itself rather than written here: change the announced
+ * duration and the threshold follows, because it IS the announced duration.
  *
- * What they replaced: `minDurationSeconds(tache)`, 40 % of each part's expected
- * time floored at 30 s — 168 s of monologue and 312 s of débat, a single
- * threshold per part with a flat −3 behind it. That function is still the
- * incumbent's rule and still exported from `constants.ts`; it is no longer this
- * project's, and nothing in `src/` computes a mark from it any more.
+ * The débat keeps the issue's eight minutes. Its own announcement is ten to
+ * thirteen (780 s), so eight is *inside* what the candidate is asked for rather
+ * than beyond it — a débat that stops two minutes early is not charged, which
+ * is lenient in the direction the correction was about and was not what the
+ * user raised. Deriving it from the spec as well would newly charge every
+ * sitting between eight and thirteen minutes, which nobody asked for.
+ *
+ * Hence the asymmetry, which is deliberate and not a leftover: one figure is
+ * the exam's, one is the issue's.
  */
-export const FULL_DEVELOPMENT_SECONDS = 8 * 60;
+export const FULL_DEVELOPMENT_SECONDS: Record<"monologue" | "debate", number> = {
+  monologue: getOralPartSpec(1)?.durationSeconds ?? 7 * 60,
+  debate: 8 * 60,
+};
+
+/**
+ * And how short a part has to be to cost the most: four minutes, #189's figure,
+ * the same for both parts. Untouched by the correction above — it is a floor
+ * rather than a ceiling, and four minutes is under both parts' announced
+ * lengths, so neither is being asked for something it cannot do.
+ *
+ * What these replaced: `minDurationSeconds(tache)`, 40 % of each part's
+ * expected time floored at 30 s — 168 s of monologue and 312 s of débat, a
+ * single threshold per part with a flat −3 behind it. That function is still
+ * the incumbent's rule and still exported from `constants.ts`; it is no longer
+ * this project's, and nothing in `src/` computes a mark from it any more.
+ */
 export const SHORT_DEVELOPMENT_SECONDS = 4 * 60;
 
 /**
@@ -176,9 +194,16 @@ export const SHORT_DEVELOPMENT_SECONDS = 4 * 60;
  */
 export type DurationTier = "full" | "moderate" | "strong";
 
-/** Which tier a part's measured seconds fall in. */
-export function durationTier(seconds: number): DurationTier {
-  if (!(seconds < FULL_DEVELOPMENT_SECONDS)) return "full";
+/**
+ * Which tier a part's measured seconds fall in.
+ *
+ * Takes the part, not just a number: since the user's correction the ceiling
+ * differs between them ({@link FULL_DEVELOPMENT_SECONDS}), and a caller that
+ * could ask "which tier is 400 seconds" without saying which half it belongs to
+ * would be asking a question that no longer has one answer.
+ */
+export function durationTier(part: "monologue" | "debate", seconds: number): DurationTier {
+  if (!(seconds < FULL_DEVELOPMENT_SECONDS[part])) return "full";
   return seconds < SHORT_DEVELOPMENT_SECONDS ? "strong" : "moderate";
 }
 
@@ -239,21 +264,21 @@ export function sittingDurationTiers(
   durations: SittingDurations,
 ): Record<"monologue" | "debate", DurationTier> {
   return {
-    monologue: durationTier(durations.monologueSeconds),
-    debate: durationTier(durations.debateSeconds),
+    monologue: durationTier("monologue", durations.monologueSeconds),
+    debate: durationTier("debate", durations.debateSeconds),
   };
 }
 
 /**
- * Which parts ran for less than {@link FULL_DEVELOPMENT_SECONDS}, in exam
- * order. Was `partsUnderFloor`, which named a rule that no longer exists.
+ * Which parts ran for less than their own {@link FULL_DEVELOPMENT_SECONDS}, in
+ * exam order. Was `partsUnderFloor`, which named a rule that no longer exists.
  */
 export function partsUnderFullDevelopment(
   durations: SittingDurations,
 ): Array<"monologue" | "debate"> {
   const short: Array<"monologue" | "debate"> = [];
-  if (durationTier(durations.monologueSeconds) !== "full") short.push("monologue");
-  if (durationTier(durations.debateSeconds) !== "full") short.push("debate");
+  if (durationTier("monologue", durations.monologueSeconds) !== "full") short.push("monologue");
+  if (durationTier("debate", durations.debateSeconds) !== "full") short.push("debate");
   return short;
 }
 
@@ -521,7 +546,12 @@ export function applySittingDurationPenalty(
   for (const charge of charges) {
     const seconds =
       charge.part === "monologue" ? durations.monologueSeconds : durations.debateSeconds;
-    const applied = applyDurationPenalty(running, seconds, FULL_DEVELOPMENT_SECONDS, charge.points);
+    const applied = applyDurationPenalty(
+      running,
+      seconds,
+      FULL_DEVELOPMENT_SECONDS[charge.part],
+      charge.points,
+    );
     running = applied.score25;
     penalty += applied.penalty;
   }

@@ -27,9 +27,15 @@ import {
   type SittingScore,
 } from "../orale-rubric";
 
-/** Comfortably inside each tier, so no case is decided by a boundary. */
-const EIGHT_MINUTES = 9 * 60;
-const SIX_MINUTES = 6 * 60;
+/**
+ * Comfortably inside each tier for BOTH parts, so no case is decided by a
+ * boundary, and none by the two parts' different ceilings either. The
+ * monologue's full-development time is its announced maximum (7 min) and the
+ * debat's is the issue's 8, so `DEVELOPED` clears the higher of the two and
+ * `HALF_WAY` is under the lower of them.
+ */
+const DEVELOPED = 9 * 60;
+const HALF_WAY = 6 * 60;
 const TWO_MINUTES = 2 * 60;
 
 const bands = (value: number) =>
@@ -55,22 +61,33 @@ function score(
 }
 
 describe("the three tiers", () => {
-  it("puts eight minutes and over in the full tier", () => {
-    assert.equal(durationTier(FULL_DEVELOPMENT_SECONDS), "full");
-    assert.equal(durationTier(EIGHT_MINUTES), "full");
-    assert.equal(durationTier(60 * 60), "full");
+  it("is asked which part, because the ceiling is not the same for both", () => {
+    // The user's correction to #189: the expose cannot run eight minutes, so
+    // its full-development time is its own announced maximum. Pinned here as
+    // the two numbers a reader needs before any other case makes sense.
+    assert.equal(FULL_DEVELOPMENT_SECONDS.monologue, 7 * 60, "the expose's announced maximum");
+    assert.equal(FULL_DEVELOPMENT_SECONDS.debate, 8 * 60, "the issue's figure, kept");
+    assert.equal(SHORT_DEVELOPMENT_SECONDS, 4 * 60, "the same floor for both");
   });
 
-  it("puts four to eight minutes in the moderate tier", () => {
-    assert.equal(durationTier(SHORT_DEVELOPMENT_SECONDS), "moderate");
-    assert.equal(durationTier(SIX_MINUTES), "moderate");
-    assert.equal(durationTier(FULL_DEVELOPMENT_SECONDS - 1), "moderate");
+  it("puts a part at or over its own ceiling in the full tier", () => {
+    assert.equal(durationTier("monologue", FULL_DEVELOPMENT_SECONDS.monologue), "full");
+    assert.equal(durationTier("debate", FULL_DEVELOPMENT_SECONDS.debate), "full");
+    assert.equal(durationTier("monologue", DEVELOPED), "full");
+    assert.equal(durationTier("debate", 60 * 60), "full");
+  });
+
+  it("puts four minutes to that ceiling in the moderate tier", () => {
+    assert.equal(durationTier("monologue", SHORT_DEVELOPMENT_SECONDS), "moderate");
+    assert.equal(durationTier("debate", HALF_WAY), "moderate");
+    assert.equal(durationTier("monologue", FULL_DEVELOPMENT_SECONDS.monologue - 1), "moderate");
+    assert.equal(durationTier("debate", FULL_DEVELOPMENT_SECONDS.debate - 1), "moderate");
   });
 
   it("puts under four minutes in the strong tier", () => {
-    assert.equal(durationTier(SHORT_DEVELOPMENT_SECONDS - 1), "strong");
-    assert.equal(durationTier(TWO_MINUTES), "strong");
-    assert.equal(durationTier(0), "strong");
+    assert.equal(durationTier("monologue", SHORT_DEVELOPMENT_SECONDS - 1), "strong");
+    assert.equal(durationTier("debate", TWO_MINUTES), "strong");
+    assert.equal(durationTier("monologue", 0), "strong");
   });
 
   it("reads both parts independently", () => {
@@ -80,35 +97,46 @@ describe("the three tiers", () => {
     });
   });
 
-  it("puts the épreuve's OWN announced monologue one tier short of full", () => {
-    // Surfaced here rather than left implicit. Every other fixture in this
-    // repository that is about some other rule was moved past
-    // `FULL_DEVELOPMENT_SECONDS` so it measures one rule at a time, which is
-    // right for those tests and would leave nothing in the suite stating the
-    // thing a reader most needs to know: #189's thresholds are absolute, and
-    // the exam's own are not the same numbers.
+  it("asks the exposé for no more than the épreuve itself asks of it", () => {
+    // THE CORRECTION, pinned. #189 specified eight minutes for both parts;
+    // `ORAL_PARTS_B2` announces the monologue as five to SEVEN, so under a
+    // single 8-minute ceiling every candidate who did exactly what they were
+    // told was charged a band of « réalisation de la tâche », with no length
+    // available to them that would have avoided it. A rule nobody can satisfy
+    // is not a rule about the candidate.
     //
-    // `ORAL_PARTS_B2` announces the monologue to the candidate as 5 to 7
-    // minutes and the débat as 10 to 13. So a candidate who does exactly what
-    // the épreuve asks of them is charged one band of « réalisation de la
-    // tâche » for the exposé, and nothing for the débat. That asymmetry is the
-    // open question on #189, and it is asserted AS IT STANDS: changing either
-    // constant to follow the announced duration fails this test, which is the
-    // point. It should be a decision, not a drift.
+    // So the exposé's ceiling IS its announced duration, read off the part
+    // rather than copied beside it: this asserts they are the same number, and
+    // fails if either moves without the other.
     const monologue = ORAL_PARTS_B2.find((part) => part.type === "monologue");
     const debate = ORAL_PARTS_B2.find((part) => part.type === "debat");
 
     assert.equal(monologue?.durationSeconds, 420, "the announced exposé, in seconds");
-    assert.equal(durationTier(420), "moderate", "and it is not a full development");
+    assert.equal(FULL_DEVELOPMENT_SECONDS.monologue, monologue?.durationSeconds);
+    assert.equal(durationTier("monologue", 420), "full", "and it is now a full development");
 
+    // The débat is the other way round and keeps the issue's figure: 8 minutes
+    // is INSIDE its announced 10 to 13, so the threshold asks for less than the
+    // épreuve does rather than more, and a débat that stops a little early is
+    // not charged. That is the lenient direction, and not what the correction
+    // was about.
     assert.equal(debate?.durationSeconds, 780, "the announced débat");
-    assert.equal(durationTier(780), "full", "which the same threshold does clear");
+    assert.ok(FULL_DEVELOPMENT_SECONDS.debate < (debate?.durationSeconds ?? 0));
+    assert.equal(durationTier("debate", 780), "full");
+  });
+
+  it("still charges an exposé that stops short of what it was asked for", () => {
+    // The correction lifts the impossible case, not the rule. Five minutes is
+    // inside the announced range and under the ceiling, so it stays « moderate »
+    // — development insuffisant, which is what #189 asks that tier to mean.
+    assert.equal(durationTier("monologue", 5 * 60), "moderate");
+    assert.equal(durationTier("monologue", 419), "moderate", "one second short of the exposé");
   });
 });
 
 describe("where the penalty lands", () => {
   it("charges the monologue's shortfall to réalisation de la tâche", () => {
-    const scored = score(TWO_MINUTES, EIGHT_MINUTES);
+    const scored = score(TWO_MINUTES, DEVELOPED);
 
     assert.deepEqual(scored.durationCharges, [
       {
@@ -123,7 +151,7 @@ describe("where the penalty lands", () => {
   });
 
   it("charges the débat's shortfall to interaction", () => {
-    const scored = score(EIGHT_MINUTES, TWO_MINUTES);
+    const scored = score(DEVELOPED, TWO_MINUTES);
 
     assert.deepEqual(
       scored.durationCharges.map((charge) => [charge.part, charge.criterion]),
@@ -189,15 +217,15 @@ describe("the combined cases, as #189 tabulates them", () => {
   }> = [
     {
       name: "monologue ≥ 8 min, débat ≥ 8 min — no duration penalty",
-      monologue: EIGHT_MINUTES,
-      debate: EIGHT_MINUTES,
+      monologue: DEVELOPED,
+      debate: DEVELOPED,
       penalty: 0,
       charged: [],
     },
     {
       name: "monologue 4–8 min, débat 4–8 min — both moderate",
-      monologue: SIX_MINUTES,
-      debate: SIX_MINUTES,
+      monologue: HALF_WAY,
+      debate: HALF_WAY,
       penalty: 4,
       charged: ["realisationTache", "interaction"],
     },
@@ -211,27 +239,27 @@ describe("the combined cases, as #189 tabulates them", () => {
     {
       name: "monologue < 4 min, débat 4–8 min — strong monologue, moderate débat",
       monologue: TWO_MINUTES,
-      debate: SIX_MINUTES,
+      debate: HALF_WAY,
       penalty: 6,
       charged: ["realisationTache", "interaction"],
     },
     {
       name: "monologue < 4 min, débat ≥ 8 min — the monologue alone",
       monologue: TWO_MINUTES,
-      debate: EIGHT_MINUTES,
+      debate: DEVELOPED,
       penalty: 4,
       charged: ["realisationTache"],
     },
     {
       name: "monologue 4–8 min, débat < 4 min — the débat carries the strong charge",
-      monologue: SIX_MINUTES,
+      monologue: HALF_WAY,
       debate: TWO_MINUTES,
       penalty: 6,
       charged: ["realisationTache", "interaction"],
     },
     {
       name: "monologue ≥ 8 min, débat < 4 min — the débat alone",
-      monologue: EIGHT_MINUTES,
+      monologue: DEVELOPED,
       debate: TWO_MINUTES,
       penalty: 4,
       charged: ["interaction"],
@@ -252,7 +280,7 @@ describe("the combined cases, as #189 tabulates them", () => {
   }
 
   it("reports both tiers even where only one was charged", () => {
-    const scored = score(EIGHT_MINUTES, TWO_MINUTES);
+    const scored = score(DEVELOPED, TWO_MINUTES);
 
     assert.deepEqual(scored.durationTiers, { monologue: "full", debate: "strong" });
     assert.deepEqual(scored.shortParts, ["debate"]);
@@ -267,7 +295,7 @@ describe("a part with no speech in it is not a short part", () => {
     // the candidate was in the part at all, where the tiers are about how much
     // of it they filled.
     const scored = scoreSitting(bands(5), {
-      monologueSeconds: SIX_MINUTES,
+      monologueSeconds: HALF_WAY,
       debateSeconds: 30,
       monologueWords: 400,
       debateWords: 0,

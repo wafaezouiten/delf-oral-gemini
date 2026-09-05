@@ -177,12 +177,12 @@ export function devSubmitDisabled(state: DevSubmitState): boolean {
  * `SHORT_DEVELOPMENT_SECONDS` (240 s) on its own, so the button produces a
  * monologue in the middle duration tier rather than the bottom one.
  *
- * It cannot produce a charge-free sitting, and since #189 it cannot even
- * produce a charge-free monologue: « full development » is eight minutes, and
- * an exposé nobody would call short still estimates around five. A typed
- * sitting meant to score without a duration charge has to claim BOTH durations
- * — which is what the duration field is for, since nobody is going to type
- * eight minutes of argument twice.
+ * It cannot produce a charge-free sitting, and it cannot on its own produce a
+ * charge-free monologue either: the exposé's full-development time is its
+ * announced 420 s (#189) and this sample estimates around 300. A typed sitting
+ * meant to score without a duration charge has to claim BOTH durations — which
+ * is what the duration field is for, since nobody is going to type seven
+ * minutes of argument and then eight more.
  */
 export function exampleExpose(subject: string): string {
   return [

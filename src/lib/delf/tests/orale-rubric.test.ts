@@ -130,12 +130,14 @@ const TOP_BANDS: CriteriaBands = {
   phonologie: 5,
 };
 
-test("the same two thresholds govern both parts, in minutes", () => {
-  // #189's figures, pinned where a reader will look for them. They replaced
-  // 168 s and 312 s — 40 % of each part's expected time — and they are NOT
-  // derived from the part durations any more: eight minutes is longer than the
-  // monologue is ever announced to last. See `FULL_DEVELOPMENT_SECONDS`.
-  assert.equal(FULL_DEVELOPMENT_SECONDS, 480);
+test("each part has its own full-development time, and one shared floor", () => {
+  // #189's figures as corrected by the user: eight minutes for the debat, and
+  // for the exposé its own announced maximum, because seven is the longest it
+  // can run. They replaced 168 s and 312 s (40 % of each part's expected time).
+  // The whole argument is on `FULL_DEVELOPMENT_SECONDS`; the matrix that
+  // exercises it is in `duration-tiers.test.ts`.
+  assert.equal(FULL_DEVELOPMENT_SECONDS.monologue, 420);
+  assert.equal(FULL_DEVELOPMENT_SECONDS.debate, 480);
   assert.equal(SHORT_DEVELOPMENT_SECONDS, 240);
 });
 
@@ -184,13 +186,22 @@ test("both parts short are both charged, on their own criteria", () => {
   );
 });
 
-test("exactly at the full threshold is not short", () => {
+test("exactly at its own full threshold is not short, part by part", () => {
+  // Each part against its own ceiling: the exposé's announced 420 s and the
+  // debat's 480 s. A single number here would pass by accident on one of them.
   assert.deepEqual(
     partsUnderFullDevelopment({
-      monologueSeconds: FULL_DEVELOPMENT_SECONDS,
-      debateSeconds: FULL_DEVELOPMENT_SECONDS,
+      monologueSeconds: FULL_DEVELOPMENT_SECONDS.monologue,
+      debateSeconds: FULL_DEVELOPMENT_SECONDS.debate,
     }),
     [],
+  );
+  assert.deepEqual(
+    partsUnderFullDevelopment({
+      monologueSeconds: FULL_DEVELOPMENT_SECONDS.monologue - 1,
+      debateSeconds: FULL_DEVELOPMENT_SECONDS.debate - 1,
+    }),
+    ["monologue", "debate"],
   );
 });
 

@@ -197,15 +197,15 @@ async function main() {
     mode: "text",
     topic: TOPIC,
     transcript: STRONG,
-    monologueSeconds: FULL_DEVELOPMENT_SECONDS + 20,
-    debateSeconds: FULL_DEVELOPMENT_SECONDS + 220,
+    monologueSeconds: FULL_DEVELOPMENT_SECONDS.monologue + 20,
+    debateSeconds: FULL_DEVELOPMENT_SECONDS.debate + 220,
   });
   const weak = await evaluateExam({
     mode: "text",
     topic: TOPIC,
     transcript: WEAK,
-    monologueSeconds: FULL_DEVELOPMENT_SECONDS + 20,
-    debateSeconds: FULL_DEVELOPMENT_SECONDS + 220,
+    monologueSeconds: FULL_DEVELOPMENT_SECONDS.monologue + 20,
+    debateSeconds: FULL_DEVELOPMENT_SECONDS.debate + 220,
   });
 
   const show = (label: string, r: typeof strong) =>
@@ -244,8 +244,8 @@ async function main() {
     mode: "text",
     topic: TOPIC,
     transcript: MIXED,
-    monologueSeconds: FULL_DEVELOPMENT_SECONDS + 20,
-    debateSeconds: FULL_DEVELOPMENT_SECONDS + 220,
+    monologueSeconds: FULL_DEVELOPMENT_SECONDS.monologue + 20,
+    debateSeconds: FULL_DEVELOPMENT_SECONDS.debate + 220,
   });
   console.log(`        ${show("mixed ", mixed)}\n`);
 
@@ -293,8 +293,8 @@ async function main() {
         mode: "audio",
         topic: TOPIC,
         transcript: WEAK,
-        monologueSeconds: FULL_DEVELOPMENT_SECONDS + 20,
-        debateSeconds: FULL_DEVELOPMENT_SECONDS + 220,
+        monologueSeconds: FULL_DEVELOPMENT_SECONDS.monologue + 20,
+        debateSeconds: FULL_DEVELOPMENT_SECONDS.debate + 220,
         audio: wav,
       });
       record(
@@ -320,7 +320,7 @@ async function main() {
     mode: "text",
     topic: TOPIC,
     transcript: STRONG,
-    monologueSeconds: FULL_DEVELOPMENT_SECONDS + 20,
+    monologueSeconds: FULL_DEVELOPMENT_SECONDS.monologue + 20,
     debateSeconds: 40,
   });
 
@@ -335,7 +335,7 @@ async function main() {
       shortSitting.durationTiers.debate === "strong",
     `penalty ${shortSitting.durationPenalty}, short: [${shortSitting.shortParts.join(", ")}], ` +
       `tiers ${JSON.stringify(shortSitting.durationTiers)} ` +
-      `(débat 40s against a ${FULL_DEVELOPMENT_SECONDS}s full-development time)`,
+      `(débat 40s against a ${FULL_DEVELOPMENT_SECONDS.debate}s full-development time)`,
   );
 
   record(
@@ -361,7 +361,8 @@ async function main() {
     strong.durationPenalty === 0 &&
       strong.shortParts.length === 0 &&
       strong.durationCharges.length === 0,
-    `the same transcript over ${FULL_DEVELOPMENT_SECONDS + 20}s + ${FULL_DEVELOPMENT_SECONDS + 220}s ` +
+    `the same transcript over ${FULL_DEVELOPMENT_SECONDS.monologue + 20}s + ` +
+      `${FULL_DEVELOPMENT_SECONDS.debate + 220}s ` +
       `scored ${strong.score25}/25 with no penalty`,
   );
 
