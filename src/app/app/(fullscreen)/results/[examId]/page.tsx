@@ -4,7 +4,7 @@ import { Notice } from "@/app/_components/notice";
 import { secondaryButton } from "@/app/_components/button-styles";
 import { requireExamAccess, requireUserId } from "@/lib/auth/exam-guard";
 import { neonSittingStore } from "@/lib/db/sittings";
-import { partsAbsent } from "@/lib/delf/orale-rubric";
+import { applySittingDurationPenalty, partsAbsent } from "@/lib/delf/orale-rubric";
 import { findTopic } from "@/lib/delf/topics";
 import { candidateWordCount } from "@/lib/delf/transcript";
 import type { StoredSitting } from "@/lib/exams/sitting-persistence";
@@ -113,6 +113,36 @@ export default async function ResultsPage({ params }: PageProps<"/app/results/[e
               monologueWords: candidateWordCount(sitting.transcript, "monologue"),
               debateWords: candidateWordCount(sitting.transcript, "debate"),
             }).filter((part) => part !== "debate" || sitting.earlyClosingCount === 0)
+          : [],
+      // `durationCharges` has no column either, and is recovered the way
+      // `absentParts` above is: by re-running the rubric's own function over
+      // the same inputs it saw at grading time — the stored bands, and the
+      // server's measurement of the recordings. Not a second copy of the rule.
+      //
+      // The score handed in is the stored raw: only `charges` is read from the
+      // result, and those depend on the bands and the durations, never on the
+      // running total.
+      //
+      // `excluded` has to be reconstructed too, or the sentence would name a
+      // part the rubric never charged: an absent part is dropped (the halving
+      // already answered for it) and so is a débat the examiner closed early.
+      // Both are the same reconstructions used just above.
+      durationCharges:
+        correction.durationPenalty > 0
+          ? applySittingDurationPenalty(
+              correction.rawScore25,
+              correction.criteria,
+              { monologueSeconds: measured("monologue"), debateSeconds: measured("debate") },
+              [
+                ...(correction.absencePenalty > 0
+                  ? partsAbsent({
+                      monologueWords: candidateWordCount(sitting.transcript, "monologue"),
+                      debateWords: candidateWordCount(sitting.transcript, "debate"),
+                    })
+                  : []),
+                ...(sitting.earlyClosingCount > 0 ? (["debate"] as const) : []),
+              ],
+            ).charges
           : [],
       model: correction.model,
       latencySeconds: correction.latencySeconds,

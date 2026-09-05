@@ -17,6 +17,7 @@ import {
 } from "@/app/_components/po/icons";
 import { Kicker, Tag } from "@/app/_components/po/tag";
 import { scoreFill, scoreInk, scorePill } from "@/app/_components/score-band";
+import type { DurationCharge } from "@/lib/delf/orale-rubric";
 import { cn } from "@/lib/ui/class-names";
 import { correctionNotices, earlyClosingNotice } from "@/lib/ui/correction-notices";
 import { formatScore25 } from "@/lib/ui/format-score";
@@ -113,6 +114,10 @@ export interface StoredResult {
      */
     durationPenalty?: number;
     shortParts?: Array<"monologue" | "debate">;
+    /** Where the duration charge landed, so the page can explain it (#189).
+     *  Optional like the rest of the corrector's working: a stash written
+     *  before the field existed carries nothing. */
+    durationCharges?: DurationCharge[];
     /**
      * What the halving cost, and which part never happened. Optional for the
      * same reason as the two above, and the fallback matters more here: the
@@ -382,6 +387,7 @@ export function ResultsClient({
       {/* Whole sentences, built and tested in `lib/ui/correction-notices.ts`.
           The component chooses neither the wording nor the figure. */}
       {notices.absence && <VerdictNote>{notices.absence}</VerdictNote>}
+      {notices.duration && <VerdictNote>{notices.duration}</VerdictNote>}
       {earlyClosing && <VerdictNote>{earlyClosing}</VerdictNote>}
 
       {evaluation.mode === "text" && (

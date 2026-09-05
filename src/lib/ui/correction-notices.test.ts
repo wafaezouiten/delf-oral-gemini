@@ -14,13 +14,150 @@ describe("the correction's penalty notices", () => {
     assert.equal(notices.absence, null);
   });
 
-  it("has no duration paragraph left to print (#137)", () => {
-    // « Note avant pénalité de durée : N/25 » is gone by the user's call. The
-    // deep equality is the assertion: whatever a sitting was docked for its
-    // length, the notices carry one field, and it is the halving's — there is
-    // nothing here for the page to render about the duration penalty, which
-    // still fires in the rubric and simply goes unexplained.
-    assert.deepEqual(correctionNotices({ rawScore25: 20 }), { absence: null });
+  it("stays silent about a sitting nothing was charged to", () => {
+    assert.deepEqual(correctionNotices({ rawScore25: 20 }), { absence: null, duration: null });
+  });
+
+  it("says nothing about duration on a correction that predates the fields", () => {
+    // The rows and stashes written before #189: `durationCharges` is absent and
+    // `durationPenalty` reads 0, which is the truthful backfill. A sentence
+    // above those would be inventing a charge.
+    assert.equal(correctionNotices({ rawScore25: 20, durationPenalty: 0 }).duration, null);
+    assert.equal(
+      correctionNotices({ rawScore25: 20, durationPenalty: 4 }).duration,
+      null,
+      "a penalty with no charges to explain says nothing rather than guessing",
+    );
+  });
+
+  describe("why the mark was docked for the clock (#189)", () => {
+    // #137 removed « Note avant pénalité de durée : N/25 » by the user's call,
+    // and for a long while the duration penalty fired unexplained. The user
+    // reversed that on #189: « the candidate should know why he got
+    // penalized ». What comes back is not the old paragraph — that one printed
+    // a number beside a mark it did not account for — but the reason: which
+    // part fell short of what, what it cost, and which criterion it came off.
+    const shortDebate = () =>
+      correctionNotices({
+        rawScore25: 23,
+        durationPenalty: 2,
+        durationCharges: [
+          {
+            part: "debate",
+            criterion: "interaction",
+            tier: "moderate",
+            seconds: 6 * 60,
+            from: 5,
+            to: 3,
+            points: 2,
+          },
+        ],
+      }).duration;
+
+    it("names the part, both durations, the cost and the criterion", () => {
+      const notice = shortDebate();
+
+      assert.match(notice!, /^Votre débat a duré 6 minutes sur les 10 attendues/);
+      assert.match(notice!, /coûté 2 points au titre de l'interaction/);
+    });
+
+    it("promises the language criteria were untouched, because they were", () => {
+      assert.match(shortDebate()!, /lexique.+morphosyntaxe.+prononciation/);
+      assert.match(shortDebate()!, /jamais pénalisés par la durée/);
+    });
+
+    it("never claims a band was lowered, because none was", () => {
+      // The sentence sits on a page that prints « Interaction 5 » from the same
+      // correction: the charge is priced from the band and the band is left as
+      // the corrector set it. Saying otherwise would contradict the row above.
+      const notice = shortDebate()!;
+
+      assert.ok(!/abaiss/i.test(notice), notice);
+      assert.ok(!/ramené/i.test(notice), notice);
+      assert.match(notice, /les notes affichées ci-dessus sont bien celles du correcteur/);
+    });
+
+    it("names both parts when both ran short", () => {
+      const notice = correctionNotices({
+        rawScore25: 25,
+        durationPenalty: 8,
+        durationCharges: [
+          {
+            part: "monologue",
+            criterion: "realisationTache",
+            tier: "strong",
+            seconds: 120,
+            from: 5,
+            to: 1,
+            points: 4,
+          },
+          {
+            part: "debate",
+            criterion: "interaction",
+            tier: "strong",
+            seconds: 150,
+            from: 5,
+            to: 1,
+            points: 4,
+          },
+        ],
+      }).duration;
+
+      assert.match(notice!, /^Les deux parties ont été plus courtes/);
+      assert.match(notice!, /votre monologue a duré 2 minutes sur les 7 attendues/);
+      assert.match(notice!, /votre débat a duré 3 minutes sur les 10 attendues/);
+    });
+
+    it("leaves out a part whose criterion had nothing left to lose", () => {
+      // A criterion already at 0 is charged 0 points by the ladder. « Cela a
+      // coûté 0 point » explains a penalty nobody received, so the clause is
+      // dropped — and with only such clauses, the whole paragraph is.
+      const mixed = correctionNotices({
+        rawScore25: 6,
+        durationPenalty: 1,
+        durationCharges: [
+          {
+            part: "monologue",
+            criterion: "realisationTache",
+            tier: "strong",
+            seconds: 60,
+            from: 1,
+            to: 0,
+            points: 1,
+          },
+          {
+            part: "debate",
+            criterion: "interaction",
+            tier: "strong",
+            seconds: 60,
+            from: 0,
+            to: 0,
+            points: 0,
+          },
+        ],
+      }).duration;
+
+      assert.match(mixed!, /^Votre monologue a duré 1 minute sur les 7 attendues/);
+      assert.ok(!mixed!.includes("débat"), mixed!);
+
+      const nothingToLose = correctionNotices({
+        rawScore25: 0,
+        durationPenalty: 0,
+        durationCharges: [
+          {
+            part: "debate",
+            criterion: "interaction",
+            tier: "strong",
+            seconds: 30,
+            from: 0,
+            to: 0,
+            points: 0,
+          },
+        ],
+      }).duration;
+
+      assert.equal(nothingToLose, null);
+    });
   });
 
   it("explains a walk-out against the half that was marked", () => {

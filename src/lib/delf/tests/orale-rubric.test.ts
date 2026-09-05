@@ -137,7 +137,7 @@ test("each part has its own full-development time, and one shared floor", () => 
   // The whole argument is on `FULL_DEVELOPMENT_SECONDS`; the matrix that
   // exercises it is in `duration-tiers.test.ts`.
   assert.equal(FULL_DEVELOPMENT_SECONDS.monologue, 420);
-  assert.equal(FULL_DEVELOPMENT_SECONDS.debate, 480);
+  assert.equal(FULL_DEVELOPMENT_SECONDS.debate, 600);
   assert.equal(SHORT_DEVELOPMENT_SECONDS, 240);
 });
 
@@ -152,7 +152,15 @@ test("a part under the full threshold is short even when the other one is not", 
   assert.equal(charged.score25, 16);
   assert.deepEqual(charged.shortParts, ["debate"]);
   assert.deepEqual(charged.charges, [
-    { part: "debate", criterion: "interaction", tier: "strong", from: 5, to: 1, points: 4 },
+    {
+      part: "debate",
+      criterion: "interaction",
+      tier: "strong",
+      seconds: 0,
+      from: 5,
+      to: 1,
+      points: 4,
+    },
   ]);
 });
 

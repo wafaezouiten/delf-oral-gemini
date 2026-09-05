@@ -180,19 +180,30 @@ function announcedSeconds(tache: number): number {
  * read off the part itself rather than written here: change the announced
  * duration and the threshold follows, because it IS the announced duration.
  *
- * The débat keeps the issue's eight minutes. Its own announcement is ten to
- * thirteen (780 s), so eight is *inside* what the candidate is asked for rather
- * than beyond it — a débat that stops two minutes early is not charged, which
- * is lenient in the direction the correction was about and was not what the
- * user raised. Deriving it from the spec as well would newly charge every
- * sitting between eight and thirteen minutes, which nobody asked for.
+ * **The débat's is ten minutes, and it is a different edge of its range.** The
+ * épreuve announces the débat as ten to thirteen (`ORAL_PARTS_B2` carries 780 s,
+ * the top of it), and the user's rule is that anywhere in that range is a débat
+ * fully carried out: « the debat max is 13 but its okey to be between 10 and
+ * 13 ». So ten is where the charge stops, not thirteen — asking for the maximum
+ * would charge almost every real sitting, which is the mistake the monologue's
+ * eight minutes already made once.
  *
- * Hence the asymmetry, which is deliberate and not a leftover: one figure is
- * the exam's, one is the issue's.
+ * Hence the asymmetry, which is deliberate and not a leftover: the exposé is
+ * measured against the TOP of its announced range and the débat against the
+ * BOTTOM of its own. That is not a rule derived from the format — it is the
+ * user's judgement about how much of each part is enough, and the format cannot
+ * settle it either way. Both figures are here, in one place, so the next person
+ * to disagree edits two lines and re-reads the tests that name them.
+ *
+ * The débat's is therefore written rather than read off the spec: 600 s is not
+ * a number `ORAL_PARTS_B2` holds, since the spec carries one duration per part
+ * and this is the other end of a range the spec does not model. The monologue's
+ * IS read off the spec, because there the threshold and the announced duration
+ * are the same number and must not drift.
  */
 export const FULL_DEVELOPMENT_SECONDS: Record<"monologue" | "debate", number> = {
   monologue: announcedSeconds(MONOLOGUE_TACHE),
-  debate: 8 * 60,
+  debate: 10 * 60,
 };
 
 /**
@@ -489,6 +500,9 @@ export interface DurationCharge {
   criterion: OralCriterion;
   /** Which tier the part fell in. Never `full` — those are not charges. */
   tier: Exclude<DurationTier, "full">;
+  /** What the part actually measured, so the charge can be explained to the
+   *  candidate without the reader having to carry the durations separately. */
+  seconds: number;
   /** The band it started on, and the one the tier's steps take it to. */
   from: GrilleBand;
   to: GrilleBand;
@@ -569,7 +583,8 @@ export function applySittingDurationPenalty(
     const criterion = DURATION_CRITERION[part];
     const from = criteria[criterion];
     const to = stepDownBand(from, DURATION_TIER_STEPS[tier]);
-    return { part, criterion, tier, from, to, points: from - to };
+    const seconds = part === "monologue" ? durations.monologueSeconds : durations.debateSeconds;
+    return { part, criterion, tier, seconds, from, to, points: from - to };
   });
 
   // One call per charged part, each with that part's own measurement against

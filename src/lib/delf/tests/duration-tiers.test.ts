@@ -31,10 +31,10 @@ import {
  * Comfortably inside each tier for BOTH parts, so no case is decided by a
  * boundary, and none by the two parts' different ceilings either. The
  * monologue's full-development time is its announced maximum (7 min) and the
- * debat's is the issue's 8, so `DEVELOPED` clears the higher of the two and
- * `HALF_WAY` is under the lower of them.
+ * debat's is the bottom of its own announced range (10 min), so `DEVELOPED`
+ * clears the higher of the two and `HALF_WAY` is under the lower of them.
  */
-const DEVELOPED = 9 * 60;
+const DEVELOPED = 11 * 60;
 const HALF_WAY = 6 * 60;
 const TWO_MINUTES = 2 * 60;
 
@@ -66,7 +66,7 @@ describe("the three tiers", () => {
     // its full-development time is its own announced maximum. Pinned here as
     // the two numbers a reader needs before any other case makes sense.
     assert.equal(FULL_DEVELOPMENT_SECONDS.monologue, 7 * 60, "the expose's announced maximum");
-    assert.equal(FULL_DEVELOPMENT_SECONDS.debate, 8 * 60, "the issue's figure, kept");
+    assert.equal(FULL_DEVELOPMENT_SECONDS.debate, 10 * 60, "the bottom of the débat's range");
     assert.equal(SHORT_DEVELOPMENT_SECONDS, 4 * 60, "the same floor for both");
   });
 
@@ -126,14 +126,21 @@ describe("the three tiers", () => {
     assert.equal(FULL_DEVELOPMENT_SECONDS.monologue, monologue?.durationSeconds);
     assert.equal(durationTier("monologue", 420), "full", "and it is now a full development");
 
-    // The débat is the other way round and keeps the issue's figure: 8 minutes
-    // is INSIDE its announced 10 to 13, so the threshold asks for less than the
-    // épreuve does rather than more, and a débat that stops a little early is
-    // not charged. That is the lenient direction, and not what the correction
-    // was about.
-    assert.equal(debate?.durationSeconds, 780, "the announced débat");
-    assert.ok(FULL_DEVELOPMENT_SECONDS.debate < (debate?.durationSeconds ?? 0));
-    assert.equal(durationTier("debate", 780), "full");
+    // The débat is measured against the other edge of its own range. The spec
+    // carries 780 s, the TOP of an announced ten to thirteen, and the user's
+    // rule is that anywhere in that range is a débat fully carried out — so ten
+    // is where the charge stops. Asking for the maximum would charge nearly
+    // every real sitting, which is the mistake the monologue's eight minutes
+    // made once already.
+    assert.equal(debate?.durationSeconds, 780, "the announced débat, at its top");
+    assert.equal(FULL_DEVELOPMENT_SECONDS.debate, 10 * 60);
+    assert.ok(
+      FULL_DEVELOPMENT_SECONDS.debate < (debate?.durationSeconds ?? 0),
+      "the bottom of the range is below its top",
+    );
+    assert.equal(durationTier("debate", 10 * 60), "full", "ten minutes is enough");
+    assert.equal(durationTier("debate", 780), "full", "and so is thirteen");
+    assert.equal(durationTier("debate", 9 * 60), "moderate", "nine is not");
   });
 
   it("still charges an exposé that stops short of what it was asked for", () => {
@@ -154,6 +161,7 @@ describe("where the penalty lands", () => {
         part: "monologue",
         criterion: "realisationTache",
         tier: "strong",
+        seconds: TWO_MINUTES,
         from: 5,
         to: 1,
         points: 4,
