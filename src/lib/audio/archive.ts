@@ -6,9 +6,9 @@
  * Three decisions, each a departure from what the recorder did before:
  *
  *  - **One artefact per phase, not one per sitting.** The monologue suivi and
- *    the débat are separate tasks with separate duration floors (168 s and
- *    312 s, `minDurationSeconds(tache)`), and one 20-minute file cannot say
- *    which half the candidate ran short on. Two artefacts can, and they are also
+ *    the débat are separate tasks, each placed in its own duration tier and
+ *    charged to its own criterion (`orale-rubric.ts`), and one 20-minute file
+ *    cannot say which half the candidate ran short on. Two artefacts can, and they are also
  *    the two things a candidate re-listens to.
  *
  *  - **The duration comes from the samples.** `sampleCount / sampleRate` and

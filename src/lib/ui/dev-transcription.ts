@@ -174,14 +174,15 @@ export function devSubmitDisabled(state: DevSubmitState): boolean {
  * A sample exposé, for the « Exemple » button.
  *
  * Long enough that {@link SPOKEN_WORDS_PER_MINUTE} puts it clear of
- * `MONOLOGUE_FLOOR_SECONDS` (168 s) on its own, so the button produces a
- * monologue graded on its content rather than docked for its length.
+ * `SHORT_DEVELOPMENT_SECONDS` (240 s) on its own, so the button produces a
+ * monologue in the middle duration tier rather than the bottom one.
  *
- * That is only half of a penalty-free sitting: the flat −3 fires when *either*
- * part is short, and the débat's own floor is 312 s. A typed sitting that is
- * meant to score without the penalty has to claim a débat as well — which is
- * what the duration field is for, since nobody is going to type five minutes of
- * argument twice.
+ * It cannot produce a charge-free sitting, and since #189 it cannot even
+ * produce a charge-free monologue: « full development » is eight minutes, and
+ * an exposé nobody would call short still estimates around five. A typed
+ * sitting meant to score without a duration charge has to claim BOTH durations
+ * — which is what the duration field is for, since nobody is going to type
+ * eight minutes of argument twice.
  */
 export function exampleExpose(subject: string): string {
   return [

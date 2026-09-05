@@ -45,11 +45,22 @@
  * And one signature changed: {@link applyDurationPenalty} returns the penalty it
  * applied as well as the adjusted score, so the caller can record what the
  * rubric asked for rather than reversing an answer out of two numbers.
+ *
+ * ---
+ *
+ * #189 REWROTE THE DURATION RULE, and it is the one part of this file that is
+ * no longer the incumbent's arithmetic. The port's rule was a single threshold
+ * per part with a flat −3 behind it, taken off the /25 as a lump. It is now
+ * three tiers per part ({@link durationTier}) charged against the criterion
+ * that part is graded on ({@link applySittingDurationPenalty}), so that a short
+ * épreuve costs « réalisation de la tâche » and « interaction » and never
+ * lexique, morphosyntaxe or phonologie. Scores either side of that change are
+ * not comparable with the incumbent's; everything else here still is.
  */
 
-import { COMPETENCY_MAX, COMPETENCY_FLOOR, minDurationSeconds } from "./constants";
+import { COMPETENCY_MAX, COMPETENCY_FLOOR } from "./constants";
 import { ORAL_CRITERIA, type OralCriterion } from "./criteria";
-import { snapToBand, type GrilleBand } from "./grille";
+import { GRILLE_BANDS, snapToBand, type GrilleBand } from "./grille";
 
 /** The five official grille criteria (each a 0/1/3/5 band). */
 export interface OralCriteriaScores {
@@ -129,25 +140,87 @@ export function applyDurationPenalty(
   return { score25: Math.max(0, score25 - penalty), penalty };
 }
 
-/** The two parts of a B2 sitting, as `tache` numbers (`constants.ts`). */
-const MONOLOGUE_TACHE = 1;
-const DEBATE_TACHE = 2;
+/**
+ * How long each part has to run before it is developed enough to cost nothing,
+ * and how short it has to be to cost the most. Eight minutes and four minutes,
+ * the same pair for both parts (#189).
+ *
+ * THE USER'S FIGURES, and they are not the ones the DELF's own format implies.
+ * The official B2 monologue is announced to the candidate as five to seven
+ * minutes (`ORAL_PARTS_B2`, 420 s) and the débat as ten to thirteen (780 s), so
+ * a textbook seven-minute exposé now lands in the middle tier and is charged
+ * one band of « réalisation de la tâche ». That is the rule as #189 specifies
+ * it, twice — once per part and again in its combined table — and it is
+ * deliberately not softened here. Both numbers are constants in one place so
+ * the decision can be revisited by editing two lines and re-reading the tests
+ * that name them.
+ *
+ * What they replaced: `minDurationSeconds(tache)`, 40 % of each part's expected
+ * time floored at 30 s — 168 s of monologue and 312 s of débat, a single
+ * threshold per part with a flat −3 behind it. That function is still the
+ * incumbent's rule and still exported from `constants.ts`; it is no longer this
+ * project's, and nothing in `src/` computes a mark from it any more.
+ */
+export const FULL_DEVELOPMENT_SECONDS = 8 * 60;
+export const SHORT_DEVELOPMENT_SECONDS = 4 * 60;
 
 /**
- * The minimum each part must produce before the duration penalty fires: 40 % of
- * the part's expected speaking time, floored at 30 s. 168 s of monologue and
- * 312 s of débat.
+ * How developed a part was, in time: the three cases #189 asks for, named
+ * rather than left as two comparisons written out wherever they are needed.
  *
- * These are the only floors left, and since #171 they are the only ones the
- * candidate can meet or miss. `phases.ts` used to hold a second, unrelated one —
- * how long they had to stay in the monologue before the UI let them advance —
- * and the two were forever being read as the same rule. They never were: that
- * one was a clock the candidate watched, these are measured against the
- * *recording* afterwards, and a phase can run its full seven minutes with 40 s
- * of audio on it.
+ * `full` costs nothing, `moderate` is « insufficient development », `strong` is
+ * « very limited development ». Note there is no fourth tier for a part with no
+ * speech in it at all: an unspoken part is not a short part, it is an absent
+ * one, and {@link applyAbsentPartPenalty} answers it. See
+ * {@link applySittingDurationPenalty} for why the two must not both fire.
  */
-export const MONOLOGUE_FLOOR_SECONDS = minDurationSeconds(MONOLOGUE_TACHE);
-export const DEBATE_FLOOR_SECONDS = minDurationSeconds(DEBATE_TACHE);
+export type DurationTier = "full" | "moderate" | "strong";
+
+/** Which tier a part's measured seconds fall in. */
+export function durationTier(seconds: number): DurationTier {
+  if (!(seconds < FULL_DEVELOPMENT_SECONDS)) return "full";
+  return seconds < SHORT_DEVELOPMENT_SECONDS ? "strong" : "moderate";
+}
+
+/**
+ * What each tier costs, in steps DOWN the grille's four bands — not in points.
+ *
+ * This is the whole of #189 §3 in one table. A step moves 5 → 3 → 1 → 0, so
+ * « moderate » takes a criterion from « B2+ » to « B2 » and « strong » from
+ * « B2+ » to « en dessous ». Two consequences, both wanted:
+ *
+ *  - **The charge is proportional to what was actually credited.** A candidate
+ *    already at 1 on the criterion loses 1 point; one at 0 loses nothing. A
+ *    short épreuve therefore cannot drive a mark to 0 on its own, which is
+ *    exactly the rule #189 states twice ("duration alone must NEVER determine
+ *    the entire score").
+ *  - **The ceiling is knowable.** Both parts in the strong tier off a perfect
+ *    correction costs 4 + 4 = 8 points of 25. Lexique, morphosyntaxe and
+ *    phonologie keep every point they earned, whatever the clock says.
+ */
+const DURATION_TIER_STEPS: Record<DurationTier, number> = { full: 0, moderate: 1, strong: 2 };
+
+/**
+ * Which criterion each part's shortfall is charged against.
+ *
+ * The grille already pins one pragmatic criterion to each half of the sitting
+ * (`SITTING_TASK_LABELS`, and the stage contract the corrector is given):
+ * « réalisation de la tâche » marks the exposé, « interaction » marks the
+ * débat. So « insufficient development of the monologue » and « insufficient
+ * interaction in the débat » each have exactly one criterion they can honestly
+ * come off, and this table is that correspondence rather than a new opinion.
+ */
+const DURATION_CRITERION: Record<"monologue" | "debate", OralCriterion> = {
+  monologue: "realisationTache",
+  debate: "interaction",
+};
+
+/** A band, moved `steps` places down the grille's own ladder (5 → 3 → 1 → 0). */
+function stepDownBand(band: GrilleBand, steps: number): GrilleBand {
+  const index = GRILLE_BANDS.indexOf(band);
+  if (index === -1) return band;
+  return GRILLE_BANDS[Math.max(0, index - steps)];
+}
 
 /** Measured speaking time per part, from the recordings rather than the clock. */
 export interface SittingDurations {
@@ -161,11 +234,26 @@ export interface SittingParticipation {
   debateWords: number;
 }
 
-/** Which parts of the sitting fell under their own floor, in exam order. */
-export function partsUnderFloor(durations: SittingDurations): Array<"monologue" | "debate"> {
+/** Both parts' tiers, in exam order, whether or not either was charged. */
+export function sittingDurationTiers(
+  durations: SittingDurations,
+): Record<"monologue" | "debate", DurationTier> {
+  return {
+    monologue: durationTier(durations.monologueSeconds),
+    debate: durationTier(durations.debateSeconds),
+  };
+}
+
+/**
+ * Which parts ran for less than {@link FULL_DEVELOPMENT_SECONDS}, in exam
+ * order. Was `partsUnderFloor`, which named a rule that no longer exists.
+ */
+export function partsUnderFullDevelopment(
+  durations: SittingDurations,
+): Array<"monologue" | "debate"> {
   const short: Array<"monologue" | "debate"> = [];
-  if (durations.monologueSeconds < MONOLOGUE_FLOOR_SECONDS) short.push("monologue");
-  if (durations.debateSeconds < DEBATE_FLOOR_SECONDS) short.push("debate");
+  if (durationTier(durations.monologueSeconds) !== "full") short.push("monologue");
+  if (durationTier(durations.debateSeconds) !== "full") short.push("debate");
   return short;
 }
 
@@ -333,63 +421,112 @@ export function applyAbsentPartPenalty(
   return { score25: halved, penalty: score25 - halved, absentParts };
 }
 
-/** The duration rule over a whole sitting, and which parts triggered it. */
+/** One part's shortfall, priced against the criterion that carries it (#189). */
+export interface DurationCharge {
+  part: "monologue" | "debate";
+  /** The criterion the points came off. See {@link DURATION_CRITERION}. */
+  criterion: OralCriterion;
+  /** Which tier the part fell in. Never `full` — those are not charges. */
+  tier: Exclude<DurationTier, "full">;
+  /** The band it started on, and the one the tier's steps take it to. */
+  from: GrilleBand;
+  to: GrilleBand;
+  /** `from − to`. Zero where the criterion was already at the bottom. */
+  points: number;
+}
+
+/** The duration rule over a whole sitting, and what it charged where. */
 export interface SittingDurationPenalty extends DurationPenalty {
   shortParts: Array<"monologue" | "debate">;
+  /** Both parts' tiers, including the parts nothing was charged for. */
+  tiers: Record<"monologue" | "debate", DurationTier>;
+  /** One entry per charged part, in exam order. Empty on a full sitting. */
+  charges: DurationCharge[];
 }
 
 /**
- * The per-part duration rule, applied to a sitting that has one /25.
+ * The per-part duration rule, applied to a sitting that has one /25 (#189).
  *
- * The port measures **each part against its own floor**, because the incumbent
- * corrects one task per correction and each correction carries its own score.
- * Here both tasks are one sitting and one mark, so the rule has to be composed,
- * and the composition is a decision the port cannot make for us:
+ * **What this replaced, and why.** Until #189 the rule was a flat −3 taken off
+ * the total, fired once if either part came in under its own floor. Two things
+ * were wrong with it, both named in the issue. It was binary — four minutes of
+ * débat and forty seconds of it cost the same — and it came off the /25 as a
+ * lump, which is to say off every criterion at once: a candidate whose French
+ * was precise and well pronounced paid for a short épreuve out of lexique and
+ * phonologie, criteria the clock says nothing about.
  *
- *   - **The penalty fires once, if either part is short.** A flat −3, which is
- *     the only magnitude the incumbent's rule can produce. Docking 3 per short
- *     part would invent a −6 that no correction over there has ever produced.
- *   - **The floors stay per part.** Measuring the sitting total against their
- *     sum (480 s) is what the deleted copy did, and it passes a candidate who
- *     talks for eight minutes in the monologue and says nothing in the débat —
- *     which is precisely the shortfall the rule exists to catch.
+ * So the rule now has three tiers ({@link durationTier}) and charges each part's
+ * shortfall to the criterion that part is graded on ({@link DURATION_CRITERION}),
+ * as steps down the grille's own ladder ({@link DURATION_TIER_STEPS}). What
+ * comes off the total is what those steps cost, which is why a weak candidate
+ * is charged less than a strong one for the same silence: there was less on the
+ * criterion to take.
  *
- * `shortParts` comes back so the reason is legible afterwards: "docked 3" and
- * "docked 3 because the débat produced 40 seconds" are different records, and
- * only one of them can be argued with.
+ * **What did NOT change.** The subtraction, its floor at 0 and the nominal
+ * reporting are still `applyDurationPenalty`'s, called once per charged part.
+ * And the five bands this returns *for the candidate to read* are untouched —
+ * the charge is priced from them, not written back onto them. That is a
+ * decision rather than an oversight: each band is printed on the correction
+ * beside the corrector's own justification of it, and a « réalisation de la
+ * tâche » silently rewritten from 5 to 3 under a paragraph praising the exposé
+ * is a page that contradicts itself. The candidate-facing consequence of a
+ * short épreuve is the mark, as it was before #189 and as #137 left it.
+ *
+ * `charges` and `tiers` come back so the figure is legible afterwards: "docked
+ * 4" and "docked 4 because the débat ran two minutes and interaction was worth
+ * 5" are different records, and only one of them can be argued with.
  *
  * `excluded` names the parts this rule may not consider, and they are dropped
- * entirely — not merely excused the −3, but removed from `shortParts` too,
- * because the array explains the charge and must not name a part that was not
- * charged. Two kinds of part land in it, for two different reasons:
+ * entirely — not merely spared the charge, but removed from `shortParts` and
+ * `charges` too, because those explain a charge and must not name a part that
+ * was not charged. Two kinds of part land in it, for two different reasons:
  *
  *   - **Parts {@link applyAbsentPartPenalty} has already charged for.** A part
- *     that never happened is necessarily under its floor, so leaving it in
- *     would dock a candidate twice for one absence and then report the second
- *     charge under the wrong reason. The rule still fires on the *other* part:
- *     an abandoned débat after a ninety-second monologue is halved, and then
- *     docked 3 for the monologue.
+ *     that never happened is necessarily under both thresholds, so leaving it
+ *     in would dock a candidate twice for one absence and then report the
+ *     second charge under the wrong reason. #189 keeps this: « no speech » is
+ *     listed apart from the three tiers, and answered by scoring what was
+ *     actually produced rather than by a duration penalty. The rule still
+ *     fires on the *other* part.
  *   - **Parts the examiner cut short (#92).** A débat that ran four minutes
  *     because the examiner dismissed the candidate at four minutes is a
  *     shortfall, but not the candidate's.
  */
 export function applySittingDurationPenalty(
   score25: number,
+  criteria: CriteriaBands,
   durations: SittingDurations,
   excluded: readonly ("monologue" | "debate")[] = [],
 ): SittingDurationPenalty {
-  const shortParts = partsUnderFloor(durations).filter((part) => !excluded.includes(part));
-  if (shortParts.length === 0) return { score25, penalty: 0, shortParts };
+  const tiers = sittingDurationTiers(durations);
+  const shortParts = partsUnderFullDevelopment(durations).filter(
+    (part) => !excluded.includes(part),
+  );
 
-  // Delegated with the first short part's own measurement against its own floor
-  // — real numbers, not a pair invented to force the branch — so the subtraction
-  // and the floor at 0 stay in the ported function and are not written twice.
-  const first =
-    shortParts[0] === "monologue"
-      ? { seconds: durations.monologueSeconds, floor: MONOLOGUE_FLOOR_SECONDS }
-      : { seconds: durations.debateSeconds, floor: DEBATE_FLOOR_SECONDS };
+  const charges: DurationCharge[] = shortParts.map((part) => {
+    const tier = tiers[part] as Exclude<DurationTier, "full">;
+    const criterion = DURATION_CRITERION[part];
+    const from = criteria[criterion];
+    const to = stepDownBand(from, DURATION_TIER_STEPS[tier]);
+    return { part, criterion, tier, from, to, points: from - to };
+  });
 
-  return { ...applyDurationPenalty(score25, first.seconds, first.floor), shortParts };
+  // One call per charged part, each with that part's own measurement against
+  // the threshold it missed — real numbers, not a pair invented to force the
+  // branch — so the subtraction and the floor at 0 stay in the ported function
+  // and are not written a second time here. The nominal penalties sum, which is
+  // what `evaluations.duration_penalty` stores: a 2/25 charged 4 records 4.
+  let running = score25;
+  let penalty = 0;
+  for (const charge of charges) {
+    const seconds =
+      charge.part === "monologue" ? durations.monologueSeconds : durations.debateSeconds;
+    const applied = applyDurationPenalty(running, seconds, FULL_DEVELOPMENT_SECONDS, charge.points);
+    running = applied.score25;
+    penalty += applied.penalty;
+  }
+
+  return { score25: running, penalty, shortParts, tiers, charges };
 }
 
 // ------------------------------------------------- phonologie without the sound
@@ -520,6 +657,20 @@ export interface SittingScore {
    */
   shortParts: Array<"monologue" | "debate">;
   /**
+   * Both parts' duration tiers (#189), reported whether or not either was
+   * charged — a part that ran its full eight minutes is a fact about the
+   * sitting, and « full » is the answer to the question `shortParts` leaves
+   * open on a part it does not name.
+   */
+  durationTiers: Record<"monologue" | "debate", DurationTier>;
+  /**
+   * Where the duration penalty came off, per part: the criterion, the tier,
+   * and the band step it cost. What makes `durationPenalty` explainable rather
+   * than merely applied — and what says, on a sitting where it reads 0 beside a
+   * two-minute débat, that the criterion was already at the bottom.
+   */
+  durationCharges: DurationCharge[];
+  /**
    * Which parts a penalty would have reached and did not, because the examiner
    * closed the épreuve early (#92). Empty on the ordinary sitting — including
    * the recovered one, where the examiner said goodbye, was contradicted, and
@@ -576,15 +727,25 @@ export function scoreSitting(
 
   // Halve first, dock second. The order is the decision: a candidate who
   // produced half an épreuve is marked on half the scale, and the shortfall
-  // rule then applies to what is left. Reversing it would charge the flat 3
-  // against the full mark and then halve the remainder, which quietly makes the
-  // duration penalty worth 1.5 points on exactly the sittings that earned it.
+  // rule then applies to what is left. Reversing it would charge the duration
+  // points against the full mark and then halve the remainder, which quietly
+  // makes them worth half on exactly the sittings that earned them.
+  //
+  // Unchanged by #189 even though the charge is now priced from the bands: the
+  // price is read off `criteria`, which no penalty touches, so the two rules
+  // can still be applied in this order without either reading the other's
+  // output.
   const absence = applyAbsentPartPenalty(rawScore25, conditions, excused);
-  const { score25, penalty, shortParts } = applySittingDurationPenalty(
-    absence.score25,
-    conditions,
-    [...absence.absentParts, ...excused],
-  );
+  const {
+    score25,
+    penalty,
+    shortParts,
+    tiers,
+    charges: durationCharges,
+  } = applySittingDurationPenalty(absence.score25, criteria, conditions, [
+    ...absence.absentParts,
+    ...excused,
+  ]);
 
   return {
     criteria,
@@ -593,13 +754,16 @@ export function scoreSitting(
     absentParts: absence.absentParts,
     durationPenalty: penalty,
     shortParts,
+    durationTiers: tiers,
+    durationCharges,
     // Excused, in the reported sense: a penalty would actually have reached it.
     // `excused` above is broader — it silences the rules whether or not they
     // had anything to say — and reporting that would label every recovered
     // sitting with a waiver that changed nothing.
     excusedParts: excused.filter(
       (part) =>
-        partsAbsent(conditions).includes(part) || partsUnderFloor(conditions).includes(part),
+        partsAbsent(conditions).includes(part) ||
+        partsUnderFullDevelopment(conditions).includes(part),
     ),
     phonologyCapped: criteria.phonologie !== snapped.phonologie,
     score25,

@@ -274,12 +274,12 @@ export const oralExamPhases = pgTable(
     /**
      * Candidate speaking time in this phase, in seconds.
      *
-     * Stored per phase because the ported rule measures the duration penalty per
-     * part — `minDurationSeconds(tache)` gives 168 s for the monologue and 312 s
-     * for the débat. Nothing on the active grading path reads it that way yet:
-     * `gemini/evaluate.ts` calls `rubric.ts`, which penalises against a single
-     * combined floor. This column is what a per-part penalty needs when the two
-     * rubric copies are reconciled, not something already wired up.
+     * Stored per phase because the rule measures the duration penalty per part:
+     * since #189 each part is placed in a tier against the same two thresholds
+     * (`FULL_DEVELOPMENT_SECONDS` and `SHORT_DEVELOPMENT_SECONDS`, 8 and 4
+     * minutes) and charged to the criterion that part is graded on. Note this
+     * column is the CLIENT's clock and is an audit trail only: the figure the
+     * rubric actually reads is measured server-side from the uploaded bytes.
      */
     spokenSeconds: integer("spoken_seconds").notNull().default(0),
 
