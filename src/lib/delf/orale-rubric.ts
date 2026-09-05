@@ -228,6 +228,15 @@ export type DurationTier = "full" | "moderate" | "strong";
  * differs between them ({@link FULL_DEVELOPMENT_SECONDS}), and a caller that
  * could ask "which tier is 400 seconds" without saying which half it belongs to
  * would be asking a question that no longer has one answer.
+ *
+ * **The comparison is negated on purpose, and NaN is why.** Written
+ * `seconds >= ceiling`, a measurement that came back NaN would fall through to
+ * `strong` and charge the candidate two bands for a number the app failed to
+ * produce. Written this way it answers `full` and charges nothing. Every real
+ * caller passes finite measured seconds — this is the direction to fail in if
+ * one ever does not, and it is the same direction the rest of the file leans
+ * (`partsSpokenButUntranscribed`, the phonologie coverage note): the app's
+ * failures are not the candidate's to pay for. Pinned in `duration-tiers.test.ts`.
  */
 export function durationTier(part: "monologue" | "debate", seconds: number): DurationTier {
   if (!(seconds < FULL_DEVELOPMENT_SECONDS[part])) return "full";

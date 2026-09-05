@@ -90,6 +90,17 @@ describe("the three tiers", () => {
     assert.equal(durationTier("monologue", 0), "strong");
   });
 
+  it("answers `full` for a measurement that is not a number at all", () => {
+    // The direction to fail in, pinned because nothing else states it. A NaN
+    // reaching here means the app could not measure the recording; charging
+    // two bands of « réalisation de la tâche » for that would bill the
+    // candidate for the app's failure, which is the one thing every other
+    // rule in this file refuses to do. `durationTier`'s negated comparison is
+    // what makes it fall this way, so a "tidying" rewrite to `>=` fails here.
+    assert.equal(durationTier("monologue", Number.NaN), "full");
+    assert.equal(durationTier("debate", Number.NaN), "full");
+  });
+
   it("reads both parts independently", () => {
     assert.deepEqual(sittingDurationTiers({ monologueSeconds: 600, debateSeconds: 60 }), {
       monologue: "full",
