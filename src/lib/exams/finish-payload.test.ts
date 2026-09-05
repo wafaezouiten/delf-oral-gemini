@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 
 import {
   MAX_PHASE_SECONDS,
+  MAX_RECONNECTS,
   MAX_TRANSCRIPT_CHARS,
   MAX_TURNS,
   MAX_TURN_CHARS,
@@ -208,6 +209,33 @@ describe("keeping the audit trail worth having", () => {
   it("still rejects the NaN that used to reach the INSERT", () => {
     assert.equal(accepts(payload({ reconnectCount: Number.NaN })), false);
     assert.equal(accepts(payload({ reconnectCount: -1 })), false);
+  });
+
+  it("refuses a reconnect count no sitting could produce", () => {
+    // Two things behind the bound, and only one of them was theoretical
+    // (raised in review of #196). `oral_exams.reconnect_count` is an
+    // `integer`, so a claim past 2^31 passed `nonnegative()`, reached the
+    // INSERT and failed it — costing the candidate their whole correction,
+    // shown to them as « correction perdue ». And since #189 the number is
+    // interpolated into the corrector's prompt, where « interrompue
+    // 999999999 fois » is not a sentence to put in front of a model about to
+    // grade somebody.
+    assert.equal(accepts(payload({ reconnectCount: MAX_RECONNECTS })), true);
+    assert.equal(accepts(payload({ reconnectCount: MAX_RECONNECTS + 1 })), false);
+    assert.equal(accepts(payload({ reconnectCount: 3_000_000_000 })), false);
+  });
+
+  it("leaves room for every reconnect a real sitting could have", () => {
+    // The bound must never refuse an honest client, and this is the assertion
+    // that decides the figure rather than a round number chosen by eye: an
+    // épreuve runs about 20 minutes, so a pathological sitting dropping every
+    // two seconds throughout lands near 600. The first bound written here was
+    // 500, and this caught it.
+    const worstCaseSitting = (20 * 60) / 2;
+    assert.ok(
+      MAX_RECONNECTS > worstCaseSitting,
+      `${MAX_RECONNECTS} would refuse a sitting that dropped ${worstCaseSitting} times`,
+    );
   });
 
   describe("the early-closing count (#92)", () => {

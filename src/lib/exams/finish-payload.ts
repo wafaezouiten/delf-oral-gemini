@@ -36,6 +36,33 @@ export { MAX_TRANSCRIPT_CHARS, MAX_TURNS, MAX_TURN_CHARS } from "./transcript-pa
 export const MAX_PHASE_SECONDS = 4 * 60 * 60;
 
 /**
+ * The most reconnections a sitting may claim.
+ *
+ * Generous on purpose, and sized against the worst sitting rather than a round
+ * number: an épreuve is about 20 minutes and a Live session takes seconds to
+ * reopen, so even one dropping every two seconds for its whole length lands
+ * near 600. A test pins that relation, and it is what caught the first figure
+ * here (500) being under it.
+ *
+ * What it bounds is the two ways an unbounded count goes wrong, and only one of
+ * them was ever theoretical:
+ *
+ *  - **`oral_exams.reconnect_count` is an `integer`.** A claim past 2^31 passes
+ *    `nonnegative()`, reaches the INSERT and fails it, and a failed write here
+ *    costs a candidate their whole correction, shown to them as « correction
+ *    perdue ». That is the same overflow the #92 clamp closed for
+ *    `earlyClosingCount`, which this field had no equivalent of.
+ *  - **It reaches the corrector's prompt since #189.** « la connexion a été
+ *    interrompue 999999999 fois » is not a sentence to put in front of a model
+ *    that is about to grade somebody (raised in review of #196).
+ *
+ * A `.max()` rather than a clamp, matching every other bounded field here:
+ * no honest client sends more than this, so the value is refused rather than
+ * quietly rewritten into something the browser never said.
+ */
+export const MAX_RECONNECTS = 1000;
+
+/**
  * One phase, as the browser saw it. Deliberately carries no recorded duration:
  * the recording's length is measured from the recording itself, and a second
  * copy of it here would be a number that can disagree with the file it
@@ -84,7 +111,7 @@ export const finishPayloadSchema = z.object({
       (reports) => new Set(reports.map((report) => report.phase)).size === reports.length,
       "a phase cannot be reported twice",
     ),
-  reconnectCount: z.number().int().nonnegative(),
+  reconnectCount: z.number().int().nonnegative().max(MAX_RECONNECTS),
   /**
    * How many times the examiner tried to close the épreuve mid-débat (#92), as
    * `ExamController` counted it. The browser is the only witness — the goodbye
@@ -97,7 +124,8 @@ export const finishPayloadSchema = z.object({
    * bounds an incoherent or buggy claim but not a fabricated one, because the
    * transcript is this same payload; why that trust is accepted is
    * `resolveEarlyClosingCount`'s to say. The clamp is also why there is no
-   * `.max()` here: it bounds the stored value by the transcript's own turn
+   * `.max()` here, where `reconnectCount` now has one: the clamp bounds the
+   * stored value by the transcript's own turn
    * limit.
    *
    * Defaulted rather than required, unlike `reconnectCount`, because it is

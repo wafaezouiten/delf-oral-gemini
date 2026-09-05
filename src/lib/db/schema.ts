@@ -275,9 +275,11 @@ export const oralExamPhases = pgTable(
      * Candidate speaking time in this phase, in seconds.
      *
      * Stored per phase because the rule measures the duration penalty per part:
-     * since #189 each part is placed in a tier against the same two thresholds
-     * (`FULL_DEVELOPMENT_SECONDS` and `SHORT_DEVELOPMENT_SECONDS`, 8 and 4
-     * minutes) and charged to the criterion that part is graded on. Note this
+     * since #189 each part is placed in one of three tiers and charged to the
+     * criterion that part is graded on. The thresholds are NOT the same for
+     * both — the exposé's is its own announced 7 minutes, because it cannot
+     * legally run longer, and the débat's is 8; `FULL_DEVELOPMENT_SECONDS` in
+     * `delf/orale-rubric.ts` is where that asymmetry is argued. Note this
      * column is the CLIENT's clock and is an audit trail only: the figure the
      * rubric actually reads is measured server-side from the uploaded bytes.
      */
