@@ -140,6 +140,33 @@ export function applyDurationPenalty(
   return { score25: Math.max(0, score25 - penalty), penalty };
 }
 
+/** The exposé's part number in `ORAL_PARTS_B2`. */
+const MONOLOGUE_TACHE = 1;
+
+/**
+ * The duration the épreuve announces for a part, or a throw.
+ *
+ * Deliberately not `?? 7 * 60`. A default here would be a second copy of the
+ * very number this reads from the spec so that the two cannot drift — and it
+ * would spend itself silently: if `ORAL_PARTS_B2` ever stopped defining this
+ * part, every sitting would be graded against a threshold nobody chose and
+ * nothing would say so. The tests can pin today's 420 but cannot reach the
+ * fallback path without breaking the source data, so the fallback is exactly
+ * the branch that would never be noticed.
+ *
+ * A throw at module load fails the build instead, which is the right failure
+ * for a constant that decides marks (raised in review of #196).
+ */
+function announcedSeconds(tache: number): number {
+  const spec = getOralPartSpec(tache);
+  if (!spec) {
+    throw new Error(
+      `ORAL_PARTS_B2 defines no part ${tache}, so the duration rule has no announced length to read.`,
+    );
+  }
+  return spec.durationSeconds;
+}
+
 /**
  * How long each part has to run before it is developed enough to cost nothing.
  *
@@ -164,7 +191,7 @@ export function applyDurationPenalty(
  * the exam's, one is the issue's.
  */
 export const FULL_DEVELOPMENT_SECONDS: Record<"monologue" | "debate", number> = {
-  monologue: getOralPartSpec(1)?.durationSeconds ?? 7 * 60,
+  monologue: announcedSeconds(MONOLOGUE_TACHE),
   debate: 8 * 60,
 };
 
@@ -541,6 +568,18 @@ export function applySittingDurationPenalty(
   // branch — so the subtraction and the floor at 0 stay in the ported function
   // and are not written a second time here. The nominal penalties sum, which is
   // what `evaluations.duration_penalty` stores: a 2/25 charged 4 records 4.
+  //
+  // WHY APPLYING THEM ONE AT A TIME MATCHES THE DATABASE, which asserts one
+  // subtraction: `evaluations_score_25_check` is `greatest(raw − absence −
+  // duration, 0)`, and this floors after EACH charge. The two agree only
+  // because every step is a non-negative subtraction from a non-negative
+  // start — the halving cannot go below 0 (it takes at most half of a
+  // non-negative number) and neither can a band step (`from − to` where
+  // `to ≤ from`). Under those conditions an intermediate floor can never bite
+  // before the final one, so `max(0, max(0, a − b) − c) === max(0, a − b − c)`.
+  // A third penalty stacked here would have to preserve that or the stored row
+  // stops reconstructing; the sweep test in `orale-rubric.test.ts` is what
+  // would notice (raised in review of #196).
   let running = score25;
   let penalty = 0;
   for (const charge of charges) {
