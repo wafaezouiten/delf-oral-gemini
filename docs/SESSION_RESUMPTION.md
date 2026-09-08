@@ -4,10 +4,10 @@
 
 Gemini Live's documented limits:
 
-| Limit | Value |
-| --- | --- |
-| Connection lifetime | ~10 minutes |
-| Audio-only session, no compression | 15 minutes |
+| Limit                              | Value                     |
+| ---------------------------------- | ------------------------- |
+| Connection lifetime                | ~10 minutes               |
+| Audio-only session, no compression | 15 minutes                |
 | Session resumption handle validity | 2 hours after termination |
 
 The DELF B2 exam this product runs is a 5-7 minute monologue plus a ~13 minute
@@ -36,8 +36,8 @@ Both phase configs set `sessionResumption: {}` — present, and **empty**. Witho
 the field the server sends no `sessionResumptionUpdate` messages at all and a
 reconnect has nothing to resume from, which would silently restart the exam.
 Adding the `transparent: true` the SDK types and the docs describe is worse than
-useless: the Developer API rejects the connection outright with *"transparent
-parameter is only supported in Gemini Enterprise Agent Platform mode"*. See
+useless: the Developer API rejects the connection outright with _"transparent
+parameter is only supported in Gemini Enterprise Agent Platform mode"_. See
 [`GEMINI_LIVE_FINDINGS.md` §1](GEMINI_LIVE_FINDINGS.md). Resumption works fine
 without it.
 
@@ -59,7 +59,7 @@ duplicate the monologue in context, so `connect()` only seeds when
 
 `contextWindowCompression: { slidingWindow: {} }` lifts the audio-only session
 cap. The oldest turns are dropped, which is acceptable here because the
-evaluation reads *our* transcript, not Gemini's context — the grade never depends
+evaluation reads _our_ transcript, not Gemini's context — the grade never depends
 on what the model still remembers.
 
 ### 4. Backoff reconnect — the unannounced drop
@@ -80,14 +80,14 @@ unheard while the transcript printed it. Nothing worth keeping is lost: a phase'
 first words are the examiner's, not the candidate's.
 
 The flush happens **after** `connect()` resolves, not only inside `onopen`. The
-SDK fires the open event *before* the connect promise settles, so a flush from
+SDK fires the open event _before_ the connect promise settles, so a flush from
 `onopen` alone runs while the session's socket field is still null: every
 buffered chunk is refused and pushed straight back onto the queue. That silently
 discarded exactly the audio the buffer exists to save. Pinned by a unit test.
 
 ## Why the candidate does not notice
 
-The three things that would make a reconnect *feel* like a new exam all live
+The three things that would make a reconnect _feel_ like a new exam all live
 above the session and are never touched by it:
 
 ```
@@ -125,7 +125,7 @@ covered by hope.
 reconnect mid-débat and asserting:
 
 - the reconnect was recorded (`reconnectCount === 1`);
-- the session was *resumed in place*, not replaced by a new exam;
+- the session was _resumed in place_, not replaced by a new exam;
 - the transcript length is unchanged across the reconnect;
 - the débat clock did not reset;
 - speech after the reconnect appends to the same transcript;

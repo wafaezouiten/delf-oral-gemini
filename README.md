@@ -20,11 +20,11 @@ pnpm dev
 
 Required to run an exam:
 
-| Variable | What it does |
-| --- | --- |
-| `GEMINI_API_KEY` | Server-side only. The browser receives short-lived ephemeral tokens minted from it, never the key. |
-| `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY` | Auth. Without them the app builds and the pure logic tests pass, but no route under `/app` opens. |
-| `DATABASE_URL` | Optional. Without it the exam runs and is graded; only persistence is skipped. |
+| Variable                                                | What it does                                                                                       |
+| ------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| `GEMINI_API_KEY`                                        | Server-side only. The browser receives short-lived ephemeral tokens minted from it, never the key. |
+| `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY` | Auth. Without them the app builds and the pure logic tests pass, but no route under `/app` opens.  |
+| `DATABASE_URL`                                          | Optional. Without it the exam runs and is graded; only persistence is skipped.                     |
 
 ```bash
 pnpm check       # typecheck + lint
@@ -54,7 +54,7 @@ conversational model to stay quiet does not work; it will still say "d'accord"
 when the candidate pauses for breath. Instead the monologue runs with
 `automaticActivityDetection.disabled: true`, and the controller sends
 `activityStart` once and withholds `activityEnd` for the entire phase. With no
-turn boundary, the model has no point at which it *can* speak. Transcription
+turn boundary, the model has no point at which it _can_ speak. Transcription
 keeps streaming throughout. See `src/lib/gemini/live-config.ts`.
 
 **The débat is a second session, seeded with the first.** Gemini cannot change a
@@ -65,7 +65,7 @@ quoting an argument the candidate actually made. See `monologueAsHistory`.
 
 **Reconnection is the expected path, not the error path.** A Gemini Live
 connection lives about ten minutes; the débat targets thirteen. The exam
-therefore *will* lose its socket mid-performance. `ExamLiveSession` keeps the
+therefore _will_ lose its socket mid-performance. `ExamLiveSession` keeps the
 newest `sessionResumption` handle, reconnects early on `GoAway` rather than
 waiting to be cut off, and falls back to backoff reconnection on an unexpected
 close. The transcript, the phase and the phase clock all live above the session,
@@ -83,7 +83,7 @@ produces its own file, and its length comes from counting the samples in it —
 then, on the server, from re-reading the uploaded artefact itself. The phase
 clock is stored beside it but is not the same number: a suspended audio graph
 behind a backgrounded tab, a headset unplugged four minutes in, a permission
-revoked mid-sentence all leave a phase that *ran* seven minutes and *recorded*
+revoked mid-sentence all leave a phase that _ran_ seven minutes and _recorded_
 ninety seconds. The DELF duration penalty is computed from the recording,
 because the recording is the only evidence the performance happened. The
 divergence is what the candidate is warned about, on screen, while there is
@@ -162,7 +162,7 @@ accepts `audio/ogg`, and the corrector model transcribed the sentence back word
 for word from 28 kB of Opus. 439 kB of PCM travelled as 28 kB.
 
 **Verified evaluation** — `pnpm verify:eval`, 11/11: a strong, a weak and an
-*uneven* transcript graded through the real model. Scores land on legal bands,
+_uneven_ transcript graded through the real model. Scores land on legal bands,
 the /25 is recomputed rather than trusted, a 20-point gap separates strong from
 weak, and — the check that matters — the uneven fixture scores morphosyntaxe 3
 while argumentation stays 5, proving criteria are judged independently rather

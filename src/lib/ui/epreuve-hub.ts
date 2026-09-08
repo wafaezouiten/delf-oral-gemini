@@ -47,9 +47,10 @@ export interface HubLinks {
   tableauDeBord: string;
   historique: string;
   /**
-   * Mon compte (#69) — the account screens and « Repartir de zéro », in one
-   * page. In the map but not in the rail: it is reached by clicking the avatar,
-   * which is where an account is reached, and the four destinations stay four.
+   * Mon compte (#69) — the account screens, « Repartir de zéro » and the sign
+   * out, in one page. It is the avatar's href: since #183 the avatar is a link
+   * at the foot of the rail and the fifth tab on the phone, rather than a menu
+   * offering this page as one of its two entries.
    */
   compte: string;
 }
@@ -221,7 +222,11 @@ export function sujetTeaser(document: string, maxChars = 180): string {
   if (text.length <= maxChars) return text;
 
   const window = text.slice(0, maxChars);
-  const lastStop = Math.max(window.lastIndexOf(". "), window.lastIndexOf(" ! "), window.lastIndexOf(" ? "));
+  const lastStop = Math.max(
+    window.lastIndexOf(". "),
+    window.lastIndexOf(" ! "),
+    window.lastIndexOf(" ? "),
+  );
   if (lastStop > maxChars * 0.4) return window.slice(0, lastStop + 1).trim();
 
   const lastSpace = window.lastIndexOf(" ");
@@ -263,9 +268,7 @@ export function sujetMeta(): string {
  * Pure, and derived from the history the page already read rather than from a
  * second query — six sujets is not worth a round trip.
  */
-export function latestScoreBySujet(
-  history: readonly DashboardSitting[],
-): Map<string, number> {
+export function latestScoreBySujet(history: readonly DashboardSitting[]): Map<string, number> {
   const latest = new Map<string, number>();
   for (const sitting of history) {
     // Newest first, so the first row for a slug is that sujet's last sitting and
@@ -297,4 +300,26 @@ export function buildHubSujets(
     meta: sujetMeta(),
     score: latestScores.get(topic.slug) ?? null,
   }));
+}
+
+/**
+ * How many sujets the hub features (#188).
+ *
+ * Three — one row of the grid at its widest. « Sujets à la une » had been
+ * printing the whole catalogue, which made it a second kiosk under a heading
+ * that promised a selection, and left « Tous les sujets » beside it linking to a
+ * page with nothing more on it.
+ */
+export const HUB_FEATURED_SUJETS = 3;
+
+/**
+ * The hub's cards: the first `HUB_FEATURED_SUJETS` of the catalogue, in its
+ * order. The kiosk keeps `buildHubSujets` and prints everything; the cut lives
+ * here rather than in the page so the number is tested and named once.
+ */
+export function buildFeaturedSujets(
+  topics: ReadonlyArray<{ slug: string; title: string; document: string }>,
+  latestScores: ReadonlyMap<string, number>,
+): HubSujet[] {
+  return buildHubSujets(topics.slice(0, HUB_FEATURED_SUJETS), latestScores);
 }

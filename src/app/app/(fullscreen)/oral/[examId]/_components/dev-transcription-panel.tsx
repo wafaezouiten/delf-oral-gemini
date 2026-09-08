@@ -147,7 +147,7 @@ export function DevTranscriptionPanel({
           // beside. Below `xl` it spans the control bar between its own
           // margins; from `xl` it hangs off the corner cluster and takes its
           // natural width. See the wrapper above for why the anchor changes.
-          className="absolute inset-x-4 bottom-full z-20 mb-2 flex flex-col gap-1.5 rounded-md border border-amber-300 bg-amber-50 p-2 shadow-lg xl:left-auto xl:right-0 xl:w-[26rem]"
+          className="absolute inset-x-4 bottom-full z-20 mb-2 flex flex-col gap-1.5 rounded-md border border-amber-300 bg-amber-50 p-2 shadow-lg xl:right-0 xl:left-auto xl:w-[26rem]"
         >
           <div className="flex items-center gap-1.5">
             <span className="inline-flex items-center gap-1 rounded-full border border-amber-400 px-1.5 py-px text-[0.5625rem] font-bold tracking-[0.1em] text-amber-700 uppercase">
@@ -210,7 +210,7 @@ export function DevTranscriptionPanel({
                 className="w-14 rounded border border-amber-300 bg-white px-1 py-0.5 text-[0.625rem] text-amber-950 outline-none placeholder:text-amber-700/60 focus:border-amber-500"
               />
             </label>
-            <span className="text-[0.625rem] tabular-nums text-amber-800">
+            <span className="text-[0.625rem] text-amber-800 tabular-nums">
               {describeDraft(text, duration)}
             </span>
             <button
@@ -243,8 +243,8 @@ export function DevTranscriptionPanel({
               opening the panel stops it, so that state cannot arise and the line
               reports rather than warns. */}
           <p className="text-[0.625rem] leading-snug text-amber-700">
-            Micro coupé : rien n&apos;est enregistré tant que ce panneau est
-            ouvert. Le micro revient au débat.
+            Micro coupé : rien n&apos;est enregistré tant que ce panneau est ouvert. Le micro
+            revient au débat.
           </p>
         </form>
       )}

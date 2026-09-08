@@ -5,12 +5,13 @@ import { requestRecordReset } from "./reset";
 
 /** A `fetch` that answers with a given status and body. */
 function fakeFetch(status: number, body: unknown) {
-  return mock.fn(async () =>
-    ({
-      ok: status >= 200 && status < 300,
-      status,
-      json: async () => body,
-    }) as unknown as Response,
+  return mock.fn(
+    async () =>
+      ({
+        ok: status >= 200 && status < 300,
+        status,
+        json: async () => body,
+      }) as unknown as Response,
   );
 }
 
@@ -49,9 +50,7 @@ describe("requesting a record reset", () => {
     // answered. Claiming the record was reset on that would empty the screen on
     // the strength of a status code.
     for (const body of [null, {}, { archived: "3" }, { archived: true }, "nonsense"]) {
-      const outcome = await requestRecordReset(
-        fakeFetch(200, body) as unknown as typeof fetch,
-      );
+      const outcome = await requestRecordReset(fakeFetch(200, body) as unknown as typeof fetch);
       assert.equal(outcome.reset, false, `body ${JSON.stringify(body)}`);
     }
   });

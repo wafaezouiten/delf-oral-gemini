@@ -16,7 +16,14 @@ on:
       - staging
       - develop
   pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
+    # No `synchronize`, deliberately (the CI diet): this workflow is
+    # report-only — it can gate nothing — so re-scoring every push to a PR
+    # spent minutes repainting a number nobody acts on mid-branch. One score
+    # when the PR opens is the useful one, and the trunk pushes above keep the
+    # trend. The full-history checkout below makes each run one of the more
+    # expensive in the repo, which is why this workflow went on the diet and
+    # the build gate did not.
+    types: [opened, reopened, ready_for_review]
 
 # Avoid piling up runs on rapid pushes to the same ref.
 concurrency:

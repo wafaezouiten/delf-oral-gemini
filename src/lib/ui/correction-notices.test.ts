@@ -1,69 +1,174 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { correctionNotices } from "./correction-notices";
+import { correctionNotices, earlyClosingNotice } from "./correction-notices";
 
 describe("the correction's penalty notices", () => {
-  it("says nothing about a sitting that earned neither penalty", () => {
+  it("says nothing about a sitting that earned no halving", () => {
     const notices = correctionNotices({
       rawScore25: 20,
-      score25: 20,
-      durationPenalty: 0,
       absencePenalty: 0,
-      shortParts: [],
       absentParts: [],
     });
 
     assert.equal(notices.absence, null);
-    assert.equal(notices.duration, null);
   });
 
-  it("explains a short épreuve against the sum of the bands", () => {
-    const notices = correctionNotices({
-      rawScore25: 20,
-      score25: 17,
-      durationPenalty: 3,
-      shortParts: ["debate"],
+  it("stays silent about a sitting nothing was charged to", () => {
+    assert.deepEqual(correctionNotices({ rawScore25: 20 }), { absence: null, duration: null });
+  });
+
+  it("says nothing about duration on a correction that predates the fields", () => {
+    // The rows and stashes written before #189: `durationCharges` is absent and
+    // `durationPenalty` reads 0, which is the truthful backfill. A sentence
+    // above those would be inventing a charge.
+    assert.equal(correctionNotices({ rawScore25: 20, durationPenalty: 0 }).duration, null);
+    assert.equal(
+      correctionNotices({ rawScore25: 20, durationPenalty: 4 }).duration,
+      null,
+      "a penalty with no charges to explain says nothing rather than guessing",
+    );
+  });
+
+  describe("why the mark was docked for the clock (#189)", () => {
+    // #137 removed « Note avant pénalité de durée : N/25 » by the user's call,
+    // and for a long while the duration penalty fired unexplained. The user
+    // reversed that on #189: « the candidate should know why he got
+    // penalized ». What comes back is not the old paragraph — that one printed
+    // a number beside a mark it did not account for — but the reason: which
+    // part fell short of what, what it cost, and which criterion it came off.
+    const shortDebate = () =>
+      correctionNotices({
+        rawScore25: 23,
+        durationPenalty: 2,
+        durationCharges: [
+          {
+            part: "debate",
+            criterion: "interaction",
+            tier: "moderate",
+            seconds: 6 * 60,
+            from: 5,
+            to: 3,
+            points: 2,
+          },
+        ],
+      }).duration;
+
+    it("names the part, both durations, the cost and the criterion", () => {
+      const notice = shortDebate();
+
+      assert.match(notice!, /^Votre débat a duré 6 minutes sur les 10 attendues/);
+      assert.match(notice!, /coûté 2 points au titre de l'interaction/);
     });
 
-    assert.equal(notices.absence, null);
-    assert.match(notices.duration!, /Note avant pénalité de durée.: 20\/25\./);
-    assert.match(notices.duration!, /Votre débat a été nettement plus court/);
+    it("promises the language criteria were untouched, because they were", () => {
+      assert.match(shortDebate()!, /lexique.+morphosyntaxe.+prononciation/);
+      assert.match(shortDebate()!, /jamais pénalisés par la durée/);
+    });
+
+    it("never claims a band was lowered, because none was", () => {
+      // The sentence sits on a page that prints « Interaction 5 » from the same
+      // correction: the charge is priced from the band and the band is left as
+      // the corrector set it. Saying otherwise would contradict the row above.
+      const notice = shortDebate()!;
+
+      assert.ok(!/abaiss/i.test(notice), notice);
+      assert.ok(!/ramené/i.test(notice), notice);
+      assert.match(notice, /les notes affichées ci-dessus sont bien celles du correcteur/);
+    });
+
+    it("names both parts when both ran short", () => {
+      const notice = correctionNotices({
+        rawScore25: 25,
+        durationPenalty: 8,
+        durationCharges: [
+          {
+            part: "monologue",
+            criterion: "realisationTache",
+            tier: "strong",
+            seconds: 120,
+            from: 5,
+            to: 1,
+            points: 4,
+          },
+          {
+            part: "debate",
+            criterion: "interaction",
+            tier: "strong",
+            seconds: 150,
+            from: 5,
+            to: 1,
+            points: 4,
+          },
+        ],
+      }).duration;
+
+      assert.match(notice!, /^Les deux parties ont été plus courtes/);
+      assert.match(notice!, /votre monologue a duré 2 minutes sur les 7 attendues/);
+      assert.match(notice!, /votre débat a duré 3 minutes sur les 10 attendues/);
+    });
+
+    it("leaves out a part whose criterion had nothing left to lose", () => {
+      // A criterion already at 0 is charged 0 points by the ladder. « Cela a
+      // coûté 0 point » explains a penalty nobody received, so the clause is
+      // dropped — and with only such clauses, the whole paragraph is.
+      const mixed = correctionNotices({
+        rawScore25: 6,
+        durationPenalty: 1,
+        durationCharges: [
+          {
+            part: "monologue",
+            criterion: "realisationTache",
+            tier: "strong",
+            seconds: 60,
+            from: 1,
+            to: 0,
+            points: 1,
+          },
+          {
+            part: "debate",
+            criterion: "interaction",
+            tier: "strong",
+            seconds: 60,
+            from: 0,
+            to: 0,
+            points: 0,
+          },
+        ],
+      }).duration;
+
+      assert.match(mixed!, /^Votre monologue a duré 1 minute sur les 7 attendues/);
+      assert.ok(!mixed!.includes("débat"), mixed!);
+
+      const nothingToLose = correctionNotices({
+        rawScore25: 0,
+        durationPenalty: 0,
+        durationCharges: [
+          {
+            part: "debate",
+            criterion: "interaction",
+            tier: "strong",
+            seconds: 30,
+            from: 0,
+            to: 0,
+            points: 0,
+          },
+        ],
+      }).duration;
+
+      assert.equal(nothingToLose, null);
+    });
   });
 
   it("explains a walk-out against the half that was marked", () => {
     const notices = correctionNotices({
       rawScore25: 25,
-      score25: 12,
-      durationPenalty: 0,
       absencePenalty: 13,
-      shortParts: [],
       absentParts: ["debate"],
     });
 
     assert.match(notices.absence!, /^Vous n'avez pas participé au débat\./);
     assert.match(notices.absence!, /sur celle que vous avez réalisée \(25\/25\)/);
-    assert.equal(notices.duration, null, "the absent part is not also called short");
-  });
-
-  it("takes the duration penalty off the halved score, not the sum of the bands", () => {
-    // The case both rules fire on: 25 → halved to 12 → docked 3 → 9. Printing
-    // the 25 as the figure the −3 came off leaves the candidate reading
-    // "25/25, divided by two" above "25/25, minus the penalty" and neither
-    // sentence reaching the 9 they were given.
-    const notices = correctionNotices({
-      rawScore25: 25,
-      score25: 9,
-      durationPenalty: 3,
-      absencePenalty: 13,
-      shortParts: ["monologue"],
-      absentParts: ["debate"],
-    });
-
-    assert.match(notices.absence!, /\(25\/25\)/, "the halving is explained from the full sum");
-    // 12, not 25 — and 12 − 3 is the 9 printed above both paragraphs.
-    assert.match(notices.duration!, /Note avant pénalité de durée.: 12\/25\./);
-    assert.match(notices.duration!, /Votre monologue a été/);
   });
 
   it("does not offer a part the candidate completed when neither was completed", () => {
@@ -74,8 +179,6 @@ describe("the correction's penalty notices", () => {
     // réalisée » would name a part that does not exist.
     const notices = correctionNotices({
       rawScore25: 20,
-      score25: 10,
-      durationPenalty: 0,
       absencePenalty: 10,
       absentParts: ["monologue", "debate"],
     });
@@ -89,32 +192,28 @@ describe("the correction's penalty notices", () => {
     );
   });
 
-  it("names both parts when both ran short", () => {
-    assert.match(
-      correctionNotices({
-        rawScore25: 20,
-        score25: 17,
-        durationPenalty: 3,
-        shortParts: ["monologue", "debate"],
-      }).duration!,
-      /Vos deux prises de parole ont été/,
-    );
-  });
-
   it("still explains the halving when the correction forgot which part", () => {
     // A second submission returns the stored row, which carries the penalty and
     // not the corrector's working — `absent_parts` has no column. The paragraph
     // must still account for the missing points, and must not guess.
     const notices = correctionNotices({
       rawScore25: 25,
-      score25: 12,
-      durationPenalty: 0,
       absencePenalty: 13,
     });
 
     assert.match(notices.absence!, /^Une partie de l'épreuve n'a pas été réalisée\./);
     assert.match(notices.absence!, /La note obtenue \(25\/25\) est donc divisée par deux\./);
     assert.doesNotMatch(notices.absence!, /que vous avez réalisée/);
+  });
+
+  it("prints a raw score under 10 on two digits, like every /25 (#161)", () => {
+    const notices = correctionNotices({
+      rawScore25: 9,
+      absencePenalty: 5,
+      absentParts: ["debate"],
+    });
+
+    assert.match(notices.absence!, /sur celle que vous avez réalisée \(09\/25\)/);
   });
 
   it("never promises a completed part it cannot point at", () => {
@@ -129,8 +228,6 @@ describe("the correction's penalty notices", () => {
     ]) {
       const notice = correctionNotices({
         rawScore25: 20,
-        score25: 10,
-        durationPenalty: 0,
         absencePenalty: 10,
         absentParts,
       }).absence!;
@@ -142,32 +239,32 @@ describe("the correction's penalty notices", () => {
       );
     }
   });
+});
 
-  it("falls back to the difference on a correction graded before the fields existed", () => {
-    // No `durationPenalty`, no `absencePenalty`: a sitting from before either
-    // column, where the only evidence of a penalty is that the mark is under
-    // the sum of the bands. There was no halving then, so the difference is
-    // the duration penalty and nothing else.
-    const notices = correctionNotices({ rawScore25: 20, score25: 17 });
-
-    assert.equal(notices.absence, null);
-    assert.match(notices.duration!, /Note avant pénalité de durée.: 20\/25\./);
-    assert.match(notices.duration!, /Votre temps de parole a été/);
+describe("the examiner-fault note (#92)", () => {
+  it("says nothing when nothing was heard — including on every pre-column sitting", () => {
+    // Zero, undefined and absent all read the same, and all three are real:
+    // a fresh sitting with a well-behaved examiner, a stash from before the
+    // field, a row from before the column. Their corrections were graded by a
+    // corrector that was never told, so the sentence would be false above them.
+    assert.equal(earlyClosingNotice(0), null);
+    assert.equal(earlyClosingNotice(undefined), null);
   });
 
-  it("does not invent a duration penalty out of the halving alone", () => {
-    // The same old-correction fallback, on a sitting that WAS halved. Without
-    // subtracting the absence first, `score25 < rawScore25` is true purely
-    // because of the halving, and the page would print a duration paragraph
-    // for a penalty that was never taken.
-    const notices = correctionNotices({
-      rawScore25: 25,
-      score25: 12,
-      absencePenalty: 13,
-      absentParts: ["debate"],
-    });
+  it("blames the examiner and clears the candidate", () => {
+    const notice = earlyClosingNotice(1)!;
 
-    assert.match(notices.absence!, /Vous n'avez pas participé au débat/);
-    assert.equal(notices.duration, null);
+    assert.match(notice, /l'examinateur a annoncé à tort la fin de l'épreuve/);
+    assert.match(notice, /n'a pas été retenue contre vous/);
+  });
+
+  it("scopes the amnesty to the débat, where the waiver actually is", () => {
+    // The monologue's penalties still stand — the goodbye is only ever heard
+    // after the monologue is over — so the sentence must not promise more
+    // than the rubric delivers to a candidate docked for a short monologue.
+    const notice = earlyClosingNotice(2)!;
+
+    assert.match(notice, /un débat écourté par cette annonce n'a entraîné aucune pénalité/);
+    assert.doesNotMatch(notice, /monologue/);
   });
 });

@@ -20,29 +20,31 @@ import "server-only";
 
 import { GoogleGenAI, Type, createPartFromUri, type Part } from "@google/genai";
 
+import { ORAL_CRITERIA, type OralCriterion } from "@/lib/delf/criteria";
+import { buildEvaluationPrompt } from "@/lib/delf/evaluation-prompt";
 import {
-  BAND_SCALE,
-  EVALUATION_RULES,
-  ORAL_CRITERIA,
-  ORAL_CRITERIA_DESCRIPTIONS,
-  type OralCriterion,
-} from "@/lib/delf/criteria";
-import { scoreSitting, type CriteriaBands } from "@/lib/delf/orale-rubric";
+  scoreSitting,
+  type CriteriaBands,
+  type DurationCharge,
+  type DurationTier,
+} from "@/lib/delf/orale-rubric";
 import {
   criterionJustifications,
   criterionScores,
   parseEvaluationResponse,
+  type EvaluationResponse,
 } from "./evaluation-response";
+import { EvaluationFailure } from "./evaluation-failure";
 import { readEvaluationUsage, type EvaluationUsage } from "./evaluation-usage";
-import { withTransientRetry } from "./transient";
-import {
-  candidateWordCount,
-  formatTranscript,
-  type TranscriptEntry,
-} from "@/lib/delf/transcript";
+import { waitForFileActive } from "./file-activation";
+import { transientStatus, withTransientRetry } from "./transient";
+import { candidateWordCount, type TranscriptEntry } from "@/lib/delf/transcript";
 import type { OralTopic } from "@/lib/delf/topics";
 import type { EvaluationFeedback, EvaluationMode, OralSpeakingPhase } from "@/lib/db/schema";
+import { earlyClosingInstruction } from "./early-closing-instruction";
 import { phonologyInstruction, type AttachedRecording } from "./phonology-instruction";
+import { technicalIncidentInstruction } from "./technical-incident-instruction";
+import { transcriptReliabilityInstruction } from "./transcript-reliability-instruction";
 
 /**
  * The corrector model. Deliberately NOT the Live model: grading is a careful
@@ -69,63 +71,67 @@ export const EVAL_MODEL = process.env.GEMINI_EVAL_MODEL ?? "gemini-3.6-flash";
  * the ported grille text (`delf/criteria.ts`) rather than this file's
  * paraphrase of it. Scores either side of this string are not strictly
  * comparable, which is the entire reason the column exists.
+ *
+ * `2026-08-21.0` adds the early-closing paragraph (#92): a sitting where the
+ * examiner said goodbye mid-débat now tells the corrector so, instead of
+ * leaving the goodbye in the transcript as if it were the shape of the
+ * exchange. The paragraph is conditional — an ordinary sitting's prompt is
+ * byte-identical to the previous version's — but the version is bumped
+ * unconditionally, because "could this correction have carried the paragraph?"
+ * is exactly the question the column answers.
+ *
+ * `2026-08-31.0` is the re-port (#173): the whole prompt is now the main
+ * project's, in the main project's order, from `delf/evaluation-prompt.ts`.
+ * Every block moved — the criterion prose became the FEI explicitation, the two
+ * pragmatic criteria took the grid's two-part-sitting wording, the band scale
+ * absorbed this file's `SCALE_USE`, the rules grew the fairness and
+ * self-correction bullets, and the complete-stage contract is appended last.
+ * This is the widest single change the column has ever recorded: scores either
+ * side of it are not comparable, which is exactly what the column is for.
+ *
+ * `2026-09-04.0` tells the corrector what the transcript is (#186): an
+ * automatic, unreviewed transcription that can mis-hear a word, render a
+ * passage in the wrong language or duplicate a turn, and that the audio —
+ * where there is audio — outranks it for every criterion, not only
+ * phonologie. Same sitting: the app's presence check now reaches the corrector
+ * under its own label rather than as an examiner question (#187).
+ *
+ * `2026-09-04.1` is #189, and it moves marks twice over. The prompt gains
+ * `PRODUCTION_CASES` — how to read a prestation that is partial, brief or
+ * interrupted, case by case — and, on a sitting whose Live session dropped, the
+ * technical-incident paragraph that says a gap in the transcript may be the
+ * app's rather than a candidate who would not answer. Beside it, and not
+ * recorded by this column at all, the rubric's duration rule became three tiers
+ * charged against « réalisation de la tâche » and « interaction »
+ * (`orale-rubric.ts`). A correction stamped with this version was graded by a
+ * corrector told what to do with silence, and scored by a rule that no longer
+ * takes a flat 3 off the total.
+ *
+ * The same version also scopes `EVALUATION_RULES`' « CAS LIMITE » to the whole
+ * sitting. It said « si aucune réplique CANDIDAT ne contient de contenu
+ * évaluable, mettez 0 à TOUS les critères » without saying which replies, and
+ * `verify:eval` caught the corrector applying it to ONE empty part: a real
+ * monologue came back 0 on lexique and morphosyntaxe. Not a separate version,
+ * because `2026-09-04.1` has never graded a stored sitting — it was introduced
+ * and corrected inside the same unmerged branch, so there is no row on either
+ * side of the difference for the column to distinguish.
  */
-export const EVAL_PROMPT_VERSION = "2026-08-15.0";
+export const EVAL_PROMPT_VERSION = "2026-09-04.1";
 
 /** Re-exported, not redeclared: the mode is a stored column, and `evaluations.mode`
  *  is where its legal values are defined. */
 export type { EvaluationMode };
 
 /**
- * Using the whole scale — this project's addition, not the grille's words.
+ * The corrector's prompt for one sitting.
  *
- * Kept separate from {@link BAND_SCALE} on purpose: that block is the ported
- * definition of what each band *means*, and paraphrasing it would change what
- * the model grades. This is a behavioural instruction about how to use it,
- * learned by running the corrector: without it, models put 3 on everything and
- * the result stops telling a good candidate from a weak one (see
- * docs/EVALUATION_FINDINGS.md).
- */
-const SCALE_USE = `UTILISEZ TOUTE L'ÉCHELLE. N'attribuez pas 3 par défaut. Un critère réellement réussi reçoit 5, un critère faible reçoit 1. Deux prestations de qualité différente DOIVENT recevoir des notes différentes. Des erreurs occasionnelles qui ne gênent pas la communication sont normales au niveau B2 et restent compatibles avec un 5 : n'exigez pas un niveau C1 pour l'accorder.`;
-
-/**
- * Which task each criterion is judged on — also this project's, and for a
- * structural reason rather than a stylistic one.
- *
- * The reference implementation corrects ONE task per correction, so it never
- * has to say where a criterion's evidence lives. Here the monologue and the
- * débat are one sitting and one mark, and the two pragmatic criteria are earned
- * in different halves of it: a candidate who argues well alone and folds under
- * contradiction is a real, common profile, and a corrector not told where to
- * look grades both criteria off whichever half it read last.
- */
-const TASK_ATTRIBUTION = `RÉPARTITION DES CRITÈRES SUR LES DEUX TÂCHES :
-- « realisationTache » se juge principalement sur le MONOLOGUE SUIVI : prise de position, structure, qualité des arguments et des exemples.
-- « interaction » se juge principalement sur le DEBAT : capacité à réagir aux objections, à défendre et à nuancer sa position, à apporter de NOUVEAUX exemples, à maintenir l'échange.
-- « lexique » et « morphosyntaxe » se jugent sur l'ENSEMBLE des deux tâches.
-- N'utilisez jamais de tiret cadratin ni de tiret demi-cadratin dans vos commentaires.`;
-
-/** The five criteria and what each measures, in the grille's own words. */
-function criteriaBlock(): string {
-  return ORAL_CRITERIA.map(
-    (key, index) => `${index + 1}. ${key} : ${ORAL_CRITERIA_DESCRIPTIONS[key]}`,
-  ).join("\n");
-}
-
-/**
- * The corrector's prompt.
- *
- * Note what it does NOT contain: any arithmetic. The band scale is stated so
- * the model knows which four numbers it may return, and nothing else about the
- * mark is asked of it — the sum, the duration penalty and the competency floor
- * are computed from what it returns, by `orale-rubric.ts`. A prompt that told
- * the model to subtract three points for a short épreuve would be a second
- * implementation of the rubric, written in French, unversioned and untestable
- * (#9).
- *
- * The durations are given for context only, so the model can read a thin
- * monologue as thin rather than as a bad one. They are the measured seconds,
- * from the recordings.
+ * A thin adapter since #173: the words are the main project's and live in
+ * `lib/delf/evaluation-prompt.ts`, which is pure and unit-tested. What this
+ * function still decides is the paragraphs that depend on the artefacts — which
+ * recordings exist and how the phonologie criterion may therefore be judged,
+ * what the transcript is worth against them, whether the session dropped, and
+ * whether the examiner tried to close the épreuve early — and it hands them
+ * over as directives, appended after the stage contract.
  */
 function buildPrompt(params: {
   mode: EvaluationMode;
@@ -133,37 +139,25 @@ function buildPrompt(params: {
   transcript: readonly TranscriptEntry[];
   monologueSeconds: number;
   debateSeconds: number;
+  /** How many times the examiner tried to close the épreuve early (#92). */
+  earlyClosingCount: number;
+  /** How many times the Live session dropped and was reopened (#189). */
+  reconnectCount: number;
   /** Which tasks the attached audio actually covers. See `phonology-instruction.ts`. */
   recordings?: readonly AttachedRecording[];
 }): string {
-  const { mode, topic, transcript, monologueSeconds, debateSeconds } = params;
-
-  return `Vous êtes un correcteur officiel du DELF B2, épreuve de production orale. Vous appliquez STRICTEMENT la grille d'évaluation de France Éducation international, notée sur 25 points.
-
-SUJET DE L'ÉPREUVE
-Titre : ${topic.title}
-Document déclencheur : ${topic.document}
-
-STRUCTURE DE L'ÉPREUVE PASSÉE
-L'épreuve comporte DEUX tâches, présentes toutes les deux dans la transcription ci-dessous :
-1. MONOLOGUE SUIVI (${Math.round(monologueSeconds)} secondes) : le candidat présente seul son point de vue. L'examinateur n'intervient pas.
-2. DEBAT (${Math.round(debateSeconds)} secondes) : l'examinateur conteste la position du candidat, qui doit la défendre et la nuancer.
-
-${BAND_SCALE}
-
-${SCALE_USE}
-
-LES CINQ CRITÈRES (chacun noté 0, 1, 3 ou 5 ; leur somme = total25) :
-${criteriaBlock()}
-
-${EVALUATION_RULES}
-
-${TASK_ATTRIBUTION}
-
-${phonologyInstruction(mode, params.recordings)}
-
-TRANSCRIPTION DE L'ÉPREUVE
-${formatTranscript(transcript) || "(aucune production)"}`;
+  return buildEvaluationPrompt({
+    topic: params.topic,
+    transcript: params.transcript,
+    monologueSeconds: params.monologueSeconds,
+    debateSeconds: params.debateSeconds,
+    directives: [
+      phonologyInstruction(params.mode, params.recordings),
+      transcriptReliabilityInstruction(params.mode),
+      technicalIncidentInstruction(params.reconnectCount),
+      earlyClosingInstruction(params.earlyClosingCount),
+    ],
+  });
 }
 
 /** The structured output contract. */
@@ -218,6 +212,23 @@ export interface EvaluationResult {
   durationPenalty: number;
   shortParts: Array<"monologue" | "debate">;
   /**
+   * How developed each part was in time, and where the shortfall was charged
+   * (#189). Corrector's working like `shortParts`: no column, never stored,
+   * carried in the finish response so a mark can be explained from one payload
+   * without re-deriving a rule the browser must not own a second copy of.
+   *
+   * **These are what the candidate's explanation is built from (#189).** The
+   * user asked for it late in the branch — « the candidate should know why he
+   * got penalized » — reversing the silence #137 had left. On the degraded
+   * no-database path the browser reads `durationCharges` straight out of this
+   * response; on the ordinary persisted path `toCorrectionRow` still drops
+   * them, and the results page reconstructs the equivalent by re-running
+   * `applySittingDurationPenalty` over the stored bands and the server's
+   * measured durations. So there is no column, and there is a reader.
+   */
+  durationTiers: Record<"monologue" | "debate", DurationTier>;
+  durationCharges: DurationCharge[];
+  /**
    * What halving the mark cost, and which parts the candidate never produced.
    * Zero and empty for a sitting where both parts happened; on a walk-out from
    * the débat this is the largest single thing that moved the mark, so it is
@@ -227,6 +238,13 @@ export interface EvaluationResult {
    */
   absencePenalty: number;
   absentParts: Array<"monologue" | "debate">;
+  /**
+   * Which parts a penalty would have reached and did not, because the examiner
+   * closed the épreuve early (#92). Corrector's working, like `shortParts` —
+   * no column, never stored; the persisted fact is the sitting's
+   * `early_closing_count`, which is what the results page keys its note on.
+   */
+  excusedParts: Array<"monologue" | "debate">;
   /**
    * Whether « phonologie » was held to the ceiling because this correction had no
    * audio (#29). Surfaced so a 3 can be explained as "not heard" rather than read
@@ -240,7 +258,21 @@ export interface EvaluationResult {
   feedback: EvaluationFeedback;
   model: string;
   promptVersion: string;
+  /**
+   * The whole of this call, wall-clock: uploads, corrector, parsing. The stored
+   * column (`evaluations.latency_seconds`), so its meaning must not move — rows
+   * written before and after #86 have to stay comparable.
+   */
   latencySeconds: number;
+  /**
+   * The split of {@link latencySeconds} that #86 asked for, because a fix
+   * chosen against one undifferentiated number is chosen blind: how long the
+   * Files API uploads took, and how long the corrector itself did. Diagnostics
+   * like `rawCriteria` and `usage` below — they travel in the response and are
+   * deliberately not columns; the operator's copy is the `[evaluate]` log line.
+   */
+  uploadSeconds: number;
+  modelSeconds: number;
   /**
    * What the correction actually cost, in tokens, as the API reported it.
    *
@@ -270,6 +302,37 @@ export interface EvaluateParams {
   transcript: readonly TranscriptEntry[];
   monologueSeconds: number;
   debateSeconds: number;
+  /**
+   * How many times the examiner tried to close the épreuve early (#92), as the
+   * controller counted it, the finish payload carried it, and the route
+   * corroborated it against the transcript before handing it here
+   * (`resolveEarlyClosingCount`). Positive, it adds the incident paragraph to
+   * the prompt and excuses the débat from both penalties
+   * (`SittingConditions.examinerClosedEarly`).
+   *
+   * Optional, defaulting to 0, unlike the rubric's own flag — the callers that
+   * omit it are the verification scripts and the audio-versus-text experiment,
+   * which grade artefacts no examiner ever misbehaved in, and for them "not
+   * counted" and "none heard" are honestly the same answer.
+   */
+  earlyClosingCount?: number;
+  /**
+   * How many times the Live session dropped and was reopened mid-épreuve
+   * (#189), as the controller counted it and the finish payload carried it.
+   * Positive, it adds the technical-incident paragraph to the prompt, which
+   * tells the corrector that a gap or an unanswered question in the transcript
+   * may be the app's rather than the candidate's.
+   *
+   * It reaches the prompt ONLY. Unlike `earlyClosingCount` it waives no
+   * penalty: the recording is made in the browser and runs straight through a
+   * dropped socket, so a reconnect shortens the transcript and never the
+   * measured seconds the duration rule reads. See
+   * `technical-incident-instruction.ts`.
+   *
+   * Optional, defaulting to 0, for `earlyClosingCount`'s reason: the scripts
+   * and the experiment grade artefacts that had no session to drop.
+   */
+  reconnectCount?: number;
   /**
    * The candidate's recording. Required for `audio` mode, ignored otherwise.
    *
@@ -337,8 +400,19 @@ export async function evaluateExam(params: EvaluateParams): Promise<EvaluationRe
           mimeType: recording.mimeType ?? mimeTypeOf(recording.blob),
         }));
 
-  const parts: Part[] = [{ text: buildPrompt({ ...params, recordings }) }];
+  // Resolved once, here, so the prompt and the rubric cannot read the default
+  // differently: the paragraph and the waiver describe one incident and must
+  // fire together or not at all.
+  const earlyClosingCount = params.earlyClosingCount ?? 0;
+  // Read once here too, though only the prompt consumes it: a default resolved
+  // at the point of use is a default the next consumer gets to choose again.
+  const reconnectCount = params.reconnectCount ?? 0;
 
+  const parts: Part[] = [
+    { text: buildPrompt({ ...params, earlyClosingCount, reconnectCount, recordings }) },
+  ];
+
+  const uploadStartedAt = Date.now();
   if (params.mode === "audio") {
     if (recordings.length === 0) {
       throw new Error("Audio mode requires the candidate's recording");
@@ -349,19 +423,78 @@ export async function evaluateExam(params: EvaluateParams): Promise<EvaluationRe
     // it. `audio/ogg` is accepted and transcribed — verified against the real
     // service, see docs/AUDIO_UPLOAD.md.
     //
-    // Sequential rather than concurrent: the free tier rate-limits uploads, and
-    // two files is not a latency problem worth a 429 for.
-    for (const recording of recordings) {
-      const uploaded = await ai.files.upload({
-        file: recording.blob,
-        config: { mimeType: recording.mimeType },
-      });
-      if (!uploaded.uri || !uploaded.mimeType) {
-        throw new Error("File upload returned no usable URI");
-      }
-      parts.push(createPartFromUri(uploaded.uri, uploaded.mimeType));
-    }
+    // Concurrent since #86, reversing a deliberate "sequential, the free tier
+    // rate-limits uploads" trade. Decided rather than drifted into: the free
+    // tier's Files API limit is a request *rate*, not a concurrency cap, the
+    // fan-out here is bounded at the two speaking phases, and a candidate is
+    // sitting at « Épreuve terminée » for the whole of this — `uploadSeconds`
+    // below is what says how much the change bought. A 429, if one ever
+    // arrives, gets the one extra attempt below before it surfaces to the
+    // candidate as it did sequentially — the route's 502 and the retry button —
+    // though `Promise.all` fails fast, so the sibling upload is abandoned
+    // mid-flight rather than never started; a small quota waste on a partial
+    // failure, cleaned up by the Files API's own TTL. `map` preserves exam
+    // order, which the prompt promises the model about the files it is handed.
+    //
+    // Three additions since #73, each answering one way the old code turned an
+    // explainable failure into « sometimes »:
+    //
+    //  1. **The upload is retried once**, transient statuses only — the same
+    //     policy the corrector call rides on, held to two attempts because the
+    //     re-send is the expensive half and `maxDuration` has to fit the model
+    //     call after it.
+    //  2. **The file is waited into `ACTIVE`** before it is referenced. The
+    //     upload resolving does not mean the service has finished with the
+    //     bytes, and referencing a `PROCESSING` file is refused — that race is
+    //     the best fit for #73's intermittence. See `file-activation.ts`.
+    //     The wait sits OUTSIDE the retry on purpose, so a file that ends
+    //     `FAILED` fails once, with its own status, rather than buying a
+    //     re-upload: processing rejected these exact bytes, re-sending them is
+    //     the expensive half `transient.ts` already argues against spending
+    //     twice, and #73's own ask is to surface the file's verdict — the
+    //     candidate's retry button re-runs the whole sequence anyway.
+    //  3. **Whatever fails in here is tagged `upload`**, so the route's 502 can
+    //     say which part of the pipeline died instead of only that one did.
+    parts.push(
+      ...(await Promise.all(
+        recordings.map(async (recording) => {
+          const label = recording.phase ?? "sitting";
+          try {
+            const uploaded = await withTransientRetry(
+              () =>
+                ai.files.upload({
+                  file: recording.blob,
+                  config: { mimeType: recording.mimeType },
+                }),
+              {
+                attempts: 2,
+                onRetry: (error, attempt, delayMs) =>
+                  console.warn(
+                    `[evaluate] ${label} upload attempt ${attempt} failed ` +
+                      `(${transientStatus(error)}), retrying in ${delayMs}ms`,
+                  ),
+              },
+            );
+            const active = await waitForFileActive(uploaded, (name) => ai.files.get({ name }), {
+              onPoll: (state, poll) =>
+                console.info(`[evaluate] ${label} recording is ${state}, poll ${poll}`),
+            });
+            if (!active.uri || !active.mimeType) {
+              throw new Error("File upload returned no usable URI");
+            }
+            return createPartFromUri(active.uri, active.mimeType);
+          } catch (error) {
+            throw new EvaluationFailure(
+              "upload",
+              `The ${label} recording could not be made available to the corrector`,
+              { cause: error },
+            );
+          }
+        }),
+      )),
+    );
   }
+  const uploadSeconds = (Date.now() - uploadStartedAt) / 1000;
 
   /**
    * Retried on a busy corrector, and only on a busy corrector.
@@ -378,6 +511,7 @@ export async function evaluateExam(params: EvaluateParams): Promise<EvaluationRe
    * outside the retry deliberately: re-sending the audio is the expensive half
    * and a failed upload leaves nothing to reuse.
    */
+  const modelStartedAt = Date.now();
   const response = await withTransientRetry(
     () =>
       ai.models.generateContent({
@@ -394,19 +528,40 @@ export async function evaluateExam(params: EvaluateParams): Promise<EvaluationRe
     {
       onRetry: (error, attempt, delayMs) =>
         console.warn(
-          `[evaluate] attempt ${attempt} failed (${(error as { status?: number }).status}), ` +
+          `[evaluate] attempt ${attempt} failed (${transientStatus(error)}), ` +
             `retrying in ${delayMs}ms`,
         ),
     },
+  ).catch((error) => {
+    // Tagged after the retry, not inside it: what reaches here is a corrector
+    // that genuinely would not answer, and the original error rides in `cause`.
+    throw new EvaluationFailure("model", "The corrector did not answer", { cause: error });
+  });
+
+  const modelSeconds = (Date.now() - modelStartedAt) / 1000;
+  // The split #86 asked for, where an operator will actually see it: which half
+  // of the corrector's latency was the network and which was the model. One
+  // line per correction, so a slow sitting can be read off the deployment logs
+  // rather than re-argued from guesses.
+  console.info(
+    `[evaluate] uploads ${uploadSeconds.toFixed(1)}s (${recordings.length} file(s)), ` +
+      `corrector ${modelSeconds.toFixed(1)}s (${EVAL_MODEL})`,
   );
 
   const text = response.text;
-  if (!text) throw new Error("The evaluator returned no output");
+  if (!text) throw new EvaluationFailure("empty", "The evaluator returned no output");
 
   // Checked, not coerced. The previous reading defaulted a missing criterion to
   // zero, so a truncated or refused generation cost the candidate five points
   // silently; a breach of the contract now throws and the caller can retry.
-  const raw = parseEvaluationResponse(text);
+  let raw: EvaluationResponse;
+  try {
+    raw = parseEvaluationResponse(text);
+  } catch (error) {
+    throw new EvaluationFailure("contract", "The evaluator's reply was not a complete correction", {
+      cause: error,
+    });
+  }
   const rawCriteria = criterionScores(raw);
 
   // The whole rubric, in one call. Snapping, the sum, the per-part duration
@@ -424,6 +579,9 @@ export async function evaluateExam(params: EvaluateParams): Promise<EvaluationRe
     // puts the recording in front of the corrector, so it is the only one that
     // may award the top phonologie band (#29).
     phonologyHeard: params.mode === "audio",
+    // And the one place the count does (#92): the rubric takes the fact, not
+    // the figure, because one goodbye and three are the same waiver.
+    examinerClosedEarly: earlyClosingCount > 0,
   });
 
   return {
@@ -436,6 +594,9 @@ export async function evaluateExam(params: EvaluateParams): Promise<EvaluationRe
     absentParts: scored.absentParts,
     durationPenalty: scored.durationPenalty,
     shortParts: scored.shortParts,
+    durationTiers: scored.durationTiers,
+    durationCharges: scored.durationCharges,
+    excusedParts: scored.excusedParts,
     phonologyCapped: scored.phonologyCapped,
     score25: scored.score25,
     meetsFloor: scored.meetsFloor,
@@ -454,6 +615,8 @@ export async function evaluateExam(params: EvaluateParams): Promise<EvaluationRe
     model: EVAL_MODEL,
     promptVersion: EVAL_PROMPT_VERSION,
     latencySeconds: (Date.now() - startedAt) / 1000,
+    uploadSeconds,
+    modelSeconds,
     usage: readEvaluationUsage(response.usageMetadata),
   };
 }

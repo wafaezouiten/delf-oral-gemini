@@ -43,11 +43,7 @@ import {
 
 import { CLIENT_CONNECT_CONFIG, INPUT_MIME_TYPE, LIVE_MODEL } from "@/lib/gemini/constants";
 import type { OralTopic } from "@/lib/delf/topics";
-import {
-  canTransition,
-  describeTransition,
-  type SessionState,
-} from "./state-machine";
+import { canTransition, describeTransition, type SessionState } from "./state-machine";
 
 export type LivePhase = "monologue" | "debate";
 
@@ -100,8 +96,39 @@ export interface LiveTokenClientRequest {
   examId: string;
   phase: LivePhase;
   topicSlug: string;
+  /**
+   * The examiner the candidate chose (#99). A fallback, not the decision: the
+   * server reads the choice off the sitting and only honours this when no row
+   * can be read — which is what keeps a reconnect on the same examiner while
+   * the database is unreachable, and what makes the choice work at all with no
+   * database configured.
+   */
+  model?: string;
+  /**
+   * DEVELOPMENT ONLY — a replacement examiner system instruction (#152).
+   *
+   * Forwarded on every mint, including reconnects, for the same reason the
+   * model is: a session that reconnects must come back as the same examiner,
+   * and a prompt that survived only the first connect would quietly revert
+   * mid-débat. The server drops it off a development build.
+   */
+  examinerPrompt?: string;
   /** Present on a resume. Its presence is what the server pins into the token. */
   resumptionHandle?: string;
+}
+
+/**
+ * A minted credential, and the examiner it was minted for.
+ *
+ * The model comes back from the server rather than being the client's own
+ * `model` echoed, because the token's constraint pins one and a connect naming
+ * another is a dead session (#99). Whatever the server decided — the sitting's
+ * stored choice, the request's, or the default — is what the socket must open
+ * with, so the two travel together through this seam.
+ */
+export interface MintedLiveToken {
+  token: string;
+  model: string;
 }
 
 /**
@@ -112,7 +139,7 @@ export interface LiveTokenClientRequest {
  * {@link browserLiveTransport}.
  */
 export interface LiveTransport {
-  mintToken(request: LiveTokenClientRequest): Promise<string>;
+  mintToken(request: LiveTokenClientRequest): Promise<MintedLiveToken>;
   open(params: {
     token: string;
     model: string;
@@ -160,9 +187,11 @@ export const browserLiveTransport: LiveTransport = {
       const body = await response.text().catch(() => "");
       throw new Error(`Could not mint a Gemini token (${response.status}): ${body}`);
     }
-    const { token } = (await response.json()) as { token?: string };
+    const { token, model } = (await response.json()) as { token?: string; model?: string };
     if (!token) throw new Error("Token endpoint returned no token");
-    return token;
+    // A server from before the model rode along answers with the token alone;
+    // it also pinned the build default, so that is what the socket must name.
+    return { token, model: model ?? LIVE_MODEL };
   },
 
   async open({ token, model, config, callbacks }) {
@@ -183,15 +212,34 @@ const GOAWAY_SAFETY_MS = 1500;
 const BACKOFF_BASE_MS = 400;
 const BACKOFF_CAP_MS = 5000;
 
+/** One turn of seedable history, in the shape `sendClientContent` takes. */
+export type LiveHistoryTurn = { role: "user" | "model"; parts: Array<{ text: string }> };
+
 export interface ExamLiveSessionOptions {
   /** The sitting this session belongs to. Sent to the token route, which binds
    *  the token to it after checking the caller owns it. */
   examId: string;
   phase: LivePhase;
   topic: OralTopic;
+  /** The candidate's chosen examiner, forwarded on every mint (#99). Absent
+   *  means "never chosen" — the server decides, exactly as before. */
+  model?: string;
+  /** DEVELOPMENT ONLY — the examiner prompt this session runs under (#152).
+   *  Absent means the instruction this repository builds. */
+  examinerPrompt?: string;
   callbacks: SessionManagerCallbacks;
-  /** History to seed a fresh session with (the monologue, for the débat). */
-  initialHistory?: Array<{ role: "user" | "model"; parts: Array<{ text: string }> }>;
+  /**
+   * History to seed a fresh session with (the monologue, for the débat).
+   *
+   * A provider is read again on EVERY fresh connect, and a reconnect whose
+   * socket died before the first resumption handle arrived is a fresh connect
+   * (#133): nothing restores the exchange, so what the provider returns is all
+   * the examiner will know. A caller whose history grows while the session
+   * runs — the débat, whose exchange is itself the history — passes the
+   * function; a plain array behaves as it always has, the same turns on every
+   * fresh connect.
+   */
+  initialHistory?: LiveHistoryTurn[] | (() => LiveHistoryTurn[]);
   transport?: LiveTransport;
   timers?: SessionTimers;
   maxReconnectAttempts?: number;
@@ -253,11 +301,10 @@ export class ExamLiveSession {
   private readonly examId: string;
   private readonly phase: LivePhase;
   private readonly topic: OralTopic;
+  private readonly model: string | undefined;
+  private readonly examinerPrompt: string | undefined;
   private readonly callbacks: SessionManagerCallbacks;
-  private readonly initialHistory: Array<{
-    role: "user" | "model";
-    parts: Array<{ text: string }>;
-  }>;
+  private readonly initialHistory: () => LiveHistoryTurn[];
   private readonly transport: LiveTransport;
   private readonly timers: SessionTimers;
   private readonly maxReconnectAttempts: number;
@@ -266,8 +313,11 @@ export class ExamLiveSession {
     this.examId = options.examId;
     this.phase = options.phase;
     this.topic = options.topic;
+    this.model = options.model;
+    this.examinerPrompt = options.examinerPrompt;
     this.callbacks = options.callbacks;
-    this.initialHistory = options.initialHistory ?? [];
+    const history = options.initialHistory ?? [];
+    this.initialHistory = typeof history === "function" ? history : () => history;
     this.transport = options.transport ?? browserLiveTransport;
     this.timers = options.timers ?? realTimers;
     this.maxReconnectAttempts = options.maxReconnectAttempts ?? DEFAULT_MAX_RECONNECT_ATTEMPTS;
@@ -306,6 +356,8 @@ export class ExamLiveSession {
       examId: this.examId,
       phase: this.phase,
       topicSlug: this.topic.slug,
+      model: this.model,
+      examinerPrompt: this.examinerPrompt,
       resumptionHandle: this.resumptionHandle,
     };
   }
@@ -331,6 +383,12 @@ export class ExamLiveSession {
     }
 
     const resuming = Boolean(this.resumptionHandle);
+    // Read before anything can open a socket: `onopen` sets `everConnected`,
+    // so by the time the connect below has succeeded the field can no longer
+    // say whether this attempt was the session's first. A fresh connect that
+    // is NOT the first is the amnesia path (#133) — see the event at the
+    // bottom of the try block.
+    const everConnectedBefore = this.everConnected;
     this.setState(resuming ? "resuming" : "connecting");
 
     // Everything below belongs to this attempt. If a close or another reconnect
@@ -340,14 +398,17 @@ export class ExamLiveSession {
     const isCurrent = () => generation === this.generation;
 
     try {
-      const token = await this.transport.mintToken(this.tokenRequest());
+      const minted = await this.transport.mintToken(this.tokenRequest());
       // A close (or a second reconnect) can land while the token is minting.
       // Bail before spending a socket on it.
       if (!isCurrent()) return;
 
       const socket = await this.transport.open({
-        token,
-        model: LIVE_MODEL,
+        token: minted.token,
+        // The model the SERVER pinned into the token, not this session's own
+        // `model` field: the constraint decides, and naming anything else on
+        // the connect is a dead session (#99).
+        model: minted.model,
         // Modalities only. The real config — instruction, VAD mode, resumption,
         // compression — is pinned in the token minted above. Verified: this
         // yields identical audio, transcripts and handles to sending the full
@@ -396,12 +457,23 @@ export class ExamLiveSession {
 
       // A brand-new débat session knows nothing about the monologue. Seed it
       // before the examiner speaks so its first objection can quote the
-      // candidate. On a RESUME the handle already carries the history, so
-      // re-seeding would duplicate the monologue in context.
-      if (!resuming && this.initialHistory.length > 0) {
-        this.socket.sendClientContent({ turns: this.initialHistory, turnComplete: false });
-        this.callbacks.onEvent("history-seeded", { turns: this.initialHistory.length });
+      // candidate. Read from the provider on every fresh connect, not captured
+      // at construction: a reconnect that lost its handle is a fresh connect
+      // (#133), and it must be seeded with the exchange as it stands NOW. On a
+      // RESUME the handle already carries the history, so re-seeding would
+      // duplicate it in context.
+      if (!resuming) {
+        const history = this.initialHistory();
+        if (history.length > 0) {
+          this.socket.sendClientContent({ turns: history, turnComplete: false });
+          this.callbacks.onEvent("history-seeded", { turns: history.length });
+        }
       }
+
+      // BEFORE the flush below, and that order is the point: the buffered
+      // chunks are the candidate mid-sentence when the socket died, and they
+      // have to land inside the reopened activity rather than in front of it.
+      if (this.candidateActivityOpen) this.sendActivityStart("activity-reopened");
 
       // Flushed HERE and not only in `onopen`, because `open()` resolves after
       // the socket is open: `onopen` therefore runs while `this.socket` is still
@@ -411,6 +483,18 @@ export class ExamLiveSession {
       // both places is safe: it is a no-op on an empty queue, and it refuses
       // unless the state says connected.
       this.flushPendingAudio();
+
+      // The reconnect that could not resume (#133): this connect REPLACED a
+      // live session and presented no handle, so the model's own memory of the
+      // exchange is gone and the seed above is all it knows. Announced as its
+      // own event rather than left to `connected`, because the controller
+      // answers it with a directive and `connected` fires from `onopen`, while
+      // `this.socket` is still null and `sendDirective` would silently drop
+      // it. Last on purpose: the answer then lands on an installed, seeded
+      // socket, after the candidate's own buffered mid-sentence words.
+      if (!resuming && everConnectedBefore) {
+        this.callbacks.onEvent("reconnected-fresh");
+      }
     } catch (error) {
       // A superseded attempt failing is not this session's problem. Without
       // this check the rejection of an abandoned `mintToken`/`open` — an
@@ -594,6 +678,41 @@ export class ExamLiveSession {
     await this.connect();
   }
 
+  /**
+   * Whether the candidate holds the manual-VAD floor — a fact about the PHASE,
+   * which is why it is re-asserted on every socket.
+   *
+   * During the monologue, `activityStart` is what makes the audio that follows
+   * part of a turn, and `activityEnd` is what makes Gemini emit the
+   * transcription of it (verified, and the reason it is emitted only then:
+   * `docs/GEMINI_LIVE_FINDINGS.md` §6 — nothing is transcribed DURING a
+   * manual-VAD activity; the entire exposé arrives in one fragment at the
+   * boundary).
+   *
+   * A marker binds to the socket it was sent on. This class replaces sockets
+   * without telling anyone — that invisibility is its whole purpose — and
+   * `ExamController` sends the marker exactly once, after the first `connect()`
+   * resolves. So every reconnect during a monologue used to leave the new
+   * socket with no open activity, and everything said after it was never part
+   * of a turn and never transcribed. The visible consequence was not a warning:
+   * `candidateWordCount(transcript, "monologue")` came back under
+   * `PARTICIPATION_WORD_FLOOR`, the rubric called the monologue ABSENT, and the
+   * correction told a candidate who had spoken for seven minutes that they had
+   * not presented it and halved their mark for it.
+   *
+   * What this does NOT recover is the audio already spoken on the socket that
+   * died: no `activityEnd` reached it, so its transcription was never emitted
+   * and no client can ask for it now. That is why the finish payload carries
+   * measured voiced seconds per part — so a transcript lost this way is read as
+   * the app's failure and not the candidate's silence.
+   *
+   * Re-sent on a resume as well as on a cold reconnect. Whether resumption
+   * restores an in-flight activity is not documented and was not observable
+   * from here; a duplicate `activityStart` is at worst redundant, a missing one
+   * costs the exposé.
+   */
+  private candidateActivityOpen = false;
+
   /** Stream one base64 PCM16 chunk of candidate audio. */
   sendAudio(base64: string): void {
     if (!this.socket || this.state !== "connected") {
@@ -671,18 +790,42 @@ export class ExamLiveSession {
    * Open the candidate's turn without closing it (manual VAD, monologue only).
    * Because no `activityEnd` follows, the model has no turn boundary and cannot
    * interrupt — the guarantee the monologue rests on.
+   *
+   * The floor stays open until {@link endCandidateActivity}, and OPEN IS A
+   * FACT ABOUT THE PHASE, NOT ABOUT THE SOCKET: see {@link candidateActivityOpen}
+   * for why that distinction is the whole of the monologue's transcript.
    */
   beginCandidateActivity(): void {
-    if (!this.socket) return;
-    this.socket.sendRealtimeInput({ activityStart: {} });
-    this.callbacks.onEvent("activity-start");
+    this.candidateActivityOpen = true;
+    this.sendActivityStart("activity-start");
   }
 
   /** Close the candidate's turn, handing the floor to the examiner. */
   endCandidateActivity(): void {
+    this.candidateActivityOpen = false;
     if (!this.socket) return;
     this.socket.sendRealtimeInput({ activityEnd: {} });
     this.callbacks.onEvent("activity-end");
+  }
+
+  /**
+   * Mark the candidate as holding the floor on the CURRENT socket.
+   *
+   * Split out from `beginCandidateActivity` so the reconnect path can re-send
+   * the marker without re-deciding whether the floor is open, and so the two
+   * sites log under different names — an `activity-reopened` in the session log
+   * is the fingerprint of the failure below actually having been survived.
+   *
+   * Silent with no socket, deliberately: the flag is already set, so the next
+   * connect sends it. That covers the sitting where the monologue's very first
+   * connect exhausted its retries and the candidate recovered it by hand —
+   * `beginCandidateActivity` ran against a null socket there, and before the
+   * flag existed the marker was simply never sent at all.
+   */
+  private sendActivityStart(event: string): void {
+    if (!this.socket) return;
+    this.socket.sendRealtimeInput({ activityStart: {} });
+    this.callbacks.onEvent(event);
   }
 
   /**
@@ -757,7 +900,9 @@ export function parseDurationMs(value: unknown): number | null {
     const seconds = Number(record.seconds ?? 0);
     const nanos = Number(record.nanos ?? 0);
     if (Number.isFinite(seconds) || Number.isFinite(nanos)) {
-      return (Number.isFinite(seconds) ? seconds : 0) * 1000 + (Number.isFinite(nanos) ? nanos : 0) / 1e6;
+      return (
+        (Number.isFinite(seconds) ? seconds : 0) * 1000 + (Number.isFinite(nanos) ? nanos : 0) / 1e6
+      );
     }
   }
   return null;

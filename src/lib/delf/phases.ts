@@ -60,31 +60,13 @@ export const PHASE_DURATIONS: Record<Exclude<OralPhase, "finished">, number> = {
 };
 
 /**
- * The minimum monologue length before the candidate may move on to the débat.
- *
- * This is a **UI gate, not a grading rule**, and the distinction is the whole
- * reason it can be this short. It was 5 minutes, matching what the real épreuve
- * expects of a "monologue suivi"; it is now 1, so a candidate can cut a
- * monologue that has genuinely run out of things to say — and so the débat,
- * which is the half most people actually want to practise, is reachable without
- * sitting through five minutes first.
- *
- * Stopping early is still penalised, and by a completely separate number:
- * `minDurationSeconds(tache)` in `constants.ts` computes the duration penalty
- * from the *measured audio*, and it is unchanged. A candidate who stops at 61
- * seconds may now do so, and will still lose the points the DELF's own floor
- * costs them. The button no longer refuses; the grille still does.
- */
-export const MONOLOGUE_MIN_SECONDS = 1 * 60;
-
-/**
  * Voiced seconds below which a monologue reads as never attempted.
  *
- * Low on purpose. A candidate who genuinely spoke for the minute the clock
- * demands will have produced far more than this; one who sat in silence
- * produces almost none. Setting it near the middle of that gap rather than near
- * a "good" monologue means the question is only ever asked of someone who
- * really did say next to nothing.
+ * Low on purpose. A candidate who genuinely attempted the task will have
+ * produced far more than this; one who sat in silence produces almost none.
+ * Setting it near the middle of that gap rather than near a "good" monologue
+ * means the question is only ever asked of someone who really did say next to
+ * nothing.
  *
  * Five seconds is also about 125 frames, which is what makes the crude
  * per-frame measure behind it safe: a click marks one frame, and no plausible
@@ -111,10 +93,7 @@ export const MIN_VOICED_SECONDS = 5;
  * stranding a candidate who cannot reach the débat *or* the end of the épreuve,
  * which is worse than the accident it prevents.
  */
-export function monologueWasSilent(
-  capturedSeconds: number,
-  voicedSeconds: number,
-): boolean {
+export function monologueWasSilent(capturedSeconds: number, voicedSeconds: number): boolean {
   if (!(capturedSeconds > 0)) return false;
   return voicedSeconds < MIN_VOICED_SECONDS;
 }
@@ -149,22 +128,28 @@ export function isPhaseTimeUp(phase: OralPhase, elapsedSeconds: number): boolean
 /**
  * Whether the candidate may end this phase early with the "continue" button.
  *
- * Preparation is always skippable (a candidate who has finished their notes
- * should not sit through 30 minutes of dead time). The monologue only unlocks
- * once the 5-minute DELF floor is reached. The débat is skippable so a candidate
- * can stop when the conversation has genuinely run its course.
+ * Every part the candidate is actually in is skippable, and that uniformity is
+ * the rule rather than an accident of three cases agreeing. Preparation: a
+ * candidate who has finished their notes should not sit through 30 minutes of
+ * dead time. Débat: they should be able to stop when the conversation has
+ * genuinely run its course.
+ *
+ * **The monologue used to be the exception, and is not any more (#171).** It
+ * held the button shut for a minute — five, before that — so a candidate could
+ * not skip the task outright. That was a UI gate standing in for a grading rule
+ * it never was: the penalty for a short part is the duration tier in
+ * `orale-rubric.ts`, computed from the *measured audio*, and it never depended
+ * on this. A candidate who concludes after twenty seconds may now do so, and
+ * still loses exactly the points that tier costs them — while one who says
+ * nothing at all is caught by {@link monologueWasSilent}, which asks rather than
+ * refuses. Neither of those needed a clock in front of it, and what the clock
+ * did cost was real: a minute of dead time before the débat, which is the half
+ * most people open this application to practise.
+ *
+ * `finished` is the only false: there is no phase left to leave.
  */
-export function canAdvanceEarly(phase: OralPhase, elapsedSeconds: number): boolean {
-  switch (phase) {
-    case "preparation":
-      return true;
-    case "monologue":
-      return elapsedSeconds >= MONOLOGUE_MIN_SECONDS;
-    case "debate":
-      return true;
-    case "finished":
-      return false;
-  }
+export function canAdvanceEarly(phase: OralPhase): boolean {
+  return phase !== "finished";
 }
 
 /**

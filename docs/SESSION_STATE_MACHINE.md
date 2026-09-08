@@ -13,11 +13,11 @@ A session dying and being resumed moves the **lower** machine through four
 states and the **upper** one through none. That is the design, not a detail:
 the transcript, the phase and the phase clock all outlive every socket.
 
-| | Owner | Source |
-| --- | --- | --- |
-| Exam phase | DELF business logic | [`src/lib/delf/phases.ts`](../src/lib/delf/phases.ts) |
-| Session state | transport | [`src/lib/live/state-machine.ts`](../src/lib/live/state-machine.ts) |
-| The two, flattened | derived | `examStatus()` in the same file |
+|                    | Owner               | Source                                                              |
+| ------------------ | ------------------- | ------------------------------------------------------------------- |
+| Exam phase         | DELF business logic | [`src/lib/delf/phases.ts`](../src/lib/delf/phases.ts)               |
+| Session state      | transport           | [`src/lib/live/state-machine.ts`](../src/lib/live/state-machine.ts) |
+| The two, flattened | derived             | `examStatus()` in the same file                                     |
 
 ---
 
@@ -79,15 +79,15 @@ things answer it, and none of them moves the transition:
   any of the above ──▶ closed  (terminal)
 ```
 
-| State | Meaning |
-| --- | --- |
-| `idle` | Constructed, no socket ever opened. |
-| `connecting` | Opening the first socket of a phase. No handle: nothing to remember yet. |
-| `resuming` | Opening a socket **with** a resumption handle. The exam continues. |
-| `connected` | Live. The only state in which audio actually reaches Gemini. |
+| State          | Meaning                                                                         |
+| -------------- | ------------------------------------------------------------------------------- |
+| `idle`         | Constructed, no socket ever opened.                                             |
+| `connecting`   | Opening the first socket of a phase. No handle: nothing to remember yet.        |
+| `resuming`     | Opening a socket **with** a resumption handle. The exam continues.              |
+| `connected`    | Live. The only state in which audio actually reaches Gemini.                    |
 | `reconnecting` | The socket is gone (goAway, drop, or a forced reconnect) and we are going back. |
-| `closed` | Ended deliberately. **Terminal.** |
-| `failed` | Backoff exhausted. Recoverable only by an explicit forced reconnect. |
+| `closed`       | Ended deliberately. **Terminal.**                                               |
+| `failed`       | Backoff exhausted. Recoverable only by an explicit forced reconnect.            |
 
 ### Why `resuming` is not just `reconnecting`
 
@@ -107,7 +107,7 @@ that would not.
   and never through `closed`: `reconnect()` marks its own teardown so the
   resulting `onclose` stays silent.
 
-`failed` is deliberately *not* terminal, and the exam screen renders a
+`failed` is deliberately _not_ terminal, and the exam screen renders a
 **"Reprendre la connexion"** control whenever `examStatus` is `error` — in every
 environment, not only development. Five automatic attempts can be spent by ten
 seconds of bad network in a twenty-minute exam, and without that control the only
@@ -171,7 +171,7 @@ Precedence, in order:
 3. **`error`** — a `failed` session mid-débat is not a débat.
 4. **`reconnecting` / `resuming`** win over the speaking phase. The phase is
    still `debate` underneath and the clock never stopped; what the candidate is
-   *told* is that the exam continues.
+   _told_ is that the exam continues.
 5. Otherwise the phase itself.
 
 A closed socket alone is **not** an error: phases close their sessions on the
@@ -181,14 +181,14 @@ way out, every time, as part of a healthy exam.
 
 ## What drives each transition
 
-| Trigger | Path |
-| --- | --- |
-| Phase starts | `idle → connecting → connected` |
-| `goAway` received | timer at `timeLeft − 1500 ms`, then `connected → reconnecting → resuming → connected` |
-| Socket drops unannounced | `connected → reconnecting → resuming → connected`, backoff 400 ms doubling to 5 s, 5 attempts |
-| Backoff exhausted | `reconnecting → failed` |
-| Candidate forces a reconnect | `connected → reconnecting → resuming → connected` |
-| Phase ends | `* → closed` |
+| Trigger                      | Path                                                                                          |
+| ---------------------------- | --------------------------------------------------------------------------------------------- |
+| Phase starts                 | `idle → connecting → connected`                                                               |
+| `goAway` received            | timer at `timeLeft − 1500 ms`, then `connected → reconnecting → resuming → connected`         |
+| Socket drops unannounced     | `connected → reconnecting → resuming → connected`, backoff 400 ms doubling to 5 s, 5 attempts |
+| Backoff exhausted            | `reconnecting → failed`                                                                       |
+| Candidate forces a reconnect | `connected → reconnecting → resuming → connected`                                             |
+| Phase ends                   | `* → closed`                                                                                  |
 
 Every connect mints a **fresh** token, including reconnects: a token is
 single-use, and a resumed session is a new session. The token request carries

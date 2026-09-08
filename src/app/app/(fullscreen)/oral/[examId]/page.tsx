@@ -38,5 +38,15 @@ export default async function OralExamPage({
   const topic = slug ? findTopic(slug) : undefined;
   if (!topic) notFound();
 
-  return <ExamClient examId={examId} topic={topic} />;
+  // The examiner recorded on the row (#99) — null both on rows that predate
+  // the column and on the degraded ids that have no row, and the client treats
+  // the two the same: the picker starts on the build default, which is what an
+  // untouched sitting will actually hear.
+  return (
+    <ExamClient
+      examId={examId}
+      topic={topic}
+      storedExaminerModel={sitting?.examinerModel ?? null}
+    />
+  );
 }

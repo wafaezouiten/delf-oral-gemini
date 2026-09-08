@@ -3,13 +3,18 @@ import { beforeEach, describe, it, mock } from "node:test";
 
 import { ORAL_CRITERIA, type OralCriterion } from "@/lib/delf/criteria";
 import { ORAL_PHASES, type OralPhase } from "@/lib/delf/phases";
-import type { EvaluationFeedback } from "@/lib/db/schema";
+import type { EvaluationFeedback, OralSpeakingPhase } from "@/lib/db/schema";
 import type { TranscriptEntry } from "@/lib/delf/transcript";
 
 import {
-  correctSitting,
+  CORRECTION_CLAIM_HOLD_SECONDS,
+  acceptSitting,
+  attachCorrection,
   deriveCorrectionWrite,
   sittingOutcome,
+  type AcceptSittingInput,
+  type ArtefactRows,
+  type AttachCorrectionInput,
   type CorrectionRow,
   type CorrectionWrite,
   type FinalisedPhase,
@@ -101,6 +106,7 @@ interface ExamRow {
   phase: OralPhase;
   transcript: TranscriptEntry[];
   reconnectCount: number;
+  earlyClosingCount: number;
   startedAt: Date;
   finishedAt: Date | null;
   abandonedAt: Date | null;
@@ -134,6 +140,7 @@ class MemoryStore implements SittingStore {
       phase: "preparation",
       transcript: [],
       reconnectCount: 0,
+      earlyClosingCount: 0,
       startedAt: new Date("2026-08-15T09:30:00Z"),
       finishedAt: null,
       abandonedAt: null,
@@ -165,16 +172,36 @@ class MemoryStore implements SittingStore {
     return true;
   }
 
-  async claimForCorrection(ref: SittingRef, claim: Parameters<SittingStore["claimForCorrection"]>[1]) {
+  async claimForCorrection(
+    ref: SittingRef,
+    claim: Parameters<SittingStore["claimForCorrection"]>[1],
+  ) {
     const exam = this.owned(ref);
     if (!exam) return false;
     if (this.evaluations.some((row) => row.examId === ref.examId)) return false;
+    // The claim hold (#86), as the SQL applies it — a previous claim younger
+    // than the grading budget most likely has a model call behind it. The
+    // fake's clock is the claim's own timestamp, matching the injected `now`.
+    if (
+      exam.finishedAt !== null &&
+      +claim.finishedAt - +exam.finishedAt < CORRECTION_CLAIM_HOLD_SECONDS * 1000
+    ) {
+      return false;
+    }
 
     exam.phase = "finished";
     exam.transcript = claim.transcript;
     exam.reconnectCount = claim.reconnectCount;
+    exam.earlyClosingCount = claim.earlyClosingCount;
     exam.finishedAt = claim.finishedAt;
     return true;
+  }
+
+  async releaseClaim(ref: SittingRef): Promise<void> {
+    const exam = this.owned(ref);
+    if (!exam) return;
+    if (this.evaluations.some((row) => row.examId === ref.examId)) return;
+    exam.finishedAt = null;
   }
 
   async abandonSitting(ref: SittingRef, abandonedAt: Date): Promise<boolean> {
@@ -188,13 +215,12 @@ class MemoryStore implements SittingStore {
     return true;
   }
 
-  async writeCorrection(ref: SittingRef, write: CorrectionWrite): Promise<StoredCorrection> {
-    if (this.failNextWrite) {
-      this.failNextWrite = false;
-      throw new Error("batch rejected");
-    }
-
-    for (const row of write.phases) {
+  /** The artefact upserts both write methods share, exactly as the SQL does:
+   *  phases update their measured seconds, recordings are insert-if-absent —
+   *  which is the clause that lets the attach's second pass never overwrite
+   *  the uris the accept's rows carry (#98, #86). */
+  private upsertArtefacts(ref: SittingRef, rows: ArtefactRows): void {
+    for (const row of rows.phases) {
       const existing = this.phases.find((p) => p.examId === ref.examId && p.phase === row.phase);
       if (existing) {
         existing.spokenSeconds = row.spokenSeconds;
@@ -203,11 +229,31 @@ class MemoryStore implements SittingStore {
         this.phases.push({ ...row, examId: ref.examId });
       }
     }
-    for (const row of write.recordings) {
+    for (const row of rows.recordings) {
       if (!this.recordings.some((r) => r.examId === ref.examId && r.phase === row.phase)) {
         this.recordings.push({ ...row, examId: ref.examId });
       }
     }
+  }
+
+  /** Set to make the next `writeArtefacts` reject, like a failed batch. */
+  failNextArtefactWrite = false;
+
+  async writeArtefacts(ref: SittingRef, artefacts: ArtefactRows): Promise<void> {
+    if (this.failNextArtefactWrite) {
+      this.failNextArtefactWrite = false;
+      throw new Error("batch rejected");
+    }
+    this.upsertArtefacts(ref, artefacts);
+  }
+
+  async writeCorrection(ref: SittingRef, write: CorrectionWrite): Promise<StoredCorrection> {
+    if (this.failNextWrite) {
+      this.failNextWrite = false;
+      throw new Error("batch rejected");
+    }
+
+    this.upsertArtefacts(ref, write);
 
     const stored: { examId: number } & StoredCorrection = {
       ...write.correction,
@@ -236,6 +282,8 @@ class MemoryStore implements SittingStore {
       outcome: sittingOutcome({ finishedAt: exam.finishedAt, correction }),
       transcript: exam.transcript,
       reconnectCount: exam.reconnectCount,
+      earlyClosingCount: exam.earlyClosingCount,
+      examinerModel: null,
       startedAt: exam.startedAt,
       finishedAt: exam.finishedAt,
       phases: this.phases.filter((row) => row.examId === ref.examId),
@@ -247,22 +295,62 @@ class MemoryStore implements SittingStore {
 
 const NOW = new Date("2026-08-15T10:20:30Z");
 
-function finishInput(overrides: Partial<Parameters<typeof correctSitting>[2]> = {}) {
+const REPORTED_PHASES = [
+  {
+    phase: "monologue" as const,
+    startedAt: +MONOLOGUE.startedAt,
+    endedAt: +MONOLOGUE.endedAt!,
+  },
+  { phase: "debate" as const, startedAt: +DEBATE.startedAt, endedAt: +DEBATE.endedAt! },
+];
+
+const MEASURED_RECORDINGS = [
+  {
+    phase: "monologue" as const,
+    mimeType: "audio/ogg",
+    byteSize: 210_000,
+    durationSeconds: 402.6,
+  },
+  {
+    phase: "debate" as const,
+    mimeType: "audio/ogg",
+    byteSize: 640_000,
+    durationSeconds: 761.2,
+  },
+];
+
+function acceptInput(overrides: Partial<AcceptSittingInput> = {}): AcceptSittingInput {
   return {
     transcript: [...MONOLOGUE.entries, ...DEBATE.entries],
     reconnectCount: 1,
-    phases: [
-      { phase: "monologue" as const, startedAt: +MONOLOGUE.startedAt, endedAt: +MONOLOGUE.endedAt! },
-      { phase: "debate" as const, startedAt: +DEBATE.startedAt, endedAt: +DEBATE.endedAt! },
-    ],
-    recordings: [
-      { phase: "monologue" as const, mimeType: "audio/ogg", byteSize: 210_000, durationSeconds: 402.6 },
-      { phase: "debate" as const, mimeType: "audio/ogg", byteSize: 640_000, durationSeconds: 761.2 },
-    ],
+    // Distinct from `reconnectCount` on purpose, so the assertion below can
+    // tell a claim that wrote the wrong number into the right column (#92).
+    earlyClosingCount: 2,
+    phases: REPORTED_PHASES,
+    recordings: MEASURED_RECORDINGS,
+    now: () => NOW,
+    ...overrides,
+  };
+}
+
+function attachInput(overrides: Partial<AttachCorrectionInput> = {}): AttachCorrectionInput {
+  return {
+    phases: REPORTED_PHASES,
+    recordings: MEASURED_RECORDINGS,
     evaluate: async () => correction(),
     now: () => NOW,
     ...overrides,
   };
+}
+
+/** The route's whole finish, as one call: accept, and attach when it took. */
+async function finishSitting(
+  store: SittingStore,
+  overrides: { accept?: Partial<AcceptSittingInput>; attach?: Partial<AttachCorrectionInput> } = {},
+) {
+  const accepted = await acceptSitting(store, REF, acceptInput(overrides.accept));
+  if (accepted.status !== "accepted") return accepted;
+  return attachCorrection(store, REF, attachInput(overrides.attach));
 }
 
 // =====================================================
@@ -301,7 +389,9 @@ describe("deriving the rows", () => {
     // The monologue's clock says seven minutes; the recording is 402.6 seconds.
     // `spoken_seconds` feeds the duration penalty, so it must be the second.
     const write = deriveCorrectionWrite({
-      phases: [{ phase: "monologue", startedAt: +MONOLOGUE.startedAt, endedAt: +MONOLOGUE.endedAt! }],
+      phases: [
+        { phase: "monologue", startedAt: +MONOLOGUE.startedAt, endedAt: +MONOLOGUE.endedAt! },
+      ],
       recordings: [
         { phase: "monologue", mimeType: "audio/ogg", byteSize: 210_000, durationSeconds: 402.6 },
       ],
@@ -340,8 +430,9 @@ describe("deriving the rows", () => {
     assert.equal(write.phases[0].endedAt, null);
   });
 
-  it("records every recording as already disposed of, with no uri", () => {
-    // Retention is forbidden; the row outlives the bytes on purpose.
+  it("records a recording nothing kept as disposed of, with no uri", () => {
+    // No vault, or an upload that failed: the row outlives the bytes, which is
+    // every row this function wrote before #98 and must keep meaning the same.
     const write = deriveCorrectionWrite({
       phases: [],
       recordings: [
@@ -355,12 +446,35 @@ describe("deriving the rows", () => {
     assert.equal(write.recordings[0].durationSeconds, 403);
   });
 
+  it("points a kept recording at its uri, and only a kept one (#98)", () => {
+    // One sitting, both artefacts uploaded, one of the two kept — the state a
+    // vault outage mid-preserve leaves. Each row must speak only for itself:
+    // the kept one is live, the lost one is honestly disposed.
+    const write = deriveCorrectionWrite({
+      phases: [],
+      recordings: [
+        { phase: "monologue", mimeType: "audio/ogg", byteSize: 210_000, durationSeconds: 402.6 },
+        { phase: "debate", mimeType: "audio/ogg", byteSize: 640_000, durationSeconds: 761.2 },
+      ],
+      correction: correction(),
+      kept: new Map<OralSpeakingPhase, string>([
+        ["monologue", "https://store.example/recordings/41/monologue.ogg"],
+      ]),
+      disposedAt,
+    });
+    assert.deepEqual(
+      write.recordings.map((row) => [row.phase, row.uri, row.deletedAt]),
+      [
+        ["monologue", "https://store.example/recordings/41/monologue.ogg", null],
+        ["debate", null, disposedAt],
+      ],
+    );
+  });
+
   it("produces integers the schema's own check constraints accept", () => {
     const write = deriveCorrectionWrite({
       phases: [{ phase: "debate", startedAt: +DEBATE.startedAt, endedAt: +DEBATE.endedAt! }],
-      recordings: [
-        { phase: "debate", mimeType: "audio/ogg", byteSize: 1, durationSeconds: 0.4 },
-      ],
+      recordings: [{ phase: "debate", mimeType: "audio/ogg", byteSize: 1, durationSeconds: 0.4 }],
       correction: correction({ rawScore25: 2, durationPenalty: 3, score25: 0, meetsFloor: false }),
       disposedAt,
     });
@@ -439,7 +553,10 @@ describe("appending a phase as it finalises", () => {
   });
 
   it("cannot reopen a sitting that has been finished", async () => {
-    await correctSitting(store, REF, finishInput());
+    // The accept alone is enough to close the door (#86): the claim stamps
+    // `finished_at`, and nothing may append to a sitting past it — least of
+    // all while its correction is still being attached behind the response.
+    await acceptSitting(store, REF, acceptInput());
     assert.equal(await store.appendFinalisedPhase(REF, DEBATE), false);
   });
 });
@@ -452,10 +569,35 @@ describe("correcting a sitting", () => {
     store.createSitting(INTRUDER, 42);
   });
 
+  it("accepts the sitting whole before any grading has run (#86)", async () => {
+    // The state the candidate is released on: claimed, artefacts written,
+    // nothing graded. Everything the response promises — "your sitting is
+    // safe" — has to be readable here, and the outcome has to be the
+    // recoverable `uncorrected`, because this is also what a crashed grading
+    // leaves behind.
+    const outcome = await acceptSitting(store, REF, acceptInput());
+    assert.equal(outcome.status, "accepted");
+
+    const sitting = await store.readSitting(REF);
+    assert.ok(sitting);
+    assert.equal(sitting.outcome, "uncorrected");
+    assert.deepEqual(sitting.finishedAt, NOW);
+    assert.deepEqual(
+      sitting.phases.map((row) => [row.phase, row.spokenSeconds]),
+      [
+        ["monologue", 403],
+        ["debate", 761],
+      ],
+      "the measured seconds are on the rows before the corrector has said a word",
+    );
+    assert.equal(sitting.recordings.length, 2);
+    assert.equal(sitting.correction, null);
+  });
+
   it("round-trips: transcript, phases, recordings and correction come back", async () => {
     await store.appendFinalisedPhase(REF, MONOLOGUE);
 
-    const outcome = await correctSitting(store, REF, finishInput());
+    const outcome = await finishSitting(store);
     assert.equal(outcome.status, "stored");
 
     const sitting = await store.readSitting(REF);
@@ -463,6 +605,7 @@ describe("correcting a sitting", () => {
     assert.equal(sitting.outcome, "corrected");
     assert.deepEqual(sitting.finishedAt, NOW);
     assert.equal(sitting.reconnectCount, 1);
+    assert.equal(sitting.earlyClosingCount, 2, "the examiner's goodbyes survive the tab (#92)");
     assert.deepEqual(sitting.transcript, [...MONOLOGUE.entries, ...DEBATE.entries]);
 
     assert.deepEqual(
@@ -486,79 +629,203 @@ describe("correcting a sitting", () => {
   });
 
   it("finishing twice produces one correction and never grades again", async () => {
-    const first = await correctSitting(store, REF, finishInput());
+    const first = await finishSitting(store);
     assert.equal(first.status, "stored");
 
-    const evaluate = mock.fn(async () => correction({ score25: 25, rawScore25: 25 }));
-    const second = await correctSitting(store, REF, finishInput({ evaluate }));
-
+    // The duplicate is refused at the ACCEPT, before anything is claimed or
+    // written — the attach never runs, so its model call is never paid for.
+    const second = await acceptSitting(store, REF, acceptInput());
     assert.equal(second.status, "already-corrected");
-    assert.equal(evaluate.mock.callCount(), 0, "a duplicate submit must not pay for a model call");
     assert.equal(store.evaluations.length, 1);
-    // And what comes back is the correction that exists, not the one this call
-    // would have produced.
-    assert.equal(second.correction.score25, 15);
+    // And what comes back is the correction that exists, not a fresh one.
+    assert.equal(second.status === "already-corrected" && second.correction.score25, 15);
+  });
+
+  it("a late attach on a corrected sitting returns the stored grade, ungraded twice", async () => {
+    // The retry-after-timeout shape (#86): the first finish's background
+    // grading landed AFTER the candidate gave up waiting and re-finished. The
+    // second attach must find the row and never ask the corrector.
+    await finishSitting(store);
+
+    const evaluate = mock.fn(async () => correction({ score25: 25, rawScore25: 25 }));
+    const outcome = await attachCorrection(store, REF, attachInput({ evaluate }));
+
+    assert.equal(outcome.status, "already-corrected");
+    assert.equal(evaluate.mock.callCount(), 0, "a duplicate attach must not pay for a model call");
+    assert.equal(outcome.correction.score25, 15);
+    assert.equal(store.evaluations.length, 1);
   });
 
   it("returns the winner's correction when the claim is lost mid-flight", async () => {
-    // The narrow race the claim exists for: something else corrects the sitting
-    // while this call is inside the model.
-    const outcome = await correctSitting(
-      store,
-      REF,
-      finishInput({
-        evaluate: async () => {
-          await store.claimForCorrection(REF, {
-            transcript: [],
-            reconnectCount: 0,
-            finishedAt: NOW,
-          });
-          await store.writeCorrection(REF, {
-            phases: [],
-            recordings: [],
-            correction: correction({ score25: 20, rawScore25: 20 }),
-          });
-          return correction();
-        },
-      }),
-    );
+    // The narrow race the claim exists for: a rival finish corrects the
+    // sitting between this accept's pre-check and its claim.
+    const originalClaim = store.claimForCorrection.bind(store);
+    store.claimForCorrection = async (ref, claim) => {
+      await store.writeCorrection(REF, {
+        phases: [],
+        recordings: [],
+        correction: correction({ score25: 20, rawScore25: 20 }),
+      });
+      return originalClaim(ref, claim);
+    };
+
+    const preserve = mock.fn(async () => new Map<OralSpeakingPhase, string>());
+    const outcome = await acceptSitting(store, REF, acceptInput({ preserve }));
 
     assert.equal(outcome.status, "already-corrected");
-    assert.equal(outcome.correction.score25, 20);
+    assert.equal(outcome.status === "already-corrected" && outcome.correction.score25, 20);
     assert.equal(store.evaluations.length, 1);
+    // The loser's rows are never written, so the loser's bytes must never
+    // land — the same discipline as the model call.
+    assert.equal(preserve.mock.callCount(), 0);
   });
 
-  it("leaves a sitting uncorrected — not completed — when the write fails", async () => {
+  it("leaves a sitting uncorrected — not completed — when the correction write fails", async () => {
+    const accepted = await acceptSitting(store, REF, acceptInput());
+    assert.equal(accepted.status, "accepted");
+
     store.failNextWrite = true;
-    const outcome = await correctSitting(store, REF, finishInput());
+    const outcome = await attachCorrection(store, REF, attachInput());
 
     assert.equal(outcome.status, "graded-not-stored");
-    // The candidate still has their grade in the response.
+    // The grade exists for whoever can still show it — behind an answered
+    // response, that is the log.
     assert.equal(outcome.status === "graded-not-stored" && outcome.correction.score25, 15);
 
     const sitting = await store.readSitting(REF);
-    assert.equal(sitting?.outcome, "uncorrected", "a half-written sitting must not read as completed");
+    assert.equal(
+      sitting?.outcome,
+      "uncorrected",
+      "a half-written sitting must not read as completed",
+    );
     assert.equal(sitting?.correction, null);
   });
 
-  it("repairs an uncorrected sitting when it is finished again", async () => {
-    // The claim asks about corrections, not about `finished_at`, precisely so
-    // this is possible. Keying on the stamp would strand the sitting.
-    store.failNextWrite = true;
-    await correctSitting(store, REF, finishInput());
+  it("refuses the finish when the artefact write fails, gives the claim back, and strands nothing", async () => {
+    // The accept's own failure: claimed, but the rows did not land. Nothing is
+    // safe, so the caller must refuse — and because nothing here will grade,
+    // the claim is RELEASED, so the immediate retry is not held out for a
+    // grading budget nobody is spending.
+    store.failNextArtefactWrite = true;
+    const failed = await acceptSitting(store, REF, acceptInput());
+    assert.equal(failed.status, "not-stored");
+    assert.equal(
+      store.exams.find((row) => row.id === EXAM_ID)?.finishedAt,
+      null,
+      "the failed accept does not sit on the claim",
+    );
 
-    const retry = await correctSitting(store, REF, finishInput());
+    const retry = await acceptSitting(store, REF, acceptInput());
+    assert.equal(retry.status, "accepted", "the re-claim repairs what the failure left, at once");
+  });
+
+  it("refuses a second finish while the first's grading may still be in flight (#86)", async () => {
+    // The review's finding on this PR: the fast 202 made stacking submits
+    // cheap, and each accepted one would have paid for its own model call.
+    // Within the grading budget, claimed-and-uncorrected reads as "being
+    // graded" and the second finish gets a retryable refusal instead.
+    const first = await acceptSitting(store, REF, acceptInput());
+    assert.equal(first.status, "accepted");
+
+    const preserve = mock.fn(async () => new Map<OralSpeakingPhase, string>());
+    const second = await acceptSitting(store, REF, acceptInput({ preserve }));
+
+    assert.equal(second.status, "not-stored");
+    assert.equal(preserve.mock.callCount(), 0, "and it never stored a second copy of the voice");
+    assert.equal(store.evaluations.length, 0);
+  });
+
+  it("repairs an uncorrected sitting when it is finished again, past the hold", async () => {
+    // The claim asks about corrections, not about `finished_at`, precisely so
+    // this is possible — once the grading budget has certainly expired, which
+    // is when the finished screen offers the retry (`CORRECTION_WAIT_LIMIT_MS`
+    // sits above the hold). Keying on the stamp would strand the sitting.
+    const accepted = await acceptSitting(store, REF, acceptInput());
+    assert.equal(accepted.status, "accepted");
+    store.failNextWrite = true;
+    await attachCorrection(store, REF, attachInput());
+
+    const afterHold = () => new Date(+NOW + (CORRECTION_CLAIM_HOLD_SECONDS + 1) * 1000);
+    const retry = await finishSitting(store, {
+      accept: { now: afterHold },
+      attach: { now: afterHold },
+    });
     assert.equal(retry.status, "stored");
     assert.equal((await store.readSitting(REF))?.outcome, "corrected");
     assert.equal(store.evaluations.length, 1);
   });
 
-  it("cannot correct, or read, a neighbouring user's sitting", async () => {
-    const neighbour: SittingRef = { examId: 42, userId: OWNER };
-    const evaluate = mock.fn(async () => correction());
+  it("writes the uris the preserve hook kept, and the attach never overwrites them (#98)", async () => {
+    const preserve = mock.fn(
+      async () =>
+        new Map<OralSpeakingPhase, string>([["monologue", "https://store.example/m.ogg"]]),
+    );
+    const accepted = await acceptSitting(store, REF, acceptInput({ preserve }));
+    assert.equal(accepted.status, "accepted");
+    assert.equal(preserve.mock.callCount(), 1);
 
-    const outcome = await correctSitting(store, neighbour, finishInput({ evaluate }));
-    assert.equal(outcome.status, "graded-not-stored");
+    const kept = () =>
+      store.recordings
+        .filter((row) => row.examId === EXAM_ID)
+        .map((row) => [row.phase, row.uri, row.deletedAt]);
+    assert.deepEqual(
+      kept(),
+      [
+        ["monologue", "https://store.example/m.ogg", null],
+        ["debate", null, NOW],
+      ],
+      "the kept half plays back; the lost half is honestly disposed",
+    );
+
+    // The attach re-runs the artefact statements with no kept map at all (#86);
+    // insert-if-absent is what keeps that second pass from disposing the copy
+    // the accept filed.
+    const outcome = await attachCorrection(store, REF, attachInput());
+    assert.equal(outcome.status, "stored");
+    assert.deepEqual(kept()[0], ["monologue", "https://store.example/m.ogg", null]);
+  });
+
+  it("never stores bytes for a sitting that is already corrected", async () => {
+    // A duplicate finish must not file a second copy of somebody's voice next
+    // to rows it will never write — the same discipline as the model call.
+    await finishSitting(store);
+
+    const preserve = mock.fn(async () => new Map<OralSpeakingPhase, string>());
+    const second = await acceptSitting(store, REF, acceptInput({ preserve }));
+
+    assert.equal(second.status, "already-corrected");
+    assert.equal(preserve.mock.callCount(), 0);
+  });
+
+  it("a preserve that throws costs the copies, never the finish", async () => {
+    // The hook's contract is not to throw; the second net exists because an
+    // upload failure must cost the candidate a replay button, never their
+    // épreuve's acceptance.
+    const preserve = mock.fn(async (): Promise<ReadonlyMap<OralSpeakingPhase, string>> => {
+      throw new Error("vault down");
+    });
+    const accepted = await acceptSitting(store, REF, acceptInput({ preserve }));
+    assert.equal(accepted.status, "accepted");
+
+    const outcome = await attachCorrection(store, REF, attachInput());
+    assert.equal(outcome.status, "stored");
+    const sitting = await store.readSitting(REF);
+    assert.equal(sitting?.outcome, "corrected");
+    assert.deepEqual(
+      sitting?.recordings.map((row) => [row.uri, row.deletedAt]),
+      [
+        [null, NOW],
+        [null, NOW],
+      ],
+      "every recording reads as disposed, exactly as on a deployment with no vault",
+    );
+  });
+
+  it("cannot accept, correct, or read a neighbouring user's sitting", async () => {
+    const neighbour: SittingRef = { examId: 42, userId: OWNER };
+
+    const outcome = await acceptSitting(store, neighbour, acceptInput());
+    assert.equal(outcome.status, "not-stored");
     assert.equal(store.evaluations.length, 0);
     assert.equal(await store.readSitting(neighbour), null);
 
@@ -604,7 +871,7 @@ describe("abandoning a sitting", () => {
     // The real race, not a theoretical one. The finish request is in flight
     // while the candidate reads the exit dialog, so "I gave up on the upload"
     // and "the upload succeeded" can arrive in either order.
-    await correctSitting(store, REF, finishInput());
+    await finishSitting(store);
     assert.equal(await store.abandonSitting(REF, new Date()), false);
     assert.equal(store.exams.find((row) => row.id === REF.examId)?.abandonedAt, null);
   });

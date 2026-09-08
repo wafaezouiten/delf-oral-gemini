@@ -36,7 +36,9 @@ path does not work.
 This is the nastiest one. Mint a token constrained to just a model:
 
 ```ts
-liveConnectConstraints: { model: LIVE_MODEL }   // WRONG
+liveConnectConstraints: {
+  model: LIVE_MODEL;
+} // WRONG
 ```
 
 …and the socket **opens**, then closes with `1011 "Internal error encountered."`
@@ -53,11 +55,11 @@ liveConnectConstraints: { model: LIVE_MODEL, config: fullConfig }   // correct
 Since the constraint carries the config anyway, the config can be built entirely
 on the server — and the client can then connect with **modalities only**:
 
-| Client connect config | Result |
-| --- | --- |
-| `{}` (empty) | connects, **no audio ever** |
+| Client connect config             | Result                             |
+| --------------------------------- | ---------------------------------- |
+| `{}` (empty)                      | connects, **no audio ever**        |
 | `{ responseModalities: [AUDIO] }` | full audio + transcripts + handles |
-| the full config | identical to the above |
+| the full config                   | identical to the above             |
 
 So `responseModalities` is the floor, not a stylistic choice. This is why
 `/api/live-token` builds the whole session config and the browser never sees the
@@ -86,10 +88,10 @@ this only bites synthetic tests — but it bit hard, and it initially looked lik
 
 ## 6. Transcription timing differs per phase — verified
 
-| Phase | `inputTranscription` during speech | after the turn boundary |
-| --- | --- | --- |
-| Débat (auto VAD) | 1 fragment, arrives live | — |
-| Monologue (manual VAD) | **0 fragments** | 1 fragment, complete and accurate |
+| Phase                  | `inputTranscription` during speech | after the turn boundary           |
+| ---------------------- | ---------------------------------- | --------------------------------- |
+| Débat (auto VAD)       | 1 fragment, arrives live           | —                                 |
+| Monologue (manual VAD) | **0 fragments**                    | 1 fragment, complete and accurate |
 
 `interimInputTranscription` is **never emitted** by this model in either mode, so
 handling `inputTranscription` alone is correct and there is no duplication risk.
@@ -99,7 +101,7 @@ no `activityEnd`, there is no turn boundary — and transcription is emitted at
 turn boundaries. So nothing is transcribed for the whole monologue, and the
 entire exposé arrives in one fragment when the floor is released.
 
-Two consequences, both handled:
+Three consequences, all handled:
 
 - The UI tells the candidate their exposé will appear at the end, rather than
   showing an empty panel for seven minutes and looking broken.
@@ -107,6 +109,23 @@ Two consequences, both handled:
   WAIT afterwards. It is what causes the transcription to be emitted, so closing
   the socket promptly after it would silently discard the entire monologue. The
   controller guards this with `activityEnded`, and a unit test pins it.
+- **`activityStart` binds to a socket, and the monologue outlives sockets.** The
+  marker was sent once, after the first `connect()` resolved, by the controller.
+  `ExamLiveSession` replaces sockets without telling anyone — that invisibility
+  is its whole job — so every reconnect during a monologue left the new socket
+  with no activity open: audio arriving outside an activity is not part of a
+  turn, and nothing after the drop was ever transcribed. Nothing threw. The
+  failure surfaced two screens away, as `partsAbsent` reading an empty monologue
+  and the correction page telling a candidate who had spoken for seven minutes
+  that they had not presented it. `candidateActivityOpen` now re-asserts the
+  marker on every connect, before the buffered audio is flushed into it.
+
+  What that still cannot recover is what was said on the socket that died: no
+  `activityEnd` reached it, so its transcription was never emitted and no client
+  can ask for it. That is why the finish payload carries measured voiced seconds
+  per part — `partsSpokenButUntranscribed` pairs them with the transcript, and
+  the route refuses to grade a part the microphone heard at length and the
+  transcript does not contain, rather than scoring it as an absence.
 
 ---
 
@@ -116,16 +135,16 @@ Two consequences, both handled:
 
 **A. The security path.** A server-minted, config-constrained token opens a
 session governed by an instruction the client never sent. The examiner opened
-with: *"Vous avez soutenu que le télétravail permettait un meilleur équilibre
-entre vie personnelle..."* — in role, in French, adversarial.
+with: _"Vous avez soutenu que le télétravail permettait un meilleur équilibre
+entre vie personnelle..."_ — in role, in French, adversarial.
 
 **B. The monologue mechanism, with a control.** The same 8 seconds of French
 speech, through two configs:
 
-| Config | Examiner audio | Verdict |
-| --- | --- | --- |
-| Débat (auto VAD) | **69 chunks** | replies, as it should |
-| Monologue (manual VAD, no `activityEnd`) | **0 chunks** | structurally silent |
+| Config                                   | Examiner audio | Verdict               |
+| ---------------------------------------- | -------------- | --------------------- |
+| Débat (auto VAD)                         | **69 chunks**  | replies, as it should |
+| Monologue (manual VAD, no `activityEnd`) | **0 chunks**   | structurally silent   |
 
 Then `activityEnd` was sent and the examiner spoke immediately (14 chunks). The
 control is what makes this meaningful: silence from a model that simply never
@@ -135,8 +154,8 @@ heard the audio would prove nothing.
 myrtilles de ma grand-mère"), captured the handle, dropped the socket, reconnected
 with the handle, and asked what the argument was. The resumed examiner:
 
-> *"Vous avez mentionné que la brioche aux myrtilles de votre grand-mère était
-> votre argument principal, or cela n'a rien à voir avec le sujet…"*
+> _"Vous avez mentionné que la brioche aux myrtilles de votre grand-mère était
+> votre argument principal, or cela n'a rien à voir avec le sujet…"_
 
 It recalled the argument across a reconnect **and stayed in character while doing
 it.** That is the 13-minute débat requirement demonstrated end to end.
@@ -146,7 +165,7 @@ it.** That is the 13-minute débat requirement demonstrated end to end.
 ## Still not verified
 
 - A real `GoAway` at the true ~10 minute limit. The reconnect path is proven by
-  forced reconnection; the *trigger* has not been observed in the wild.
+  forced reconnection; the _trigger_ has not been observed in the wild.
 - The browser half: `getUserMedia`, the AudioWorklet, and playback. Everything
   above ran in Node against the same protocol, so the wire format is confirmed,
   but the microphone path needs a human with a microphone.

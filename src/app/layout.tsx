@@ -39,12 +39,15 @@ export const metadata: Metadata = {
  */
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
-    <html
-      lang="fr"
-      className={`${inter.variable} ${spectral.variable} h-full antialiased`}
-    >
+    <html lang="fr" className={`${inter.variable} ${spectral.variable} h-full antialiased`}>
       <body className="flex min-h-full flex-col font-sans">
-        <ClerkProvider localization={frFR}>{children}</ClerkProvider>
+        {/* `display: contents`, so the wrapper is invisible to the body's flex
+            layout and exists only to draw the line the dead-band guard in
+            globals.css needs: inside #app is the product, and any other child
+            of <body> is a squatter someone appended (#114). */}
+        <div id="app" className="contents">
+          <ClerkProvider localization={frFR}>{children}</ClerkProvider>
+        </div>
       </body>
     </html>
   );

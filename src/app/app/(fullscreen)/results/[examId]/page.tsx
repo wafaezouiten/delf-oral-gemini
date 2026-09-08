@@ -4,7 +4,7 @@ import { Notice } from "@/app/_components/notice";
 import { secondaryButton } from "@/app/_components/button-styles";
 import { requireExamAccess, requireUserId } from "@/lib/auth/exam-guard";
 import { neonSittingStore } from "@/lib/db/sittings";
-import { partsAbsent } from "@/lib/delf/orale-rubric";
+import { applySittingDurationPenalty, partsAbsent } from "@/lib/delf/orale-rubric";
 import { findTopic } from "@/lib/delf/topics";
 import { candidateWordCount } from "@/lib/delf/transcript";
 import type { StoredSitting } from "@/lib/exams/sitting-persistence";
@@ -67,6 +67,20 @@ export default async function ResultsPage({ params }: PageProps<"/app/results/[e
   const measured = (phase: "monologue" | "debate") =>
     sitting.recordings.find((row) => row.phase === phase)?.durationSeconds ?? 0;
 
+  // The recordings whose bytes were kept (#98): a uri to serve and no purge
+  // stamp. Everything else — pre-#98 sittings, vaultless deployments, uploads
+  // that failed — renders exactly as before, a duration with nothing to play,
+  // which is the honest sentence for a recording that existed and is gone.
+  const playable = sitting.recordings
+    .filter((row) => row.uri !== null && row.deletedAt === null)
+    .map((row) => ({
+      phase: row.phase,
+      mimeType: row.mimeType,
+      // From the row, so the player can print « 0:00 / 1:38 » before a single
+      // byte has moved — its file stays unfetched until play is pressed.
+      durationSeconds: row.durationSeconds,
+    }));
+
   const initial: StoredResult = {
     evaluation: {
       mode: correction.mode,
@@ -86,12 +100,49 @@ export default async function ResultsPage({ params }: PageProps<"/app/results/[e
       // Guarded on the penalty so a row written before the halving existed
       // (`absence_penalty` defaults to 0) is never labelled with a charge it
       // did not take.
+      //
+      // And minus the débat the examiner closed early (#92), exactly as the
+      // rubric dropped it at grading time: a positive count means the waiver
+      // was live (the column and the waiver shipped together, and old rows
+      // read 0), so a silent débat here was excused, not charged — leaving it
+      // in would caption a monologue-only halving as « aucune des deux
+      // parties ».
       absentParts:
         correction.absencePenalty > 0
           ? partsAbsent({
               monologueWords: candidateWordCount(sitting.transcript, "monologue"),
               debateWords: candidateWordCount(sitting.transcript, "debate"),
-            })
+            }).filter((part) => part !== "debate" || sitting.earlyClosingCount === 0)
+          : [],
+      // `durationCharges` has no column either, and is recovered the way
+      // `absentParts` above is: by re-running the rubric's own function over
+      // the same inputs it saw at grading time — the stored bands, and the
+      // server's measurement of the recordings. Not a second copy of the rule.
+      //
+      // The score handed in is the stored raw: only `charges` is read from the
+      // result, and those depend on the bands and the durations, never on the
+      // running total.
+      //
+      // `excluded` has to be reconstructed too, or the sentence would name a
+      // part the rubric never charged: an absent part is dropped (the halving
+      // already answered for it) and so is a débat the examiner closed early.
+      // Both are the same reconstructions used just above.
+      durationCharges:
+        correction.durationPenalty > 0
+          ? applySittingDurationPenalty(
+              correction.rawScore25,
+              correction.criteria,
+              { monologueSeconds: measured("monologue"), debateSeconds: measured("debate") },
+              [
+                ...(correction.absencePenalty > 0
+                  ? partsAbsent({
+                      monologueWords: candidateWordCount(sitting.transcript, "monologue"),
+                      debateWords: candidateWordCount(sitting.transcript, "debate"),
+                    })
+                  : []),
+                ...(sitting.earlyClosingCount > 0 ? (["debate"] as const) : []),
+              ],
+            ).charges
           : [],
       model: correction.model,
       latencySeconds: correction.latencySeconds,
@@ -104,6 +155,16 @@ export default async function ResultsPage({ params }: PageProps<"/app/results/[e
     monologueSeconds: measured("monologue"),
     debateSeconds: measured("debate"),
     reconnectCount: sitting.reconnectCount,
+    // The examiner's early goodbyes (#92) — unlike `reconnectCount` above,
+    // something actually renders this: the note explaining that the fault was
+    // not held against the candidate.
+    earlyClosingCount: sitting.earlyClosingCount,
+    playable,
+    // Which model spoke (#99) — the counterpart of `evaluation.model`, which
+    // names the one that graded. Null on sittings from before the column, and
+    // shown as nothing rather than guessed: today's default is not evidence
+    // about which examiner an old sitting heard.
+    examinerModel: sitting.examinerModel,
   };
 
   return <ResultsClient examId={examId} initial={initial} />;
@@ -116,9 +177,12 @@ export default async function ResultsPage({ params }: PageProps<"/app/results/[e
  * telling them apart is what "interrupted sittings are distinguishable from
  * completed ones" means in practice. `in-progress` is an épreuve that stopped
  * before it was submitted — a closed tab, a lost connection — and nothing was
- * ever graded. `uncorrected` is one that was submitted and graded, where the row
- * did not survive the write; finishing it again re-runs the whole path, which is
- * why the copy says the result may still be in the tab it was taken in.
+ * ever graded. `uncorrected` is one that was submitted, whose correction is not
+ * attached — which, since #86, is most often a correction still UNDER WAY: the
+ * finish answers as soon as the sitting is safe and grades behind the response,
+ * so a candidate who closed the tab and clicked straight here can land minutes
+ * ahead of their own mark. The copy says to refresh before it says anything is
+ * wrong, and only then that the tab that took the épreuve can re-send it.
  */
 function UnfinishedSitting({ sitting }: { sitting: StoredSitting }) {
   const interrupted = sitting.outcome === "in-progress";
@@ -134,10 +198,10 @@ function UnfinishedSitting({ sitting }: { sitting: StoredSitting }) {
         </h1>
       </div>
 
-      <Notice tone="warning" title={interrupted ? "Aucune note" : "Correction perdue"}>
+      <Notice tone="warning" title={interrupted ? "Aucune note" : "Correction en attente"}>
         {interrupted
           ? "Cette épreuve n'a pas été menée à son terme — l'onglet a été fermé, ou la connexion a été perdue avant la fin. Rien n'a été corrigé, et il n'y a pas de note à afficher."
-          : "Cette épreuve a bien été passée et corrigée, mais sa correction n'a pas pu être enregistrée. Si l'onglet où vous l'avez passée est encore ouvert, la note s'y trouve peut-être encore."}
+          : "Cette épreuve a bien été passée ; sa correction n'est pas encore enregistrée. Elle est peut-être encore en cours — attendez un instant, puis actualisez cette page. Si rien n'arrive, l'onglet où vous avez passé l'épreuve, s'il est encore ouvert, peut réessayer l'envoi."}
       </Notice>
 
       <div className="flex justify-center">

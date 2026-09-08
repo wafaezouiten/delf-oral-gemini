@@ -1,7 +1,8 @@
 /**
  * Speak the examiner's consignes once, and commit the result (#37).
  *
- *   pnpm announcements
+ *   pnpm announcements            # all four
+ *   pnpm announcements debate     # only the clips named, carrying the rest forward
  *
  * The clips in `public/announcements/` are build artefacts of
  * `src/lib/delf/announcements.ts`, and this is the build. Running it is a
@@ -34,7 +35,7 @@
 import { config } from "dotenv";
 config({ path: ".env.local" });
 
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { GoogleGenAI } from "@google/genai";
@@ -120,16 +121,79 @@ async function speak(client: GoogleGenAI, text: string): Promise<Int16Array> {
   return new Int16Array(bytes.buffer, bytes.byteOffset, bytes.byteLength / 2);
 }
 
+/**
+ * Which clips this run speaks: the ids on the command line, or all four.
+ *
+ *   pnpm announcements          # all four
+ *   pnpm announcements debate   # just the one whose script changed
+ *
+ * Added because a one-script edit used to re-speak the other three (#167).
+ * Prosody differs between calls, so that put three unrelated megabyte binaries
+ * in the diff, each holding a slightly different reading of a sentence nobody
+ * had touched — which is both unreviewable and the opposite of what the header
+ * says this script is for.
+ */
+function requestedIds(argv: string[]): readonly AnnouncementId[] {
+  if (argv.length === 0) return ANNOUNCEMENT_IDS;
+  const unknown = argv.filter((id) => !ANNOUNCEMENT_IDS.includes(id as AnnouncementId));
+  if (unknown.length > 0) {
+    throw new Error(
+      `unknown announcement id: ${unknown.join(", ")}. ` +
+        `Known ids: ${ANNOUNCEMENT_IDS.join(", ")}.`,
+    );
+  }
+  // Kept in the canonical order rather than the order they were typed, so the
+  // console output reads the same whatever the argument order was.
+  return ANNOUNCEMENT_IDS.filter((id) => argv.includes(id));
+}
+
+/**
+ * The manifest as it stands, so a partial run can carry the untouched clips
+ * forward instead of writing a manifest that describes only what it spoke.
+ *
+ * A partial run is REFUSED when the existing manifest was made by a different
+ * model or voice. The manifest names one of each for all four clips, so mixing
+ * generations under it would make it lie about three of them — and the lie
+ * would be about the two fields that explain why the clips sound the way they
+ * do. Regenerate everything after a model or voice change; that is a run that
+ * should be deliberate anyway.
+ */
+async function carriedClips(
+  ids: readonly AnnouncementId[],
+): Promise<AnnouncementManifest["clips"]> {
+  if (ids.length === ANNOUNCEMENT_IDS.length) return {} as AnnouncementManifest["clips"];
+
+  const raw = await readFile(join(OUT_DIR, "manifest.json"), "utf8").catch(() => null);
+  if (raw === null) {
+    throw new Error(
+      "no manifest to carry the untouched clips forward from. " +
+        "Run `pnpm announcements` with no arguments to speak all four.",
+    );
+  }
+
+  const existing = JSON.parse(raw) as AnnouncementManifest;
+  if (existing.model !== TTS_MODEL || existing.voice !== VOICE) {
+    throw new Error(
+      `the committed clips were spoken by ${existing.model} / ${existing.voice}, ` +
+        `this run would use ${TTS_MODEL} / ${VOICE}. ` +
+        "Run `pnpm announcements` with no arguments to regenerate all four.",
+    );
+  }
+  return existing.clips;
+}
+
 async function main() {
   if (!process.env.GEMINI_API_KEY) throw new Error("GEMINI_API_KEY is not set");
   const client = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
+  const ids = requestedIds(process.argv.slice(2));
+
   await mkdir(OUT_DIR, { recursive: true });
   console.log(`model: ${TTS_MODEL}\nvoice: ${VOICE}\nout:   ${OUT_DIR}\n`);
 
-  const clips = {} as AnnouncementManifest["clips"];
+  const clips = await carriedClips(ids);
 
-  for (const id of ANNOUNCEMENT_IDS) {
+  for (const id of ids) {
     const announcement = ANNOUNCEMENTS[id];
     const file = announcement.src.replace("/announcements/", "");
     process.stdout.write(`${id.padEnd(12)} `);

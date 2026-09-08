@@ -1,12 +1,12 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { UserButton } from "@clerk/nextjs";
+import { useUser } from "@clerk/nextjs";
 
-import { ChartIcon, ClockIcon, DocumentIcon, MicIcon } from "@/app/_components/po/icons";
+import { ChartIcon, ClockIcon, DocumentIcon, MicIcon, UserIcon } from "@/app/_components/po/icons";
 import { cn } from "@/lib/ui/class-names";
-import { clerkAppearance } from "@/lib/ui/clerk-appearance";
 import { HUB_LINKS, isNavLinkActive } from "@/lib/ui/epreuve-hub";
 
 /**
@@ -39,7 +39,12 @@ const LINKS = [
   {
     href: HUB_LINKS.tableauDeBord,
     label: "Tableau de bord",
-    short: "Progrès",
+    // One destination, one name (#183). The tab bar abbreviated this to
+    // « Progrès », so the phone and the rail called the same screen two
+    // different things and neither was the name printed at the top of the page
+    // it opens. It wraps to two lines in a 75 px tab, which is what the tab bar
+    // and the page agreeing costs.
+    short: "Tableau de bord",
     Icon: ChartIcon,
     exact: false,
   },
@@ -52,8 +57,55 @@ const LINKS = [
   },
 ] as const;
 
+/**
+ * The candidate's avatar, at whatever size the surface it sits on draws icons.
+ *
+ * Clerk's photo when there is one, this product's own glyph when there is not —
+ * and the glyph is also what renders before `useUser` has resolved, so the slot
+ * never collapses and the label beside it never reflows.
+ *
+ * `unoptimized`: the src is Clerk's own host, and routing it through the image
+ * optimiser would mean naming a remote pattern in `next.config.ts` for one
+ * 20 px avatar. Served as-is, no host needs listing.
+ */
+function Avatar({ px }: { px: number }) {
+  const { user } = useUser();
+
+  if (!user?.imageUrl) {
+    return (
+      <span
+        aria-hidden
+        className="border-border bg-muted text-muted-foreground flex shrink-0 items-center justify-center rounded-full border"
+        style={{ width: px, height: px }}
+      >
+        {/* `className` explicitly, and not for the `shrink-0`: `Icon` defaults
+            it to `size-4`, and a 16 px class sitting under a 12 px inline
+            style reads as the size the glyph is. Passing one replaces the
+            default, so the style is the only thing sizing this. */}
+        <UserIcon
+          className="shrink-0"
+          style={{ width: Math.round(px * 0.6), height: Math.round(px * 0.6) }}
+        />
+      </span>
+    );
+  }
+
+  return (
+    <Image
+      src={user.imageUrl}
+      alt=""
+      width={px}
+      height={px}
+      unoptimized
+      className="border-border shrink-0 rounded-full border object-cover"
+      style={{ width: px, height: px }}
+    />
+  );
+}
+
 export function AppSidebar() {
   const pathname = usePathname();
+  const compteCurrent = isNavLinkActive(pathname, HUB_LINKS.compte);
 
   return (
     <>
@@ -62,7 +114,7 @@ export function AppSidebar() {
       <aside className="no-print bg-card border-border sticky top-0 hidden h-dvh w-52 shrink-0 flex-col border-r md:flex">
         <div className="px-5 pt-5 pb-4">
           <Link href="/app" className="block">
-            <span className="font-serif block text-base font-semibold">DELF B2</span>
+            <span className="block font-serif text-base font-semibold">DELF B2</span>
             <span className="text-muted-foreground block text-[0.6875rem] font-semibold tracking-[0.16em] uppercase">
               Production orale
             </span>
@@ -98,36 +150,46 @@ export function AppSidebar() {
           </ul>
         </nav>
 
-        {/* Clerk's avatar menu, kept as it was: clicking it offers the account
-            and the sign out. What changed is where the first of those two goes
-            — `userProfileMode="navigation"` sends « Gérer le compte » to
-            /app/compte instead of opening Clerk's modal over the app, and that
-            page is where « Repartir de zéro » lives (#69). The popover wears the
-            product's palette for the same reason the page does. */}
-        <div className="border-border flex items-center gap-2.5 border-t px-4 py-3">
-          <UserButton
-            userProfileMode="navigation"
-            userProfileUrl={HUB_LINKS.compte}
-            appearance={clerkAppearance}
-          />
-          <span className="text-muted-foreground truncate text-xs">Mon compte</span>
+        {/* Mon compte, at the foot of the rail — a destination like the four
+            above rather than a menu (#183).
+         *
+         * Clerk's `<UserButton>` stood here and opened a popover offering
+         * « Gérer le compte » and « Se déconnecter ». The first of those two was
+         * already this href, so the popover's whole job was to put one click in
+         * front of the page; the sign out it also carried now sits on that page,
+         * with the rest of the account. The avatar goes where it says it goes.
+         *
+         * It wears the rail's own active treatment, `aria-current` included,
+         * because it is now in the same list — a screen reader is told the
+         * candidate is on their account rather than merely near it. */}
+        <div className="border-border border-t p-3">
+          <Link
+            href={HUB_LINKS.compte}
+            aria-current={compteCurrent ? "page" : undefined}
+            className={cn(
+              "flex items-center gap-2.5 rounded-md px-3 py-2 text-[0.8125rem] transition-colors",
+              compteCurrent
+                ? "bg-primary-subtle text-primary font-semibold"
+                : "text-muted-foreground hover:text-foreground hover:bg-muted font-medium",
+            )}
+          >
+            <Avatar px={20} />
+            <span className="truncate">Mon compte</span>
+          </Link>
         </div>
       </aside>
 
-      {/* Phone: a slim top bar for the brand and the account, because neither
-          fits a five-slot tab bar and both have to stay reachable. */}
-      <header className="no-print bg-card border-border sticky top-0 z-30 flex items-center justify-between gap-3 border-b px-4 py-2.5 md:hidden">
+      {/* Phone: a slim top bar for the brand alone. The avatar left it for the
+          tab bar (#183) — the navigation on a phone is at the foot of the
+          screen, and the account was the one destination reachable only from
+          the opposite end of it. */}
+      <header className="no-print bg-card border-border sticky top-0 z-30 flex items-center gap-3 border-b px-4 py-2.5 md:hidden">
         <Link href="/app" className="flex items-baseline gap-2">
           <span className="font-serif text-sm font-semibold">DELF B2</span>
           <span className="text-muted-foreground text-[0.625rem] font-semibold tracking-[0.16em] uppercase">
             Production orale
           </span>
         </Link>
-        <UserButton
-          userProfileMode="navigation"
-          userProfileUrl={HUB_LINKS.compte}
-          appearance={clerkAppearance}
-        />
       </header>
     </>
   );
@@ -142,16 +204,22 @@ export function AppSidebar() {
  * it, and a distinct `aria-label` from the desktop rail's, since two navigation
  * landmarks sharing a name are indistinguishable to assistive tech.
  *
+ * Five tabs since #183: the four destinations, and the account the avatar used
+ * to reach from the top bar. The labels are 10 px and wrap rather than being
+ * abbreviated — « Tableau de bord » over two lines is the page's own name,
+ * which « Progrès » over one was not.
+ *
  * Rendered by the `(hub)` layout only. The simulateur and the correction are
  * under `(fullscreen)` and keep their own chrome — a tab bar across the foot of
  * the passation would sit exactly where the mic is.
  */
 export function MobileTabBar() {
   const pathname = usePathname();
+  const compteCurrent = isNavLinkActive(pathname, HUB_LINKS.compte);
 
   return (
     <div className="no-print bg-card border-border fixed inset-x-0 bottom-0 z-40 border-t pb-[env(safe-area-inset-bottom)] md:hidden">
-      <nav aria-label="Navigation mobile" className="flex h-16 items-center justify-around px-1">
+      <nav aria-label="Navigation mobile" className="flex h-16 items-stretch justify-around px-0.5">
         {LINKS.map(({ href, short, label, Icon, exact }) => {
           const current = isNavLinkActive(pathname, href, exact);
           return (
@@ -161,17 +229,38 @@ export function MobileTabBar() {
               aria-current={current ? "page" : undefined}
               aria-label={label}
               className={cn(
-                "flex min-h-11 flex-1 flex-col items-center justify-center gap-0.5 rounded-md transition-colors",
+                "flex min-h-11 min-w-0 flex-1 flex-col items-center justify-center gap-0.5 rounded-md px-0.5 transition-colors",
                 current ? "text-primary" : "text-muted-foreground",
               )}
             >
-              <span className={cn("rounded-md px-2 py-1", current && "bg-primary-subtle")}>
+              <span className={cn("rounded-md px-2 py-0.5", current && "bg-primary-subtle")}>
                 <Icon className="size-5" />
               </span>
-              <span className="text-[0.6875rem] leading-tight font-semibold">{short}</span>
+              <span className="text-center text-[0.625rem] leading-[1.15] font-semibold text-balance">
+                {short}
+              </span>
             </Link>
           );
         })}
+
+        {/* The account, as the fifth tab. The avatar is the icon — it is what a
+            candidate looks for — and « Compte » is the word under it, so the tab
+            is readable before the photo has loaded and to someone who never set
+            one. */}
+        <Link
+          href={HUB_LINKS.compte}
+          aria-current={compteCurrent ? "page" : undefined}
+          aria-label="Mon compte"
+          className={cn(
+            "flex min-h-11 min-w-0 flex-1 flex-col items-center justify-center gap-0.5 rounded-md px-0.5 transition-colors",
+            compteCurrent ? "text-primary" : "text-muted-foreground",
+          )}
+        >
+          <span className={cn("rounded-md px-2 py-0.5", compteCurrent && "bg-primary-subtle")}>
+            <Avatar px={20} />
+          </span>
+          <span className="text-center text-[0.625rem] leading-[1.15] font-semibold">Compte</span>
+        </Link>
       </nav>
     </div>
   );

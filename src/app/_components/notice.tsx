@@ -78,14 +78,14 @@ export function Notice({
   const role = tone === "danger" ? "alert" : tone === "warning" ? "status" : undefined;
 
   return (
-    <div role={role} className={`flex gap-3 rounded-lg border px-4 py-3 ${classes}`}>
+    <div role={role} className={`flex gap-2.5 rounded-lg border px-3.5 py-2.5 ${classes}`}>
       <span
         className="mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full border border-current text-[0.6875rem] font-bold"
         aria-hidden
       >
         {mark}
       </span>
-      <div className="min-w-0 flex-1 space-y-2">
+      <div className="min-w-0 flex-1 space-y-1.5">
         <p className="text-sm font-semibold">{title ?? heading}</p>
         <div className="text-sm leading-relaxed">{children}</div>
         {action}

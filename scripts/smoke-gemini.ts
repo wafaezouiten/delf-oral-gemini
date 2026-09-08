@@ -104,7 +104,9 @@ async function main() {
   clearTimeout(timeout);
   session.close();
 
-  console.log(`3. examiner audio: ${audioChunks} chunks, ~${Math.round(audioBytes / 1024)} KB base64`);
+  console.log(
+    `3. examiner audio: ${audioChunks} chunks, ~${Math.round(audioBytes / 1024)} KB base64`,
+  );
   console.log(`4. examiner transcript: "${examinerText.trim()}"`);
   console.log(`5. resumption handle: ${resumptionHandle ? "issued" : "NOT ISSUED"}`);
 

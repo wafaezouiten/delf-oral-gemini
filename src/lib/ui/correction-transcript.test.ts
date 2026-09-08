@@ -127,7 +127,7 @@ describe("an épreuve walked out of mid-exposé", () => {
   it("still prints both headings where `formatTranscript` prints one", () => {
     // The divergence stated as a comparison, so that a future change to either
     // side has to be deliberate about the other.
-    assert.ok(!formatTranscript(WALKED_OUT).includes("DEBAT"));
+    assert.ok(!formatTranscript(WALKED_OUT).includes("PARTIE 2"));
     assert.equal(correctionTranscriptView(WALKED_OUT, DURATIONS).sections.length, 2);
   });
 });
@@ -246,5 +246,29 @@ describe("stamping each turn with when it was said", () => {
 
     assert.equal(view.sections[1].turns[1].entry.text, "Je maintiens que oui, et voici pourquoi…");
     assert.equal(view.sections[1].turns[1].entry.speaker, "candidate");
+  });
+});
+
+describe("a directive the examiner read aloud, on a correction written before #187", () => {
+  it("shows the candidate what was said, and not the app's instruction", () => {
+    const stored: TranscriptEntry[] = [
+      turn("monologue", "candidate", "Mon exposé.", 1_000),
+      turn(
+        "debate",
+        "examiner",
+        "[Information de service, à ne jamais prononcer : le débat est terminé. Dis exactement ceci : « Je vous remercie, nous avons terminé. »]\n\nJe vous remercie, nous avons terminé.",
+        900_000,
+      ),
+      turn("debate", "examiner", "[Le candidat n'a toujours rien répondu.]", 905_000),
+    ];
+    const view = correctionTranscriptView(stored, { monologueSeconds: 84, debateSeconds: 774 });
+    const debate = view.sections[1];
+    assert.deepEqual(
+      debate.turns.map((t) => t.entry.text),
+      ["Je vous remercie, nous avons terminé."],
+      "the echo is gone and the turn that was nothing but an echo is gone with it",
+    );
+    // Re-anchored on the surviving turn's own timestamp, as ever.
+    assert.equal(debate.turns[0].timeLabel, "0:00");
   });
 });

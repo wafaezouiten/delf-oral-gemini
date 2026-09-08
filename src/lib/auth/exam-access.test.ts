@@ -15,10 +15,16 @@ const INTRUDER = "user_intruder";
 
 /** Two sittings, one each, so "someone else's exam" is a real row and not a gap. */
 const ROWS: ExamOwnerRow[] = [
-  { id: 41, userId: OWNER, topicSlug: "vie-professionnelle" },
+  {
+    id: 41,
+    userId: OWNER,
+    topicSlug: "vie-professionnelle",
+    examinerModel: "gemini-3.1-flash-live-preview",
+  },
   // No subject on this one: the join that reads it is a `leftJoin`, so a row
-  // that names none is still a row, and still somebody's.
-  { id: 42, userId: INTRUDER, topicSlug: null },
+  // that names none is still a row, and still somebody's. No examiner either —
+  // a row from before #99 — for the same reason: neither gets a vote.
+  { id: 42, userId: INTRUDER, topicSlug: null, examinerModel: null },
 ];
 
 const lookup: ExamOwnerLookup = async (examId) => ROWS.find((row) => row.id === examId);
@@ -36,6 +42,7 @@ describe("exam access", () => {
       userId: OWNER,
       examId: 41,
       topicSlug: "vie-professionnelle",
+      examinerModel: "gemini-3.1-flash-live-preview",
     });
   });
 
@@ -50,6 +57,7 @@ describe("exam access", () => {
       userId: INTRUDER,
       examId: 42,
       topicSlug: null,
+      examinerModel: null,
     });
   });
 
@@ -117,7 +125,13 @@ describe("exam access", () => {
 describe("page gate", () => {
   it("renders the owner's own sitting", () => {
     assert.equal(
-      pageGate({ status: "owned", userId: OWNER, examId: 41, topicSlug: null }),
+      pageGate({
+        status: "owned",
+        userId: OWNER,
+        examId: 41,
+        topicSlug: null,
+        examinerModel: null,
+      }),
       "render",
     );
   });
@@ -152,7 +166,13 @@ describe("page gate", () => {
     // assert that "render" is not reachable from anything that names a sitting
     // without proving ownership.
     const outcomes = [
-      { status: "owned", userId: OWNER, examId: 41, topicSlug: "vie-professionnelle" },
+      {
+        status: "owned",
+        userId: OWNER,
+        examId: 41,
+        topicSlug: "vie-professionnelle",
+        examinerModel: null,
+      },
       { status: "denied", reason: "unauthenticated" },
       { status: "denied", reason: "not-found" },
       { status: "no-sitting", userId: OWNER, reason: "no-database" },

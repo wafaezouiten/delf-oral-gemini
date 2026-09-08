@@ -29,11 +29,7 @@ const FULL: LiveConnectConfig = {
   temperature: 0.9,
 };
 
-async function run(
-  label: string,
-  connectConfig: LiveConnectConfig,
-  apiKey: string,
-): Promise<void> {
+async function run(label: string, connectConfig: LiveConnectConfig, apiKey: string): Promise<void> {
   const server = new GoogleGenAI({ apiKey });
   const token = await server.authTokens.create({
     config: {

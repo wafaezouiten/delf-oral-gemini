@@ -56,7 +56,12 @@ import {
  */
 async function findExamOwner(examId: number): Promise<ExamOwnerRow | undefined> {
   const [row] = await getDb()
-    .select({ id: oralExams.id, userId: oralExams.userId, topicSlug: oralTopics.slug })
+    .select({
+      id: oralExams.id,
+      userId: oralExams.userId,
+      topicSlug: oralTopics.slug,
+      examinerModel: oralExams.examinerModel,
+    })
     .from(oralExams)
     .leftJoin(oralTopics, eq(oralExams.topicId, oralTopics.id))
     .where(eq(oralExams.id, examId))
@@ -162,7 +167,11 @@ export async function requireExamAccess(examId: string): Promise<OwnedSitting | 
       throw new Error(`[exam-guard] ownership of exam ${examId} could not be verified`);
     case "render":
       return access.status === "owned"
-        ? { examId: access.examId, topicSlug: access.topicSlug }
+        ? {
+            examId: access.examId,
+            topicSlug: access.topicSlug,
+            examinerModel: access.examinerModel,
+          }
         : null;
   }
 }

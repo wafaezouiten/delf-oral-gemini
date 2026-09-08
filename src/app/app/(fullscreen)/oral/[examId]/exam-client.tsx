@@ -1,21 +1,41 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
 
 import { Notice } from "@/app/_components/notice";
 import { dangerButton } from "@/app/_components/button-styles";
 import { ExitDialog } from "@/app/_components/po/exit-dialog";
+import { QuitPreparationDialog } from "@/app/_components/po/quit-preparation-dialog";
 import { useExamController } from "@/lib/live/use-exam-controller";
 import type { ExamFinishedPayload } from "@/lib/live/exam-controller";
 import { isOpusEncodingSupported } from "@/lib/audio/opus-encoder";
+import { fetchCorrectionStatus, waitForCorrection } from "@/lib/exams/correction-wait";
+import { postFinishRequest } from "@/lib/exams/finish-request";
 import { selectDeliverable } from "@/lib/exams/uploaded-recording";
 import { requestAbandon } from "@/lib/exams/abandon";
-import { describeFinishFailure, type FinishFailure } from "@/lib/ui/finish-failure";
+import { requestPreparationExit } from "@/lib/exams/preparation-exit";
+import { requestExaminerChoice } from "@/lib/exams/examiner-choice";
+import { LIVE_MODEL } from "@/lib/gemini/constants";
+import {
+  CORRECTION_TIMED_OUT,
+  describeFinishFailure,
+  type FinishFailure,
+} from "@/lib/ui/finish-failure";
+import { finishStage } from "@/lib/ui/finish-progress";
+import {
+  clearSavedExaminerPrompt,
+  saveExaminerPrompt,
+  savedPromptServerSnapshot,
+  savedPromptSnapshot,
+  subscribeSavedPrompt,
+} from "@/lib/ui/dev-examiner-prompt-storage";
 import type { OralTopic } from "@/lib/delf/topics";
 import { AnnouncementControl } from "./_components/announcement-control";
 import { DEV_TOOLS_ENABLED } from "@/lib/dev-tools";
 import { DevTranscriptionPanel } from "./_components/dev-transcription-panel";
+import { DevExaminerPromptPanel } from "./_components/dev-examiner-prompt-panel";
+import { DevTimeSkip } from "./_components/dev-time-skip";
 import { PreparationScreen } from "./_components/preparation-screen";
 import { PassationScreen } from "./_components/passation-screen";
 import { FinishedScreen } from "./_components/finished-screen";
@@ -51,15 +71,68 @@ import { FinishedScreen } from "./_components/finished-screen";
  */
 const BROWSER_CHECK_TIMEOUT_MS = 3_000;
 
-export function ExamClient({ examId, topic }: { examId: string; topic: OralTopic }) {
+export function ExamClient({
+  examId,
+  topic,
+  storedExaminerModel,
+}: {
+  examId: string;
+  topic: OralTopic;
+  /** The examiner on the sitting's row, or null where no row (or no choice)
+   *  exists. The picker's starting point, so a reload shows what will run. */
+  storedExaminerModel: string | null;
+}) {
   const router = useRouter();
   const [notes, setNotes] = useState("");
   const [notesOpen, setNotesOpen] = useState(false);
+  /**
+   * DEVELOPMENT ONLY — whether the examiner-prompt editor is open (#152).
+   *
+   * Local state, unlike the transcription panel's, and the difference is the
+   * point: that toggle lives on the controller because opening it PAUSES THE
+   * MICROPHONE, so a second copy could disagree with the device. This one
+   * changes nothing about the épreuve by being open — the candidate keeps
+   * speaking and keeps being recorded — so there is nothing for the controller
+   * to arbitrate.
+   */
+  const [promptPanelOpen, setPromptPanelOpen] = useState(false);
   const [showExitDialog, setShowExitDialog] = useState(false);
   const [abandoning, setAbandoning] = useState(false);
   const [abandonFailed, setAbandonFailed] = useState(false);
+  const [showQuitPreparation, setShowQuitPreparation] = useState(false);
+  const [quittingPreparation, setQuittingPreparation] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<FinishFailure | null>(null);
+  /**
+   * How much of the finish request's body has left the tab, as the transport
+   * reports it (#86) — null before the first progress event and on every
+   * retry, exactly 1 once the upload is done. What lets the finished screen
+   * say « Envoi… » with a bar and then « en cours de correction », instead of
+   * one spinner over a chain of segments of very different lengths.
+   */
+  const [uploadFraction, setUploadFraction] = useState<number | null>(null);
+  /**
+   * The server has accepted the sitting and moved the correction behind its
+   * response (#86). From this moment the tab is disposable — the recording is
+   * safe on the server — and the screen's sentence changes to say so while the
+   * poll below waits for the correction to land.
+   */
+  const [awaitingCorrection, setAwaitingCorrection] = useState(false);
+  /**
+   * Whether this screen still exists — the poll's cancellation signal (#86).
+   * `waitForCorrection` can run for five minutes, and a candidate who left —
+   * the back button, the way-out button below — must not leave behind a loop
+   * hammering the status route and setting state on an unmounted component.
+   * Same pattern as `isOpusEncodingSupported`'s `live` guard, held in a ref
+   * because the poll starts from a callback rather than an effect.
+   */
+  const liveRef = useRef(true);
+  useEffect(() => {
+    liveRef.current = true;
+    return () => {
+      liveRef.current = false;
+    };
+  }, []);
   const submittedRef = useRef(false);
 
   /**
@@ -87,6 +160,47 @@ export function ExamClient({ examId, topic }: { examId: string; topic: OralTopic
   const finishedPayload = useRef<ExamFinishedPayload | null>(null);
 
   /**
+   * The examiner for this sitting (#99): what the row says, or the build
+   * default for a row that never chose (and for the degraded ids that have no
+   * row). Held here rather than in the picker because three consumers need it —
+   * the préparation rail renders it, every token mint forwards it, and the
+   * finish stash records it for the results page.
+   *
+   * The state only moves when the server has agreed. `requestExaminerChoice`
+   * returns `applied: false` whenever the row was not proven written, and the
+   * row is what the token route mints from — advancing the picker on an
+   * unwritten row would promise a voice the épreuve will not use.
+   */
+  const [examinerModel, setExaminerModel] = useState(storedExaminerModel ?? LIVE_MODEL);
+  const [examinerSaving, setExaminerSaving] = useState(false);
+  const [examinerError, setExaminerError] = useState(false);
+  /**
+   * Read by `onFinished` through a ref, NOT captured: `onFinished` is a
+   * dependency of the controller memo in `useExamController`, and a callback
+   * whose identity moved with the picker would rebuild the controller — and
+   * restart the épreuve — on every change of examiner.
+   */
+  const examinerModelRef = useRef(examinerModel);
+  useEffect(() => {
+    examinerModelRef.current = examinerModel;
+  }, [examinerModel]);
+  const chooseExaminer = useCallback(
+    async (model: string) => {
+      if (examinerSaving || model === examinerModel) return;
+      setExaminerSaving(true);
+      setExaminerError(false);
+      const outcome = await requestExaminerChoice(examId, model);
+      if (outcome.applied) {
+        setExaminerModel(model);
+      } else {
+        setExaminerError(true);
+      }
+      setExaminerSaving(false);
+    },
+    [examId, examinerSaving, examinerModel],
+  );
+
+  /**
    * Ship the finished exam for grading. The evaluation is stashed in
    * sessionStorage as well as persisted, so the results page renders even with
    * no database configured.
@@ -103,6 +217,8 @@ export function ExamClient({ examId, topic }: { examId: string; topic: OralTopic
       finishedPayload.current = payload;
       setSubmitting(true);
       setSubmitError(null);
+      setUploadFraction(null);
+      setAwaitingCorrection(false);
 
       const form = new FormData();
       const json = JSON.stringify({
@@ -110,6 +226,10 @@ export function ExamClient({ examId, topic }: { examId: string; topic: OralTopic
         transcript: payload.transcript,
         phases: payload.phases,
         reconnectCount: payload.reconnectCount,
+        earlyClosingCount: payload.earlyClosingCount,
+        // What the microphone heard, per part. Only ever read to excuse a
+        // transcript the app lost — see the field on `finishPayloadSchema`.
+        voicedSeconds: payload.voicedSeconds,
         // Undefined on any sitting that was actually spoken, and ignored by the
         // route in a production build (#36).
         devSeconds: payload.devSeconds,
@@ -168,19 +288,69 @@ export function ExamClient({ examId, topic }: { examId: string; topic: OralTopic
         payload.phases.find((report) => report.phase === phase)?.recordedSeconds ?? 0;
 
       try {
-        const response = await fetch(`/api/exams/${examId}/finish`, {
-          method: "POST",
-          body: form,
-        });
-        // A platform error is an HTML page, not this route's JSON, so parsing is
-        // allowed to fail without losing the status — which is the half of the
-        // failure that decides whether a retry is worth offering.
-        const body = await response.json().catch(() => null);
-        if (!response.ok) {
-          setSubmitError(describeFinishFailure(response.status, body?.error));
+        // Over XHR rather than fetch, for the one thing fetch cannot do: report
+        // how much of the upload has left the tab (#86). The answer contract is
+        // the same — a platform error is an HTML page, not this route's JSON,
+        // so the body parses to null without losing the status, which is the
+        // half of the failure that decides whether a retry is worth offering.
+        const requestStartedAt = Date.now();
+        const { status, body } = await postFinishRequest(
+          `/api/exams/${examId}/finish`,
+          form,
+          setUploadFraction,
+        );
+        if (DEV_TOOLS_ENABLED) {
+          // The client's half of #86's instrumentation: the whole round trip,
+          // to read against the segments the server logs for the same request.
+          console.info(
+            `[finish] answered ${status} in ${((Date.now() - requestStartedAt) / 1000).toFixed(1)}s`,
+          );
+        }
+        if (status < 200 || status >= 300) {
+          setSubmitError(describeFinishFailure(status, body?.error));
           setSubmitting(false);
           submittedRef.current = false;
           return;
+        }
+        // A 200 whose body did not parse is not a result the candidate can be
+        // navigated to; the catch below turns it into the retryable message.
+        if (body === null) throw new Error("the finish route answered 200 without JSON");
+
+        /**
+         * The 202's own word (#86): the sitting is safe and the correction is
+         * being attached behind the response. Nothing goes into
+         * sessionStorage — the pending path only exists for persisted
+         * sittings, and the results page reads those from the database. Poll
+         * until the correction lands, then navigate; past the server's own
+         * budget, stop claiming anything is in progress and put the retry in
+         * front of the tab — which still holds the artefacts, and whose
+         * re-finish begins with a duplicate check, so a correction that
+         * landed late costs nothing.
+         */
+        if (body.pending === true) {
+          setAwaitingCorrection(true);
+          const outcome = await waitForCorrection(() => fetchCorrectionStatus(examId), {
+            cancelled: () => !liveRef.current,
+          });
+          // The screen is gone — the candidate took the sentence at its word
+          // and left. Nothing to set, nobody to navigate; the correction
+          // finishes on the server and the historique will have it.
+          if (outcome === "cancelled") return;
+          if (outcome === "corrected") {
+            // `replace`, not `push` (#183). See the finish path below.
+            router.replace(`/app/results/${examId}`);
+            return;
+          }
+          setAwaitingCorrection(false);
+          setSubmitError(CORRECTION_TIMED_OUT);
+          setSubmitting(false);
+          submittedRef.current = false;
+          return;
+        }
+        // Neither pending nor carrying a result is a contract breach, not a
+        // shape to guess at; the catch below turns it into the retry message.
+        if (body.evaluation === undefined) {
+          throw new Error("the finish route answered without a result or a pending word");
         }
 
         sessionStorage.setItem(
@@ -192,13 +362,31 @@ export function ExamClient({ examId, topic }: { examId: string; topic: OralTopic
             monologueSeconds: recordedSeconds("monologue"),
             debateSeconds: recordedSeconds("debate"),
             reconnectCount: payload.reconnectCount,
+            // Same fallback-copy logic as `examinerModel` below: the database
+            // row carries this for a persisted sitting, and this stash is the
+            // only copy for one that was never persisted. The results page
+            // keys its examiner-fault note on it (#92).
+            earlyClosingCount: payload.earlyClosingCount,
+            // Which model spoke (#99). The database copy reads it off the row;
+            // this is the fallback copy for a sitting that was never persisted,
+            // so it carries the same fact. Through the ref — see its comment.
+            examinerModel: examinerModelRef.current,
           }),
         );
-        router.push(`/app/results/${examId}`);
+        // `replace` rather than `push` (#183). The correction now offers a
+        // « Retour », and the entry it would go back to is this passation — a
+        // finished épreuve whose socket is closed, whose clock has run out and
+        // which cannot be sat again. Replacing the entry sends that Retour to
+        // wherever the épreuve was opened from, which is the page the candidate
+        // actually came from; nothing else about the navigation changes, and
+        // nothing linked to this url in the first place.
+        router.replace(`/app/results/${examId}`);
       } catch (error) {
-        // The request never got an answer — offline, DNS, a dropped upload. The
-        // exception's own words ("Failed to fetch") are for the console; the
-        // candidate gets a sentence and a retry, because nothing was refused.
+        // Almost always: the request never got an answer — offline, DNS, a
+        // dropped upload. The one other arrival is the throw above, a 200
+        // whose body was not JSON. Both end the same way on purpose: the
+        // exception's own words are for the console, and the candidate gets a
+        // sentence and a retry, because nothing was refused.
         console.error(error);
         setSubmitError(describeFinishFailure(null, null));
         setSubmitting(false);
@@ -209,7 +397,41 @@ export function ExamClient({ examId, topic }: { examId: string; topic: OralTopic
     [examId, topic, router],
   );
 
-  const { state, controller } = useExamController({ examId, topic, onFinished });
+  const { state, controller } = useExamController({ examId, topic, examinerModel, onFinished });
+
+  /**
+   * The examiner prompt saved for this sujet, if there is one (#166).
+   *
+   * Read as an external store rather than into state, for the reason the
+   * correction page reads its own stash that way: `localStorage` does not exist
+   * during the server render, and `useSyncExternalStore` is what lets the
+   * server snapshot be null without a hydration mismatch. The store notifies on
+   * every apply and reset, so the panel below sees its own writes.
+   */
+  const savedPrompt = useSyncExternalStore(
+    subscribeSavedPrompt,
+    () => (DEV_TOOLS_ENABLED ? savedPromptSnapshot(topic.slug) : null),
+    savedPromptServerSnapshot,
+  );
+
+  /**
+   * Put it in force, before anything opens a session.
+   *
+   * This is the whole reason the read is here and not in the panel: the panel
+   * renders on the débat, which is after the débat's first session has already
+   * been minted, and a system instruction is fixed for a session's lifetime. A
+   * saved prompt applied there would need a restart to take — and a restart at
+   * the débat's opening costs the examiner the exposé it is about to quote.
+   *
+   * Safe to run during the préparation because the controller scopes the
+   * override to the débat (#166): the monologue's session is not handed it.
+   * `setExaminerPrompt` is itself a no-op off a development build, and ignores
+   * a value it already holds, so this settles after one call.
+   */
+  useEffect(() => {
+    if (!savedPrompt) return;
+    controller.setExaminerPrompt(savedPrompt.prompt);
+  }, [controller, savedPrompt]);
 
   /**
    * Start the épreuve on arrival (#55).
@@ -327,6 +549,39 @@ export function ExamClient({ examId, topic }: { examId: string; topic: OralTopic
   };
 
   /**
+   * Quit during the préparation (#113): archive the sitting, then leave.
+   *
+   * NOT the abandon path, and the difference is the issue. Nothing has been said
+   * during the préparation, so there is no performance to score zero — leaving
+   * here must not be the walk-out that quitting mid-exposé is. The sitting is
+   * archived instead (the reset's stamp, #69), so a deliberate exit does not
+   * strand a row that looks like a crashed tab.
+   *
+   * Awaited like the abandon, for the #38 reason — `router.push` is a soft
+   * navigation, so there is nothing to outrun and the click's work should be
+   * done before the screen changes — but the outcome is only logged, never
+   * blocking. The dialog promised the candidate an *absence*: this épreuve will
+   * not count and will not appear. An exit whose write failed produces exactly
+   * that, so there is no broken promise to report and no retry to offer.
+   *
+   * No `router.refresh()`, unlike the abandon: nothing the destination renders
+   * changed. An archived préparation reaches no historique, no sujet card and no
+   * tableau de bord — the walk-out needed the refresh precisely because its
+   * zero does.
+   */
+  const quitPreparation = async () => {
+    if (quittingPreparation) return;
+    setQuittingPreparation(true);
+
+    const outcome = await requestPreparationExit(examId);
+    if (!outcome.recorded) {
+      console.warn("[preparation] the exit was not archived on the server", outcome);
+    }
+
+    leave();
+  };
+
+  /**
    * Every failure the épreuve can produce, in the order a candidate cares about
    * it: the connection that has stopped coming back, then the microphone. Both
    * are messages first and a control second — a red button on its own is not an
@@ -353,9 +608,9 @@ export function ExamClient({ examId, topic }: { examId: string; topic: OralTopic
             </button>
           }
         >
-          Les tentatives automatiques de reconnexion n&apos;ont pas abouti. Le
-          temps de cette partie continue de s&apos;écouler et ce qui a déjà été
-          dit est conservé. Vérifiez votre connexion internet, puis reprenez.
+          Les tentatives automatiques de reconnexion n&apos;ont pas abouti. Le temps de cette partie
+          continue de s&apos;écouler et ce qui a déjà été dit est conservé. Vérifiez votre connexion
+          internet, puis reprenez.
         </Notice>
       )}
 
@@ -384,44 +639,36 @@ export function ExamClient({ examId, topic }: { examId: string; topic: OralTopic
     <>
       {notices}
       {canEncode === false && (
-        <Notice
-          tone="danger"
-          title="Votre navigateur ne peut pas envoyer l'enregistrement"
-        >
-          Il ne sait pas compresser l&apos;audio. Votre prestation sera corrigée à
-          partir de la transcription seule, sans écoute de votre prononciation, et
-          la pénalité de durée s&apos;appliquera comme si aucun enregistrement
-          n&apos;existait. Passez plutôt l&apos;épreuve sur une version récente de
-          Chrome, Edge, Safari ou Firefox.
+        <Notice tone="danger" title="Votre navigateur ne peut pas envoyer l'enregistrement">
+          Il ne sait pas compresser l&apos;audio. Votre prestation sera corrigée à partir de la
+          transcription seule, sans écoute de votre prononciation, et la pénalité de durée
+          s&apos;appliquera comme si aucun enregistrement n&apos;existait. Passez plutôt
+          l&apos;épreuve sur une version récente de Chrome, Edge, Safari ou Firefox.
         </Notice>
       )}
     </>
   );
 
   /**
-   * The phase is open but has not begun: the consigne is playing, or is held
-   * waiting for a click the browser's autoplay policy made necessary (#37).
-   *
-   * Derived here rather than added to `ExamState`, because it is exactly the two
-   * flags below in the two phases this branch renders — and the screens it feeds
-   * need it to keep from printing "you are being recorded and your time has
-   * started" over a phase where neither is true yet.
+   * The phase is open but has not begun: the consigne is playing (#37). A
+   * consigne the browser refused to autoplay no longer holds a phase — the
+   * controller forfeits it and moves on — so this is one flag now, kept under
+   * its own name because the screens it feeds read it as a statement about the
+   * phase, not about audio.
    */
-  const awaitingConsigne = state.announcementPlaying || state.announcementBlocked;
+  const awaitingConsigne = state.announcementPlaying;
 
   /**
    * The examiner's spoken consigne, on every screen it can appear on (#37, #59).
    *
    * One element handed to whichever screen is up, rather than each screen
    * building its own: the control has to survive the préparation → monologue
-   * boundary looking like the same control, and the two controller calls behind
-   * it should not be written down twice.
+   * boundary looking like the same control, and the controller call behind it
+   * should not be written down twice.
    */
   const announcement = (
     <AnnouncementControl
       playing={state.announcementPlaying}
-      blocked={state.announcementBlocked}
-      onPlay={() => controller.playAnnouncement()}
       onSkip={() => controller.skipAnnouncement()}
     />
   );
@@ -431,7 +678,7 @@ export function ExamClient({ examId, topic }: { examId: string; topic: OralTopic
   if (state.phase === "finished") {
     return (
       <FinishedScreen
-        submitting={submitting}
+        stage={finishStage(submitting, uploadFraction, awaitingCorrection)}
         submitError={submitError}
         droppedPhases={droppedPhases}
         onRetry={() => {
@@ -444,6 +691,10 @@ export function ExamClient({ examId, topic }: { examId: string; topic: OralTopic
     );
   }
 
+  // The walk-out confirmation, from the exposé onwards only. The préparation
+  // renders its own dialog below (#113): this one's zero is a promise the
+  // product keeps by stamping `abandoned_at`, and before the exposé there is no
+  // performance for that zero to be about.
   const exitDialog = (
     <ExitDialog
       open={showExitDialog}
@@ -467,13 +718,21 @@ export function ExamClient({ examId, topic }: { examId: string; topic: OralTopic
           onNotes={setNotes}
           remaining={state.remaining}
           onStartExam={() => void controller.advanceEarly()}
-          onExit={() => setShowExitDialog(true)}
-          canEncode={canEncode}
+          onExit={() => setShowQuitPreparation(true)}
           checking={checkingBrowser}
+          examinerModel={examinerModel}
+          examinerSaving={examinerSaving}
+          examinerError={examinerError}
+          onChooseExaminer={(model) => void chooseExaminer(model)}
           notices={hasNotices || canEncode === false ? preparationNotices : undefined}
           announcement={announcement}
         />
-        {exitDialog}
+        <QuitPreparationDialog
+          open={showQuitPreparation}
+          pending={quittingPreparation}
+          onCancel={() => setShowQuitPreparation(false)}
+          onConfirm={() => void quitPreparation()}
+        />
       </>
     );
   }
@@ -488,6 +747,7 @@ export function ExamClient({ examId, topic }: { examId: string; topic: OralTopic
         remaining={state.remaining}
         recording={state.recording}
         examinerSpeaking={state.examinerSpeaking}
+        openingQuestionPending={state.openingQuestionPending}
         connected={state.connection === "connected"}
         connecting={state.connection === "connecting"}
         canAdvance={state.canAdvance}
@@ -508,6 +768,46 @@ export function ExamClient({ examId, topic }: { examId: string; topic: OralTopic
         devPanel={
           DEV_TOOLS_ENABLED ? (
             <div className="space-y-2">
+              {/* The débat and nowhere else (#153). The monologue's examiner is
+                  silent by design — the transport withholds its turn, and its prompt's
+                  whole content is « tu écoutes et tu ne parles pas » — so a prompt
+                  experiment there has nothing observable to test. The débat is where
+                  the examiner argues, and where editing how it argues means something. */}
+              {state.phase === "debate" && (
+                <DevExaminerPromptPanel
+                  topicSlug={topic.slug}
+                  examinerModel={examinerModel}
+                  active={promptPanelOpen}
+                  modified={state.examinerPromptModified}
+                  sessionOpen={state.examinerSessionOpen}
+                  saved={savedPrompt}
+                  onActiveChange={setPromptPanelOpen}
+                  // Store, then make it govern something: a system instruction is
+                  // fixed for a session's lifetime, so the restart is what turns an
+                  // edit into behaviour. A no-op when no session is open, where the
+                  // next connect picks the prompt up anyway.
+                  //
+                  // Then write it down (#166), so the next sitting on this sujet
+                  // opens under it. Last of the three: the save is a promise about
+                  // later épreuves, and making it before this one is actually
+                  // running the prompt would be promising the wrong thing.
+                  onApply={(prompt, promptVersion) => {
+                    controller.setExaminerPrompt(prompt);
+                    controller.restartExaminerSession();
+                    saveExaminerPrompt(topic.slug, prompt, promptVersion);
+                  }}
+                  // « Réinitialiser » erases the save too, and has to: it is
+                  // offered as the way back to the shipped instruction, and one
+                  // that left the prompt to return on the next sitting would be
+                  // the most confusing control in the panel.
+                  onReset={() => {
+                    controller.setExaminerPrompt(null);
+                    controller.restartExaminerSession();
+                    clearSavedExaminerPrompt(topic.slug);
+                  }}
+                />
+              )}
+
               {/* The exposé and nowhere else. The débat is spoken, and the
                   controller hands the microphone back when the monologue ends
                   so it can be. */}
@@ -529,21 +829,36 @@ export function ExamClient({ examId, topic }: { examId: string; topic: OralTopic
                   onSubmit={(text, seconds) => controller.submitTypedExpose(text, seconds)}
                 />
               )}
-              {/* Drives the path a real GoAway takes, so the 13-minute
-                  resumption behaviour can be exercised in seconds instead of
-                  waiting for the connection limit. Stands down once the real
-                  recovery control is on screen in the notice above — two
-                  buttons doing the same thing side by side is how a developer
-                  ends up testing the wrong one. */}
-              {state.status !== "error" && (
-                <button
-                  type="button"
-                  onClick={() => void controller.forceReconnect()}
-                  className="border-border text-muted-foreground rounded-md border px-3 py-1.5 text-xs font-semibold"
-                >
-                  Forcer une reconnexion ({state.reconnectCount})
-                </button>
-              )}
+              {/* The time skip, underneath the prompt (#183). It used to be a
+                  `fixed bottom-24 left-4` pill rendered beside the passation
+                  screen — the reference's own placement (#149) — which put it
+                  on top of the conversation column the candidate is reading.
+                  In the cluster it is the last row of the one corner every
+                  other dev control already occupies.
+
+                  The conditions are unchanged and still the reference's: only
+                  while the part is actually running and not closing, since a
+                  skip on an armed clock has nothing to move and one during the
+                  handshake would race the end it is asking for. The held
+                  monologue hides it too, because `tick()` re-anchors a held
+                  clock and would silently undo the jump. */}
+              {(state.phase === "monologue" || state.phase === "debate") &&
+                state.phaseStartedAt !== null &&
+                !state.closing &&
+                !state.monologueHeld && (
+                  <DevTimeSkip
+                    onSkip={(seconds) => controller.devSkipTime(seconds)}
+                    onSkipToEnd={() => controller.devSkipToEnd()}
+                  />
+                )}
+
+              {/* « Forcer une reconnexion » stood here and is gone (#163). It
+                  drove the path a real GoAway takes, which is worth exercising
+                  — but it did it from the control bar, in the row the dev
+                  popovers open out of, and a plain bordered button among them
+                  was the widest thing in that corner. `forceReconnect()` is
+                  untouched: the recovery notice's « Reprendre la connexion »
+                  is the same call, and it is the one a candidate can reach. */}
             </div>
           ) : undefined
         }

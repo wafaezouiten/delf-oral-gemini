@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 
 import {
   MAX_PHASE_SECONDS,
+  MAX_RECONNECTS,
   MAX_TRANSCRIPT_CHARS,
   MAX_TURNS,
   MAX_TURN_CHARS,
@@ -210,6 +211,55 @@ describe("keeping the audit trail worth having", () => {
     assert.equal(accepts(payload({ reconnectCount: -1 })), false);
   });
 
+  it("refuses a reconnect count no sitting could produce", () => {
+    // Two things behind the bound, and only one of them was theoretical
+    // (raised in review of #196). `oral_exams.reconnect_count` is an
+    // `integer`, so a claim past 2^31 passed `nonnegative()`, reached the
+    // INSERT and failed it — costing the candidate their whole correction,
+    // shown to them as « correction perdue ». And since #189 the number is
+    // interpolated into the corrector's prompt, where « interrompue
+    // 999999999 fois » is not a sentence to put in front of a model about to
+    // grade somebody.
+    assert.equal(accepts(payload({ reconnectCount: MAX_RECONNECTS })), true);
+    assert.equal(accepts(payload({ reconnectCount: MAX_RECONNECTS + 1 })), false);
+    assert.equal(accepts(payload({ reconnectCount: 3_000_000_000 })), false);
+  });
+
+  it("leaves room for every reconnect a real sitting could have", () => {
+    // The bound must never refuse an honest client, and this is the assertion
+    // that decides the figure rather than a round number chosen by eye: an
+    // épreuve runs about 20 minutes, so a pathological sitting dropping every
+    // two seconds throughout lands near 600. The first bound written here was
+    // 500, and this caught it.
+    const worstCaseSitting = (20 * 60) / 2;
+    assert.ok(
+      MAX_RECONNECTS > worstCaseSitting,
+      `${MAX_RECONNECTS} would refuse a sitting that dropped ${worstCaseSitting} times`,
+    );
+  });
+
+  describe("the early-closing count (#92)", () => {
+    // The one number in this payload that can RAISE a grade: positive, it
+    // waives the débat's penalties. Bounded like `reconnectCount`, but with a
+    // default where that field has none — see the schema for the deploy story.
+    it("accepts what the controller counts", () => {
+      assert.equal(accepts(payload({ earlyClosingCount: 0 })), true);
+      assert.equal(accepts(payload({ earlyClosingCount: 3 })), true);
+    });
+
+    it("defaults an absent field to zero, for the sitting in flight across the deploy", () => {
+      const parsed = finishPayloadSchema.safeParse(payload());
+      assert.ok(parsed.success);
+      assert.equal(parsed.data.earlyClosingCount, 0);
+    });
+
+    it("refuses the shapes that could not have been counted", () => {
+      assert.equal(accepts(payload({ earlyClosingCount: -1 })), false);
+      assert.equal(accepts(payload({ earlyClosingCount: 1.5 })), false);
+      assert.equal(accepts(payload({ earlyClosingCount: Number.NaN })), false);
+    });
+  });
+
   describe("the development duration claim (#36)", () => {
     // The only field in this payload that can reach a mark. The schema is not
     // what stops it being abused — the route ignores it in production and lets
@@ -240,9 +290,58 @@ describe("keeping the audit trail worth having", () => {
     });
 
     it("is bounded by the same ceiling as the wall clock beside it", () => {
-      assert.equal(accepts(payload({ devSeconds: { monologue: MAX_PHASE_SECONDS, debate: 0 } })), true);
+      assert.equal(
+        accepts(payload({ devSeconds: { monologue: MAX_PHASE_SECONDS, debate: 0 } })),
+        true,
+      );
       assert.equal(
         accepts(payload({ devSeconds: { monologue: MAX_PHASE_SECONDS + 1, debate: 0 } })),
+        false,
+      );
+    });
+  });
+
+  describe("what the microphone heard, per part", () => {
+    // The only field here that cannot raise a mark: the route reads it to
+    // REFUSE to produce one, when a part carries minutes of voiced speech and
+    // almost no transcript. So the bounds are about arithmetic that must not be
+    // poisoned, not about a claim that must not be believed.
+    it("is optional, because a page from before the field has no evidence to offer", () => {
+      // A candidate mid-sitting across the deploy finishes from a controller
+      // that has never heard of it, and a 400 there costs them the épreuve.
+      assert.equal(accepts(payload()), true);
+      assert.equal(accepts(payload({ voicedSeconds: undefined })), true);
+    });
+
+    it("accepts a plausible pair, including a sitting nobody spoke in", () => {
+      assert.equal(accepts(payload({ voicedSeconds: { monologue: 280, debate: 410 } })), true);
+      assert.equal(accepts(payload({ voicedSeconds: { monologue: 0, debate: 0 } })), true);
+    });
+
+    it("refuses a half-filled pair, so neither part can default silently", () => {
+      assert.equal(accepts(payload({ voicedSeconds: { monologue: 280 } })), false);
+      assert.equal(accepts(payload({ voicedSeconds: {} })), false);
+    });
+
+    it("refuses the values that would poison the comparison", () => {
+      assert.equal(
+        accepts(payload({ voicedSeconds: { monologue: Number.NaN, debate: 0 } })),
+        false,
+      );
+      assert.equal(accepts(payload({ voicedSeconds: { monologue: -1, debate: 0 } })), false);
+      assert.equal(
+        accepts(payload({ voicedSeconds: { monologue: Number.POSITIVE_INFINITY, debate: 0 } })),
+        false,
+      );
+    });
+
+    it("is bounded by the same ceiling as the wall clock beside it", () => {
+      assert.equal(
+        accepts(payload({ voicedSeconds: { monologue: MAX_PHASE_SECONDS, debate: 0 } })),
+        true,
+      );
+      assert.equal(
+        accepts(payload({ voicedSeconds: { monologue: MAX_PHASE_SECONDS + 1, debate: 0 } })),
         false,
       );
     });

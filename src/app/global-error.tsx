@@ -38,8 +38,7 @@ export default function GlobalError({ error, retry }: ErrorPageProps) {
           alignItems: "center",
           justifyContent: "center",
           padding: "1.5rem",
-          fontFamily:
-            "system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif",
+          fontFamily: "system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif",
           colorScheme: "light dark",
           background: "Canvas",
           color: "CanvasText",
@@ -63,8 +62,8 @@ export default function GlobalError({ error, retry }: ErrorPageProps) {
             L&apos;application n&apos;a pas pu démarrer
           </h1>
           <p style={{ margin: "0.75rem 0 0", lineHeight: 1.6, opacity: 0.8 }}>
-            Le problème vient de notre côté. Réessayez dans un instant ; si vous
-            étiez en train de passer une épreuve, elle a été interrompue.
+            Le problème vient de notre côté. Réessayez dans un instant ; si vous étiez en train de
+            passer une épreuve, elle a été interrompue.
           </p>
           <button
             type="button"

@@ -17,6 +17,7 @@ import {
   type LiveSocketCallbacks,
   type LiveTokenClientRequest,
   type LiveTransport,
+  type MintedLiveToken,
   type SessionManagerCallbacks,
   type SessionTimers,
 } from "./session-manager";
@@ -110,6 +111,9 @@ class FakeTransport implements LiveTransport {
   sockets: FakeSocket[] = [];
   /** Number of upcoming mints that should fail, simulating a token route outage. */
   failMints = 0;
+  /** When set, mints answer with THIS model regardless of the request — the
+   *  sitting's stored choice outranking the client's, as the real gate does. */
+  mintModel: string | null = null;
   private minted = 0;
   private mintGate: MintGate | null = null;
   private openGate: Promise<void> | null = null;
@@ -146,7 +150,7 @@ class FakeTransport implements LiveTransport {
     };
   }
 
-  async mintToken(request: LiveTokenClientRequest): Promise<string> {
+  async mintToken(request: LiveTokenClientRequest): Promise<MintedLiveToken> {
     this.tokenRequests.push({ ...request });
     const gate = this.mintGate;
     if (gate) {
@@ -158,7 +162,9 @@ class FakeTransport implements LiveTransport {
       throw new Error("token route unavailable");
     }
     this.minted += 1;
-    return `token-${this.minted}`;
+    // As the real route does: the requested model when one arrives, the
+    // default otherwise — and the session must open with what came BACK.
+    return { token: `token-${this.minted}`, model: this.mintModel ?? request.model ?? LIVE_MODEL };
   }
 
   async open(params: {
@@ -273,7 +279,10 @@ interface Harness {
 function harness(
   overrides: {
     phase?: "monologue" | "debate";
-    initialHistory?: Array<{ role: "user" | "model"; parts: Array<{ text: string }> }>;
+    model?: string;
+    initialHistory?:
+      | Array<{ role: "user" | "model"; parts: Array<{ text: string }> }>
+      | (() => Array<{ role: "user" | "model"; parts: Array<{ text: string }> }>);
     maxReconnectAttempts?: number;
   } = {},
 ): Harness {
@@ -285,6 +294,7 @@ function harness(
     examId: "42",
     phase: overrides.phase ?? "debate",
     topic: TOPIC,
+    model: overrides.model,
     callbacks,
     initialHistory: overrides.initialHistory,
     transport,
@@ -317,14 +327,44 @@ describe("session creation", () => {
       examId: "42",
       phase: "monologue",
       topicSlug: TOPIC.slug,
+      // Absent when the candidate never chose an examiner: the server decides,
+      // exactly as it did before the picker existed (#99).
+      model: undefined,
       // Absent on a first connect: there is nothing to resume yet, and its
       // absence is what makes this a `connecting` rather than a `resuming`.
       resumptionHandle: undefined,
+      examinerPrompt: undefined,
     });
     assert.equal(h.transport.opens.length, 1);
     assert.equal(h.transport.opens[0].token, "token-1", "the minted token opens the socket");
     assert.equal(h.transport.opens[0].model, LIVE_MODEL);
     assert.equal(h.session.connectionState, "connected");
+  });
+
+  it("opens the socket with the model the SERVER minted, not its own idea of it", async () => {
+    // The token's constraint pins one model; a connect naming another is a
+    // dead session. So the chosen examiner travels UP with every mint, and
+    // whatever the server decided travels BACK and names the socket (#99).
+    const h = harness({ model: "gemini-2.5-flash-native-audio-preview-12-2025" });
+    await h.session.connect();
+
+    assert.equal(
+      h.transport.tokenRequests[0].model,
+      "gemini-2.5-flash-native-audio-preview-12-2025",
+    );
+    assert.equal(h.transport.opens[0].model, "gemini-2.5-flash-native-audio-preview-12-2025");
+  });
+
+  it("defers to the server when its decision differs from the session's own", async () => {
+    // The sitting's stored choice outranks whatever this tab believes — the
+    // row is the record of what the candidate heard, and the token was minted
+    // for the row's examiner. Opening with the local one would be a session
+    // the constraint refuses.
+    const h = harness({ model: "gemini-2.5-flash-native-audio-preview-12-2025" });
+    h.transport.mintModel = LIVE_MODEL;
+    await h.session.connect();
+
+    assert.equal(h.transport.opens[0].model, LIVE_MODEL);
   });
 
   it("reports idle, connecting, connected, in that order", async () => {
@@ -401,6 +441,104 @@ describe("session configuration", () => {
 
     assert.deepEqual(h.transport.socket.realtime.at(-1), { text: "Ouvre le débat." });
     assert.equal(h.transport.socket.contents.length, 0);
+  });
+});
+
+// ------------------------------------------------------- the monologue's floor
+
+/**
+ * An open candidate activity is a fact about the PHASE, and every one of these
+ * is about it surviving a socket that is not.
+ *
+ * What was wrong: the marker was sent once, on the first socket, and a session
+ * that replaced that socket — which is this class's entire job — left the new
+ * one with no activity open. Audio arriving outside an activity is not part of
+ * a turn, and the monologue's transcript is emitted at the turn boundary and
+ * NOWHERE ELSE, so what a candidate said after a reconnect was never
+ * transcribed. Nothing threw. The correction page called them absent for it.
+ */
+describe("the monologue's floor, across sockets", () => {
+  it("reopens the candidate's activity on a reconnect", async () => {
+    const h = harness({ phase: "monologue" });
+    await h.session.connect();
+    h.session.beginCandidateActivity();
+    h.transport.socket.emit(resumptionUpdate("handle-one"));
+
+    h.transport.socket.drop();
+    await flush();
+
+    assert.deepEqual(
+      h.transport.socket.realtime.filter((input) => input.activityStart),
+      [{ activityStart: {} }],
+      "the replacement socket is told the candidate still holds the floor",
+    );
+    assert.ok(h.eventNames().includes("activity-reopened"), "and the log says it happened");
+  });
+
+  it("reopens it before flushing what the candidate said during the outage", async () => {
+    // Order, not merely presence: those chunks are the candidate mid-sentence.
+    // Flushed in front of the marker they would land outside the turn, which is
+    // the same loss this reopening exists to prevent, moved by two lines.
+    const h = harness({ phase: "monologue" });
+    await h.session.connect();
+    h.session.beginCandidateActivity();
+
+    h.transport.socket.drop();
+    h.session.sendAudio("mid-sentence");
+    await flush();
+
+    const kinds = h.transport.socket.realtime.map((input) =>
+      input.activityStart ? "start" : input.audio ? "audio" : "other",
+    );
+    assert.deepEqual(kinds, ["start", "audio"]);
+  });
+
+  it("does not reopen a floor the phase has already released", async () => {
+    // `activityEnd` hands the examiner the turn. Re-opening after it would take
+    // the floor back on the candidate's behalf and cost the closing sentence.
+    const h = harness({ phase: "monologue" });
+    await h.session.connect();
+    h.session.beginCandidateActivity();
+    h.session.endCandidateActivity();
+
+    h.transport.socket.drop();
+    await flush();
+
+    assert.deepEqual(
+      h.transport.socket.realtime.filter((input) => input.activityStart),
+      [],
+    );
+  });
+
+  it("opens the floor on the socket that finally arrives, not the one that failed", async () => {
+    // The monologue whose first connect exhausted its retries, recovered by the
+    // candidate's own « reprendre la connexion ». `beginCandidateActivity` ran
+    // against a null socket, so before the flag existed the marker was never
+    // sent AT ALL — and the entire exposé that followed was never transcribed.
+    const h = harness({ phase: "monologue", maxReconnectAttempts: 1 });
+    h.transport.failMints = 2;
+    await h.session.connect();
+    assert.equal(h.session.connectionState, "failed");
+
+    h.session.beginCandidateActivity();
+    await h.session.reconnect();
+
+    assert.deepEqual(
+      h.transport.socket.realtime.filter((input) => input.activityStart),
+      [{ activityStart: {} }],
+    );
+  });
+
+  it("leaves the débat's sockets alone, since nothing ever opened a floor on them", async () => {
+    const h = harness({ phase: "debate" });
+    await h.session.connect();
+    h.transport.socket.drop();
+    await flush();
+
+    assert.deepEqual(
+      h.transport.socket.realtime.filter((input) => input.activityStart),
+      [],
+    );
   });
 });
 
@@ -539,7 +677,11 @@ describe("reconnection", () => {
     h.transport.socket.drop();
     await flush();
 
-    assert.deepEqual(h.timers.slept, [400, 400], "the second drop starts from the base delay again");
+    assert.deepEqual(
+      h.timers.slept,
+      [400, 400],
+      "the second drop starts from the base delay again",
+    );
     assert.equal(h.session.connectionState, "connected");
   });
 
@@ -603,10 +745,7 @@ describe("reconnection", () => {
     assert.equal(h.transport.socket.audioChunks.length, 50);
     // Bounded, but not silently: a dropped-audio incident has to be visible in
     // the session log, and once per outage rather than once per chunk.
-    assert.equal(
-      h.log.events.filter((event) => event.name === "audio-buffer-overflow").length,
-      1,
-    );
+    assert.equal(h.log.events.filter((event) => event.name === "audio-buffer-overflow").length, 1);
   });
 
   it("ignores the retired socket's close, which lands mid-reconnect", async () => {
@@ -893,6 +1032,117 @@ describe("server messages", () => {
     await h.session.connect();
     h.transport.socket.emit({ serverContent: { interrupted: true } } as LiveServerMessage);
     assert.equal(h.log.interruptions, 1);
+  });
+});
+
+// ------------------------------------------- the reconnect that could not resume
+
+describe("the reconnect that could not resume (#133)", () => {
+  // A socket that dies BEFORE its first `sessionResumptionUpdate` leaves
+  // nothing to resume with: the replacement connect is fresh, and the
+  // examiner's memory of the exchange dies with the old socket. These pin the
+  // two halves of the recovery — the re-seed reads the provider again, and the
+  // amnesia is announced so the controller can tell the examiner where it
+  // stands.
+
+  it("re-seeds a fresh reconnect with what the provider returns NOW", async () => {
+    const turns: Array<{ role: "user" | "model"; parts: Array<{ text: string }> }> = [
+      { role: "user", parts: [{ text: "Mon exposé." }] },
+    ];
+    const h = harness({ phase: "debate", initialHistory: () => [...turns] });
+    await h.session.connect();
+    assert.equal(h.transport.socket.contents.length, 1);
+
+    // The exchange grows while the socket is up; it then dies with no handle
+    // ever received, so the replacement cannot resume.
+    turns.push({ role: "model", parts: [{ text: "Première objection." }] });
+    h.transport.socket.drop();
+    await flush();
+
+    assert.equal(h.session.connectionState, "connected");
+    assert.equal(h.transport.sockets.length, 2);
+    assert.deepEqual(
+      h.transport.socket.contents,
+      [{ turns, turnComplete: false }],
+      "the new session was seeded with the exchange as it stands, not as it started",
+    );
+  });
+
+  it("announces the amnesia, and only the amnesia", async () => {
+    const h = harness();
+    await h.session.connect();
+    assert.ok(!h.eventNames().includes("reconnected-fresh"), "a first connect lost nothing");
+
+    h.transport.socket.drop();
+    await flush();
+    assert.deepEqual(
+      h.eventNames().filter((name) => name === "reconnected-fresh"),
+      ["reconnected-fresh"],
+      "a no-handle reconnect lost the exchange, and says so",
+    );
+  });
+
+  it("stays quiet on a resume, which lost nothing", async () => {
+    const h = harness();
+    await h.session.connect();
+    h.transport.socket.emit(resumptionUpdate("handle-one"));
+    h.transport.socket.drop();
+    await flush();
+
+    assert.equal(h.session.connectionState, "connected");
+    assert.ok(!h.eventNames().includes("reconnected-fresh"));
+  });
+
+  it("announces it only once the new socket can carry the answer", async () => {
+    // The `connected` event fires from `onopen`, while the session's socket
+    // field is still null — a directive sent in response to it would be
+    // silently dropped. The recovery answers `reconnected-fresh` instead,
+    // which is emitted after the socket is installed and seeded, so the
+    // directive reaches the examiner, after the re-seeded history.
+    const transport = new FakeTransport();
+    const timers = new TestTimers();
+    const { callbacks, log } = recorder();
+    const session: ExamLiveSession = new ExamLiveSession({
+      examId: "42",
+      phase: "debate",
+      topic: TOPIC,
+      callbacks: {
+        ...callbacks,
+        onEvent: (name, detail) => {
+          callbacks.onEvent(name, detail);
+          if (name === "reconnected-fresh") session.sendDirective("[Reprends le débat.]");
+        },
+      },
+      initialHistory: () => [{ role: "user", parts: [{ text: "Mon exposé." }] }],
+      transport,
+      timers,
+    });
+
+    await session.connect();
+    transport.socket.drop();
+    await flush();
+
+    assert.equal(transport.socket.contents.length, 1, "the new socket was seeded first");
+    assert.deepEqual(transport.socket.realtime, [{ text: "[Reprends le débat.]" }]);
+    assert.ok(log.events.some((event) => event.name === "directive-sent"));
+  });
+
+  it("never degrades an exhausted resume to a fresh session", async () => {
+    // The amnesia path is exactly the no-handle one. A resume that runs out of
+    // attempts fails — it does not fall back to reopening the débat with no
+    // memory, which would trade a visible outage for a silent restart.
+    const h = harness({ maxReconnectAttempts: 2 });
+    await h.session.connect();
+    h.transport.socket.emit(resumptionUpdate("handle-one"));
+    h.transport.failMints = 99;
+    h.transport.socket.drop();
+    await flush();
+
+    assert.equal(h.session.connectionState, "failed");
+    assert.ok(!h.eventNames().includes("reconnected-fresh"));
+    for (const request of h.transport.tokenRequests.slice(1)) {
+      assert.equal(request.resumptionHandle, "handle-one", "every attempt presented the handle");
+    }
   });
 });
 

@@ -4,12 +4,7 @@ import type { ReactNode } from "react";
 
 import { AlertIcon, LoadingIcon, MicIcon, PencilIcon, StopIcon } from "@/app/_components/po/icons";
 import { cn } from "@/lib/ui/class-names";
-import {
-  micCopy,
-  secondsToMonologueFloor,
-  type MicState,
-  type SpeakingPhase,
-} from "@/lib/ui/po-player-view";
+import { micCopy, micState, type MicState, type SpeakingPhase } from "@/lib/ui/po-player-view";
 
 /**
  * The passation control bar, docked at the foot: the notes toggle on the left,
@@ -31,11 +26,17 @@ import {
  * to a correction, and a button that silently skipped the débat would be
  * offering one.
  *
- * The monologue's five-minute floor (`canAdvanceEarly`) is shown as time still
- * owed under the mic rather than baked into a long button label. The reference
- * has no analogue; this project's previous screen carried it as the button's
- * own text, which meant the label changed every sixty seconds under a candidate
- * who might be reading it.
+ * The mic also used to have a fifth state: a monologue that had not yet run the
+ * minute `canAdvanceEarly` demanded showed a greyed-out control with a countdown
+ * under it. The floor is gone (#171), so the control is an offer in every state
+ * a candidate can reach — which is what the reference's always was.
+ *
+ * **The round control is 48 px rather than 56, and the armed pill 40 rather than
+ * 44 (#183).** Both are still well past the 44 px a touch target needs, and the
+ * red disc was reading as the loudest thing on a screen whose subject is the
+ * examiner: it is the control you press twice in twenty minutes, at the end of
+ * each half. Shrinking it also gives the hint under it and the two buttons
+ * beside it room in the 56 px bar on a phone, where the row was wrapping.
  */
 export function ConversationControls({
   phase,
@@ -45,7 +46,6 @@ export function ConversationControls({
   awaitingStart = false,
   startDisabled = false,
   closing = false,
-  elapsed,
   hasNotes,
   notesOpen,
   onToggleNotes,
@@ -69,18 +69,27 @@ export function ConversationControls({
    * about to start speaking or stop.
    */
   awaitingStart?: boolean;
-  /** Armed, but not yet startable: the examiner is still giving the consigne. */
+  /**
+   * Armed, but not yet startable: the examiner is still giving the consigne.
+   *
+   * The control keeps « Enregistrer » and its hint throughout and only greys
+   * out (#176) — the candidate reads one label for the whole part-that-has-not-
+   * begun, and the only thing that changes when the voice ends is that the
+   * button becomes pressable. What is happening meanwhile is said next to the
+   * examiner, by `examinerStatus`, and by the consigne's own « Passer » button.
+   */
   startDisabled?: boolean;
   /**
    * The click has been taken and the part is ending: the examiner is delivering
    * its closing sentence (#55).
    *
-   * Without this the control fell back to `locked` — `canAdvance` goes false the
-   * moment the handshake starts — and printed « Encore 0 min avant de pouvoir
-   * conclure » over a monologue that was already concluding.
+   * It has to be said here rather than inferred: `canAdvance` goes false the
+   * moment the handshake starts, and with no floor left to explain that
+   * (#171) the control would read a part that is already concluding as one the
+   * candidate could still press — the spinner, the disabled state and « Terminé »
+   * all come from this flag alone.
    */
   closing?: boolean;
-  elapsed: number;
   hasNotes: boolean;
   notesOpen: boolean;
   onToggleNotes: () => void;
@@ -94,28 +103,28 @@ export function ConversationControls({
    *  empty-transcript notice rather than under the conversation (#36). */
   devPanel?: ReactNode;
 }) {
-  // Armed outranks everything: a part that has not begun is not connecting, and
-  // it is not locked behind a floor it has not started counting towards. Closing
-  // comes next, and for the same kind of reason: a part that is ending is not
-  // waiting for a floor it passed, whatever `canAdvance` says about it.
-  const state: MicState = awaitingStart
-    ? "armed"
-    : closing
-      ? "closing"
-      : connecting
-        ? "connecting"
-        : canAdvance
-          ? "recording"
-          : "locked";
-  const { hint, label, button } = micCopy(phase, state, secondsToMonologueFloor(elapsed));
+  // The ladder is `micState`'s, next to the copy it selects and tested there:
+  // its last branch is a fall-through, and what lands in it is exactly what this
+  // control will claim about a state nobody thought of (#176).
+  const state: MicState = micState({ awaitingStart, closing, connecting });
+  const { hint, label, button } = micCopy(phase, state);
   const armed = state === "armed";
-  const locked = state === "locked";
   /** Nothing the candidate presses now changes what happens next, so the control
    *  stops looking like an offer. */
-  const inert = locked || state === "closing";
+  const inert = state === "closing";
 
   return (
-    <div className="border-border bg-card/95 relative shrink-0 border-t backdrop-blur">
+    // `z-20` on the bar, and it is the dev popovers that need it (#163).
+    // `backdrop-blur` makes this element a stacking context, so a popover
+    // inside it cannot climb out with a `z-` of its own however large — its
+    // twenty is counted among the bar's children. The débat's scene row is
+    // `sticky top-0 z-10` inside a `<main>` that is `relative` with no
+    // z-index, so no stacking context is formed there and that ten is counted
+    // against the page. The two were never in the same contest: the scene card
+    // painted over the prompt being edited, mid-word. Raising the bar puts
+    // both of its popovers above the column, and leaves the notes drawer's
+    // `z-40` where it was, covering the bar as it is meant to.
+    <div className="border-border bg-card/95 relative z-20 shrink-0 border-t backdrop-blur">
       {/* The controls stay in a centred 760px column; the alert is pushed out of
           it, into the bar's own right-hand corner — see the `xl:absolute` on it
           below. Positioning it against THIS element rather than the column is
@@ -156,8 +165,8 @@ export function ConversationControls({
               // Armed, the control is a pill with a word in it: it is starting
               // something, and the round stop-button shape reads as ending one.
               armed
-                ? "bg-danger h-11 rounded-full px-5 text-sm font-semibold text-white hover:opacity-90"
-                : "size-14 rounded-full",
+                ? "bg-danger h-10 rounded-full px-5 text-sm font-semibold text-white hover:opacity-90"
+                : "size-12 rounded-full",
               !armed &&
                 (recording && !inert
                   ? "bg-danger text-white hover:opacity-90"
@@ -167,13 +176,16 @@ export function ConversationControls({
             )}
           >
             {/* The ring says "you are live", so it follows the microphone and
-                not the button's enabled state: it keeps pulsing through the
-                locked minutes, when the candidate is very much being recorded.
-                Never while armed — nothing is being captured yet, and a pulsing
+                not the button's enabled state — it keeps pulsing through the
+                closing handshake, when the candidate is still being recorded.
+                Never while armed: nothing is being captured yet, and a pulsing
                 ring over a part that has not started is the same false claim the
                 recording badge is written to avoid. */}
             {recording && !armed && (
-              <span className="po-ring border-danger absolute -inset-1 rounded-full border-2" aria-hidden />
+              <span
+                className="po-ring border-danger absolute -inset-1 rounded-full border-2"
+                aria-hidden
+              />
             )}
             {armed ? (
               <>
@@ -183,18 +195,17 @@ export function ConversationControls({
             ) : connecting || state === "closing" ? (
               // The same spinner the connection uses, for the same reason: the
               // épreuve is waiting on the examiner and the candidate is not.
-              <LoadingIcon className="size-6 animate-spin" />
-            ) : locked ? (
-              <MicIcon className="size-6" />
+              <LoadingIcon className="size-5 animate-spin" />
             ) : (
-              <StopIcon className="size-6" />
+              <StopIcon className="size-5" />
             )}
           </button>
-          {/* Not a live region: it changes once a minute during the locked
-              window, and a screen reader reciting the countdown over the
-              examiner is the fault the clock's milestones exist to avoid. The
-              button's own name carries the same fact on demand, and the close is
-              announced by the status line above the controls. */}
+          {/* Not a live region. It used to change every minute, counting a
+              monologue down to its floor, and a screen reader reciting that over
+              the examiner is the fault the clock's milestones exist to avoid.
+              The floor is gone (#171), but the reason holds for the close this
+              line still describes: the status line above the controls is what
+              says that one out loud. */}
           <span className="text-muted-foreground text-center text-[0.6875rem]">{hint}</span>
         </div>
 
@@ -204,9 +215,7 @@ export function ConversationControls({
             onClick={onAdvance}
             disabled={phase !== "debate" || !canAdvance}
             title={
-              phase === "debate"
-                ? undefined
-                : "Le débat doit avoir lieu avant la fin de l'épreuve."
+              phase === "debate" ? undefined : "Le débat doit avoir lieu avant la fin de l'épreuve."
             }
             className="bg-primary text-primary-foreground h-9 shrink-0 rounded-md px-4 text-xs font-semibold transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
           >
@@ -222,9 +231,21 @@ export function ConversationControls({
               The alert and the development panel share one wrapper because they
               are about the same thing — the transcript, and its being empty —
               and because they must move together: two separately-positioned
-              elements in one corner is how they end up on top of each other. */}
+              elements in one corner is how they end up on top of each other.
+
+              `xl:inset-y-0` with `content-center` rather than the half-height
+              offset and translate that did the same centring before (#163),
+              and the difference is what the dev popover measures itself
+              against. A popover inside this cluster is positioned against IT
+              from `xl` up and against the bar below it, so a cap written in
+              percentages meant two different heights on two sides of one
+              breakpoint. Spanning the bar makes them the same height, and the
+              cap true at every width. The row still sits in the middle of the
+              bar — `items-center` centres one line, `content-center` centres
+              two — and the translate is gone with the offset, which also stops
+              this cluster forming a containing block of its own. */}
           {(emptyTranscript || devPanel) && (
-            <div className="flex flex-wrap items-center gap-2 xl:absolute xl:top-1/2 xl:right-6 xl:-translate-y-1/2">
+            <div className="flex flex-wrap items-center gap-2 xl:absolute xl:inset-y-0 xl:right-6 xl:content-center">
               {emptyTranscript && (
                 <div
                   role="alert"
@@ -232,9 +253,7 @@ export function ConversationControls({
                 >
                   <AlertIcon className="size-4 shrink-0" />
                   <div className="min-w-0">
-                    <p className="text-xs font-semibold whitespace-nowrap">
-                      Transcription vide
-                    </p>
+                    <p className="text-xs font-semibold whitespace-nowrap">Transcription vide</p>
                     <p className="text-[0.6875rem] leading-snug whitespace-nowrap">
                       Chronomètre arrêté.
                     </p>

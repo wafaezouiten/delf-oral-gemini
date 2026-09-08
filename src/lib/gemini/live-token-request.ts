@@ -29,6 +29,8 @@
 import type { ExamAccess } from "@/lib/auth/exam-access";
 import { EXAM_ACCESS_DENIALS } from "@/lib/auth/exam-access";
 import { findTopic } from "@/lib/delf/topics";
+import { LIVE_MODEL, isSelectableLiveModel } from "@/lib/gemini/constants";
+import { MAX_EXAMINER_PROMPT_LENGTH } from "@/lib/ui/dev-examiner-prompt";
 
 /** The two phases that open a Live session. `preparation` is silent by design. */
 export type LiveTokenPhase = "monologue" | "debate";
@@ -49,13 +51,28 @@ export interface LiveTokenRequest {
   examId: string;
   /** What the client asked for. Only used when no sitting can be read. */
   requestedTopicSlug: string;
+  /**
+   * The examiner the client asked for (#99). Optional — an absent model means
+   * the default — and, like the slug, only used when no sitting can be read:
+   * the stored choice outranks it whenever a row answers.
+   */
+  requestedModel?: string;
   /** Present only on a reconnect. Its presence is what makes the connect a resume. */
   resumptionHandle?: string;
+  /**
+   * DEVELOPMENT ONLY — a replacement examiner system instruction (#152).
+   *
+   * Parsed here, but deliberately NOT honoured here: {@link gateLiveToken}
+   * drops it unless the caller says the development tooling is on. Validating
+   * and authorising in two steps is the same shape the subject and the model
+   * already have, and it is what lets the refusal be unit-tested without a
+   * request object.
+   */
+  requestedExaminerPrompt?: string;
 }
 
 export type LiveTokenParse =
-  | { ok: true; request: LiveTokenRequest }
-  | { ok: false; status: number; error: string };
+  { ok: true; request: LiveTokenRequest } | { ok: false; status: number; error: string };
 
 /**
  * Validate the request body.
@@ -83,13 +100,50 @@ export function parseLiveTokenRequest(body: unknown): LiveTokenParse {
     return { ok: false, status: 400, error: "Sujet inconnu" };
   }
 
+  // The one part of the pinned config a client may now have an opinion on, so
+  // it is checked against the verified allow-list rather than merely
+  // type-checked (#99). Refused loudly rather than coerced: an unknown id that
+  // reached the constraint would not fail here — it would open a socket and
+  // kill it with 1011 and no diagnostic, mid-épreuve.
+  const model = input.model;
+  if (model !== undefined && (typeof model !== "string" || !isSelectableLiveModel(model))) {
+    return { ok: false, status: 400, error: "Modèle inconnu" };
+  }
+
+  // Length-bounded rather than inspected. There is nothing to validate about
+  // the CONTENT of a system instruction — replacing it wholesale is the
+  // feature — so the only questions are whether it is text and whether it is
+  // small enough to pin into a token. What keeps this safe is not this check
+  // but the gate below, which refuses it outright off a development build.
+  const prompt = input.examinerPrompt;
+  if (
+    prompt !== undefined &&
+    (typeof prompt !== "string" ||
+      prompt.trim().length === 0 ||
+      prompt.length > MAX_EXAMINER_PROMPT_LENGTH)
+  ) {
+    return { ok: false, status: 400, error: "Prompt examinateur invalide" };
+  }
+  const requestedExaminerPrompt =
+    typeof prompt === "string" && prompt.trim().length > 0 ? prompt : undefined;
+
   const handle = input.resumptionHandle;
   const resumptionHandle =
     typeof handle === "string" && handle.length > 0 && handle.length <= MAX_RESUMPTION_HANDLE_LENGTH
       ? handle
       : undefined;
 
-  return { ok: true, request: { phase, examId, requestedTopicSlug, resumptionHandle } };
+  return {
+    ok: true,
+    request: {
+      phase,
+      examId,
+      requestedTopicSlug,
+      requestedModel: model,
+      resumptionHandle,
+      requestedExaminerPrompt,
+    },
+  };
 }
 
 export type LiveTokenGate =
@@ -104,6 +158,23 @@ export type LiveTokenGate =
        * from `request` means persistence is degraded.
        */
       source: "sitting" | "request";
+      /** The examiner to pin into the token (#99). Always allow-listed. */
+      model: string;
+      /**
+       * Where the examiner came from. `sitting` and `request` mean what they
+       * mean for the subject. `default` is the untouched path — no row and no
+       * request — AND the one fault worth a log line: a stored model that has
+       * since left the allow-list is replaced by the default rather than
+       * minted, because a constraint naming a retired id opens a socket that
+       * dies with 1011 mid-épreuve.
+       */
+      modelSource: "sitting" | "request" | "default";
+      /**
+       * DEVELOPMENT ONLY — the system instruction to pin instead of the built
+       * one (#152). Undefined on every production mint, because the gate below
+       * only ever sets it when told the development tooling is enabled.
+       */
+      examinerPrompt?: string;
     };
 
 export interface LiveTokenGateInput {
@@ -111,11 +182,25 @@ export interface LiveTokenGateInput {
    * The ownership answer for `examId`, from `authorizeExam`. It carries the
    * sitting's subject when there is one — the route used to read that with a
    * second query and pass it in beside this, which was both a round trip and a
-   * way for the two to be about different sittings (#22).
+   * way for the two to be about different sittings (#22). Since #99 it carries
+   * the sitting's examiner on the same read, for the same reason.
    */
   access: ExamAccess;
   /** The subject the browser asked for. Already validated by {@link parseLiveTokenRequest}. */
   requestedTopicSlug: string;
+  /** The examiner the browser asked for, if any. Already allow-listed. */
+  requestedModel?: string;
+  /** DEVELOPMENT ONLY — the replacement instruction the browser sent (#152). */
+  requestedExaminerPrompt?: string;
+  /**
+   * Whether this build carries the development tooling — `DEV_TOOLS_ENABLED`,
+   * read on the SERVER by the route and passed in so this stays pure.
+   *
+   * Defaults to false, which is the whole safety property: a caller that
+   * forgets to pass it gets the production behaviour, and the examiner prompt
+   * a browser sent is discarded without comment. Nothing below can widen it.
+   */
+  devToolsEnabled?: boolean;
 }
 
 /**
@@ -125,20 +210,81 @@ export interface LiveTokenGateInput {
  * this route is the fifth caller of that module, and a second opinion about who
  * owns a sitting is exactly the kind of drift that reopens an IDOR quietly.
  */
-export function gateLiveToken({ access, requestedTopicSlug }: LiveTokenGateInput): LiveTokenGate {
+export function gateLiveToken({
+  access,
+  requestedTopicSlug,
+  requestedModel,
+  requestedExaminerPrompt,
+  devToolsEnabled = false,
+}: LiveTokenGateInput): LiveTokenGate {
   if (access.status === "denied") {
     const { status, error } = EXAM_ACCESS_DENIALS[access.reason];
     return { decision: "deny", status, error };
   }
 
+  /**
+   * The one place a client-supplied examiner prompt is allowed in (#152).
+   *
+   * A single `&&`, and it is the entire authorisation: off a development build
+   * the field is dropped, so the instruction the token pins is the one this
+   * repository built. Not a 400 — a production server that starts refusing
+   * requests because a browser sent a field it should not have is a worse
+   * failure than one that ignores it, and there is no legitimate client that
+   * sends this outside development anyway.
+   */
+  const examinerPrompt = devToolsEnabled ? requestedExaminerPrompt : undefined;
+
+  /**
+   * The examiner, decided by the same rule as the subject: the row wins
+   * whenever there is one to read (#99). Two consequences are the point:
+   *
+   *  - a null column on an owned row means "nothing was ever chosen", so the
+   *    default runs — NOT the requested model, because the row is the record
+   *    of what the candidate heard, and honouring a request the row does not
+   *    carry would make that record a lie;
+   *  - with no row to read, the request stands, which is what keeps a
+   *    reconnect on the SAME examiner through a database blip — the client
+   *    re-sends its choice on every mint, so a mid-débat `lookup-failed` does
+   *    not switch voices.
+   *
+   * A stored model that has since left the allow-list falls back to the
+   * default: an épreuve on the wrong examiner beats one that dies at the
+   * handshake with no diagnostic. The route logs it off `modelSource`.
+   */
+  const examinerModel = (): Pick<
+    Extract<LiveTokenGate, { decision: "mint" }>,
+    "model" | "modelSource"
+  > => {
+    if (access.status === "owned") {
+      return access.examinerModel && isSelectableLiveModel(access.examinerModel)
+        ? { model: access.examinerModel, modelSource: "sitting" }
+        : { model: LIVE_MODEL, modelSource: "default" };
+    }
+    return requestedModel
+      ? { model: requestedModel, modelSource: "request" }
+      : { model: LIVE_MODEL, modelSource: "default" };
+  };
+
   // Owned, and the sitting says what was asked. The authoritative path.
   if (access.status === "owned" && access.topicSlug) {
-    return { decision: "mint", topicSlug: access.topicSlug, source: "sitting" };
+    return {
+      decision: "mint",
+      topicSlug: access.topicSlug,
+      source: "sitting",
+      examinerPrompt,
+      ...examinerModel(),
+    };
   }
 
   // Either there is no sitting to read (no database, or a degraded `local-…`
   // id), the lookup failed, or the row exists but its subject could not be
   // joined. None of those is a reason to end an exam in progress, and none of
   // them lets the caller reach another candidate's sitting.
-  return { decision: "mint", topicSlug: requestedTopicSlug, source: "request" };
+  return {
+    decision: "mint",
+    topicSlug: requestedTopicSlug,
+    source: "request",
+    examinerPrompt,
+    ...examinerModel(),
+  };
 }

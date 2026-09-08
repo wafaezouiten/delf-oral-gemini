@@ -39,6 +39,34 @@ import { checkWavFormat, readWavFormat } from "@/lib/audio/pcm";
 export const MAX_RECORDING_BYTES = 3 * 1024 * 1024;
 
 /**
+ * The shortest recording worth handing to the corrector (#73). A measured file
+ * under this many seconds is treated as if no file arrived for that phase.
+ *
+ * The files this exists for are stubs, and two of them are ordinary: a débat
+ * ended before anything was said still records the candidate's (silent)
+ * microphone through the examiner's closing line, and a typed dev exposé (#51)
+ * carries the seconds of room noise captured before the panel was opened. Both
+ * are legal little Opus files that pass every other check, get uploaded, and
+ * then buy nothing but failure modes — the Files API is handed a two-second
+ * fragment it may refuse, the corrector is told to listen to silence labelled
+ * as a task, and one stub flips a whole sitting out of the text path.
+ *
+ * Dropping one is free where it matters, and that is why 10 seconds is safe:
+ *
+ *  - **The duration penalty cannot move.** The thresholds are minutes
+ *    (`SHORT_DEVELOPMENT_SECONDS`, `FULL_DEVELOPMENT_SECONDS` in
+ *    `orale-rubric.ts`), so a phase measuring 8 seconds and one measuring 0 are
+ *    in the same tier — the same reading a dead microphone already gets.
+ *  - **The absence halving (#71) is charged in words**, out of the transcript,
+ *    and never reads the recording at all.
+ *  - **Phonologie loses nothing it had.** Ten seconds of audio is not evidence
+ *    of B2 phonology; if the stub was the sitting's only file, the grading
+ *    falls back to text mode and the #29 ceiling — the honest reading of an
+ *    épreuve the corrector cannot actually hear.
+ */
+export const MIN_RECORDING_SECONDS = 10;
+
+/**
  * And the whole request, which is the number that actually matters.
  *
  * 4 MiB is 4 194 304 bytes, under the platform's documented 4.5 MB, and above
@@ -88,6 +116,16 @@ export function fitsInOneRequest(parts: readonly number[]): boolean {
  * the honest one — the server cannot grade audio it does not have. It is a
  * reason to drop as little as possible, which is why this drops per artefact
  * rather than all-or-nothing.
+ *
+ * Since #98 a delivered recording is also *kept* — the correction plays it
+ * back — so a dropped artefact now loses the candidate a replay as well as the
+ * grading of that half. Re-read in that light, the rule above still holds:
+ * what cannot be delivered cannot be graded OR kept, both halves of the loss
+ * come from the same missing bytes, and shedding the one oversized artefact is
+ * still strictly better than a 413 that loses the sitting whole. What would
+ * not survive #98 is any scheme that widens this transport's ceiling by
+ * routing recordings around the finish request — whoever builds that must move
+ * this selection with it, not delete it.
  */
 export function selectDeliverable<T>(
   recordings: readonly T[],
@@ -138,16 +176,14 @@ export interface MeasuredRecording {
  *
  * **WAV** is what the archive falls back to when a browser cannot encode Opus.
  * It is measured just as exactly, but be clear about how little of it can get
- * here: at 32 kB a second, {@link MAX_RECORDING_BYTES} is **98 seconds** of it,
- * against a monologue the candidate cannot leave before 300
- * (`MONOLOGUE_MIN_SECONDS`). So the only WAV this route will ever accept is one
- * whose capture failed inside the first minute and a half — not "a capture that
- * failed early" in general. `archive.ts`'s own example, a headset unplugged four
- * minutes in, is 7.7 MB as WAV and does not fit; it fits as Opus, which is what
- * it will be on any browser that has WebCodecs at all. A candidate who spoke
- * normally into a browser that does not is graded from audio not at all: the
- * client weighs each artefact and sends what it can rather than a request that
- * cannot be delivered.
+ * here: at 32 kB a second, {@link MAX_RECORDING_BYTES} is **98 seconds** of it.
+ * So the only WAV this route will ever accept is one whose capture failed inside
+ * the first minute and a half — not "a capture that failed early" in general.
+ * `archive.ts`'s own example, a headset unplugged four minutes in, is 7.7 MB as
+ * WAV and does not fit; it fits as Opus, which is what it will be on any browser
+ * that has WebCodecs at all. A candidate who spoke normally into a browser that
+ * does not is graded from audio not at all: the client weighs each artefact and
+ * sends what it can rather than a request that cannot be delivered.
  *
  * It stays accepted because refusing it would throw away the one audio a broken
  * capture does produce, and because it costs one branch to keep — not because it

@@ -38,10 +38,7 @@
 import { config } from "dotenv";
 config({ path: ".env.local", quiet: true });
 
-import {
-  evaluateOralPerformance,
-  ORAL_EVAL_MODEL,
-} from "../../src/lib/ai/orale-evaluation";
+import { evaluateOralPerformance, ORAL_EVAL_MODEL } from "../../src/lib/ai/orale-evaluation";
 import { minDurationSeconds } from "../../src/lib/constants/orale";
 
 /**

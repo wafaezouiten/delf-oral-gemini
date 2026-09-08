@@ -26,7 +26,7 @@ import { GoogleGenAI, Modality } from "@google/genai";
 
 import { ORAL_CRITERIA } from "../src/lib/delf/criteria";
 import { GRILLE_BANDS } from "../src/lib/delf/grille";
-import { DEBATE_FLOOR_SECONDS, criteriaToScore25 } from "../src/lib/delf/orale-rubric";
+import { FULL_DEVELOPMENT_SECONDS, criteriaToScore25 } from "../src/lib/delf/orale-rubric";
 import { ORAL_TOPICS } from "../src/lib/delf/topics";
 import type { TranscriptEntry } from "../src/lib/delf/transcript";
 import { evaluateExam } from "../src/lib/gemini/evaluate";
@@ -197,15 +197,15 @@ async function main() {
     mode: "text",
     topic: TOPIC,
     transcript: STRONG,
-    monologueSeconds: 400,
-    debateSeconds: 700,
+    monologueSeconds: FULL_DEVELOPMENT_SECONDS.monologue + 20,
+    debateSeconds: FULL_DEVELOPMENT_SECONDS.debate + 220,
   });
   const weak = await evaluateExam({
     mode: "text",
     topic: TOPIC,
     transcript: WEAK,
-    monologueSeconds: 400,
-    debateSeconds: 700,
+    monologueSeconds: FULL_DEVELOPMENT_SECONDS.monologue + 20,
+    debateSeconds: FULL_DEVELOPMENT_SECONDS.debate + 220,
   });
 
   const show = (label: string, r: typeof strong) =>
@@ -225,9 +225,7 @@ async function main() {
     "no 2s or 4s survived into a stored score",
   );
 
-  const arithmeticOk = [strong, weak].every(
-    (r) => criteriaToScore25(r.criteria) === r.rawScore25,
-  );
+  const arithmeticOk = [strong, weak].every((r) => criteriaToScore25(r.criteria) === r.rawScore25);
   record(
     "the /25 is recomputed from the bands, not taken from the model",
     arithmeticOk,
@@ -241,13 +239,28 @@ async function main() {
     `strong ${strong.score25}/25 vs weak ${weak.score25}/25 (gap of ${strong.score25 - weak.score25})`,
   );
 
+  // The regression this fixture caught once, now asserted on every run (#189).
+  // WEAK is a real if poor monologue beside a débat of four monosyllables —
+  // exactly the shape that satisfied « CAS LIMITE » on a literal reading and
+  // came back 0 on all five criteria, including the two language criteria the
+  // exposé gives real evidence for. It cost an API call to find and nothing to
+  // keep: the correction is already in hand, so this is a `record()` and not a
+  // fourth call.
+  const weakLanguage = ["lexique", "morphosyntaxe"] as const;
+  record(
+    "an evaluable monologue is not zeroed by a near-empty débat",
+    weakLanguage.some((criterion) => weak.criteria[criterion] > 0),
+    weakLanguage.map((criterion) => `${criterion}=${weak.criteria[criterion]}`).join(" ") +
+      ` — 0 on both would mean the corrector read one empty part as an empty sitting`,
+  );
+
   // The discriminating case: rich argumentation carried by broken grammar.
   const mixed = await evaluateExam({
     mode: "text",
     topic: TOPIC,
     transcript: MIXED,
-    monologueSeconds: 400,
-    debateSeconds: 700,
+    monologueSeconds: FULL_DEVELOPMENT_SECONDS.monologue + 20,
+    debateSeconds: FULL_DEVELOPMENT_SECONDS.debate + 220,
   });
   console.log(`        ${show("mixed ", mixed)}\n`);
 
@@ -295,8 +308,8 @@ async function main() {
         mode: "audio",
         topic: TOPIC,
         transcript: WEAK,
-        monologueSeconds: 400,
-        debateSeconds: 700,
+        monologueSeconds: FULL_DEVELOPMENT_SECONDS.monologue + 20,
+        debateSeconds: FULL_DEVELOPMENT_SECONDS.debate + 220,
         audio: wav,
       });
       record(
@@ -314,23 +327,41 @@ async function main() {
 
   console.log("3. The duration rule, through the real corrector\n");
 
-  // The same strong transcript, against a débat that produced 40 seconds. The
-  // rubric — not the model, which is never told the rule — has to notice.
+  // The same strong transcript, against a débat that produced 40 seconds and a
+  // monologue that ran its full development time. The rubric — not the model,
+  // which is never told the rule — has to notice, charge the débat alone, and
+  // charge it to « interaction » (#189).
   const shortSitting = await evaluateExam({
     mode: "text",
     topic: TOPIC,
     transcript: STRONG,
-    monologueSeconds: 400,
+    monologueSeconds: FULL_DEVELOPMENT_SECONDS.monologue + 20,
     debateSeconds: 40,
   });
 
+  const debateCharge = shortSitting.durationCharges[0];
+
   record(
-    "a short part is docked, and the part that was short is named",
-    shortSitting.durationPenalty === 3 &&
+    "the short part is charged, and the part that was short is named",
+    shortSitting.durationPenalty > 0 &&
       shortSitting.shortParts.length === 1 &&
-      shortSitting.shortParts[0] === "debate",
-    `penalty ${shortSitting.durationPenalty}, short: [${shortSitting.shortParts.join(", ")}] ` +
-      `(débat 40s against a ${DEBATE_FLOOR_SECONDS}s floor)`,
+      shortSitting.shortParts[0] === "debate" &&
+      shortSitting.durationTiers.monologue === "full" &&
+      shortSitting.durationTiers.debate === "strong",
+    `penalty ${shortSitting.durationPenalty}, short: [${shortSitting.shortParts.join(", ")}], ` +
+      `tiers ${JSON.stringify(shortSitting.durationTiers)} ` +
+      `(débat 40s against a ${FULL_DEVELOPMENT_SECONDS.debate}s full-development time)`,
+  );
+
+  record(
+    "the charge comes off interaction, and off nothing else",
+    shortSitting.durationCharges.length === 1 &&
+      debateCharge?.criterion === "interaction" &&
+      debateCharge?.points === shortSitting.durationPenalty,
+    debateCharge
+      ? `${debateCharge.criterion} ${debateCharge.from} → ${debateCharge.to} ` +
+          `(${debateCharge.points} point(s)), lexique/morphosyntaxe/phonologie untouched`
+      : "no charge was recorded",
   );
 
   record(
@@ -341,9 +372,13 @@ async function main() {
   );
 
   record(
-    "a full sitting of the same transcript is not docked",
-    strong.durationPenalty === 0 && strong.shortParts.length === 0,
-    `the same transcript over 400s + 700s scored ${strong.score25}/25 with no penalty`,
+    "a full sitting of the same transcript is not charged at all",
+    strong.durationPenalty === 0 &&
+      strong.shortParts.length === 0 &&
+      strong.durationCharges.length === 0,
+    `the same transcript over ${FULL_DEVELOPMENT_SECONDS.monologue + 20}s + ` +
+      `${FULL_DEVELOPMENT_SECONDS.debate + 220}s ` +
+      `scored ${strong.score25}/25 with no penalty`,
   );
 
   const passed = checks.filter((c) => c.pass).length;

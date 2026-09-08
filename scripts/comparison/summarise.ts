@@ -12,7 +12,8 @@
  * THE ONE JOIN THAT NEEDS DEFENDING. This system returns five criteria for a
  * sitting; the incumbent returns five criteria twice, once per tâche. To compare
  * criterion by criterion, the incumbent's ten numbers have to become five, and
- * the rule used is this system's own attribution (`evaluate.ts`, TASK_ATTRIBUTION):
+ * the rule used is the sitting's own criterion attribution (`delf/criteria.ts`,
+ * COMPLETE_STAGE_DIRECTIVE; `evaluate.ts`'s TASK_ATTRIBUTION until #173):
  *
  *   realisationTache ← the incumbent's tâche 1 (the monologue)
  *   interaction      ← the incumbent's tâche 2 (the débat)
@@ -95,11 +96,7 @@ function oursFor(run: RunFile, sittingId: string): Array<Ok<OurRecord>> {
   return run.ours.filter((r): r is Ok<OurRecord> => r.ok && r.sittingId === sittingId);
 }
 
-function incumbentFor(
-  run: RunFile,
-  sittingId: string,
-  tache: number,
-): Array<Ok<IncumbentRecord>> {
+function incumbentFor(run: RunFile, sittingId: string, tache: number): Array<Ok<IncumbentRecord>> {
   return (run.incumbent?.results ?? []).filter(
     (r): r is Ok<IncumbentRecord> => r.ok && r.sittingId === sittingId && r.tache === tache,
   );
@@ -135,8 +132,7 @@ function criterionTable(run: RunFile): string {
 
       // The comparable incumbent value, per the attribution documented above.
       const source = ATTRIBUTION[criterion];
-      const theirs =
-        source === 1 ? t1Values : source === 2 ? t2Values : [...t1Values, ...t2Values];
+      const theirs = source === 1 ? t1Values : source === 2 ? t2Values : [...t1Values, ...t2Values];
 
       const delta =
         theirs.length === 0
@@ -272,7 +268,8 @@ function failureTable(run: RunFile): string {
     "| System | Sitting | Error | Failed after |",
     "| --- | --- | --- | --- |",
     ...ourFailures.map(
-      (r) => `| ours | ${r.sittingId} | ${"error" in r ? r.error.slice(0, 120) : ""} | ${r.latencySeconds.toFixed(1)}s |`,
+      (r) =>
+        `| ours | ${r.sittingId} | ${"error" in r ? r.error.slice(0, 120) : ""} | ${r.latencySeconds.toFixed(1)}s |`,
     ),
     ...theirFailures.map(
       (r) =>
@@ -294,7 +291,9 @@ function stabilityTable(run: RunFile): string {
       for (const tache of [1, 2] as const) {
         const values = incumbentFor(run, sitting.id, tache).map((r) => r.criteria[criterion]);
         if (values.length > 1 && !stable(values)) {
-          rows.push(`| incumbent t${tache} | ${sitting.id} | ${criterion} | ${values.join(" then ")} |`);
+          rows.push(
+            `| incumbent t${tache} | ${sitting.id} | ${criterion} | ${values.join(" then ")} |`,
+          );
         }
       }
     }

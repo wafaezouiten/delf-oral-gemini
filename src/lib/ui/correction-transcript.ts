@@ -27,6 +27,7 @@
 import { formatClock, formatTurnOffset } from "@/lib/delf/phases";
 import {
   entriesForPhase,
+  stripDirectiveEchoes,
   type TranscriptEntry,
   type TranscriptPhase,
 } from "@/lib/delf/transcript";
@@ -122,9 +123,14 @@ export interface CorrectionTranscriptView {
  * that sitting is exactly the one this block exists for.
  */
 export function correctionTranscriptView(
-  transcript: readonly TranscriptEntry[],
+  stored: readonly TranscriptEntry[],
   durations: { monologueSeconds: number; debateSeconds: number },
 ): CorrectionTranscriptView {
+  // The rows written before the controller held directive echoes back (#187)
+  // still carry them, and a candidate reading their correction must not meet
+  // « [Information de service, à ne jamais prononcer : …] » in the examiner's
+  // mouth. Scrubbed at read time, once, here — the page shows what was said.
+  const transcript = stripDirectiveEchoes(stored);
   const spoke = transcript.some((entry) => entry.speaker === "candidate");
 
   const seconds: Record<TranscriptPhase, number> = {
@@ -143,8 +149,7 @@ export function correctionTranscriptView(
         entry,
         timeLabel: formatTurnOffset(entry.timestamp - anchor),
       })),
-      emptyNote:
-        entries.length === 0 && spoke ? CORRECTION_TRANSCRIPT_COPY.emptySection : null,
+      emptyNote: entries.length === 0 && spoke ? CORRECTION_TRANSCRIPT_COPY.emptySection : null,
     };
   });
 
@@ -158,4 +163,3 @@ export function correctionTranscriptView(
         },
   };
 }
-

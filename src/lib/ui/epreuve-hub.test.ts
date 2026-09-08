@@ -5,10 +5,12 @@ import { COMPETENCY_MAX, ORAL_PARTS_B2 } from "@/lib/delf/constants";
 import { ORAL_CRITERIA } from "@/lib/delf/criteria";
 import { zeroCriteria, type DashboardSitting } from "./dashboard-view";
 import {
+  buildFeaturedSujets,
   buildHubFormat,
   buildHubSujets,
   buildHubView,
   buildShapePill,
+  HUB_FEATURED_SUJETS,
   HUB_LINKS,
   isNavLinkActive,
   latestScoreBySujet,
@@ -63,7 +65,7 @@ describe("the hub view", () => {
     // Retyped, these drift: the hub would advertise an épreuve marked on
     // something the grille does not print.
     assert.equal(buildHubView().criteria.length, ORAL_CRITERIA.length);
-    assert.ok(buildHubView().criteria.includes("Maîtrise phonologique"));
+    assert.ok(buildHubView().criteria.includes("Maîtrise du système phonologique"));
   });
 
   it("names its icons by role, never by glyph", () => {
@@ -157,6 +159,33 @@ describe("the sujet cards", () => {
   });
 });
 
+describe("the sujets à la une", () => {
+  const catalogue = Array.from({ length: 8 }, (_, i) => ({
+    slug: `s${i + 1}`,
+    title: `Sujet ${i + 1}`,
+    document: "D.",
+  }));
+
+  it("features exactly three, in the catalogue's order (#188)", () => {
+    assert.equal(HUB_FEATURED_SUJETS, 3);
+    const featured = buildFeaturedSujets(catalogue, new Map());
+    assert.deepEqual(
+      featured.map((sujet) => sujet.slug),
+      ["s1", "s2", "s3"],
+    );
+  });
+
+  it("prints a shorter catalogue whole rather than padding it", () => {
+    assert.equal(buildFeaturedSujets(catalogue.slice(0, 2), new Map()).length, 2);
+  });
+
+  it("carries the featured sujets' scores like any other card", () => {
+    const [first, second] = buildFeaturedSujets(catalogue, new Map([["s2", 21]]));
+    assert.equal(first.score, null);
+    assert.equal(second.score, 21);
+  });
+});
+
 /**
  * One sitting, as `readCandidateHistory` returns it. Only the slug and the score
  * are read by the reducer; the rest is filled so the fixture is a real
@@ -183,6 +212,7 @@ function sitting(overrides: Partial<DashboardSitting> = {}): DashboardSitting {
     phase: "finished",
     endedAt: new Date("2026-08-16T10:00:00Z"),
     archivedAt: null,
+    recordings: [],
     ...overrides,
   };
 }

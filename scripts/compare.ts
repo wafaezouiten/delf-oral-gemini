@@ -115,9 +115,14 @@ interface Flags {
 
 function parseFlags(argv: string[]): Flags {
   const get = (name: string) =>
-    argv.find((a) => a.startsWith(`--${name}=`))?.split("=").slice(1).join("=") ?? null;
+    argv
+      .find((a) => a.startsWith(`--${name}=`))
+      ?.split("=")
+      .slice(1)
+      .join("=") ?? null;
   const repeats = Number(get("repeats") ?? 1);
-  if (!Number.isInteger(repeats) || repeats < 1) throw new Error("--repeats must be a positive integer");
+  if (!Number.isInteger(repeats) || repeats < 1)
+    throw new Error("--repeats must be a positive integer");
   return { repeats, only: get("only"), skipIncumbent: argv.includes("--skip-incumbent") };
 }
 
@@ -131,12 +136,12 @@ function gitCommit(): string {
 
 // ------------------------------------------------------------------ this system
 
-async function runOurs(
-  sitting: SittingProfile,
-  repeat: number,
-): Promise<OurRecord> {
+async function runOurs(sitting: SittingProfile, repeat: number): Promise<OurRecord> {
   const topic = findTopic(sitting.topicSlug);
-  if (!topic) throw new Error(`${sitting.id} names topic "${sitting.topicSlug}", which is not in ORAL_TOPICS`);
+  if (!topic)
+    throw new Error(
+      `${sitting.id} names topic "${sitting.topicSlug}", which is not in ORAL_TOPICS`,
+    );
 
   process.stdout.write(`[ours] ${sitting.id} · run ${repeat}… `);
   const startedAt = Date.now();
@@ -194,7 +199,10 @@ async function runOurs(
  * compile on start-up, and folding that into each correction would inflate every
  * latency reading by several seconds of tooling.
  */
-function runIncumbent(sittings: readonly SittingProfile[], repeats: number): {
+function runIncumbent(
+  sittings: readonly SittingProfile[],
+  repeats: number,
+): {
   model: string;
   results: IncumbentRecord[];
 } {
@@ -232,19 +240,15 @@ function runIncumbent(sittings: readonly SittingProfile[], repeats: number): {
   copyFileSync(resolve(import.meta.dirname, "comparison/incumbent-runner.ts"), runnerPath);
 
   try {
-    const child = spawnSync(
-      "pnpm",
-      ["exec", "tsx", runnerPath],
-      {
-        cwd: repo,
-        input: JSON.stringify(jobs),
-        encoding: "utf8",
-        shell: process.platform === "win32",
-        maxBuffer: 64 * 1024 * 1024,
-        env: childEnv(),
-        stdio: ["pipe", "pipe", "inherit"],
-      },
-    );
+    const child = spawnSync("pnpm", ["exec", "tsx", runnerPath], {
+      cwd: repo,
+      input: JSON.stringify(jobs),
+      encoding: "utf8",
+      shell: process.platform === "win32",
+      maxBuffer: 64 * 1024 * 1024,
+      env: childEnv(),
+      stdio: ["pipe", "pipe", "inherit"],
+    });
     if (child.status !== 0) {
       throw new Error(`the incumbent runner exited ${child.status} (see stderr above)`);
     }
@@ -269,9 +273,7 @@ function runIncumbent(sittings: readonly SittingProfile[], repeats: number): {
 
 async function main() {
   const flags = parseFlags(process.argv.slice(2));
-  const sittings = flags.only
-    ? SITTINGS.filter((s) => s.id === flags.only)
-    : SITTINGS;
+  const sittings = flags.only ? SITTINGS.filter((s) => s.id === flags.only) : SITTINGS;
   if (sittings.length === 0) throw new Error(`no sitting matches --only=${flags.only}`);
   if (!process.env.GEMINI_API_KEY) throw new Error("GEMINI_API_KEY is not set");
 

@@ -21,13 +21,8 @@
  * definition of done for logic.
  */
 
-import { ORAL_PARTS_B2, getOralPartSpec } from "@/lib/delf/constants";
-import {
-  MONOLOGUE_MIN_SECONDS,
-  PHASE_DURATIONS,
-  formatClock,
-  type OralPhase,
-} from "@/lib/delf/phases";
+import { ORAL_PARTS_B2 } from "@/lib/delf/constants";
+import { type OralPhase } from "@/lib/delf/phases";
 
 /** The phases the candidate actually speaks in — the two that have a mic. */
 export type SpeakingPhase = "monologue" | "debate";
@@ -60,68 +55,13 @@ export function shortPartLabel(title: string): string {
  * préparation prints the sujet's own title rather than the part's.
  */
 
-// =====================================================
-// THE DÉROULÉ
-// =====================================================
-
-/** One phase of the épreuve, as the préparation rail's numbered list prints it. */
-export interface PoDerouleStep {
-  /** 1-based position, printed in the numbered chip. */
-  n: number;
-  title: string;
-  /** "30:00", "7:00" — never a bare constant. */
-  durationLabel: string;
-  caption: string;
-}
-
-/**
- * The ordered phases of the épreuve, for the préparation rail.
- *
- * Built from `PHASE_DURATIONS` rather than from an `OralPartSpec` the way the
- * reference does it, because the durations the candidate is about to live
- * through are the state machine's, and those are what the clocks will count.
- * Reading them from anywhere else is how a briefing ends up promising seven
- * minutes of a monologue the timer gives five.
- *
- * The captions are the part descriptions' first clause, same as the reference.
+/*
+ * `buildDeroule` — the numbered "Déroulé de la séance" list — is gone with its
+ * card. It survived the briefing screen's deletion (#55) by moving to the
+ * préparation rail; the rail was reordered on the user's call and the card
+ * dropped, so the list's durations now live in exactly one place the candidate
+ * meets them: the sujet's launch dialog.
  */
-export function buildDeroule(): PoDerouleStep[] {
-  return [
-    {
-      n: 1,
-      title: "Préparation",
-      durationLabel: formatClock(PHASE_DURATIONS.preparation),
-      caption: "Sujet en main, notes autorisées",
-    },
-    {
-      n: 2,
-      title: "Monologue suivi",
-      durationLabel: formatClock(PHASE_DURATIONS.monologue),
-      caption: firstClause(partDescription(1)),
-    },
-    {
-      n: 3,
-      title: "Débat",
-      durationLabel: formatClock(PHASE_DURATIONS.debate),
-      caption: "L'examinateur conteste votre position ; défendez-la.",
-    },
-  ];
-}
-
-function partDescription(tache: number): string {
-  return getOralPartSpec(tache)?.description ?? "";
-}
-
-/**
- * First sentence of a description, trimmed for a one-line caption, with a
- * trailing parenthetical duration hint ("(~5–7 min)") dropped — the duration is
- * already the row's right-hand column, and printing it twice on one line is how
- * the reference's caption used to read.
- */
-function firstClause(text: string): string {
-  const sentence = text.split(/[.!?]/)[0]?.trim() ?? text.trim();
-  return sentence.replace(/\s*\([^)]*\)\s*$/, "").trim();
-}
 
 // =====================================================
 // THE PRÉPARATION RAIL
@@ -187,22 +127,57 @@ export const EXPOSE_PLAN: readonly PlanStep[] = [
 /**
  * What the record control is doing.
  *
- * `armed` is the part that has not started: the consigne has been given, the
- * sujet and the plan are on screen, and no clock is running until the candidate
- * says they are ready. The other three are the part in progress.
+ * `armed` is the part that has not started: the sujet and the plan are on
+ * screen, and no clock is running until the candidate says they are ready. The
+ * other three are the part in progress.
+ *
+ * It spans the consigne as well (#176). The control is disabled while the voice
+ * plays and enabled when it ends, but it is the same state and reads the same
+ * words in both — a part that has not begun cannot be terminated, whether or not
+ * the examiner is still explaining it.
  */
-export type MicState = "armed" | "recording" | "locked" | "connecting" | "closing";
+export type MicState = "armed" | "recording" | "connecting" | "closing";
+
+/**
+ * Which of the four the control is in, from the three facts the passation has.
+ *
+ * Armed outranks everything: a part that has not begun is not connecting, and it
+ * is not ending. Closing comes next, and for the same kind of reason — a part
+ * that is already concluding is not "recording", whatever the microphone is
+ * still doing. The ladder is total without consulting `canAdvance`, and has been
+ * only since the monologue's floor was removed (#171): the two things that still
+ * make that false are both branches above.
+ *
+ * Total means the last branch catches everything the others do not claim, which
+ * is why it is written down here with a test rather than inline in the bar. It
+ * caught an unstarted débat for the length of its consigne, and the screen said
+ * « Vous parlez. Cliquez pour terminer le débat. » over the examiner's voice,
+ * with a live stop button under it (#176). `awaitingStart` covers the consigne
+ * now; whether the press is *taken* is a separate flag, and a separate word:
+ * disabled.
+ */
+export function micState(flags: {
+  awaitingStart: boolean;
+  closing: boolean;
+  connecting: boolean;
+}): MicState {
+  if (flags.awaitingStart) return "armed";
+  if (flags.closing) return "closing";
+  if (flags.connecting) return "connecting";
+  return "recording";
+}
 
 /**
  * The word on the record control, the hint printed under it, and its accessible
  * name.
  *
  * All three name the actual task, per the reference: a débat is not an "exposé",
- * and the label is the only name a screen-reader user gets for the control. The
- * `locked` state is this project's own — the control ends the monologue, and the
- * monologue may not end before the DELF's floor (`canAdvanceEarly`). The
- * reference has no analogue because its mic ends the whole conversation and a
- * candidate may always do that.
+ * and the label is the only name a screen-reader user gets for the control.
+ *
+ * There used to be a fifth state here, `locked`, for a monologue that had not
+ * yet reached the floor `canAdvanceEarly` imposed on it. The floor is gone
+ * (#171), and so is the state: like the reference's, this control now always
+ * offers what it says.
  *
  * The visible `button` word is new with the sujet-on-screen layout. The control
  * used to be an icon alone, which was legible while it only ever meant "stop":
@@ -213,14 +188,13 @@ export type MicState = "armed" | "recording" | "locked" | "connecting" | "closin
 export function micCopy(
   phase: SpeakingPhase,
   state: MicState,
-  remainingToFloorSeconds = 0,
 ): { hint: string; label: string; button: string } {
   const act = phase === "monologue" ? "votre exposé" : "le débat";
 
-  // The part has not begun. The candidate has read the sujet and the plan with
-  // no clock running, and this is the button that starts both the clock and the
-  // recording — so it is the one state where the control says what it *starts*
-  // rather than what it ends.
+  // The part has not begun — the consigne may still be playing. The candidate
+  // reads the sujet and the plan with no clock running, and this is the button
+  // that starts both the clock and the recording — so it is the one state where
+  // the control says what it *starts* rather than what it ends.
   if (state === "armed") {
     return {
       button: "Enregistrer",
@@ -250,17 +224,6 @@ export function micCopy(
           ? "Fin de l'exposé. L'examinateur conclut, puis vous donne la consigne du débat."
           : "Fin du débat. L'examinateur conclut, puis votre prestation part pour correction.",
       label: phase === "monologue" ? "Exposé terminé" : "Débat terminé",
-    };
-  }
-
-  if (state === "locked") {
-    const minutes = Math.ceil(remainingToFloorSeconds / 60);
-    return {
-      button: "Terminer",
-      // Said as time still to fill rather than as a refusal: the candidate is
-      // not being blocked, they are being told the task is not done yet.
-      hint: `Encore ${minutes} min avant de pouvoir conclure`,
-      label: `Terminer ${act} — disponible dans ${minutes} minutes`,
     };
   }
 
@@ -308,12 +271,23 @@ export function examinerStatus(options: {
    * are speaking, not that they have gone.
    */
   closing?: boolean;
+  /**
+   * The débat's opening question is on its way and nothing is audible yet.
+   *
+   * Below `speaking`, because the moment the voice starts, « intervient » is the
+   * truer sentence; below the connection checks, because while the socket is
+   * still connecting that is the better explanation for the silence. What it
+   * replaces is the default: « Vous écoute attentivement » over an examiner who
+   * is about to ask told the candidate the floor was theirs.
+   */
+  opening?: boolean;
 }): string {
   if (options.announcing) return "L'examinateur donne la consigne…";
   if (options.closing) return "L'examinateur conclut…";
   if (options.connecting) return "Connexion en cours…";
   if (!options.connected) return "L'examinateur n'est pas en ligne.";
   if (options.speaking) return "L'examinateur intervient…";
+  if (options.opening) return "L'examinateur prépare sa question…";
   return "Vous écoute attentivement.";
 }
 
@@ -413,18 +387,30 @@ export function passationStatus(
  */
 
 // =====================================================
-// THE FLOOR
+// THE CLOCK
 // =====================================================
 
-/**
- * How long is still owed before the monologue may be ended early, floored at 0.
- *
- * The rule itself is `canAdvanceEarly`'s in `phases.ts`; this only turns it into
- * the number the mic hint prints, so the button's disabled state and the
- * sentence explaining it are computed from one subtraction rather than two.
+/*
+ * `secondsToMonologueFloor` counted down the minute a monologue had to run
+ * before « Terminer » unlocked. The floor is gone (#171) and it went with the
+ * `locked` copy it fed.
  */
-export function secondsToMonologueFloor(elapsedSeconds: number): number {
-  return Math.max(0, MONOLOGUE_MIN_SECONDS - Math.floor(elapsedSeconds));
+
+/**
+ * A rewound start stamp that makes the derived elapsed time jump forward by
+ * `skipSeconds`. Because elapsed is `(now - start)`, moving the start *earlier*
+ * advances the clock — the mechanism behind the dev fast-forward tool, which
+ * lets a tester reach time-up (and the real close-out handshake) without waiting
+ * out the full épreuve. A non-positive skip is a no-op, so it never rewinds time.
+ *
+ * PORT NOTE: `rewindStartBy` from the reference's `po-player-view.ts`, verbatim
+ * in behaviour. There the tool was admin-gated on the live session; here it is
+ * development-gated (`DEV_TOOLS_ENABLED`) and the stamp it rewinds is the
+ * controller's `phaseStart`, but the arithmetic — and the property that nothing
+ * bypasses the finalize path — is the same.
+ */
+export function rewindStartBy(startMs: number, skipSeconds: number): number {
+  return startMs - Math.max(0, skipSeconds) * 1000;
 }
 
 /**

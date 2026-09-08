@@ -4,6 +4,7 @@ import { Kicker } from "@/app/_components/po/tag";
 import { requireUserId } from "@/lib/auth/exam-guard";
 import { AccountProfile } from "../_components/account-profile";
 import { ResetRecord } from "../_components/reset-record";
+import { SignOut } from "../_components/sign-out";
 
 /**
  * Mon compte — one page, two blocks, one column.
@@ -31,8 +32,7 @@ import { ResetRecord } from "../_components/reset-record";
 
 export const metadata: Metadata = {
   title: "Mon compte · Production orale DELF B2",
-  description:
-    "Votre compte DELF B2 : profil, sécurité, et repartir de zéro sans rien supprimer.",
+  description: "Votre compte DELF B2 : profil, sécurité, et repartir de zéro sans rien supprimer.",
 };
 
 // Per-user, and one of its controls writes to the candidate's record.
@@ -54,16 +54,23 @@ export default async function ComptePage() {
   // translate, so it stays in normal flow — and centred on the phone, where
   // there is nowhere else to be.
   return (
-    <main className="mx-auto flex w-full max-w-2xl flex-col px-6 py-8 lg:mx-0 lg:ml-20 lg:max-w-4xl">
+    // The phone gets narrower margins and a shorter rhythm (#185). `px-6` on a
+    // 390 px screen spent a twelfth of the width on white either side of a
+    // Clerk card that is a column of input fields; `px-4` is what every other
+    // screen in the product gives a phone, and this one had no reason to be
+    // the exception.
+    <main className="mx-auto flex w-full max-w-2xl flex-col px-4 py-6 sm:px-6 sm:py-8 lg:mx-0 lg:ml-20 lg:max-w-4xl">
       {/* The title on the left, the reset on the right, stacked on a phone.
           `items-start` rather than a baseline: the left side is three lines and
           the right is a button, and aligning them on anything but their tops
           drops the button into the middle of the paragraph. */}
-      <header className="flex w-full flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-        <div>
+      <header className="flex w-full flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
+        <div className="min-w-0">
           <Kicker>DELF B2 · Production orale</Kicker>
-          <h1 className="font-serif mt-1 text-2xl leading-tight font-semibold">Mon compte</h1>
-          <p className="text-muted-foreground mt-2 text-sm leading-relaxed">
+          <h1 className="mt-1 font-serif text-xl leading-tight font-semibold sm:text-2xl">
+            Mon compte
+          </h1>
+          <p className="text-muted-foreground mt-1.5 text-sm leading-relaxed">
             Votre profil, votre sécurité, et votre record d&apos;épreuves.
           </p>
         </div>
@@ -72,9 +79,34 @@ export default async function ComptePage() {
       </header>
 
       {/* The card keeps the narrow measure; only the header takes the wider one.
-          A Clerk card stretched to 4xl is a login form the width of a desk. */}
-      <div className="mt-6 w-full lg:max-w-2xl">
+          A Clerk card stretched to 4xl is a login form the width of a desk.
+          `min-w-0` so a wide row inside Clerk's card scrolls itself instead of
+          pushing this column past the phone's viewport. */}
+      <div className="mt-5 w-full min-w-0 sm:mt-6 lg:max-w-2xl">
         <AccountProfile />
+      </div>
+
+      {/* « Se déconnecter », under the card (#183). It arrived with the avatar:
+          the rail's `<UserButton>` popover carried « Gérer le compte » and this,
+          the avatar now goes straight to the first, and the second belongs on
+          the page that manages the account rather than in a menu that no longer
+          exists. Below Clerk's card rather than in the header, because the
+          header is where the one control that changes the record lives, and two
+          buttons up there would put a sign out beside a reset.
+
+          It now says what it costs, which on this page is nothing (#185): a
+          candidate reading a page whose other button archives their whole
+          record should not have to wonder whether this one does too. The
+          sentence leads on a phone and the button follows it full-width; from
+          `sm` up they share a row with the button at the end. */}
+      <div className="border-border mt-5 w-full border-t pt-5 sm:mt-6 sm:pt-6 lg:max-w-2xl">
+        <div className="flex flex-col gap-2.5 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+          <p className="text-muted-foreground max-w-[52ch] text-xs leading-relaxed">
+            Vous déconnecter de cet appareil. Vos épreuves, vos corrections et vos enregistrements
+            restent enregistrés.
+          </p>
+          <SignOut />
+        </div>
       </div>
     </main>
   );

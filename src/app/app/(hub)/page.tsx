@@ -4,17 +4,12 @@ import { requireUserId } from "@/lib/auth/exam-guard";
 import { readCandidateHistory } from "@/lib/db/history";
 import { ORAL_TOPICS } from "@/lib/delf/topics";
 import {
-  buildHubSujets,
+  buildFeaturedSujets,
   buildHubView,
   HUB_LINKS,
   latestScoreBySujet,
 } from "@/lib/ui/epreuve-hub";
-import {
-  HubCapabilities,
-  HubFormat,
-  HubMasthead,
-  HubSujets,
-} from "./_components/hub-sections";
+import { HubCapabilities, HubFormat, HubMasthead, HubSujets } from "./_components/hub-sections";
 
 /**
  * The Production orale hub.
@@ -46,11 +41,13 @@ export default async function ProductionOraleHub() {
   const [user, history] = await Promise.all([currentUser(), readCandidateHistory(userId)]);
 
   const view = buildHubView();
-  const sujets = buildHubSujets(ORAL_TOPICS, latestScoreBySujet(history));
+  // The first three of the catalogue (#188), not the whole of it: the kiosk is
+  // one click away for the rest.
+  const sujets = buildFeaturedSujets(ORAL_TOPICS, latestScoreBySujet(history));
   const firstName = user?.firstName;
 
   return (
-    <main className="mx-auto w-full max-w-5xl px-4 py-10 sm:px-6">
+    <main className="mx-auto w-full max-w-5xl px-4 py-6 sm:px-6 sm:py-8">
       <HubMasthead view={view} />
 
       {firstName && (

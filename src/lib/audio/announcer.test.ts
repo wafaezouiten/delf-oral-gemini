@@ -30,7 +30,9 @@ class FakeClip implements ClipPlayback {
 
   /** The browser refuses to autoplay it. */
   refuse(): void {
-    this.fail(new DOMException("play() failed because the user didn't interact", "NotAllowedError"));
+    this.fail(
+      new DOMException("play() failed because the user didn't interact", "NotAllowedError"),
+    );
   }
 
   /** The file is missing. */

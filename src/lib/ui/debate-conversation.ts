@@ -1,5 +1,5 @@
 /**
- * The copy and the arithmetic behind the débat's conversation (#48, #60).
+ * The copy and the arithmetic behind the débat's conversation (#48, #60, #88).
  *
  * Here rather than in the component for the reason every other `lib/ui` module
  * is: the words a candidate reads mid-épreuve and the rule that decides whether
@@ -14,7 +14,10 @@
  * whose turn it is. Both were right about a part of it. The débat now shows the
  * two protagonists **and** the exchange, and pays for the room by dropping the
  * document — the sujet's title stays, its paragraphs go, because during the
- * débat the candidate is answering the examiner rather than reading.
+ * débat the candidate is answering the examiner rather than reading. #88 pinned
+ * those two protagonists to the top of the column while the exchange keeps
+ * scrolling past them, which is the arrangement both of those issues had been
+ * arguing towards — and it took nothing from the exchange to do it.
  */
 
 import { formatTurnOffset } from "@/lib/delf/phases";
@@ -33,8 +36,7 @@ export const DEBATE_CONVERSATION_COPY = {
    * after it is heard — and a candidate who notices that without being told
    * reads it as the product being broken.
    */
-  footnote:
-    "Transcription automatique : elle peut arriver avec un léger décalage sur la voix.",
+  footnote: "Transcription automatique : elle peut arriver avec un léger décalage sur la voix.",
 } as const;
 
 /**
@@ -63,9 +65,13 @@ export const STICK_THRESHOLD_PX = 32;
  *
  * Asked of the scroll position *before* the new text lands, so a candidate who
  * has scrolled up to re-read an earlier objection is not yanked back down by the
- * examiner continuing to speak. The metrics are the screen's scroller rather
- * than a box of the panel's own: the conversation has no scrollbar of its own,
- * the whole column scrolls.
+ * examiner continuing to speak.
+ *
+ * The metrics are the screen's scroller rather than a box of the panel's own:
+ * the conversation has no scrollbar of its own, the whole column scrolls. #88
+ * pinned the two protagonists above it with `position: sticky` and left that
+ * sentence true, which is the argument for sticky in one line — every other
+ * answer to #88 began by taking the scrollbar back.
  */
 export function isNearBottom(
   metrics: { scrollTop: number; scrollHeight: number; clientHeight: number },

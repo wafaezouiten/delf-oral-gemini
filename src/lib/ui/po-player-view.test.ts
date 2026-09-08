@@ -1,27 +1,23 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { MONOLOGUE_MIN_SECONDS, PHASE_DURATIONS, formatClock } from "@/lib/delf/phases";
 import {
-  buildDeroule,
   candidateStatus,
   examinerStatus,
   micCopy,
+  micState,
   passationStatus,
   poKicker,
-  secondsToMonologueFloor,
   shortPartLabel,
   partieKicker,
   EXPOSE_PLAN,
   topbarStep,
+  rewindStartBy,
 } from "./po-player-view";
 
 describe("the masthead", () => {
   it("names the épreuve, the diploma and the part", () => {
-    assert.equal(
-      poKicker("Monologue suivi"),
-      "Production orale · DELF B2 · Monologue suivi",
-    );
+    assert.equal(poKicker("Monologue suivi"), "Production orale · DELF B2 · Monologue suivi");
   });
 
   it("cuts a part title at its separator, whichever one was typed", () => {
@@ -34,39 +30,12 @@ describe("the masthead", () => {
     assert.equal(shortPartLabel("Débat — exercice en interaction"), "Débat");
     assert.equal(shortPartLabel("Débat"), "Débat");
   });
-
 });
 
-describe("the déroulé", () => {
-  const steps = buildDeroule();
-
-  it("prints the three phases the state machine will actually run", () => {
-    assert.deepEqual(
-      steps.map((step) => step.title),
-      ["Préparation", "Monologue suivi", "Débat"],
-    );
-    assert.deepEqual(
-      steps.map((step) => step.n),
-      [1, 2, 3],
-    );
-  });
-
-  it("prints the clocks the timers will count, not a second copy of them", () => {
-    // The whole reason this is derived rather than written out: a briefing that
-    // promises seven minutes of a monologue the timer gives five is worse than
-    // no briefing.
-    assert.equal(steps[0].durationLabel, formatClock(PHASE_DURATIONS.preparation));
-    assert.equal(steps[1].durationLabel, formatClock(PHASE_DURATIONS.monologue));
-    assert.equal(steps[2].durationLabel, formatClock(PHASE_DURATIONS.debate));
-  });
-
-  it("captions the monologue without repeating the duration beside it", () => {
-    // The part description ends in "(~5–7 min)", and the row already carries a
-    // duration column.
-    assert.doesNotMatch(steps[1].caption, /min/);
-    assert.ok(steps[1].caption.length > 0);
-  });
-});
+/*
+ * "the déroulé" tests went with `buildDeroule` and its rail card: the durations
+ * the list derived are now printed once, on the sujet's launch dialog.
+ */
 
 describe("the exposé plan", () => {
   it("gives the argued arc, which is the only one B2 has a caller for", () => {
@@ -95,6 +64,42 @@ describe("the exposé plan", () => {
   });
 });
 
+describe("the mic state", () => {
+  const armed = { awaitingStart: true, closing: false, connecting: false };
+
+  it("reads a part that has not begun as armed, whatever else is true of it", () => {
+    // Armed outranks the other two: a part that has not begun is not connecting,
+    // and it is not ending.
+    assert.equal(micState(armed), "armed");
+    assert.equal(micState({ ...armed, connecting: true }), "armed");
+    assert.equal(micState({ ...armed, closing: true }), "armed");
+  });
+
+  it("never calls a part that has not begun « recording »", () => {
+    // The regression in #176, in one line. `awaitingStart` used to go false for
+    // the length of the consigne, nothing else was true either, and the phase
+    // fell through the ladder into its last branch — so the débat spent its whole
+    // consigne saying « Vous parlez. Cliquez pour terminer le débat. » with a
+    // live stop button under it. The flag covers the consigne now, and the
+    // ladder's floor must never be where an unstarted part lands.
+    assert.notEqual(micState(armed), "recording");
+    assert.equal(micCopy("debate", micState(armed)).button, "Enregistrer");
+    assert.equal(micCopy("debate", micState(armed)).hint, "Cliquez pour commencer le débat.");
+  });
+
+  it("puts the closing handshake above the connection, and the part above both", () => {
+    assert.equal(micState({ awaitingStart: false, closing: true, connecting: true }), "closing");
+    assert.equal(
+      micState({ awaitingStart: false, closing: false, connecting: true }),
+      "connecting",
+    );
+    assert.equal(
+      micState({ awaitingStart: false, closing: false, connecting: false }),
+      "recording",
+    );
+  });
+});
+
 describe("the mic copy", () => {
   it("names the task, because the label is the control's only name", () => {
     assert.match(micCopy("monologue", "recording").label, /exposé/);
@@ -110,23 +115,17 @@ describe("the mic copy", () => {
     assert.match(hint, /Cliquez pour terminer votre exposé\.$/);
   });
 
-  it("says how much time is still owed rather than refusing", () => {
-    const { hint, label } = micCopy("monologue", "locked", 150);
-    // 150 s rounds UP to 3 minutes: promising "2 min" and then still refusing at
-    // 2:00 is the version of this that gets clicked twice.
-    assert.match(hint, /Encore 3 min/);
-    assert.match(label, /3 minutes/);
-  });
-
   it("says what it is waiting for while the socket opens", () => {
     assert.match(micCopy("debate", "connecting").hint, /Connexion/);
   });
 
-  it("stops counting down to a floor once the part is closing", () => {
-    // `canAdvance` goes false the moment the handshake starts, so the control
-    // used to fall back to `locked` and print « Encore 0 min avant de pouvoir
-    // conclure » over a monologue that was already concluding (#55).
-    const { hint, button } = micCopy("monologue", "closing", 0);
+  it("says the part is ending rather than offering to end it", () => {
+    // This used to be the countdown's test: `canAdvance` goes false the moment
+    // the handshake starts, the control fell back to `locked`, and it printed
+    // « Encore 0 min avant de pouvoir conclure » over a monologue that was
+    // already concluding (#55). The floor is gone (#171) and so is the wrong
+    // copy's source, but the state is still the one that has to say « ending ».
+    const { hint, button } = micCopy("monologue", "closing");
     assert.doesNotMatch(hint, /Encore/);
     assert.match(hint, /Fin de l'exposé/);
     // The button is no longer an offer, and stops being worded as one.
@@ -136,18 +135,6 @@ describe("the mic copy", () => {
   it("names what comes next at the close, per part", () => {
     assert.match(micCopy("monologue", "closing").hint, /consigne du débat/);
     assert.match(micCopy("debate", "closing").hint, /correction/);
-  });
-});
-
-describe("the floor", () => {
-  it("counts down to the DELF's five-minute minimum", () => {
-    assert.equal(secondsToMonologueFloor(0), MONOLOGUE_MIN_SECONDS);
-    assert.equal(secondsToMonologueFloor(60), MONOLOGUE_MIN_SECONDS - 60);
-  });
-
-  it("never goes negative once the floor is passed", () => {
-    assert.equal(secondsToMonologueFloor(MONOLOGUE_MIN_SECONDS), 0);
-    assert.equal(secondsToMonologueFloor(MONOLOGUE_MIN_SECONDS + 999), 0);
   });
 });
 
@@ -170,6 +157,27 @@ describe("the status lines", () => {
     assert.match(
       examinerStatus({ connected: false, connecting: false, speaking: true, announcing: true }),
       /consigne/,
+    );
+  });
+
+  it("says the examiner is preparing their question, not listening, at the débat's opening", () => {
+    // The connect-and-generate window before the opening question is audible.
+    // « Vous écoute attentivement » here handed the candidate the floor over an
+    // examiner who was about to ask.
+    assert.match(
+      examinerStatus({ connected: true, connecting: false, speaking: false, opening: true }),
+      /prépare sa question/,
+    );
+    // The moment the voice starts, speaking is the truer sentence.
+    assert.match(
+      examinerStatus({ connected: true, connecting: false, speaking: true, opening: true }),
+      /intervient/,
+    );
+    // And while the socket is still connecting, that is the better explanation
+    // for the silence.
+    assert.match(
+      examinerStatus({ connected: false, connecting: true, speaking: false, opening: true }),
+      /Connexion/,
     );
   });
 
@@ -242,10 +250,7 @@ describe("the status card", () => {
   it("lets the close outrank the connection and the consigne", () => {
     // The part is ending: what the socket is doing, and what the last consigne
     // was, are both answers to a question the candidate has stopped asking.
-    assert.equal(
-      passationStatus("monologue", false, true, true).title,
-      "Fin de l'exposé",
-    );
+    assert.equal(passationStatus("monologue", false, true, true).title, "Fin de l'exposé");
   });
 });
 
@@ -270,5 +275,21 @@ describe("the topbar stepper", () => {
   it("numbers the parts as the DELF does", () => {
     assert.equal(partieKicker("monologue"), "Partie 1 · Monologue suivi");
     assert.equal(partieKicker("debate"), "Partie 2 · Débat");
+  });
+});
+
+describe("rewinding the start stamp (the dev fast-forward)", () => {
+  it("advances the derived clock by the skipped seconds", () => {
+    // Elapsed is (now - start), so moving the start earlier moves the clock
+    // forward — the whole mechanism, ported from the reference.
+    const start = 1_000_000;
+    assert.equal(rewindStartBy(start, 30), start - 30_000);
+    assert.equal(rewindStartBy(start, 120), start - 120_000);
+  });
+
+  it("never rewinds time: a non-positive skip is a no-op", () => {
+    const start = 1_000_000;
+    assert.equal(rewindStartBy(start, 0), start);
+    assert.equal(rewindStartBy(start, -45), start);
   });
 });

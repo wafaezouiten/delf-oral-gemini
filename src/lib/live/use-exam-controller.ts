@@ -10,7 +10,7 @@
  * mutable exam state.
  */
 
-import { useEffect, useMemo, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useRef, useSyncExternalStore } from "react";
 
 import { ExaminerAnnouncer } from "@/lib/audio/announcer";
 import { MicRecorder } from "@/lib/audio/recorder";
@@ -59,16 +59,33 @@ export function useExamController(options: {
    *  which has no business knowing about row ids. */
   examId: string;
   topic: OralTopic;
+  /**
+   * The examiner chosen on the préparation screen (#99), or null for the
+   * default. Forwarded on every token mint as the fallback the server honours
+   * when no sitting can be read — the stored choice outranks it otherwise.
+   */
+  examinerModel: string | null;
   onFinished: (payload: ExamFinishedPayload) => void;
 }) {
-  const { examId, topic, onFinished } = options;
+  const { examId, topic, examinerModel, onFinished } = options;
 
   const controller = useMemo(
     () =>
       new ExamController({
         topic,
-        createSession: (phase, sessionTopic, callbacks, initialHistory) =>
-          new ExamLiveSession({ examId, phase, topic: sessionTopic, callbacks, initialHistory }),
+        createSession: (phase, sessionTopic, callbacks, initialHistory, model, examinerPrompt) =>
+          new ExamLiveSession({
+            examId,
+            phase,
+            topic: sessionTopic,
+            model,
+            // DEVELOPMENT ONLY (#152) — undefined on every real sitting. It
+            // rides to the token route, which drops it unless that build
+            // carries the tooling.
+            examinerPrompt,
+            callbacks,
+            initialHistory,
+          }),
         createRecorder: (callbacks) => new MicRecorder(callbacks),
         createPlayer: (callbacks) => new ExaminerAudioPlayer(callbacks),
         createAnnouncer: (callbacks) => new ExaminerAnnouncer(callbacks),
@@ -77,6 +94,29 @@ export function useExamController(options: {
       }),
     [examId, topic, onFinished],
   );
+
+  /**
+   * Keep the controller's idea of the examiner current (#99).
+   *
+   * Pushed into the controller rather than listed as a dependency of the memo
+   * above, because rebuilding the controller restarts the épreuve — and the
+   * choice can legitimately change during the préparation. Sessions are only
+   * opened after the préparation ends, and this effect has run by then: it
+   * fires on mount and on every change, before the client's own `start()`
+   * effect, which is declared later in the same component.
+   */
+  useEffect(() => {
+    controller.setExaminerModel(examinerModel);
+  }, [controller, examinerModel]);
+
+  /**
+   * A teardown React has asked for but which has not run yet.
+   *
+   * Empty except for the window between an effect cleanup and the mount that may
+   * immediately follow it — which in development is every mount. Read and written
+   * only by the release effect below, where the reasoning lives.
+   */
+  const pendingRelease = useRef<{ controller: ExamController; cancelled: boolean } | null>(null);
 
   /**
    * Release the microphone and the socket when the candidate leaves.
@@ -101,13 +141,47 @@ export function useExamController(options: {
    * guarantee: if capture is still waiting on the permission prompt, `stop()`
    * awaits that first. Nothing is held yet in that case, and the controller's
    * own teardown flag stops the device being adopted if it does arrive.
+   *
+   * **The cleanup queues the release rather than performing it (#160).** React's
+   * StrictMode — on by default under the App Router, and this repo does not turn
+   * it off — runs every effect mount → cleanup → mount in development. The
+   * controller is a `useMemo`, so the same instance lives through that cycle, and
+   * `destroy()` is one-way: before this, the second mount got a controller that
+   * was already dead. Nothing said so. `start()` refused, the clock never
+   * started, « Commencer » did nothing, and the préparation consigne was cut off
+   * mid-sentence by the teardown that had just run — a room that mounted dead on
+   * `next dev` and nowhere else, because live sittings had only ever been
+   * exercised on production builds, where effects are not double-invoked.
+   *
+   * So the cleanup hands the release to a microtask, and the next mount of the
+   * *same* controller calls it off. A StrictMode cycle is one synchronous commit,
+   * so that cancellation always beats the microtask; a real unmount has nobody to
+   * cancel it and tears down a microtask later, which costs nothing. Identity is
+   * what is compared rather than a boolean, so a cleanup caused by the controller
+   * itself being rebuilt still releases the instance it was for.
+   *
+   * `pagehide` keeps calling `destroy()` directly. It is the path that has to
+   * reach `stop()` inside its own call stack, and a page that is going away is
+   * not coming back to cancel anything.
    */
   useEffect(() => {
+    const queued = pendingRelease.current;
+    if (queued?.controller === controller) {
+      queued.cancelled = true;
+      pendingRelease.current = null;
+    }
+
     const release = () => controller.destroy();
     window.addEventListener("pagehide", release);
     return () => {
       window.removeEventListener("pagehide", release);
-      controller.destroy();
+      const deferred = { controller, cancelled: false };
+      pendingRelease.current = deferred;
+      queueMicrotask(() => {
+        if (deferred.cancelled) return;
+        if (pendingRelease.current === deferred) pendingRelease.current = null;
+        controller.destroy();
+      });
     };
   }, [controller]);
 

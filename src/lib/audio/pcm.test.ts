@@ -78,9 +78,7 @@ describe("WAV wrapping", () => {
     const view = new DataView(await blob.arrayBuffer());
 
     const ascii = (offset: number, length: number) =>
-      String.fromCharCode(
-        ...Array.from({ length }, (_, i) => view.getUint8(offset + i)),
-      );
+      String.fromCharCode(...Array.from({ length }, (_, i) => view.getUint8(offset + i)));
 
     assert.equal(blob.type, "audio/wav");
     assert.equal(view.byteLength, 44 + samples.byteLength);
@@ -184,10 +182,7 @@ describe("reading a WAV's duration", () => {
     // A short upload is short audio. Trusting the declared size would report the
     // recording the candidate meant to send rather than the one that arrived,
     // and the penalty would be computed against audio nobody has.
-    assert.equal(
-      wavDurationSeconds(wav({ dataBytes: 16_000, declaredDataBytes: 32_000 })),
-      0.5,
-    );
+    assert.equal(wavDurationSeconds(wav({ dataBytes: 16_000, declaredDataBytes: 32_000 })), 0.5);
   });
 
   it("returns null rather than a plausible zero for anything it cannot read", () => {

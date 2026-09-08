@@ -164,6 +164,21 @@ export function UserIcon(props: IconProps) {
   );
 }
 
+/**
+ * The examiner's face on the correction's transcript (#190): a mortarboard, so
+ * the two speakers are told apart by shape and never by hue alone. The
+ * candidate is `UserIcon` above.
+ */
+export function TeacherIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="m3 9.5 9-4.5 9 4.5-9 4.5-9-4.5Z" />
+      <path d="M7 11.5v4c0 1.7 2.3 3 5 3s5-1.3 5-3v-4" />
+      <path d="M21 9.5v5" />
+    </Icon>
+  );
+}
+
 /** The sujets catalogue: a sheet with lines on it, not a book. */
 export function DocumentIcon(props: IconProps) {
   return (
@@ -219,6 +234,92 @@ export function ExitIcon(props: IconProps) {
       <path d="M14 4h4a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-4" />
       <path d="M10 8 6 12l4 4" />
       <path d="M6 12h10" />
+    </Icon>
+  );
+}
+
+// The recording player's glyphs (#98). Same rules as everything above: stroke
+// on currentColor, aria-hidden, meaning carried by the button's label. The
+// "15" is drawn as a filled figure rather than a stroke because a 7 px numeral
+// stroked at 1.8 is a smudge.
+
+export function PauseIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M8.5 5.5v13" />
+      <path d="M15.5 5.5v13" />
+    </Icon>
+  );
+}
+
+export function SkipBack15Icon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M3.5 12a8.5 8.5 0 1 0 2.49-6.01L3.5 8.5" />
+      <path d="M3.5 3.5v5h5" />
+      <text
+        x="12"
+        y="15.5"
+        textAnchor="middle"
+        fontSize="8"
+        fontWeight="700"
+        fill="currentColor"
+        stroke="none"
+      >
+        15
+      </text>
+    </Icon>
+  );
+}
+
+export function SkipForward15Icon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M20.5 12a8.5 8.5 0 1 1-2.49-6.01L20.5 8.5" />
+      <path d="M20.5 3.5v5h-5" />
+      <text
+        x="12"
+        y="15.5"
+        textAnchor="middle"
+        fontSize="8"
+        fontWeight="700"
+        fill="currentColor"
+        stroke="none"
+      >
+        15
+      </text>
+    </Icon>
+  );
+}
+
+export function VolumeIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M11 5 6.5 8.5H3.5v7h3L11 19V5Z" />
+      <path d="M14.5 9a4.2 4.2 0 0 1 0 6" />
+      <path d="M17.2 6.5a8 8 0 0 1 0 11" />
+    </Icon>
+  );
+}
+
+export function VolumeMutedIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M11 5 6.5 8.5H3.5v7h3L11 19V5Z" />
+      <path d="m15.5 9.5 5 5" />
+      <path d="m20.5 9.5-5 5" />
+    </Icon>
+  );
+}
+
+export function TrashIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M4.5 7h15" />
+      <path d="M9.5 7V5.5A1.5 1.5 0 0 1 11 4h2a1.5 1.5 0 0 1 1.5 1.5V7" />
+      <path d="m6.5 7 .7 11.2a2 2 0 0 0 2 1.8h5.6a2 2 0 0 0 2-1.8L17.5 7" />
+      <path d="M10 10.5v6" />
+      <path d="M14 10.5v6" />
     </Icon>
   );
 }

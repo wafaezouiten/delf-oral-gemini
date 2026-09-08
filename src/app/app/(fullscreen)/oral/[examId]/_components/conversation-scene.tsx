@@ -25,6 +25,14 @@ import { formatClock } from "@/lib/delf/phases";
  * the candidate is on is the reason the inner one was deleted, and none of that
  * changed.
  *
+ * **It sticks to the top of the column while the exchange scrolls (#88).** The
+ * screen kept one scroller and this row got `position: sticky` — the sujet's
+ * document scrolls away above it, the turns scroll away beneath it, and the one
+ * thing that answers « whose turn is it » stays where it can be read. The
+ * stickiness is applied where the row is placed (`passation-screen.tsx`) rather
+ * than here: this component is the two faces and their statuses, and it is the
+ * screen's business how far up the page they are.
+ *
  * **The clock here is elapsed, and that is not a duplicate of the topbar's.**
  * The ring counts down what is left; this counts up what has been used. Two
  * different questions, which is why the reference keeps both, and why printing
@@ -66,8 +74,11 @@ export function ConversationScene({
       ? `À vous de parler. ${candidateStatus}`
       : examinerStatus;
 
+  // `relative` on the row anchors the `sr-only` span — absolute, and without
+  // a positioned ancestor it would anchor to the document and grow the page
+  // by the column's scroll distance (#114).
   return (
-    <div className="border-border bg-card flex shrink-0 items-center gap-3 rounded-lg border p-4 sm:gap-4 sm:px-5">
+    <div className="border-border bg-card relative flex shrink-0 items-center gap-3 rounded-lg border p-4 sm:gap-4 sm:px-5">
       <span aria-live="polite" className="sr-only">
         {turnAnnouncement}
       </span>
@@ -128,13 +139,7 @@ export function ConversationScene({
  * The ring is the reference's `motion.span` as a CSS class — see `.po-ring` in
  * globals.css for why that swap is deliberate rather than a shortcut.
  */
-function SpeakerFace({
-  active,
-  tone,
-}: {
-  active: boolean;
-  tone: "examiner" | "candidate";
-}) {
+function SpeakerFace({ active, tone }: { active: boolean; tone: "examiner" | "candidate" }) {
   return (
     <span className="relative size-11 shrink-0 sm:size-[2.875rem]" aria-hidden>
       {active && (

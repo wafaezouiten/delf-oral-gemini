@@ -1,15 +1,27 @@
 /**
  * POST /api/account/reset — the candidate is starting over (#69).
  *
- * Sent from « Repartir de zéro », the page this product adds to Clerk's account
- * screens at /app/compte, after an explicit confirmation. It archives everything
- * currently on the record: the tableau de bord goes back to its empty state, the
+ * Sent from « Réinitialiser », in the header of the account page this product
+ * adds to Clerk's screens at /app/compte. The button sends it on the first press
+ * — the confirmation panel that used to stand in front of it was removed on the
+ * candidate's instruction (#175), which is only defensible because of the
+ * paragraph below: this route archives, it does not delete. It archives
+ * everything currently on the record: the tableau de bord goes back to its empty state, the
  * sujet cards go back to « Commencer », and the historique keeps every sitting
  * under its archive.
  *
  * **It deletes nothing**, which is what makes it safe to expose as a button. No
  * sitting, correction or recording is removed, `/app/results/:id` on an archived
  * épreuve keeps working, and the guard in front of it is untouched.
+ *
+ * That promise now covers bytes as well as rows (#98): the recordings a sitting
+ * kept in the vault stay kept, and playback on an archived correction keeps
+ * working, because the archive hides a record rather than shortening it. The
+ * candidate who wants an old voice silenced has that as its own verb — the
+ * player's « Supprimer », one recording at a time, speaking through
+ * `oral_recordings.deleted_at` (`DELETE /api/exams/:id/recordings/:phase`) —
+ * and it is deliberately not folded into this reset: starting over and
+ * erasing a voice are different decisions, differently irreversible.
  *
  * Two ways this differs from the sitting routes next door:
  *

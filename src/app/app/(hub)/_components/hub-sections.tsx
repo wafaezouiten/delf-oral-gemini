@@ -1,14 +1,9 @@
 import Link from "next/link";
 
-import {
-  ArrowRightIcon,
-  ChartIcon,
-  ClockIcon,
-  GridCheckIcon,
-} from "@/app/_components/po/icons";
+import { ChartIcon, ClockIcon, GridCheckIcon } from "@/app/_components/po/icons";
 import { Kicker, Tag } from "@/app/_components/po/tag";
-import { ScoreTag } from "@/app/_components/score-band";
 import type { HubCapability, HubSujet, HubView } from "@/lib/ui/epreuve-hub";
+import { SujetCard } from "./sujet-card";
 
 /**
  * The four blocks of the hub, reproduced from the reference's
@@ -72,7 +67,7 @@ export function HubMasthead({ view }: { view: HubView }) {
   return (
     <div className="flex flex-wrap items-start justify-between gap-x-6 gap-y-4">
       <div className="min-w-0">
-        <h1 className="font-serif max-w-[18ch] text-[2.375rem] leading-[1.05] font-semibold tracking-tight sm:text-[2.875rem]">
+        <h1 className="max-w-[18ch] font-serif text-[2.375rem] leading-[1.05] font-semibold tracking-tight sm:text-[2.875rem]">
           {view.title}
         </h1>
         <p className="text-muted-foreground mt-4 max-w-[56ch] text-[0.96875rem] leading-[1.65]">
@@ -101,9 +96,9 @@ export function HubFormat({ view }: { view: HubView }) {
     <section className="mt-10">
       <SectionHeading n="01">Le format de l&apos;épreuve</SectionHeading>
 
-      <div className="mt-4 grid gap-4">
+      <div className="mt-4 grid gap-3">
         {view.format.map((item, index) => (
-          <div key={item.key} className="border-border bg-card sheet border p-5 sm:p-6">
+          <div key={item.key} className="border-border bg-card sheet border p-4 sm:p-5">
             <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
               <Tag>{item.pill}</Tag>
               <h3 className="text-base font-semibold tracking-tight">{item.title}</h3>
@@ -141,12 +136,16 @@ export function HubFormat({ view }: { view: HubView }) {
 }
 
 /**
- * « Sujets à la une » — a few real sujets, straight from the catalogue.
+ * « Sujets à la une » — the first three sujets of the catalogue (#188), drawn
+ * with the kiosk's own card so the two grids are one object.
  *
- * The reference's colour rule, kept verbatim because it is what stops this grid
- * turning into a fruit salad: the kind pill is neutral and the score is the
- * card's one accent. Every card has a kind, so colouring it classifies nothing;
- * only some cards have a score, so that is the one allowed to mean something.
+ * The reference's colour rule, kept because it is what stops this grid turning
+ * into a fruit salad: the score is the card's one accent. Only some cards have
+ * a score, so that is the one allowed to mean something — and since #188 it
+ * colours the whole card, not only the pill. The kind pill the reference once
+ * put beside it is gone from this grid, as it is from the main project's: every
+ * sujet here is the same épreuve, so it classified nothing (the sheet on the
+ * kiosk still names the kind).
  *
  * The card is one `<Link>` rather than a card with a button in it, so the whole
  * surface is the target and there is exactly one tab stop per sujet.
@@ -176,40 +175,20 @@ export function HubSujets({
         Sujets à la une
       </SectionHeading>
 
-      <ul className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {sujets.map((sujet) => (
+      <ul className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        {sujets.map((sujet, index) => (
           <li key={sujet.slug} className="flex">
-            <Link
+            <SujetCard
+              sujet={sujet}
+              // The featured row is the top of the catalogue in its own order,
+              // so the row's index is the kiosk's position for the same sujet:
+              // the number a reader sees here is the one they find on the card
+              // the link lands them on.
+              position={index + 1}
               // Straight to this sujet's sheet on the kiosk, rather than to the
               // top of the page with a hash the grid would have to hunt for.
               href={`${allSujetsHref}?sujet=${sujet.slug}`}
-              // Paper stock, not a white card: the thing the candidate picks and
-              // the thing they read inside the épreuve are visibly the same
-              // object, and a grid of sheets is nothing like the reference's
-              // grid of cards.
-              className="group border-paper-border bg-paper hover:border-primary/60 sheet flex w-full flex-col border p-5 transition-colors"
-            >
-              <div className="flex items-center justify-between gap-2">
-                <Tag>{sujet.kind}</Tag>
-                {/* The ✓ that used to sit here is gone with the pass/fail
-                    colour it belonged to: a tick on a 6/25 in a red pill reads
-                    as approval of the mark rather than as "already sat", and the
-                    footer below already says « Refaire » for that. */}
-                {sujet.score !== null && <ScoreTag score25={sujet.score} />}
-              </div>
-
-              <h3 className="mt-3 line-clamp-3 text-[0.9375rem] leading-snug font-semibold tracking-tight">
-                {sujet.title}
-              </h3>
-
-              <div className="mt-auto flex items-center justify-between gap-2 pt-5">
-                <span className="text-muted-foreground tabular text-xs">{sujet.meta}</span>
-                <span className="text-primary inline-flex items-center gap-1 text-xs font-semibold">
-                  {sujet.score === null ? "Commencer" : "Refaire"}
-                  <ArrowRightIcon className="size-3.5 transition-transform group-hover:translate-x-0.5" />
-                </span>
-              </div>
-            </Link>
+            />
           </li>
         ))}
       </ul>
@@ -237,7 +216,7 @@ const CAPABILITY_ICONS: Record<
 
 export function HubCapabilities({ view }: { view: HubView }) {
   return (
-    <section className="border-border bg-card mt-10 grid sheet border sm:grid-cols-3">
+    <section className="border-border bg-card sheet mt-10 grid border sm:grid-cols-3">
       {view.capabilities.map((capability, index) => {
         const Glyph = CAPABILITY_ICONS[capability.icon];
         return (
@@ -245,8 +224,8 @@ export function HubCapabilities({ view }: { view: HubView }) {
             key={capability.title}
             className={
               index > 0
-                ? "border-border flex items-start gap-3 border-t p-5 sm:border-t-0 sm:border-l"
-                : "flex items-start gap-3 p-5"
+                ? "border-border flex items-start gap-3 border-t p-4 sm:border-t-0 sm:border-l"
+                : "flex items-start gap-3 p-4"
             }
           >
             <span className="bg-muted text-muted-foreground flex size-9 shrink-0 items-center justify-center rounded-md">

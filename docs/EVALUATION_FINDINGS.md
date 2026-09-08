@@ -8,11 +8,11 @@ Three transcripts are graded through the real model: a strong B2 performance, a
 weak one, and — the important one — an **uneven** performance with rich, well
 defended argumentation carried by conspicuously broken grammar.
 
-| Fixture | Score | réal. | inter. | lex. | morph. | phon. |
-| --- | --- | --- | --- | --- | --- | --- |
-| Strong | 25/25 | 5 | 5 | 5 | 5 | 5 |
-| Mixed (ideas strong, grammar broken) | 23/25 | 5 | 5 | 5 | **3** | 5 |
-| Weak | 5/25 | 1 | 1 | 1 | 1 | 1 |
+| Fixture                              | Score | réal. | inter. | lex. | morph. | phon. |
+| ------------------------------------ | ----- | ----- | ------ | ---- | ------ | ----- |
+| Strong                               | 25/25 | 5     | 5      | 5    | 5      | 5     |
+| Mixed (ideas strong, grammar broken) | 23/25 | 5     | 5      | 5    | **3**  | 5     |
+| Weak                                 | 5/25  | 1     | 1      | 1    | 1      | 1     |
 
 Confirmed by this:
 
@@ -43,12 +43,12 @@ measured the shortfall against an 8-minute sitting total where the port measures
 each part against its own floor. `rubric.ts` is deleted. What survives is the
 port:
 
-| Rule | Lives in |
-| --- | --- |
-| The five criteria, their prose, the band scale, the evaluation rules | `delf/criteria.ts` |
-| The bands 0/1/3/5, their labels, snapping a raw number onto one | `delf/grille.ts` |
-| The /25 ceiling, the ≥ 5/25 floor, the per-part duration floors | `delf/constants.ts` |
-| The sum, the penalty, the floor test, and the order they happen in | `delf/orale-rubric.ts` |
+| Rule                                                                 | Lives in               |
+| -------------------------------------------------------------------- | ---------------------- |
+| The five criteria, their prose, the band scale, the evaluation rules | `delf/criteria.ts`     |
+| The bands 0/1/3/5, their labels, snapping a raw number onto one      | `delf/grille.ts`       |
+| The /25 ceiling, the ≥ 5/25 floor, the per-part duration floors      | `delf/constants.ts`    |
+| The sum, the penalty, the floor test, and the order they happen in   | `delf/orale-rubric.ts` |
 
 The evaluator calls `scoreSitting` and nothing else. That matters more than it
 looks: the order — snap, sum, dock, then test the floor — is itself a rule. Test
@@ -80,7 +80,7 @@ take scores with `Number(entry?.score ?? 0)`, so a response missing `phonologie`
 criterion 0 and graded the candidate anyway. A breach of the contract throws
 (`gemini/evaluation-response.ts`), and the caller can retry.
 
-A 2 or a 4 is deliberately *not* a breach. The grille has no such band and the
+A 2 or a 4 is deliberately _not_ a breach. The grille has no such band and the
 prompt forbids it, but `snapToBand` is the ported net underneath exactly that
 mistake, and failing a whole sitting over a band the rubric knows how to read
 would throw away a correction for nothing.
@@ -89,8 +89,8 @@ would throw away a correction for nothing.
 
 **The corrector is generous, and this should be treated as unresolved.**
 
-25/25 is a perfect score. 23/25 for a candidate producing *"les salariés ils
-gagne"*, *"elles peut accéder"* and *"les jeunes qui commence, ils apprend"* —
+25/25 is a perfect score. 23/25 for a candidate producing _"les salariés ils
+gagne"_, _"elles peut accéder"_ and _"les jeunes qui commence, ils apprend"_ —
 pervasive subject-verb agreement failure across every single turn — is defensible
 under the band scale (3 = "au niveau B2 with limitations") but sits at the very
 top of plausible. A real examiner might well give 1 there.

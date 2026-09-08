@@ -31,7 +31,14 @@
  * typings, not copied from a blog post.
  */
 
-import { Modality, type LiveConnectConfig } from "@google/genai";
+import {
+  ActivityHandling,
+  EndSensitivity,
+  Modality,
+  StartSensitivity,
+  type AudioTranscriptionConfig,
+  type LiveConnectConfig,
+} from "@google/genai";
 
 import { buildExaminerInstruction } from "@/lib/delf/examiner-prompt";
 import type { OralTopic } from "@/lib/delf/topics";
@@ -79,7 +86,38 @@ export interface LiveConfigOptions {
   topic: OralTopic;
   /** Resumption handle from a previous session, when reconnecting. */
   resumptionHandle?: string;
+  /**
+   * DEVELOPMENT ONLY — a system instruction to use instead of the built one
+   * (#152).
+   *
+   * The whole of the examiner's behaviour, replaced. It reaches this file only
+   * from the token route, which accepts it only where the development tooling
+   * is enabled and drops it everywhere else, so a production mint cannot carry
+   * one. Absent on every real sitting, and absent is the only state the shipped
+   * product has.
+   *
+   * Applied to the instruction and to nothing else: the VAD mode, the
+   * resumption, the compression and the temperature are what make the monologue
+   * a monologue, and a prompt experiment must not be able to reach them.
+   */
+  instructionOverride?: string;
 }
+
+/**
+ * How the candidate's speech is transcribed — in French, told so (#186).
+ *
+ * Left to detect the language on its own, the transcriber rendered one whole
+ * débat answer in Portuguese: the candidate had answered in French, and what
+ * was stored was a Portuguese paraphrase of it, which the corrector then cited
+ * as « un passage impromptu en langue portugaise » against the lexique band.
+ * This is a DELF épreuve; every word the candidate says into it is meant to be
+ * French, and a hint is exactly the strength this deserves — a candidate who
+ * really does drop into another language is still transcribed, the transcriber
+ * is merely no longer guessing which language a hesitant accent belongs to.
+ * The corrector is separately told that the text is automatic and the audio
+ * outranks it (`transcript-reliability-instruction.ts`).
+ */
+const CANDIDATE_TRANSCRIPTION: AudioTranscriptionConfig = { languageCodes: ["fr-FR"] };
 
 /**
  * The monologue configuration: the examiner listens and cannot interrupt.
@@ -88,12 +126,16 @@ export interface LiveConfigOptions {
  * the examiner still speaks two lines in this phase — the opening handover and
  * the closing sentence — and a session cannot change modality later.
  */
-export function monologueConfig({ topic, resumptionHandle }: LiveConfigOptions): LiveConnectConfig {
+export function monologueConfig({
+  topic,
+  resumptionHandle,
+  instructionOverride,
+}: LiveConfigOptions): LiveConnectConfig {
   return {
     responseModalities: [Modality.AUDIO],
     speechConfig: EXAMINER_SPEECH,
-    systemInstruction: buildExaminerInstruction("monologue", topic),
-    inputAudioTranscription: {},
+    systemInstruction: instructionOverride ?? buildExaminerInstruction("monologue", topic),
+    inputAudioTranscription: CANDIDATE_TRANSCRIPTION,
     outputAudioTranscription: {},
     sessionResumption: resumptionHandle ? { handle: resumptionHandle, ...RESUMPTION } : RESUMPTION,
     contextWindowCompression: COMPRESSION,
@@ -112,23 +154,85 @@ export function monologueConfig({ topic, resumptionHandle }: LiveConfigOptions):
  *
  * `silenceDurationMs` is the single most consequential number in this file. The
  * documented floor is 500 ms; that is tuned for native speakers and would have
- * the examiner talking over a candidate who pauses to conjugate. 1200 ms gives a
- * B2 learner room to think without the exchange feeling sluggish.
+ * the examiner talking over a candidate who pauses to conjugate.
+ *
+ * It is also, measured, most of the reply latency (#100). `pnpm measure:live`
+ * against the real service (run of 2026-08-20, in `docs/comparison/runs`) put
+ * the median last-word-to-first-audio gap at 1.63 s with this window at 1200 ms
+ * — the model's own time to first audio was 0.43 s and flat across six turns,
+ * so roughly three quarters of what the candidate waits through is this number.
+ * #100 cut it to 1000 ms, the shortest the learner-protection floor in
+ * `live-config.test.ts` allowed, and recorded what that bought and what it
+ * risked: every millisecond comes straight off the reply gap, and is also a
+ * millisecond less a B2 candidate may pause mid-sentence before the examiner
+ * takes their unfinished turn.
+ *
+ * **The risk was the one that landed.** Reported from a real sitting: the
+ * candidate is cut off mid-thought, their transcript arrives truncated, and the
+ * examiner answers half an answer — then asks a second question before the
+ * first has been answered at all, because the half it heard read as a complete
+ * turn. So the window goes back UP, past where #100 found it, to 1500 ms. The
+ * ~500 ms this costs the reply gap is a cost paid on every turn; the failure it
+ * buys out of is one that costs the candidate the turn itself. That trade is
+ * not close, and the latency measurement is not the evidence that settles it.
+ *
+ * **Three numbers, one decision — do not tune them apart.** The two
+ * sensitivities were unset until now, which meant the service's own defaults,
+ * which are tuned for native speakers in a quiet room:
+ *
+ *   - `START_SENSITIVITY_LOW` — more evidence required before the room counts
+ *     as somebody starting to speak. The candidate sits in front of a speaker
+ *     playing the examiner's voice, and browser echo cancellation is a best
+ *     effort, not a guarantee: at the default sensitivity the examiner's own
+ *     voice coming back through the microphone was enough to register activity.
+ *   - `END_SENSITIVITY_LOW` — more evidence required before the candidate is
+ *     judged to have finished. `silenceDurationMs` says how long a gap must be;
+ *     this says how sure the detector must be that the gap is silence at all. A
+ *     learner hunting for a word is quiet, not silent, and the pair is what
+ *     stops that being read as a turn ending.
+ *   - `prefixPaddingMs` 300 → 500 — a cough, a chair, one echoed syllable no
+ *     longer clears the bar for committing start-of-speech.
+ *
+ * **`activityHandling: NO_INTERRUPTION` is the guarantee, not the tuning.**
+ * Everything above makes a false barge-in rarer; this makes it harmless. By
+ * default any detected activity interrupts the model mid-generation, which is
+ * where the reported distortion came from — a turn cut off server-side, plus
+ * `ExamController.handleInterruption` flushing everything the player still had
+ * queued of it. The candidate then hears a question break up, and the examiner
+ * opens a fresh turn on the far side of the phantom activity with a NEW
+ * question. #74 fought one shape of this from the client and could only ever
+ * salvage what had already been delivered; this stops the server taking the
+ * decision.
+ *
+ * What it costs, stated plainly: the candidate can no longer talk over the
+ * examiner. That is acceptable here and would not be in a chat product — the
+ * examiner's interventions are one to three sentences by prompt, the DELF
+ * exercice en interaction never asks the candidate to interrupt, and the
+ * app already owns every other way a turn can end (the silence watch, the time
+ * cues, the closing handshake). Their speech during an examiner turn is still
+ * captured and still transcribed; it simply does not cut the examiner short.
  */
-export function debateConfig({ topic, resumptionHandle }: LiveConfigOptions): LiveConnectConfig {
+export function debateConfig({
+  topic,
+  resumptionHandle,
+  instructionOverride,
+}: LiveConfigOptions): LiveConnectConfig {
   return {
     responseModalities: [Modality.AUDIO],
     speechConfig: EXAMINER_SPEECH,
-    systemInstruction: buildExaminerInstruction("debate", topic),
-    inputAudioTranscription: {},
+    systemInstruction: instructionOverride ?? buildExaminerInstruction("debate", topic),
+    inputAudioTranscription: CANDIDATE_TRANSCRIPTION,
     outputAudioTranscription: {},
     sessionResumption: resumptionHandle ? { handle: resumptionHandle, ...RESUMPTION } : RESUMPTION,
     contextWindowCompression: COMPRESSION,
     realtimeInputConfig: {
       automaticActivityDetection: {
-        prefixPaddingMs: 300,
-        silenceDurationMs: 1200,
+        prefixPaddingMs: 500,
+        silenceDurationMs: 1500,
+        startOfSpeechSensitivity: StartSensitivity.START_SENSITIVITY_LOW,
+        endOfSpeechSensitivity: EndSensitivity.END_SENSITIVITY_LOW,
       },
+      activityHandling: ActivityHandling.NO_INTERRUPTION,
     },
     // Higher than the monologue: the examiner has to invent counter-arguments,
     // not recite a line.

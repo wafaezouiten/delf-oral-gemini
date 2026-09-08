@@ -49,3 +49,13 @@ next-env.d.ts
 
 # clerk configuration (can include secrets)
 /.clerk/
+
+# playwright (see playwright.config.ts) — run output, never source.
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/
+
+# A captured Clerk session (see e2e/capture-session.ts) — a live credential
+# for whoever ran it, never a repository file.
+/e2e/.auth/
