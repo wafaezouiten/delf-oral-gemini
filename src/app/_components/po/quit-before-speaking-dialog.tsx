@@ -6,8 +6,7 @@ import { secondaryButton } from "@/app/_components/button-styles";
 import { AlertIcon } from "./icons";
 
 /**
- * « Quitter la préparation ? » — the confirmation behind Retour while nothing
- * has been said yet (#113).
+ * The confirmation behind Retour while nothing has been said yet (#113, #199).
  *
  * Its own component rather than a variant of `ExitDialog`, because the two
  * dialogs make opposite claims and a shared body would have to branch on every
@@ -17,6 +16,22 @@ import { AlertIcon } from "./icons";
  * reaches the historique. A warning the product does not honour is the thing the
  * exit dialog was explicitly built not to be, which is why the préparation
  * stopped opening it.
+ *
+ * **`stage` is where that boundary now falls (#199).** This used to be the
+ * préparation's dialog and nothing else, on the reading that the préparation
+ * ending is when a candidate starts performing. It is not: a speaking part opens
+ * *armed*, with the consigne spoken, the control reading « Enregistrer », no
+ * clock running and nothing being captured. The monologue is that part, and for
+ * the whole of that window this dialog's claim is as true as it is during the
+ * préparation — nothing has been said. The real boundary is « Enregistrer », and
+ * `examExitRoute` is where it is written down.
+ *
+ * Only two strings move with the stage, and both are about *where* the candidate
+ * is rather than what leaving costs: the question in the title, and what the
+ * safe button offers to go back to. The framed loss and the paragraph under it
+ * are shared because they are the same facts — the notes and the préparation
+ * clock are gone either way, and the sitting is unnotée either way. A prop that
+ * changed the promise would be two dialogs wearing one name.
  *
  * What IS worth a confirmation is what the candidate actually loses: the
  * préparation clock and the notes. That is the framed block — warning-toned, not
@@ -32,13 +47,18 @@ import { AlertIcon } from "./icons";
  * that keeps the parent's state honest — are `ExitDialog`'s, for the reasons
  * documented there.
  */
-export function QuitPreparationDialog({
+export function QuitBeforeSpeakingDialog({
   open,
+  stage,
   pending = false,
   onCancel,
   onConfirm,
 }: {
   open: boolean;
+  /** Which side of the préparation → monologue boundary the candidate is on.
+   *  Not a difference in consequence — see above — only in what to call the
+   *  thing they are about to leave. */
+  stage: "preparation" | "monologue";
   /** The archive write is in flight; the candidate leaves when it settles. */
   pending?: boolean;
   onCancel: () => void;
@@ -63,12 +83,20 @@ export function QuitPreparationDialog({
         event.preventDefault();
         onCancel();
       }}
-      aria-labelledby="quit-preparation-title"
+      aria-labelledby="quit-before-speaking-title"
       className="bg-card text-foreground border-border m-auto w-[min(27rem,92vw)] border p-0 backdrop:bg-black/50"
     >
       <div className="space-y-3 p-4 sm:p-5">
-        <h2 id="quit-preparation-title" className="font-serif text-lg font-semibold">
-          Quitter la préparation ?
+        <h2 id="quit-before-speaking-title" className="font-serif text-lg font-semibold">
+          {stage === "preparation" ? (
+            <>Quitter la préparation ?</>
+          ) : (
+            // The préparation is over and the exposé has not begun, so neither
+            // half of « Quitter la préparation ? » is true any more — and a
+            // candidate who reads a dialog naming a phase they have left has to
+            // wonder which screen it is actually about.
+            <>Quitter l&apos;épreuve ?</>
+          )}
         </h2>
 
         {/* The one fact that decides the click: what leaving costs. */}
@@ -87,7 +115,7 @@ export function QuitPreparationDialog({
         <div className="flex flex-wrap justify-end gap-2 pt-1">
           {/* Autofocused: the dialog opens on the way out, so the key the
               candidate is most likely to press next should be the one that
-              keeps their préparation. */}
+              keeps their épreuve. */}
           <button
             type="button"
             onClick={onCancel}
@@ -95,7 +123,7 @@ export function QuitPreparationDialog({
             disabled={pending}
             autoFocus
           >
-            Continuer la préparation
+            {stage === "preparation" ? "Continuer la préparation" : "Continuer"}
           </button>
           {/* Plain, not red. `dangerButton` is reserved for the controls that
               change a candidate's record on purpose, and this dialog's whole
