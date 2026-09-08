@@ -16,6 +16,12 @@ describe("what the corrector is told about an early closing", () => {
     // incident must be byte-identical to the previous version's, which is what
     // keeps EVAL_PROMPT_VERSION's bump honest about what actually changed.
     assert.equal(earlyClosingInstruction(0), "");
+    assert.equal(earlyClosingInstruction(-1), "");
+    // And on a count that arrived unparsed: `<= 0` is false for NaN, so
+    // without the finite check the sitting with no incident is the one that
+    // gets the incident paragraph. `technicalIncidentInstruction` pins the
+    // same case, and the two are only worth reading together if they agree.
+    assert.equal(earlyClosingInstruction(Number.NaN), "");
   });
 
   it("attributes the fault to the examiner, not the candidate", () => {
