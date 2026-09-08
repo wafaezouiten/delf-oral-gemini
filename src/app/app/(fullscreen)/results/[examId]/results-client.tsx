@@ -20,6 +20,7 @@ import { scoreFill, scoreInk, scorePill } from "@/app/_components/score-band";
 import type { DurationCharge } from "@/lib/delf/orale-rubric";
 import { cn } from "@/lib/ui/class-names";
 import { correctionNotices, earlyClosingNotice } from "@/lib/ui/correction-notices";
+import { breakdownDeductions, scoreBreakdown } from "@/lib/ui/criterion-breakdown";
 import { formatScore25 } from "@/lib/ui/format-score";
 import { HUB_LINKS } from "@/lib/ui/epreuve-hub";
 import {
@@ -356,6 +357,26 @@ export function ResultsClient({
     : undefined;
 
   /**
+   * The five rows and the subtractions under them, reconciled with the mark
+   * (#203). Built in `lib/ui/criterion-breakdown.ts`, where `node --test` can
+   * reach the arithmetic — this component prints figures, it does not compute
+   * them.
+   *
+   * Until #203 the rows showed the corrector's bands and nothing else, so a
+   * short épreuve printed five 5s above a 21/25 and left the reader to discover
+   * that the page does not add up. Each row now carries the band it earned AND
+   * the band the clock left it, and the footer names whatever no band could
+   * carry — the halving, or a penalty whose charges were never written down.
+   *
+   * `reconciles` false means the correction's own figures disagree with each
+   * other, which the stored-row path can produce (see the module). The footer
+   * then does not print: a page that shows less is recoverable, one that shows
+   * a wrong sum is not.
+   */
+  const breakdown = scoreBreakdown(evaluation);
+  const deductions = breakdownDeductions(breakdown);
+
+  /**
    * The pane's two halves, built ONCE and rendered twice — the aside from
    * `lg`, the drawer below it. Nodes rather than a duplicated block in each
    * branch, so the two copies cannot drift apart.
@@ -424,22 +445,54 @@ export function ResultsClient({
           <div key={group.competence}>
             <Kicker className="pb-2 text-[0.625rem]">{group.competence}</Kicker>
             <div className="flex flex-col gap-2">
-              {group.criteria.map((key) => (
-                <CriterionRow
-                  key={key}
-                  label={ORAL_CRITERIA_LABELS[key]}
-                  description={ORAL_CRITERIA_SUMMARIES[key]}
-                  band={evaluation.criteria[key] ?? 0}
-                  justification={evaluation.feedback.justifications[key]}
-                  note={key === "phonologie" ? phonoNote : undefined}
-                  open={openKey === key}
-                  onToggle={() => setOpenKey((current) => (current === key ? null : key))}
-                />
-              ))}
+              {group.criteria.map((key) => {
+                const line = breakdown.lines.find((row) => row.criterion === key);
+                return (
+                  <CriterionRow
+                    key={key}
+                    label={ORAL_CRITERIA_LABELS[key]}
+                    description={ORAL_CRITERIA_SUMMARIES[key]}
+                    earned={line?.earned ?? evaluation.criteria[key] ?? 0}
+                    awarded={line?.awarded ?? evaluation.criteria[key] ?? 0}
+                    justification={evaluation.feedback.justifications[key]}
+                    note={key === "phonologie" ? phonoNote : undefined}
+                    open={openKey === key}
+                    onToggle={() => setOpenKey((current) => (current === key ? null : key))}
+                  />
+                );
+              })}
             </div>
           </div>
         ))}
       </div>
+
+      {/* Where the five figures actually land. Printed only when they add up —
+          see `breakdown` above for the one case where they cannot. */}
+      {breakdown.reconciles && (
+        <div className="sheet border-border bg-card mt-4 border px-3.5 py-3">
+          {deductions.length > 0 && (
+            <>
+              <TotalRow
+                label="Total des critères"
+                value={`${formatScore25(breakdown.criteriaTotal)}/${COMPETENCY_MAX}`}
+              />
+              {deductions.map((deduction) => (
+                <TotalRow
+                  key={deduction.key}
+                  label={deduction.label}
+                  value={`−${deduction.points}`}
+                  muted
+                />
+              ))}
+            </>
+          )}
+          <TotalRow
+            label={deductions.length > 0 ? "Note finale" : "Total"}
+            value={`${formatScore25(breakdown.score25)}/${COMPETENCY_MAX}`}
+            strong={deductions.length > 0}
+          />
+        </div>
+      )}
 
       <div className="mt-4 flex flex-col gap-2.5">
         <FeedbackPanel
@@ -742,7 +795,8 @@ const BAND_CLASSES: Record<BandTone, { ink: string; fill: string; bar: string }>
 function CriterionRow({
   label,
   description,
-  band,
+  earned,
+  awarded,
   justification,
   note,
   open,
@@ -750,15 +804,24 @@ function CriterionRow({
 }: {
   label: string;
   description: string;
-  band: GrilleBand;
+  /** The band the corrector set, and the one `justification` is about. */
+  earned: GrilleBand;
+  /** The band after the duration charge, and the one the total is built from.
+   *  Equal to `earned` on every criterion the clock did not reach. */
+  awarded: GrilleBand;
   justification?: string;
   note?: string;
   open: boolean;
   onToggle: () => void;
 }) {
   const panelId = useId();
-  const tone = BAND_CLASSES[BAND_TONE[band]];
-  const low = band === 0;
+  // Everything the row says about where the criterion LANDED — its colour, its
+  // band name, the length of its bar — reads the awarded band, because that is
+  // the figure the mark was built from. The earned band appears beside it as a
+  // figure and nothing else (#203).
+  const tone = BAND_CLASSES[BAND_TONE[awarded]];
+  const low = awarded === 0;
+  const charged = earned - awarded;
 
   return (
     <div
@@ -776,7 +839,15 @@ function CriterionRow({
       >
         <span className="flex items-center gap-2.5">
           <span className="min-w-0 flex-1 truncate text-[0.8125rem] font-bold">{label}</span>
-          <span className={cn("tabular shrink-0 text-xs font-semibold", tone.ink)}>{band}/5</span>
+          {charged > 0 && (
+            <span className="tabular text-muted-foreground shrink-0 text-xs font-semibold">
+              <span aria-hidden>{earned} →</span>
+              <span className="sr-only">note du correcteur {earned} sur 5, note retenue</span>
+            </span>
+          )}
+          <span className={cn("tabular shrink-0 text-xs font-semibold", tone.ink)}>
+            {awarded}/5
+          </span>
           {/* The band's name: a pill from `sm`, read but not shown below it —
               a phone's row has no width for a fourth word. */}
           <span
@@ -786,9 +857,9 @@ function CriterionRow({
               tone.ink,
             )}
           >
-            {BAND_LABELS[band]}
+            {BAND_LABELS[awarded]}
           </span>
-          <span className="sr-only sm:hidden">{BAND_LABELS[band]}</span>
+          <span className="sr-only sm:hidden">{BAND_LABELS[awarded]}</span>
           <ChevronDownIcon
             className={cn(
               "text-muted-foreground size-3.5 shrink-0 transition-transform",
@@ -799,7 +870,7 @@ function CriterionRow({
         <span className="bg-muted mt-2.5 block h-1 overflow-hidden rounded-full" aria-hidden>
           <span
             className={cn("criterion-bar block h-full rounded-full", tone.bar)}
-            style={{ width: `${(band / 5) * 100}%` }}
+            style={{ width: `${(awarded / 5) * 100}%` }}
           />
         </span>
       </button>
@@ -811,6 +882,18 @@ function CriterionRow({
             {justification}
           </p>
         )}
+        {/* Said inside the row because the justification above it is about the
+            EARNED band, and a reader who has just been told the exposé was
+            clear needs to know why the row reads lower (#203). The part and the
+            durations are in the paragraph under the mark; this is the
+            arithmetic, beside the two figures it connects. */}
+        {charged > 0 && (
+          <p className="border-border text-muted-foreground mt-2.5 border-t pt-2.5 text-[0.6875rem] leading-snug">
+            Note du correcteur&nbsp;: {earned}/5. La durée de l&apos;épreuve a coûté{" "}
+            {charged === 1 ? "1 point" : `${charged} points`} sur ce critère, d&apos;où {awarded}/5
+            dans le total.
+          </p>
+        )}
         {note && (
           <div className="border-border text-muted-foreground mt-2.5 flex items-start gap-2 border-t pt-2.5">
             <AlertIcon className="mt-0.5 size-3 shrink-0" />
@@ -819,6 +902,39 @@ function CriterionRow({
         )}
       </div>
     </div>
+  );
+}
+
+/**
+ * One line of the footer under the criteria: a label and a figure, the figures
+ * aligned on `tabular` so the column can actually be added up by eye (#203).
+ *
+ * `muted` is a deduction, `strong` the line the deductions arrive at. Neither is
+ * a heading — the whole block is a statement of arithmetic, and a screen reader
+ * meets it as the run of text it is.
+ */
+function TotalRow({
+  label,
+  value,
+  muted,
+  strong,
+}: {
+  label: string;
+  value: string;
+  muted?: boolean;
+  strong?: boolean;
+}) {
+  return (
+    <p
+      className={cn(
+        "flex items-baseline justify-between gap-3 text-xs",
+        muted && "text-muted-foreground",
+        strong && "border-border mt-1.5 border-t pt-1.5 font-semibold",
+      )}
+    >
+      <span>{label}</span>
+      <span className="tabular shrink-0">{value}</span>
+    </p>
   );
 }
 
