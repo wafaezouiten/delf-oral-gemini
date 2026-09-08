@@ -607,11 +607,13 @@ export function applySittingDurationPenalty(
   let running = score25;
   let penalty = 0;
   for (const charge of charges) {
-    const seconds =
-      charge.part === "monologue" ? durations.monologueSeconds : durations.debateSeconds;
     const applied = applyDurationPenalty(
       running,
-      seconds,
+      // The measurement the charge already carries, rather than the same
+      // ternary written twice: a third part, or a second source for either
+      // duration, would otherwise have two places to be added and one of them
+      // would be found by a wrong number in a stored row.
+      charge.seconds,
       FULL_DEVELOPMENT_SECONDS[charge.part],
       charge.points,
     );

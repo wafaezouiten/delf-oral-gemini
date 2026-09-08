@@ -33,7 +33,13 @@
  * corrections that could carry this paragraph and those that never would.
  */
 export function earlyClosingInstruction(earlyClosingCount: number): string {
-  if (earlyClosingCount <= 0) return "";
+  // `Number.isFinite` first, as `technicalIncidentInstruction` does: `<= 0`
+  // is false for NaN, so a count that arrived unparsed would print an
+  // examiner fault into the prompt of a sitting that never had one. The
+  // finish route validates before either function is reached (see
+  // `finishPayloadSchema`); the two incident paragraphs still guard alike,
+  // so neither is the one a future caller finds out about the hard way.
+  if (!Number.isFinite(earlyClosingCount) || earlyClosingCount <= 0) return "";
 
   return `INCIDENT PENDANT LE DEBAT : l'examinateur a annoncé À TORT la fin de l'épreuve avant la fin du temps imparti (en prenant congé, en invitant le candidat à quitter la salle, ou en annonçant une partie qui n'existe pas). Cette clôture prématurée est une DÉFAILLANCE DE L'EXAMINATEUR, pas un fait de la prestation du candidat. Elle apparaît dans la transcription, et elle est audible dans l'enregistrement si vous en disposez. N'en tenez aucun compte : ne traitez pas ces tours de parole comme la fin réelle de l'épreuve, et ne pénalisez le candidat sur AUCUN critère si l'échange s'en trouve écourté ou si sa participation s'arrête après cette annonce — un candidat à qui l'on dit que l'épreuve est terminée cesse légitimement de parler.`;
 }
