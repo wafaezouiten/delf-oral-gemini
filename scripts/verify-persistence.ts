@@ -346,6 +346,30 @@ async function main(): Promise<number> {
       status: reclaimed.status,
     });
 
+    /**
+     * The same hold, seen from the walk-out (raised in review of #197).
+     *
+     * Between the accept and the correction there is no `evaluations` row, so
+     * the `not exists` guard `abandonSitting` shares with the claim has nothing
+     * to see for the whole grading budget. Without the hold clause, a second
+     * tab's « Quitter » stamps a zero onto a sitting that is at that moment
+     * being graded — `writeCorrection` asks no questions and lands anyway — and
+     * the row ends up both abandoned and corrected, which the historique and
+     * the results page then read in opposite directions.
+     */
+    check(
+      "a walk-out is refused while the correction is being computed",
+      (await store.abandonSitting(heldRef, new Date())) === false,
+    );
+    await store.releaseClaim(heldRef);
+    check(
+      "and is allowed again the moment that claim is released",
+      await store.abandonSitting(heldRef, new Date()),
+    );
+    // Deleted for the reason `midMonologue` is below: it is a walk-out now, and
+    // the record is counted further down.
+    await db.delete(oralExams).where(eq(oralExams.id, held.id));
+
     console.log("\nread back");
     const stored = await store.readSitting(ref);
     check("the sitting reads as corrected", stored?.outcome === "corrected", {
@@ -470,6 +494,20 @@ async function main(): Promise<number> {
     check(
       "an archived préparation cannot be walked out of afterwards",
       (await store.abandonSitting(prepRef, new Date())) === false,
+    );
+    // And the mirror of that mirror (raised in review of #197). The claim
+    // carries the same `archived_at is null` clause: `phase` cannot tell this
+    // exit from a live monologue, so a finish arriving after it would hang a
+    // correction on the row — and the archive would then list, as a graded
+    // épreuve, the sitting the dialog promised would never appear.
+    check(
+      "nor can it be finished afterwards",
+      (await store.claimForCorrection(prepRef, {
+        transcript: MONOLOGUE,
+        reconnectCount: 0,
+        earlyClosingCount: 0,
+        finishedAt: new Date(),
+      })) === false,
     );
 
     // A walk-out stamped while the row still reads `preparation` — which is

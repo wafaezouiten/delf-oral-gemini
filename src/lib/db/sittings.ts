@@ -442,6 +442,19 @@ export function neonSittingStore(): SittingStore {
           and(
             eq(oralExams.id, ref.examId),
             eq(oralExams.userId, ref.userId),
+            // Off the record stays off it: the mirror of the guard
+            // `abandonSitting` carries against this column, refused here for
+            // the same reason. `archivePreparationExit` (#113) stamps a row the
+            // candidate has just been told will never appear, and `phase`
+            // cannot tell that exit from a live monologue — so a finish
+            // arriving afterwards would hang a correction on it, and the
+            // historique's archive would list, as a graded épreuve, the exact
+            // sitting the dialog promised against. Nothing is stranded by
+            // refusing: an archived sitting is off the record by the
+            // candidate's own instruction, and the reset's archive
+            // (`archiveCandidateRecord`) deliberately never touches a sitting
+            // that is still running.
+            isNull(oralExams.archivedAt),
             // Not `finished_at is null`. See the header of
             // `sitting-persistence.ts`: keying on the correction is what lets a
             // sitting whose write failed be finished again instead of being
@@ -539,6 +552,18 @@ export function neonSittingStore(): SittingStore {
        *  - `not exists (…evaluations…)`, the same guard `claimForCorrection`
        *    uses, so a correction that landed while the dialog was open outranks
        *    the walk-out. A sitting is graded or abandoned, never both;
+       *  - **and not while one is being computed**, which since #86 is a state
+       *    that carries no evaluation row yet: the finish route claims, answers
+       *    202, and grades behind it for up to
+       *    {@link CORRECTION_CLAIM_HOLD_SECONDS}. Through that window the
+       *    bullet above has nothing to see, and this clause is the only thing
+       *    between a second tab's « Quitter » and a row stamped abandoned that
+       *    a correction then lands on anyway — `writeCorrection` asks no
+       *    questions, and `readCandidateHistory` reads such a row as an
+       *    abandoned 0/25 while the results page reads the correction. The
+       *    claim's own predicate, reused verbatim, so a claim released after a
+       *    failed write (`releaseClaim`) reopens the walk-out at once rather
+       *    than for the rest of the hold;
        *  - `archived_at is null`, the mirror of the guard `archivePreparationExit`
        *    carries against this column. Redundant for a reset's archive — those
        *    rows were graded or abandoned first, and the clauses above already
@@ -575,6 +600,8 @@ export function neonSittingStore(): SittingStore {
             isNull(oralExams.abandonedAt),
             isNull(oralExams.archivedAt),
             sql`not exists (select 1 from ${evaluations} where ${evaluations.examId} = ${oralExams.id})`,
+            sql`(${oralExams.finishedAt} is null
+              or ${oralExams.finishedAt} < now() - make_interval(secs => ${CORRECTION_CLAIM_HOLD_SECONDS}))`,
           ),
         )
         .returning({ id: oralExams.id });
