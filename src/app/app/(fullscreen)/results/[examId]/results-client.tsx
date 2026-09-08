@@ -446,6 +446,11 @@ export function ResultsClient({
             <Kicker className="pb-2 text-[0.625rem]">{group.competence}</Kicker>
             <div className="flex flex-col gap-2">
               {group.criteria.map((key) => {
+                // Never missing in practice — the breakdown maps over
+                // `ORAL_CRITERIA` and these keys come from the same set — but
+                // `find` is typed as it should be, and the fallback is the
+                // reading this row had before the breakdown existed rather
+                // than a zero invented to satisfy the types.
                 const line = breakdown.lines.find((row) => row.criterion === key);
                 return (
                   <CriterionRow
@@ -466,33 +471,38 @@ export function ResultsClient({
         ))}
       </div>
 
-      {/* Where the five figures actually land. Printed only when they add up —
-          see `breakdown` above for the one case where they cannot. */}
-      {breakdown.reconciles && (
-        <div className="sheet border-border bg-card mt-4 border px-3.5 py-3">
-          {deductions.length > 0 && (
-            <>
-              <TotalRow
-                label="Total des critères"
-                value={`${formatScore25(breakdown.criteriaTotal)}/${COMPETENCY_MAX}`}
-              />
-              {deductions.map((deduction) => (
+      {/* Where the five figures actually land. Printed only when they add up
+          (see `breakdown` above for the one case where they cannot) AND only
+          when something happened between the rows and the mark: a charge that
+          moved a row, or a deduction no row could carry. On the ordinary
+          sitting the five bands already ARE the mark, and a « Total 25/25 »
+          under them would only restate the /25 at the top of the pane. */}
+      {breakdown.reconciles &&
+        (deductions.length > 0 || breakdown.lines.some((l) => l.charged)) && (
+          <div className="sheet border-border bg-card mt-4 border px-3.5 py-3">
+            {deductions.length > 0 && (
+              <>
                 <TotalRow
-                  key={deduction.key}
-                  label={deduction.label}
-                  value={`−${deduction.points}`}
-                  muted
+                  label="Total des critères"
+                  value={`${formatScore25(breakdown.criteriaTotal)}/${COMPETENCY_MAX}`}
                 />
-              ))}
-            </>
-          )}
-          <TotalRow
-            label={deductions.length > 0 ? "Note finale" : "Total"}
-            value={`${formatScore25(breakdown.score25)}/${COMPETENCY_MAX}`}
-            strong={deductions.length > 0}
-          />
-        </div>
-      )}
+                {deductions.map((deduction) => (
+                  <TotalRow
+                    key={deduction.key}
+                    label={deduction.label}
+                    value={`−${deduction.points}`}
+                    muted
+                  />
+                ))}
+              </>
+            )}
+            <TotalRow
+              label={deductions.length > 0 ? "Note finale" : "Total"}
+              value={`${formatScore25(breakdown.score25)}/${COMPETENCY_MAX}`}
+              strong={deductions.length > 0}
+            />
+          </div>
+        )}
 
       <div className="mt-4 flex flex-col gap-2.5">
         <FeedbackPanel
@@ -839,13 +849,24 @@ function CriterionRow({
       >
         <span className="flex items-center gap-2.5">
           <span className="min-w-0 flex-1 truncate text-[0.8125rem] font-bold">{label}</span>
+          {/* The two figures are shown, and SAID, separately: the visible pair
+              reads « 5 → 1 » across two spans, so the spoken sentence is one
+              `sr-only` span carrying both numbers itself rather than a fragment
+              that only completes because of what happens to sit beside it. */}
+          <span className="sr-only">
+            {charged > 0
+              ? `note du correcteur ${earned} sur 5, note retenue ${awarded} sur 5`
+              : `${awarded} sur 5`}
+          </span>
           {charged > 0 && (
-            <span className="tabular text-muted-foreground shrink-0 text-xs font-semibold">
-              <span aria-hidden>{earned} →</span>
-              <span className="sr-only">note du correcteur {earned} sur 5, note retenue</span>
+            <span
+              className="tabular text-muted-foreground shrink-0 text-xs font-semibold"
+              aria-hidden
+            >
+              {earned} →
             </span>
           )}
-          <span className={cn("tabular shrink-0 text-xs font-semibold", tone.ink)}>
+          <span className={cn("tabular shrink-0 text-xs font-semibold", tone.ink)} aria-hidden>
             {awarded}/5
           </span>
           {/* The band's name: a pill from `sm`, read but not shown below it —

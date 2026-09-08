@@ -76,7 +76,13 @@ describe("the correction's penalty notices", () => {
       // justification.
       const notice = shortDebate()!;
 
-      assert.ok(!/le correcteur a abaiss/i.test(notice), notice);
+      // Kept from the pre-#203 test, and deliberately still this broad: the row
+      // shows the corrector's band beside the retained one, so ANY wording that
+      // says a band was brought down describes something the reader can see is
+      // untrue. Cheap insurance against a future rewording, not just against
+      // one phrase.
+      assert.ok(!/abaiss/i.test(notice), notice);
+      assert.ok(!/ramené/i.test(notice), notice);
       assert.match(notice, /la note du correcteur est suivie de celle retenue/);
       assert.ok(
         !/sont bien celles du correcteur/.test(notice),
