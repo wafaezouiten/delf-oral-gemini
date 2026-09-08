@@ -3009,7 +3009,17 @@ export class ExamController {
       if (this.phaseStart !== null) {
         this.phaseSeconds[current] = Math.round((this.now() - this.phaseStart) / 1000);
       }
-      this.phaseStamps[current].endedAt = this.now();
+      // Only for a part that actually opened. `startedAt` is stamped by
+      // `beginRecording()` from the candidate's own « Enregistrer », so a part
+      // quit out of while still armed (#199) now leaves NEITHER stamp rather
+      // than an end without a beginning. Nothing reads the pair unguarded today
+      // — `phaseReports` and `reportFinalisedPhase` both check `startedAt`
+      // first, which is why the old unconditional stamp was inert — but a
+      // half-stamped phase is a state the next reader would have to be taught
+      // about, and there is no fact it records.
+      if (this.phaseStamps[current].startedAt !== null) {
+        this.phaseStamps[current].endedAt = this.now();
+      }
       this.tolerate("end-phase", () => this.recorder?.endPhase());
 
       // DEVELOPMENT ONLY — a typed phase leaves no artefact (#51). Decided at
