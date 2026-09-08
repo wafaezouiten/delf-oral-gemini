@@ -299,13 +299,27 @@ export interface SittingStore {
 // DERIVING THE ROWS
 // =====================================================
 
-/** A phase as the browser reported it: the wall clock, and nothing derived. */
+/** A phase as the browser reported it, plus the duration the route resolved. */
 export interface ReportedPhase {
   phase: OralSpeakingPhase;
   /** Epoch ms. Required — a phase is reported only because it was entered. */
   startedAt: number;
   /** Epoch ms, or null for a phase entered and never left. */
   endedAt: number | null;
+  /**
+   * How long this part lasted, as the correction beside it was graded on (#203).
+   *
+   * The route's `gradedSeconds`: the audio measured out of the uploaded bytes,
+   * plus whatever the development claims added to it — and nothing this module
+   * decides, because deciding what a client may claim is the route's job and
+   * only the route knows which build it is running in.
+   *
+   * Optional so a caller with nothing but the browser's report still writes a
+   * row; absent falls back to the measured recording, which is what this
+   * derivation used before the field existed and therefore leaves every
+   * existing caller and every stored row exactly where they were.
+   */
+  gradedSeconds?: number;
 }
 
 /** One uploaded artefact, already measured out of its own bytes by the route. */
@@ -335,9 +349,9 @@ export interface CorrectionInput {
  *
  * Pure, and exported, because this is where the arithmetic that a stored row
  * either agrees or disagrees with the correction lives (#17): `spoken_seconds`
- * comes from the measured audio rather than from the clock the browser sent, and
- * each recording row either points at the copy the vault kept or is stamped
- * disposed — never both, and never neither.
+ * is the duration the correction was graded on — the measured audio, never the
+ * clock the browser sent — and each recording row either points at the copy the
+ * vault kept or is stamped disposed, never both and never neither.
  *
  * Rounding is `Math.round`, matching the integer columns and their `>= 0` check
  * constraints. A negative measurement cannot reach here — `measureUploadedRecording`
@@ -366,7 +380,11 @@ export function deriveArtefactRows(input: Omit<CorrectionInput, "correction">): 
     // record of a task that never happened.
     phases: input.phases.map((report) => ({
       phase: report.phase,
-      spokenSeconds: Math.max(0, Math.round(measured(report.phase))),
+      // The duration the correction was graded on, which on every real sitting
+      // IS the measured audio — see `ReportedPhase.gradedSeconds` for the one
+      // development case where the two differ, and why the row must follow the
+      // grade rather than the file.
+      spokenSeconds: Math.max(0, Math.round(report.gradedSeconds ?? measured(report.phase))),
       startedAt: new Date(report.startedAt),
       endedAt: report.endedAt === null ? null : new Date(report.endedAt),
     })),
