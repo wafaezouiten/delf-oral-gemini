@@ -80,8 +80,11 @@ export interface SittingRef {
 /** One speaking phase's row, as this module hands it to the store. */
 export interface PhaseRow {
   phase: OralSpeakingPhase;
-  /** Measured from the audio, never from the browser's clock. See the header of
-   *  the finish route for why those are two different numbers. */
+  /** The duration the correction beside this row was graded on: measured from
+   *  the audio, never the browser's clock — see the header of the finish route
+   *  for why those are two different numbers, and
+   *  {@link ReportedPhase.gradedSeconds} for the one development case where it
+   *  is the measurement plus the time a tester skipped (#203). */
   spokenSeconds: number;
   startedAt: Date | null;
   endedAt: Date | null;
