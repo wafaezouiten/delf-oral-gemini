@@ -42,8 +42,11 @@ import {
  * by a flat battery rather than a choice, which is exactly the difference
  * `abandoned_at` exists to draw.
  *
- * The join on `evaluations` is therefore a `leftJoin` and no longer an inner
- * one: an abandoned sitting has no correction and must still be counted.
+ * The correction is therefore reached by a `leftJoin` and no longer an inner
+ * one: an abandoned sitting has no correction and must still be counted. And it
+ * is reached through `latestEvaluationByExam` rather than through `evaluations`
+ * directly, because a sitting may carry more than one correction and this
+ * function owes its callers one row per sitting — see that subquery.
  *
  * A third question sits on top of those two since #69: whether the sitting is
  * still on the **current** record, or was archived when the candidate started
@@ -128,6 +131,54 @@ const recordingsByExam = (userId: string) =>
     .groupBy(oralRecordings.examId)
     .as("recording_lists");
 
+/**
+ * The one correction that counts for each sitting: the newest.
+ *
+ * A third subquery, and the reason it exists is the same fan-out the two above
+ * guard against — with one difference that makes it worse. `evaluations` has no
+ * unique key on `exam_id`, deliberately: `schema.ts` says "one sitting must
+ * carry many evaluations" so the comparison harness can grade one performance
+ * several times. A plain join therefore emits **one row per correction**, and
+ * this function's contract is one row per sitting. A twice-graded sitting was
+ * printing twice in the historique, twice in the dashboard's list, and counting
+ * twice in every average computed off it — each copy carrying a different mark,
+ * while the correction it linked to showed a third answer.
+ *
+ * It showed a third answer because it was already right: `readSitting` and
+ * `findCorrection` both take `order by created_at desc, id desc limit 1`. This
+ * is that ordering, applied once per exam — so the record and the correction it
+ * opens can no longer disagree about what a sitting scored.
+ *
+ * `distinct on` rather than a `max(created_at)` join: the tiebreak on `id`
+ * matters (a re-grade written in the same millisecond as its predecessor is
+ * exactly what a harness does), and reproducing "newest by two keys" as a
+ * correlated subquery is how the two orderings would drift apart.
+ */
+const latestEvaluationByExam = (userId: string) =>
+  getDb()
+    .selectDistinctOn([evaluations.examId], {
+      id: evaluations.id,
+      examId: evaluations.examId,
+      score25: evaluations.score25,
+      meetsFloor: evaluations.meetsFloor,
+      mode: evaluations.mode,
+      realisationTache: evaluations.realisationTache,
+      interaction: evaluations.interaction,
+      lexique: evaluations.lexique,
+      morphosyntaxe: evaluations.morphosyntaxe,
+      phonologie: evaluations.phonologie,
+    })
+    .from(evaluations)
+    // The join is the scoping, as everywhere in this file: `evaluations` has no
+    // `user_id` of its own, and a subquery that graded the whole table before
+    // the outer WHERE filtered it would read every candidate's corrections.
+    .innerJoin(oralExams, eq(evaluations.examId, oralExams.id))
+    .where(eq(oralExams.userId, userId))
+    // `distinct on` demands its expressions lead the ORDER BY; the rest is
+    // `findCorrection`'s ordering verbatim.
+    .orderBy(evaluations.examId, desc(evaluations.createdAt), desc(evaluations.id))
+    .as("latest_evaluations");
+
 /** The parts in the order they were sat — `json_agg` has no opinion about it. */
 const PHASE_ORDER: ReadonlyArray<SittingRecording["phase"]> = ["monologue", "debate"];
 
@@ -169,6 +220,7 @@ export async function readCandidateHistory(
 
   const totals = spokenSecondsByExam(userId);
   const recordings = recordingsByExam(userId);
+  const correction = latestEvaluationByExam(userId);
 
   try {
     const rows = await getDb()
@@ -180,19 +232,21 @@ export async function readCandidateHistory(
         finishedAt: oralExams.finishedAt,
         abandonedAt: oralExams.abandonedAt,
         archivedAt: oralExams.archivedAt,
-        score25: evaluations.score25,
-        meetsFloor: evaluations.meetsFloor,
-        mode: evaluations.mode,
+        score25: correction.score25,
+        meetsFloor: correction.meetsFloor,
+        mode: correction.mode,
         spokenSeconds: totals.spokenSeconds,
         recordings: recordings.recordings,
-        realisationTache: evaluations.realisationTache,
-        interaction: evaluations.interaction,
-        lexique: evaluations.lexique,
-        morphosyntaxe: evaluations.morphosyntaxe,
-        phonologie: evaluations.phonologie,
+        realisationTache: correction.realisationTache,
+        interaction: correction.interaction,
+        lexique: correction.lexique,
+        morphosyntaxe: correction.morphosyntaxe,
+        phonologie: correction.phonologie,
       })
       .from(oralExams)
-      .leftJoin(evaluations, eq(evaluations.examId, oralExams.id))
+      // The newest correction, one row per sitting — never `evaluations`
+      // itself, which fans a twice-graded sitting out into two épreuves.
+      .leftJoin(correction, eq(correction.examId, oralExams.id))
       .innerJoin(oralTopics, eq(oralExams.topicId, oralTopics.id))
       .leftJoin(totals, eq(totals.examId, oralExams.id))
       .leftJoin(recordings, eq(recordings.examId, oralExams.id))
@@ -200,7 +254,7 @@ export async function readCandidateHistory(
         and(
           eq(oralExams.userId, userId),
           // Graded, or walked out of. Anything else is still running.
-          or(isNotNull(evaluations.id), isNotNull(oralExams.abandonedAt)),
+          or(isNotNull(correction.id), isNotNull(oralExams.abandonedAt)),
           // The current record, unless the caller wants the archive with it.
           // `undefined` is how Drizzle's `and` is told to drop a condition, and
           // it is the whole difference between the two callers.

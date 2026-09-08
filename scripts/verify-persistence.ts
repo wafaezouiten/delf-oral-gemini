@@ -416,6 +416,60 @@ async function main(): Promise<number> {
     check("the reconnect count was stored", stored?.reconnectCount === 1);
     check("the early-closing count was stored", stored?.earlyClosingCount === 2);
 
+    /**
+     * A sitting graded twice (#200).
+     *
+     * `evaluations` has no unique key on `exam_id` on purpose — the comparison
+     * harness grades one performance under several prompts — so this is a row
+     * shape the schema invites and the finish route simply never produces. It
+     * is also a shape only a live database can show: the fan-out happens in
+     * the JOIN, so no unit test with a fake store can see it.
+     *
+     * Two statements must agree about a twice-graded sitting, and until this
+     * check they did not. `readSitting` took the newest correction and the
+     * historique's query took *all* of them, printing one épreuve as two rows
+     * with two different marks — neither of which was the one the correction
+     * page then showed.
+     */
+    console.log("\ngraded twice");
+    const regrade: CorrectionRow = {
+      ...correction,
+      // Distinguishable from the first at a glance, and legal: `score_25` must
+      // equal the raw minus both penalties, so the whole arithmetic moves.
+      criteria: Object.fromEntries(ORAL_CRITERIA.map((c) => [c, 5])) as CorrectionRow["criteria"],
+      rawScore25: 25,
+      absencePenalty: 0,
+      durationPenalty: 0,
+      score25: 25,
+      meetsFloor: true,
+      promptVersion: "verify-regrade",
+    };
+    // No artefacts: a re-grade reads the phases and recordings already stored
+    // rather than writing them again, and the ones stored here have just been
+    // asserted disposed of. `writeCorrection` batches nothing for an empty
+    // pair, so this is the insert alone.
+    await store.writeCorrection(ref, { phases: [], recordings: [], correction: regrade });
+
+    check(
+      "the correction page reads the newest of the two",
+      (await store.findCorrection(ref))?.score25 === regrade.score25,
+      { score25: (await store.findCorrection(ref))?.score25, expected: regrade.score25 },
+    );
+    const regraded = (await readCandidateHistory(USER)).filter((s) => s.examId === ref.examId);
+    check("the record still lists it once, not twice", regraded.length === 1, {
+      rows: regraded.length,
+    });
+    check(
+      "and reads the same mark the correction does",
+      regraded[0]?.score25 === regrade.score25 && regraded[0]?.meetsFloor === regrade.meetsFloor,
+      { score25: regraded[0]?.score25, expected: regrade.score25 },
+    );
+    check(
+      "with the newest bands, not the older ones",
+      ORAL_CRITERIA.every((c) => regraded[0]?.criteria[c] === 5),
+      { criteria: regraded[0]?.criteria },
+    );
+
     console.log("\nownership");
     const intruder = { examId: ref.examId, userId: "verify_intruder" };
     check("a stranger reads nothing", (await store.readSitting(intruder)) === null);
@@ -583,7 +637,11 @@ async function main(): Promise<number> {
     );
     check(
       "and the correction, which nothing deleted",
-      archive.some((s) => s.examId === ref.examId && s.score25 === scored.score25),
+      // The re-grade's mark, not the first correction's: the archive is read
+      // through the same query as the record, so it takes the newest of the
+      // two here too. Nothing deleted the older one either — it is simply not
+      // what this sitting scored.
+      archive.some((s) => s.examId === ref.examId && s.score25 === regrade.score25),
     );
 
     check("a second reset moves nothing", (await archiveCandidateRecord(USER, new Date())) === 0);
