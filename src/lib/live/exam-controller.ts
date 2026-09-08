@@ -2462,6 +2462,51 @@ export class ExamController {
   }
 
   /**
+   * End the épreuve from a débat that never began (#199).
+   *
+   * The candidate has given their exposé, heard the débat's consigne and decided
+   * to stop there. Until this existed the only way out of that window was
+   * « Retour », which promised a zero and stamped `abandoned_at` — throwing away
+   * an exposé that had actually been spoken. The prestation is owed a
+   * correction; what it is not owed is a débat mark, and the rubric already
+   * prices that absence (`partsAbsent` counts words, `applyAbsentPartPenalty`
+   * halves the /25), so nothing about the scoring changes here.
+   *
+   * **Why not `advanceEarly()`.** That ends a part through
+   * `beginClosingHandshake()`, which asks the examiner for a closing sentence
+   * and then waits for the turn. On an armed part there is no session to ask and
+   * no clock for `tick()` to move, so the wait would never complete and the
+   * safety timeout would never be reached — exactly the hang `canAdvance`
+   * documents and excludes. This goes straight to the transition instead, which
+   * is where every other ordering decision already lives.
+   *
+   * **The consigne may still be playing**, since « Retour » is on screen
+   * throughout it. Silenced first, for the same reason « Passer » exists: the
+   * transition that is speaking it is suspended inside `announce()`, and letting
+   * it resume into a sitting that is finishing would put the débat's
+   * instructions over the closing clip. `skipAnnouncement()` resolves that await,
+   * and `advance()` re-checks the phase on the far side of it so the suspended
+   * call finds the épreuve already over and returns.
+   *
+   * Handed off rather than awaited, through `advanceDetached()` and for its
+   * reason (#65): `advance()` ends by speaking a consigne and encoding a
+   * sitting, the caller is a click handler with a dialog to close, and a
+   * transition that fails must still say so somewhere instead of becoming an
+   * unhandled rejection in a console nobody has open. The screen the candidate
+   * lands on is `finished`, and everything after it — the encode, the upload,
+   * its retry — is that screen's, unchanged.
+   */
+  finishWithoutDebate(): void {
+    if (this.phase !== "debate") return;
+    // Armed, and armed only. A débat with a clock running is a walk-out, and
+    // must keep going through the dialog that says so.
+    if (this.phaseStart !== null) return;
+    if (this.destroyed) return;
+    if (this.announcementPlaying) this.skipAnnouncement();
+    this.advanceDetached();
+  }
+
+  /**
    * Start the part the candidate is looking at: « Enregistrer ».
    *
    * This is the moment the épreuve begins for that part. The clock is anchored,
@@ -2925,6 +2970,27 @@ export class ExamController {
     });
   }
 
+  /**
+   * Whether the sitting has left the phase this transition was opening.
+   *
+   * `advance()` awaits two slow things on its way into a speaking part — the
+   * microphone, then a consigne that takes twenty-five seconds to speak — and
+   * the candidate is looking at « Retour » for all of it. Two departures can
+   * land in that window: the tab going away (`destroyed`, which this still
+   * answers), and now a candidate ending the épreuve from an armed débat (#199),
+   * which flips the phase to `finished` from underneath a call that is still
+   * arming the débat.
+   *
+   * Both mean the same thing to everything below the awaits: there is no phase
+   * left to arm, no monologue left to report as finalised, and no finish to run
+   * — whoever moved the sitting on has already done its own. So this is one
+   * question asked twice rather than a special case: is the phase this call was
+   * entering still the phase the sitting is in?
+   */
+  private hasMovedOn(target: OralPhase): boolean {
+    return this.destroyed || this.phase !== target;
+  }
+
   /** Every phase transition runs through here, so ordering lives in one place. */
   private async advance(): Promise<void> {
     const current = this.phase;
@@ -3044,6 +3110,7 @@ export class ExamController {
       // and no message saying why. A failure here is not fatal: the micError is
       // already on screen and the épreuve is still worth sitting.
       await this.prepareAudio();
+      if (this.hasMovedOn(target)) return;
 
       // The consigne, then the candidate's own go-ahead, then the clock, the
       // microphone and the examiner. None of that order commutes: the consigne
@@ -3052,9 +3119,7 @@ export class ExamController {
       // opens last so the examiner is not left holding a turn while an
       // instruction it did not give is being read out.
       await this.announce(target);
-      // A sitting that ended while the consigne was playing — the tab closed,
-      // the candidate walked out. There is no phase left to start.
-      if (this.destroyed) return;
+      if (this.hasMovedOn(target)) return;
 
       // ARMED, not started. `phaseStart` stays null and `startSpeaking()` is
       // what anchors it, from the candidate's own click on « Enregistrer ». The
