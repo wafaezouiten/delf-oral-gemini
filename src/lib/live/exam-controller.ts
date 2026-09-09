@@ -3483,6 +3483,11 @@ export class ExamController {
     }
   }
 
+  /** When the débat started waiting on the exposé, or null when it is not. */
+  private transcriptWaitStartedAt: number | null = null;
+  /** Ends that wait early, from the heartbeat or from a teardown. */
+  private releaseTranscriptWait: (() => void) | null = null;
+
   /**
    * Hold the débat until the exposé has been written down, but not for long.
    *
@@ -3492,27 +3497,46 @@ export class ExamController {
    * « Commencer le débat ». What this bounds is the tail, so a transcriber that
    * has hung cannot leave somebody looking at a part that will not open.
    *
-   * The timer is cleared on the way out rather than left to fire: `node --test`
-   * keeps the process alive for a pending timeout, and a thirty-second one per
-   * simulated sitting would be the unit suite's whole runtime.
+   * **Stamped, not scheduled**, exactly as `closingHasTimedOut` is and for the
+   * same reason: this file has one clock, it is injected, and the last real
+   * `setTimeout` in it was ripped out of the closing handshake for ignoring
+   * `deps.now()` and costing the unit suite a genuine twelve-second sleep. A
+   * thirty-second one would have been worse, and the tell is that the timeout
+   * would have had no test — see `checkMonologueTranscriptWait`, which the
+   * heartbeat calls and the fake clock can drive.
    */
   private async awaitMonologueTranscript(): Promise<void> {
     const pending = this.monologueTranscription;
     if (!pending) return;
-    let timer: ReturnType<typeof setTimeout> | undefined;
+    this.transcriptWaitStartedAt = this.now();
     try {
       await Promise.race([
         pending,
         new Promise<void>((resolve) => {
-          timer = setTimeout(() => {
-            this.log("monologue-transcription-timeout", MONOLOGUE_TRANSCRIPTION_WAIT_MS);
-            resolve();
-          }, MONOLOGUE_TRANSCRIPTION_WAIT_MS);
+          this.releaseTranscriptWait = resolve;
         }),
       ]);
     } finally {
-      if (timer) clearTimeout(timer);
+      this.transcriptWaitStartedAt = null;
+      this.releaseTranscriptWait = null;
     }
+  }
+
+  /**
+   * The débat has waited long enough for an exposé that is not coming.
+   *
+   * Called from `tick()`, so the deadline is read off the injected clock like
+   * every other timing decision here. Letting go does not abandon the
+   * transcription: the call is still running, and if it ever answers, the words
+   * land in the transcript and travel with the finish payload. What is lost is
+   * the SEED — this débat's examiner opens without the monologue behind it,
+   * which is a worse débat and still an épreuve.
+   */
+  private checkMonologueTranscriptWait(): void {
+    if (this.transcriptWaitStartedAt === null) return;
+    if (this.now() - this.transcriptWaitStartedAt < MONOLOGUE_TRANSCRIPTION_WAIT_MS) return;
+    this.log("monologue-transcription-timeout", MONOLOGUE_TRANSCRIPTION_WAIT_MS);
+    this.releaseTranscriptWait?.();
   }
 
   /** Release the monologue floor exactly once. See `activityEnded`. */
@@ -3710,6 +3734,10 @@ export class ExamController {
       return;
     }
 
+    // Before every early return below it, because this one releases something
+    // that is holding the part open rather than reacting to it.
+    this.checkMonologueTranscriptWait();
+
     const seconds = Math.floor((this.now() - this.phaseStart) / 1000);
     if (seconds !== this.elapsed) {
       this.elapsed = seconds;
@@ -3792,6 +3820,11 @@ export class ExamController {
     this.destroyed = true;
     this.stopTicker();
     this.clearClosingTimer();
+    // The heartbeat is what would otherwise end this wait, and it has just been
+    // stopped. Left alone, an `openSession` awaiting a transcription that never
+    // answers would hold its closure — and this controller — for the life of
+    // the tab.
+    this.releaseTranscriptWait?.();
     // Before anything is awaited: `close()` resolves any in-flight `play()` as
     // skipped, so an `announce()` a phase boundary is awaiting cannot strand
     // that boundary on a page that is going away — and `advance()` checks

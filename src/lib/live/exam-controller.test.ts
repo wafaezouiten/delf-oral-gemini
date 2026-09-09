@@ -4898,3 +4898,48 @@ describe("the monologue's transcript comes from its recording", () => {
     assert.equal(h.controller.getSnapshot().phase, "debate");
   });
 });
+
+/**
+ * The wait has a deadline, and the deadline is on the exam's own clock.
+ *
+ * Its own block because the sitting it describes is the one the wait exists
+ * for: a transcriber that never answers. `closingHasTimedOut` learned this
+ * lesson first — a real `setTimeout` here would be untestable except by
+ * sleeping thirty seconds, which is exactly why the timeout would have gone
+ * untested.
+ */
+describe("the débat does not wait forever for the exposé", () => {
+  it("opens unseeded once the transcription has had its window", async () => {
+    // Never resolves: the transcriber hung, or the model is still thinking.
+    const h = harness({ transcribeMonologue: () => new Promise<string>(() => {}) });
+    h.controller.start();
+    await h.controller.advanceEarly();
+    await pressRecord(h);
+    h.controller.startSpeaking();
+    await new Promise((resolve) => setImmediate(resolve));
+    h.advanceClock(360);
+    h.session().candidateSays("Ce que la session avait bien voulu rendre.");
+    await h.controller.advanceEarly();
+    h.session().finishTurn();
+    await new Promise((resolve) => setImmediate(resolve));
+
+    // The candidate presses « Commencer le débat » and the part does not open.
+    await pressRecord(h);
+    assert.equal(h.sessions.length, 1, "still holding for the exposé");
+
+    // Thirty seconds of the exam's clock, driven by the harness rather than by
+    // the wall — the whole point of stamping the deadline.
+    h.advanceClock(31);
+    await new Promise((resolve) => setImmediate(resolve));
+
+    assert.equal(h.sessions.length, 2, "the débat opened anyway");
+    assert.equal(h.controller.getSnapshot().phase, "debate");
+    // And what the socket did deliver is still the monologue's transcript: the
+    // wait ran out, nothing was erased.
+    assert.ok(
+      h.controller
+        .getSnapshot()
+        .transcript.some((entry) => entry.text === "Ce que la session avait bien voulu rendre."),
+    );
+  });
+});

@@ -92,7 +92,7 @@ async function main() {
     const pcm = exposeOf(seconds, clips);
     const wav = pcm16ToWav(pcm, RATE);
     const startedAt = Date.now();
-    const text = await transcribeMonologue(wav, "audio/wav");
+    const text = await transcribeMonologue(await wav.arrayBuffer(), "audio/wav");
     const took = (Date.now() - startedAt) / 1000;
     const spoken = (pcm.length / RATE).toFixed(0);
     console.log(`\n  ${spoken}s of exposé, ${(wav.size / 1024 / 1024).toFixed(1)} MB of WAV:`);

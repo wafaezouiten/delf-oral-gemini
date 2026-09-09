@@ -26,7 +26,12 @@ import { EXAM_ACCESS_DENIALS } from "@/lib/auth/exam-access";
 // The same number one phase's artefact is held to when this very blob reaches
 // the finish, with the platform arithmetic that sets it. The cap lives there
 // rather than in the transcriber for the reason that module gives.
-import { MAX_RECORDING_BYTES } from "@/lib/exams/uploaded-recording";
+import {
+  MAX_RECORDING_BYTES,
+  MIN_RECORDING_SECONDS,
+  measureUploadedRecording,
+} from "@/lib/exams/uploaded-recording";
+import { INPUT_SAMPLE_RATE } from "@/lib/gemini/constants";
 import { transcribeMonologue } from "@/lib/gemini/transcribe-monologue";
 
 export const runtime = "nodejs";
@@ -72,15 +77,38 @@ export async function POST(request: Request, context: { params: Promise<{ examId
     return NextResponse.json({ error: "Enregistrement trop volumineux" }, { status: 413 });
   }
 
-  // What the blob says it is, not what the form claims: the artefact is Ogg
-  // Opus since #24, and a file offered under the wrong type transcribes silence.
-  const mimeType = audio.type || "audio/ogg";
+  /**
+   * What the BYTES are, not what the blob's `type` claims they are — the same
+   * policy, and the same function, the finish route applies to this very
+   * artefact when it arrives there. `Blob.type` is the client's label; a file
+   * handed to the transcriber under the wrong one transcribes silence, and
+   * silence here is indistinguishable from a candidate who said nothing.
+   *
+   * `null` is a file nothing here recognises. Refused rather than sent, for the
+   * cost: an unmeasurable file is not going to become a transcript.
+   */
+  const bytes = await audio.arrayBuffer();
+  const measured = measureUploadedRecording(bytes, INPUT_SAMPLE_RATE);
+  if (!measured) {
+    return NextResponse.json({ error: "Enregistrement illisible" }, { status: 400 });
+  }
+  // The same floor the finish route reads a stub against (#73): seconds of room
+  // tone is an absence, and asking a model to transcribe one spends a call to
+  // be told so. The empty answer is the honest one and costs nothing.
+  if (measured.durationSeconds < MIN_RECORDING_SECONDS) {
+    console.info(
+      `[monologue-transcript] ${measured.durationSeconds.toFixed(1)}s is under the ` +
+        `${MIN_RECORDING_SECONDS}s floor; nothing to transcribe`,
+    );
+    return NextResponse.json({ text: "" });
+  }
 
   const startedAt = Date.now();
   try {
-    const text = await transcribeMonologue(audio, mimeType);
+    const text = await transcribeMonologue(bytes, measured.mimeType);
     console.info(
-      `[monologue-transcript] ${audio.size} bytes of ${mimeType} -> ` +
+      `[monologue-transcript] ${audio.size} bytes of ${measured.mimeType}, ` +
+        `${measured.durationSeconds.toFixed(1)}s -> ` +
         `${text.length} chars in ${((Date.now() - startedAt) / 1000).toFixed(1)}s`,
     );
     return NextResponse.json({ text });

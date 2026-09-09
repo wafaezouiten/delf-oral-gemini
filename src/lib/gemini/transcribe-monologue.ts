@@ -61,9 +61,20 @@ import { withTransientRetry, transientStatus } from "./transient";
  * returned 0, 4, 140, 507, 664, 1318 and 2703 characters. Turning thinking down
  * changed the failure's shape and not its rate.
  *
- * `gemini-3.5-transcribe` returns the whole thing, in a few seconds, and puts
- * it in a part of its own — see {@link readTranscription}. The override stays
- * for the day this id is renamed, which preview ids are.
+ * `gemini-3.5-transcribe` answers, every time, in a few seconds, and puts the
+ * words in a part of its own — see {@link readTranscription}. On 395 s of the
+ * fixture: 5356 characters in 8.5 s, and 2550 in 5.8 s. Both are transcripts
+ * and neither is nothing, which is the bar the other model could not clear —
+ * but the two are not the same length, so this is "reliably answers", not
+ * "provably complete".
+ *
+ * That caveat is partly the fixture's: `verify-monologue-transcript.ts` has no
+ * seven-minute recording of a person to hand and loops the app's own consignes
+ * to reach the length, which is speech a transcriber has already heard four
+ * times over. Whether a real exposé comes back whole is what
+ * `e2e/monologue-transcription.spec.ts` is for, and it has not been run.
+ *
+ * The override stays for the day this id is renamed, which preview ids are.
  */
 export const TRANSCRIBE_MODEL = process.env.GEMINI_TRANSCRIBE_MODEL ?? "gemini-3.5-transcribe";
 
@@ -111,11 +122,14 @@ const INSTRUCTION = [
  * here would be a second number to keep in step, for no protection the first
  * does not already give.
  *
- * @param mimeType What the blob turned out to be — `audio/ogg` from the Opus
- *   encoder, `audio/wav` from the fallback. A file offered under the wrong type
- *   transcribes silence.
+ * @param audio The recording's bytes. An `ArrayBuffer` rather than the `Blob`
+ *   the route received, because the route has already read it once to decide
+ *   what it is — reading it twice would double a multi-megabyte copy.
+ * @param mimeType What the bytes turned out to BE, from
+ *   `measureUploadedRecording` — never the label the client attached. A file
+ *   offered under the wrong type transcribes silence.
  */
-export async function transcribeMonologue(audio: Blob, mimeType: string): Promise<string> {
+export async function transcribeMonologue(audio: ArrayBuffer, mimeType: string): Promise<string> {
   return readTranscription(await transcribeMonologueRaw(audio, mimeType));
 }
 
@@ -144,14 +158,14 @@ function readTranscription(response: GenerateContentResponse): string {
 }
 
 async function transcribeMonologueRaw(
-  audio: Blob,
+  audio: ArrayBuffer,
   mimeType: string,
 ): Promise<GenerateContentResponse> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) throw new Error("GEMINI_API_KEY is not set");
 
   const ai = new GoogleGenAI({ apiKey });
-  const data = Buffer.from(await audio.arrayBuffer()).toString("base64");
+  const data = Buffer.from(audio).toString("base64");
 
   // The same policy the corrector rides on: a busy model answers 503 and the
   // identical request goes through moments later, and here there is a candidate
