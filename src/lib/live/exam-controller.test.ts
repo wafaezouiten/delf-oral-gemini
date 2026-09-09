@@ -78,12 +78,24 @@ class FakeSession implements LiveSessionLike {
     return this.historyProvider();
   }
 
+  /**
+   * What the seed said at the moment this socket opened, frozen.
+   *
+   * {@link history} reads the provider live, which is right for the reconnect it
+   * was written for and useless for the question "had the exposé been written
+   * down BEFORE the examiner connected?" — a live read answers yes however late
+   * the words arrived. The monologue is transcribed from its recording, so that
+   * question is now a contract.
+   */
+  historyAtConnect: Array<{ role: "user" | "model"; parts: Array<{ text: string }> }> = [];
+
   async connect(): Promise<void> {
     this.connects += 1;
     // Open on a later turn, never in the caller's — a real socket cannot do
     // otherwise, and everything said into that window is dropped by
     // `sendDirective` below rather than silently counted here.
     await Promise.resolve();
+    this.historyAtConnect = this.historyProvider();
     this.open = true;
     this.callbacks.onStateChange("connected");
   }
@@ -447,6 +459,13 @@ function harness(
      * cannot play the clips gets.
      */
     announcer?: FakeAnnouncer;
+    /**
+     * Read the monologue's recording back as text (the Live API will not — see
+     * `lib/gemini/transcribe-monologue.ts`). Absent by default, so every test
+     * written before it still describes a controller whose monologue transcript
+     * is whatever the socket delivered.
+     */
+    transcribeMonologue?: (recording: PhaseRecording) => Promise<string>;
   } = {},
 ): Harness {
   let now = 0;
@@ -484,6 +503,7 @@ function harness(
     createAnnouncer: devices.announcer ? () => devices.announcer! : undefined,
     onFinished: (payload) => finished.push(payload),
     onPhaseFinalised: devices.onPhaseFinalised ?? ((report) => progress.push(report)),
+    transcribeMonologue: devices.transcribeMonologue,
     now: () => now,
     autoTick: false,
   });
@@ -4751,5 +4771,222 @@ describe("a directive the examiner reads aloud instead of obeying (#187)", () =>
     h.session().examinerSays("Pourquoi ?");
 
     assert.deepEqual(await examinerTurns(h), ["Pourquoi ?"]);
+  });
+});
+
+/**
+ * The exposé, read back off its own recording.
+ *
+ * The Live session that hears the monologue does not transcribe it. Manual
+ * voice-activity detection holds the candidate's floor open for the whole part
+ * — which is what stops the examiner interrupting — and past somewhere under
+ * four minutes inside that one activity, the `activityEnd` meant to emit the
+ * whole exposé emits nothing at all and never does. Measured against the real
+ * service in `scripts/probe-monologue-close.ts`, with the débat's automatic VAD
+ * transcribing the same audio as a control. A DELF exposé is five to seven
+ * minutes, so this was every spoken monologue, and each one reached the finish
+ * route as a candidate who had said nothing.
+ */
+describe("the monologue's transcript comes from its recording", () => {
+  /** Sit an exposé and hand over to the débat, without pressing record on it —
+   *  the débat is left armed, so its session has not opened yet. */
+  async function exposeThenHandover(h: Harness, spoken?: string): Promise<void> {
+    h.controller.start();
+    await h.controller.advanceEarly();
+    await pressRecord(h);
+    h.controller.startSpeaking();
+    await new Promise((resolve) => setImmediate(resolve));
+    h.advanceClock(360);
+    if (spoken) h.session().candidateSays(spoken);
+    await h.controller.advanceEarly();
+    h.session().finishTurn();
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+
+  const EXPOSE = "Je vais vous parler du télétravail, et je le défendrai en deux parties.";
+
+  /** The candidate's monologue turns as the controller now holds them. */
+  function exposeTurns(h: Harness): string[] {
+    return h.controller
+      .getSnapshot()
+      .transcript.filter((entry) => entry.phase === "monologue" && entry.speaker === "candidate")
+      .map((entry) => entry.text);
+  }
+
+  it("writes the recording's account of the exposé into the transcript", async () => {
+    const h = harness({ transcribeMonologue: async () => EXPOSE });
+    await exposeThenHandover(h);
+    await pressRecord(h);
+
+    assert.deepEqual(exposeTurns(h), [EXPOSE]);
+  });
+
+  it("replaces what the socket managed to deliver rather than adding to it", async () => {
+    // A short exposé the live session DID transcribe. Appending would hand the
+    // corrector the same words twice and double the count the absence rule reads.
+    const h = harness({ transcribeMonologue: async () => EXPOSE });
+    await exposeThenHandover(h, EXPOSE);
+    await pressRecord(h);
+
+    assert.deepEqual(exposeTurns(h), [EXPOSE], "one exposé, not two");
+  });
+
+  it("has the exposé in hand before the examiner who must argue with it connects", async () => {
+    // The contract the wait exists for: the débat's session is seeded with what
+    // the candidate argued, so a transcription that lands after the socket opens
+    // is a débat about nothing.
+    const gate = deferred();
+    const h = harness({
+      transcribeMonologue: async () => {
+        await gate.promise;
+        return EXPOSE;
+      },
+    });
+    await exposeThenHandover(h);
+
+    const opening = pressRecord(h);
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(h.sessions.length, 1, "the débat is still waiting for the exposé");
+
+    gate.resolve();
+    await opening;
+    // `startSpeaking` hands the connect off rather than awaiting it — it is a
+    // click handler — so the session appears a turn after the gate opens.
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(h.sessions.length, 2);
+    assert.ok(
+      JSON.stringify(h.sessions[1].historyAtConnect).includes("télétravail"),
+      "the examiner was seeded with the exposé it has to challenge",
+    );
+  });
+
+  it("sends the exposé for correction", async () => {
+    const h = harness({ transcribeMonologue: async () => EXPOSE });
+    await exposeThenHandover(h);
+    await pressRecord(h);
+    h.advanceClock(PHASE_DURATIONS.debate);
+    h.session().finishTurn();
+    await new Promise((resolve) => setImmediate(resolve));
+
+    const sent = h.finished[0]?.transcript.filter((entry) => entry.phase === "monologue");
+    assert.ok(sent?.some((entry) => entry.text === EXPOSE));
+  });
+
+  it("survives a transcriber that fails, because an épreuve is not a transcript", async () => {
+    const h = harness({
+      transcribeMonologue: async () => {
+        throw new Error("502");
+      },
+    });
+    await exposeThenHandover(h, "Ce que la session a bien voulu rendre.");
+    await pressRecord(h);
+
+    assert.equal(h.controller.getSnapshot().phase, "debate");
+    assert.equal(h.sessions.length, 2, "the débat opened anyway");
+    assert.deepEqual(
+      exposeTurns(h),
+      ["Ce que la session a bien voulu rendre."],
+      "and kept whatever the socket had delivered",
+    );
+  });
+
+  it("erases nothing when the recording turns out to hold no speech", async () => {
+    // An empty string is a real answer about a real recording, and one the
+    // absence rule is entitled to see — but it is not a licence to delete the
+    // words the session did deliver.
+    const h = harness({ transcribeMonologue: async () => "" });
+    await exposeThenHandover(h, "Trois mots seulement.");
+    await pressRecord(h);
+
+    assert.deepEqual(exposeTurns(h), ["Trois mots seulement."]);
+  });
+
+  it("asks for one transcription, on the artefact the encode already produced", async () => {
+    const seen: PhaseRecording[] = [];
+    const h = harness({
+      transcribeMonologue: async (recording) => {
+        seen.push(recording);
+        return EXPOSE;
+      },
+    });
+    await exposeThenHandover(h);
+    await pressRecord(h);
+
+    assert.equal(seen.length, 1);
+    assert.equal(seen[0].phase, "monologue");
+    // One `recordingFor`, shared: the encode and the transcription wait on the
+    // same memoized promise rather than asking the archive twice.
+    assert.deepEqual(h.recorder.prepared, ["monologue"]);
+  });
+
+  it("does not hold a débat that was reached without any monologue recording", async () => {
+    // Nothing to transcribe is not a reason to wait: the dep is never called and
+    // the part opens as it always did.
+    let called = false;
+    const h = harness({
+      transcribeMonologue: async () => {
+        called = true;
+        return EXPOSE;
+      },
+    });
+    h.controller.start();
+    await h.controller.advanceEarly();
+    await pressRecord(h);
+    h.controller.startSpeaking();
+    await new Promise((resolve) => setImmediate(resolve));
+    // The clock runs out with the microphone delivering nothing at all, so the
+    // phase closes with no artefact behind it.
+    h.advanceClockSilently(PHASE_DURATIONS.monologue);
+    h.session().finishTurn();
+    await new Promise((resolve) => setImmediate(resolve));
+    await pressRecord(h);
+
+    assert.equal(called, false);
+    assert.equal(h.controller.getSnapshot().phase, "debate");
+  });
+});
+
+/**
+ * The wait has a deadline, and the deadline is on the exam's own clock.
+ *
+ * Its own block because the sitting it describes is the one the wait exists
+ * for: a transcriber that never answers. `closingHasTimedOut` learned this
+ * lesson first — a real `setTimeout` here would be untestable except by
+ * sleeping thirty seconds, which is exactly why the timeout would have gone
+ * untested.
+ */
+describe("the débat does not wait forever for the exposé", () => {
+  it("opens unseeded once the transcription has had its window", async () => {
+    // Never resolves: the transcriber hung, or the model is still thinking.
+    const h = harness({ transcribeMonologue: () => new Promise<string>(() => {}) });
+    h.controller.start();
+    await h.controller.advanceEarly();
+    await pressRecord(h);
+    h.controller.startSpeaking();
+    await new Promise((resolve) => setImmediate(resolve));
+    h.advanceClock(360);
+    h.session().candidateSays("Ce que la session avait bien voulu rendre.");
+    await h.controller.advanceEarly();
+    h.session().finishTurn();
+    await new Promise((resolve) => setImmediate(resolve));
+
+    // The candidate presses « Commencer le débat » and the part does not open.
+    await pressRecord(h);
+    assert.equal(h.sessions.length, 1, "still holding for the exposé");
+
+    // Thirty seconds of the exam's clock, driven by the harness rather than by
+    // the wall — the whole point of stamping the deadline.
+    h.advanceClock(31);
+    await new Promise((resolve) => setImmediate(resolve));
+
+    assert.equal(h.sessions.length, 2, "the débat opened anyway");
+    assert.equal(h.controller.getSnapshot().phase, "debate");
+    // And what the socket did deliver is still the monologue's transcript: the
+    // wait ran out, nothing was erased.
+    assert.ok(
+      h.controller
+        .getSnapshot()
+        .transcript.some((entry) => entry.text === "Ce que la session avait bien voulu rendre."),
+    );
   });
 });

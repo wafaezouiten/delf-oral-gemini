@@ -60,9 +60,7 @@ import {
   type CorrectionRow,
 } from "@/lib/exams/sitting-persistence";
 import { resolveEarlyClosingCount } from "@/lib/delf/early-closing";
-import { PARTICIPATION_WORD_FLOOR, partsSpokenButUntranscribed } from "@/lib/delf/orale-rubric";
 import { findTopic } from "@/lib/delf/topics";
-import { candidateWordCount } from "@/lib/delf/transcript";
 // Lives outside this file so it can be unit-tested: nothing in a route that
 // imports `server-only`, Clerk and the database client can be loaded by
 // `node --test`, and the request validation is the last thing that should go
@@ -71,6 +69,9 @@ import { finishPayloadSchema } from "@/lib/exams/finish-payload";
 // The rule that settles one part's duration, extracted for the same reason —
 // it is the arithmetic that decides a mark, and #203 gave it a second input.
 import { gradedPhaseSeconds } from "@/lib/exams/graded-duration";
+// The two refusals a sitting nobody can be heard in earns, and the order
+// between them — extracted so a test can hold the order. See its module comment.
+import { participationRefusal } from "@/lib/exams/participation-refusal";
 // The binary half of the same request, extracted for the same reason.
 import {
   MAX_RECORDING_BYTES,
@@ -247,72 +248,26 @@ export async function POST(request: Request, context: { params: Promise<{ examId
   const topic = findTopic(payload.topicSlug);
   if (!topic) return NextResponse.json({ error: "Sujet inconnu" }, { status: 404 });
 
-  // Refuse to invent a grade for an exam that never happened. A model handed an
-  // empty transcript will still confidently return five scores.
-  //
-  // The same floor the rubric now applies per part, imported rather than
-  // written twice: this gate and the halving are the same judgement about what
-  // counts as having spoken, asked at two scopes, and a bare 20 here would let
-  // them drift apart silently.
-  if (candidateWordCount(payload.transcript) < PARTICIPATION_WORD_FLOOR) {
-    return NextResponse.json(
-      {
-        error:
-          "La transcription ne contient presque aucune parole du candidat. L'épreuve ne peut pas être évaluée.",
-      },
-      { status: 422 },
-    );
-  }
-
   /**
-   * The same refusal, asked per part, and answered by the microphone.
+   * Refuse to grade a sitting nobody can be heard in — and say whose failure it
+   * was, in that order.
    *
-   * The gate above catches a sitting with no words in it at all. This one
-   * catches the sitting that has plenty — a full débat, say — and is missing
-   * one part's worth, in a way only a transcription failure explains: minutes
-   * of measured voiced speech under a transcript that shows almost none.
-   *
-   * Refusing is the point, and it is not the conservative option. Grading on
-   * would have produced a number, and the rubric would then have halved it and
-   * had the correction page tell the candidate they never presented their
-   * monologue — which is the failure this whole path exists to stop being
-   * reported as theirs. A 422 costs them the sitting; the alternative costs
-   * them the sitting AND blames them for it.
-   *
-   * Placed before `readRecordings`, so a refusal is decided without spending
-   * the upload, and long before anything paid is called.
-   *
-   * `voicedSeconds` absent means a client that predates the field, which has no
-   * evidence to offer either way: `partsSpokenButUntranscribed` is then asked
-   * about zeroes and answers with nothing, so those sittings behave exactly as
-   * they did before this existed.
+   * Both halves and, more importantly, the order between them live in
+   * `participation-refusal.ts`. Asked here rather than after `readRecordings`
+   * so a refusal is decided without spending the upload, and long before
+   * anything paid is called.
    */
-  const untranscribed = partsSpokenButUntranscribed(
-    {
-      monologueWords: candidateWordCount(payload.transcript, "monologue"),
-      debateWords: candidateWordCount(payload.transcript, "debate"),
-    },
-    {
-      monologueSeconds: payload.voicedSeconds?.monologue ?? 0,
-      debateSeconds: payload.voicedSeconds?.debate ?? 0,
-    },
-  );
-  if (untranscribed.length > 0) {
-    const named =
-      untranscribed.length === 2
-        ? "des deux parties de l'épreuve"
-        : untranscribed[0] === "monologue"
-          ? "de votre monologue"
-          : "de votre débat";
+  const refusal = participationRefusal(payload.transcript, {
+    monologueSeconds: payload.voicedSeconds?.monologue ?? 0,
+    debateSeconds: payload.voicedSeconds?.debate ?? 0,
+  });
+  if (refusal) {
     return NextResponse.json(
-      {
-        error:
-          `La transcription ${named} n'a pas été enregistrée correctement : ` +
-          `le microphone vous a bien entendu, mais vos paroles ne sont pas parvenues jusqu'au ` +
-          `correcteur. L'épreuve ne peut pas être évaluée, et ce n'est pas de votre fait.`,
-        reason: "transcription",
-        parts: untranscribed,
-      },
+      // `reason` and `parts` only where they mean something: an absent sitting
+      // has no part to name, and the screen reads the message either way.
+      refusal.reason === "transcription"
+        ? { error: refusal.message, reason: refusal.reason, parts: refusal.parts }
+        : { error: refusal.message },
       { status: 422 },
     );
   }

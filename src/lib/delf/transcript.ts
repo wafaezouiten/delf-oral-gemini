@@ -338,3 +338,56 @@ export function debateSessionHistory(
   }));
   return [...monologueAsHistory(entries), ...exchange];
 }
+
+/**
+ * Put one part's candidate speech back, from a source that is not the socket.
+ *
+ * The monologue is transcribed from its own recording, server-side, because the
+ * Live API will not transcribe the exposé the épreuve actually asks for: past
+ * somewhere between 3 min 44 s and 4 min 18 s inside ONE manual-VAD activity,
+ * the `activityEnd` that is supposed to emit the whole thing emits nothing at
+ * all, and never does — measured against the real service in
+ * `scripts/probe-monologue-close.ts`, with the débat's automatic VAD
+ * transcribing the same 370 seconds as a control. A DELF B2 exposé is five to
+ * seven minutes, so every spoken monologue fell in the failing range.
+ *
+ * REPLACES rather than appends, and that is the whole of the decision. What the
+ * live session managed to deliver for this part is at best a prefix of what the
+ * recording says — for a short exposé it is the same words twice, and appending
+ * would hand the corrector a candidate who said everything twice and the
+ * absence rule a word count that had doubled. So the part's candidate turns go,
+ * and one turn carrying the recording's own account of them takes their place.
+ *
+ * The examiner's turns are untouched: the closing sentence really was said, and
+ * nothing about it was lost.
+ *
+ * The new turn LEADS its part, which is where an exposé belongs — the only
+ * examiner turn in a monologue is the thanks at the end of it.
+ */
+export function replaceCandidateSpeech(
+  entries: readonly TranscriptEntry[],
+  phase: TranscriptPhase,
+  text: string,
+  timestamp: number,
+): TranscriptEntry[] {
+  const spoken = text.trim();
+  // Nothing to put back is not an instruction to erase what is there. A failed
+  // or empty transcription leaves the part exactly as the session left it.
+  if (!spoken) return entries as TranscriptEntry[];
+
+  // The first entry that is not from an EARLIER part, rather than the first
+  // entry of this one: the part being written may have no turns at all — which
+  // is precisely the failure this exists for — and appending then would file
+  // the exposé after the débat that answered it.
+  const order = (of: TranscriptPhase) => (of === "monologue" ? 0 : 1);
+  const notEarlier = entries.findIndex((entry) => order(entry.phase) >= order(phase));
+  const at = notEarlier === -1 ? entries.length : notEarlier;
+  const replacement: TranscriptEntry = { phase, speaker: "candidate", timestamp, text: spoken };
+  return [
+    ...entries.slice(0, at),
+    replacement,
+    ...entries
+      .slice(at)
+      .filter((entry) => !(entry.phase === phase && entry.speaker === "candidate")),
+  ];
+}
