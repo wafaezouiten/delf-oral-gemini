@@ -19,6 +19,7 @@ import {
   formatTranscript,
   isPresenceCheck,
   monologueAsHistory,
+  replaceCandidateSpeech,
   separateDirectiveEcho,
   stripDirectiveEchoes,
   type TranscriptEntry,
@@ -355,5 +356,54 @@ describe("the app's presence check in the corrector's transcript (#187)", () => 
       { phase: "debate", speaker: "candidate", timestamp: 1, text: "Vous m'entendez ?" },
     ]);
     assert.ok(candidate.includes("CANDIDAT: Vous m'entendez ?"));
+  });
+});
+
+describe("replaceCandidateSpeech", () => {
+  const sitting: TranscriptEntry[] = [
+    { phase: "monologue", speaker: "candidate", timestamp: 1000, text: "Je vais vous parler" },
+    { phase: "monologue", speaker: "candidate", timestamp: 2000, text: "du télétravail." },
+    { phase: "monologue", speaker: "examiner", timestamp: 9000, text: "Je vous remercie." },
+    { phase: "debate", speaker: "examiner", timestamp: 10_000, text: "Vous avez dit que…" },
+    { phase: "debate", speaker: "candidate", timestamp: 11_000, text: "Oui, et je maintiens." },
+  ];
+
+  it("puts the part's candidate speech back as one turn", () => {
+    const out = replaceCandidateSpeech(sitting, "monologue", "L'exposé entier.", 1000);
+    const monologue = entriesForPhase(out, "monologue");
+    assert.deepEqual(
+      monologue.map((e) => `${e.speaker}: ${e.text}`),
+      ["candidate: L'exposé entier.", "examiner: Je vous remercie."],
+    );
+  });
+
+  it("leads the part, because that is where an exposé is spoken", () => {
+    const out = replaceCandidateSpeech(sitting, "monologue", "L'exposé entier.", 1000);
+    assert.equal(out[0].text, "L'exposé entier.");
+    assert.equal(out[0].timestamp, 1000);
+  });
+
+  it("does not double the words it replaces", () => {
+    const out = replaceCandidateSpeech(sitting, "monologue", "Je vais vous parler", 1000);
+    assert.equal(candidateWordCount(out, "monologue"), 4);
+  });
+
+  it("leaves the other part alone", () => {
+    const out = replaceCandidateSpeech(sitting, "monologue", "L'exposé entier.", 1000);
+    assert.deepEqual(entriesForPhase(out, "debate"), entriesForPhase(sitting, "debate"));
+  });
+
+  it("writes a part that had no turns at all", () => {
+    const debateOnly: TranscriptEntry[] = [
+      { phase: "debate", speaker: "examiner", timestamp: 10_000, text: "Vous avez dit que…" },
+    ];
+    const out = replaceCandidateSpeech(debateOnly, "monologue", "L'exposé entier.", 500);
+    assert.equal(out.length, 2);
+    assert.equal(out[0].phase, "monologue");
+    assert.equal(out[1].phase, "debate");
+  });
+
+  it("erases nothing when the transcription came back empty", () => {
+    assert.deepEqual(replaceCandidateSpeech(sitting, "monologue", "   ", 1000), sitting);
   });
 });
