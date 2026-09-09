@@ -2550,6 +2550,81 @@ export class ExamController {
   }
 
   /**
+   * End the épreuve from a débat that never began (#199).
+   *
+   * The candidate has given their exposé, heard the débat's consigne and decided
+   * to stop there. Until this existed the only way out of that window was
+   * « Retour », which promised a zero and stamped `abandoned_at` — throwing away
+   * an exposé that had actually been spoken. The prestation is owed a
+   * correction; what it is not owed is a débat mark, and the rubric already
+   * prices that absence (`partsAbsent` counts words, `applyAbsentPartPenalty`
+   * halves the /25), so nothing about the scoring changes here.
+   *
+   * **Why not `advanceEarly()`.** That ends a part through
+   * `beginClosingHandshake()`, which asks the examiner for a closing sentence
+   * and then waits for the turn. On an armed part there is no session to ask and
+   * no clock for `tick()` to move, so the wait would never complete and the
+   * safety timeout would never be reached — exactly the hang `canAdvance`
+   * documents and excludes. This goes straight to the transition instead, which
+   * is where every other ordering decision already lives.
+   *
+   * **The consigne may still be playing**, since « Retour » is on screen
+   * throughout it. Silenced first, for the same reason « Passer » exists: the
+   * transition that is speaking it is suspended inside `announce()`, and letting
+   * it resume into a sitting that is finishing would put the débat's
+   * instructions over the closing clip. `skipAnnouncement()` resolves that await,
+   * and `advance()` re-checks the phase on the far side of it so the suspended
+   * call finds the épreuve already over and returns.
+   *
+   * **The exposé is waited for first, and it is the whole reason this awaits
+   * anything.** The monologue is not transcribed by the session that heard it
+   * (#206) — it is read back off its own recording, in a call started at the
+   * handover — and the only place that wait happens is `openSession()`, which
+   * runs from « Enregistrer ». This path never presses it, so without this the
+   * finish payload carried whatever the socket had, which for a real exposé is
+   * nothing: a monologue-only sitting with zero candidate words, refused by
+   * `participationRefusal` as a transcription the app lost. Same wait as the
+   * débat's, same thirty-second bound driven from `tick()` — which is still
+   * running here, and is not once `finish()` has stopped the ticker, so this
+   * cannot be deferred into it.
+   *
+   * The transition itself is still handed off, through `advanceDetached()` and
+   * for its reason (#65): `advance()` ends by speaking a consigne and encoding a
+   * sitting, and a transition that fails must say so somewhere rather than
+   * become an unhandled rejection in a console nobody has open. What the caller
+   * awaits is the wait, so a dialog can say it is waiting; the screen the
+   * candidate lands on is `finished`, and everything after it — the encode, the
+   * upload, its retry — is that screen's, unchanged.
+   */
+  async finishWithoutDebate(): Promise<void> {
+    if (!this.canFinishWithoutDebate()) return;
+
+    await this.awaitMonologueTranscript();
+    // Re-checked, because that wait can run for thirty seconds. Nothing on
+    // screen can start the débat meanwhile — the confirmation is a modal
+    // `<dialog>`, so the passation behind it is inert — but this is a public
+    // method and the guard is one line.
+    if (!this.canFinishWithoutDebate()) return;
+
+    // The silence and the transition, with no await between them, and the order
+    // is the whole of it. `skipAnnouncement()` resolves the `announce()` the
+    // handover's own transition is suspended inside, which then resumes ON THE
+    // NEXT MICROTASK — so the advance below, running synchronously, flips the
+    // phase first and that call finds the épreuve over and returns
+    // (`hasMovedOn`). An await in between let it resume in the gap instead, arm
+    // a débat that was already being left, and file a progress report the finish
+    // was about to supersede.
+    if (this.announcementPlaying) this.skipAnnouncement();
+    this.advanceDetached();
+  }
+
+  /** An armed débat, and nothing else. A débat with a clock running is a
+   *  walk-out and must keep going through the dialog that says so. */
+  private canFinishWithoutDebate(): boolean {
+    return this.phase === "debate" && this.phaseStart === null && !this.destroyed;
+  }
+
+  /**
    * Start the part the candidate is looking at: « Enregistrer ».
    *
    * This is the moment the épreuve begins for that part. The clock is anchored,
@@ -3013,6 +3088,27 @@ export class ExamController {
     });
   }
 
+  /**
+   * Whether the sitting has left the phase this transition was opening.
+   *
+   * `advance()` awaits two slow things on its way into a speaking part — the
+   * microphone, then a consigne that takes twenty-five seconds to speak — and
+   * the candidate is looking at « Retour » for all of it. Two departures can
+   * land in that window: the tab going away (`destroyed`, which this still
+   * answers), and now a candidate ending the épreuve from an armed débat (#199),
+   * which flips the phase to `finished` from underneath a call that is still
+   * arming the débat.
+   *
+   * Both mean the same thing to everything below the awaits: there is no phase
+   * left to arm, no monologue left to report as finalised, and no finish to run
+   * — whoever moved the sitting on has already done its own. So this is one
+   * question asked twice rather than a special case: is the phase this call was
+   * entering still the phase the sitting is in?
+   */
+  private hasMovedOn(target: OralPhase): boolean {
+    return this.destroyed || this.phase !== target;
+  }
+
   /** Every phase transition runs through here, so ordering lives in one place. */
   private async advance(): Promise<void> {
     const current = this.phase;
@@ -3031,7 +3127,17 @@ export class ExamController {
       if (this.phaseStart !== null) {
         this.phaseSeconds[current] = Math.round((this.now() - this.phaseStart) / 1000);
       }
-      this.phaseStamps[current].endedAt = this.now();
+      // Only for a part that actually opened. `startedAt` is stamped by
+      // `beginRecording()` from the candidate's own « Enregistrer », so a part
+      // quit out of while still armed (#199) now leaves NEITHER stamp rather
+      // than an end without a beginning. Nothing reads the pair unguarded today
+      // — `phaseReports` and `reportFinalisedPhase` both check `startedAt`
+      // first, which is why the old unconditional stamp was inert — but a
+      // half-stamped phase is a state the next reader would have to be taught
+      // about, and there is no fact it records.
+      if (this.phaseStamps[current].startedAt !== null) {
+        this.phaseStamps[current].endedAt = this.now();
+      }
       this.tolerate("end-phase", () => this.recorder?.endPhase());
 
       // DEVELOPMENT ONLY — a typed phase leaves no artefact (#51). Decided at
@@ -3143,6 +3249,7 @@ export class ExamController {
       // and no message saying why. A failure here is not fatal: the micError is
       // already on screen and the épreuve is still worth sitting.
       await this.prepareAudio();
+      if (this.hasMovedOn(target)) return;
 
       // The consigne, then the candidate's own go-ahead, then the clock, the
       // microphone and the examiner. None of that order commutes: the consigne
@@ -3151,9 +3258,7 @@ export class ExamController {
       // opens last so the examiner is not left holding a turn while an
       // instruction it did not give is being read out.
       await this.announce(target);
-      // A sitting that ended while the consigne was playing — the tab closed,
-      // the candidate walked out. There is no phase left to start.
-      if (this.destroyed) return;
+      if (this.hasMovedOn(target)) return;
 
       // ARMED, not started. `phaseStart` stays null and `startSpeaking()` is
       // what anchors it, from the candidate's own click on « Enregistrer ». The
@@ -3781,7 +3886,25 @@ export class ExamController {
 
   /** Advance the clock. Public so a test can drive it without real time. */
   tick(): void {
-    if (!this.started || this.phase === "finished" || this.phaseStart === null) return;
+    if (!this.started || this.phase === "finished") return;
+
+    /**
+     * Before the clock's own early return, not after it.
+     *
+     * What this releases is a wait that holds a part OPEN, and a part waiting on
+     * « Enregistrer » has no clock at all — which is exactly the state the armed
+     * débat's exit does its waiting in (#199). Left below the `phaseStart` guard
+     * the thirty-second bound simply did not exist there, and a transcriber that
+     * never answered held the épreuve open for ever: the same shape of trap
+     * `canAdvance` documents about the closing handshake, one wait further on.
+     *
+     * Safe above the held-monologue branch too, which used to precede it: the
+     * check returns immediately unless a wait is actually running, and one only
+     * ever runs on the way into the débat.
+     */
+    this.checkMonologueTranscriptWait();
+
+    if (this.phaseStart === null) return;
 
     // Held: re-anchor the phase's start to now so the elapsed count stands
     // still. Re-anchoring rather than tracking a paused duration means every
@@ -3792,10 +3915,6 @@ export class ExamController {
       this.checkCaptureAlive();
       return;
     }
-
-    // Before every early return below it, because this one releases something
-    // that is holding the part open rather than reacting to it.
-    this.checkMonologueTranscriptWait();
 
     const seconds = Math.floor((this.now() - this.phaseStart) / 1000);
     if (seconds !== this.elapsed) {

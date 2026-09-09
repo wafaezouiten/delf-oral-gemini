@@ -1,5 +1,12 @@
 /**
- * Telling the server the candidate left during the préparation (#113).
+ * Telling the server the candidate left before saying anything (#113, #199).
+ *
+ * Named for the préparation because that is the only phase it could reach when
+ * it was written, and still named for it because that is the phase the row's own
+ * guard names — see the route. What it actually covers since #199 is the whole
+ * window before the first « Enregistrer », the armed monologue included; the two
+ * agree because `phase` only leaves `'preparation'` when a speaking part
+ * finalises, which is strictly after the click this stops at.
  *
  * A module for the reason `abandon.ts` is one — the rules are testable against a
  * fake `fetch` — but the rules themselves are lighter, and the difference is the

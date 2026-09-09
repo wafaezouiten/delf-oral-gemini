@@ -4990,3 +4990,222 @@ describe("the débat does not wait forever for the exposé", () => {
     );
   });
 });
+
+describe("quitting a débat that never began (#199)", () => {
+  const events = (h: Harness, name: string) =>
+    h.controller.getSnapshot().events.filter((event) => event.name === name);
+
+  /**
+   * The exposé is spoken, the handover is over, and the débat is ARMED: its
+   * consigne has been given, the control reads « Enregistrer », no clock is
+   * running and nothing is being captured.
+   *
+   * `completeClosing` cannot be used to get here — it presses « Enregistrer » on
+   * whatever part it lands in, which is the one thing this window is defined by
+   * nobody having done.
+   */
+  async function intoArmedDebate(h: Harness): Promise<void> {
+    h.controller.start();
+    await h.controller.advanceEarly();
+    await pressRecord(h);
+    h.session().candidateSays("Le télétravail a transformé le rapport au bureau.");
+    h.advanceClock(SPOKEN_MONOLOGUE_SECONDS);
+    await h.controller.advanceEarly();
+    h.session().finishTurn();
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+
+  /** Two ticks, which is what the finish costs: the recorder's stop and its
+   *  encode, then the closing consigne and the handover to `onFinished`. */
+  async function settle(): Promise<void> {
+    await new Promise((resolve) => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+
+  it("is the only way out of a window « Terminer l'épreuve » cannot reach", async () => {
+    const h = harness();
+    await intoArmedDebate(h);
+
+    const armed = h.controller.getSnapshot();
+    assert.equal(armed.phase, "debate");
+    assert.equal(armed.awaitingStart, true, "nobody has pressed « Enregistrer »");
+    // The trap the issue is about: with no clock to move and no session to ask
+    // for a closing sentence, `canAdvance` is false — so before this method the
+    // candidate's only exit was the dialog that promised a zero and threw the
+    // exposé away with it.
+    assert.equal(armed.canAdvance, false);
+  });
+
+  it("sends the exposé for correction instead of abandoning it", async () => {
+    const h = harness();
+    await intoArmedDebate(h);
+
+    h.controller.finishWithoutDebate();
+    await settle();
+
+    assert.equal(h.controller.getSnapshot().phase, "finished");
+    assert.equal(h.finished.length, 1, "the prestation went for correction");
+    assert.deepEqual(
+      h.finished[0]?.transcript.map((entry) => entry.text),
+      ["Le télétravail a transformé le rapport au bureau."],
+      "carrying the exposé that was actually spoken",
+    );
+  });
+
+  it("reports the monologue and no débat at all", async () => {
+    // Not a débat row reading zero seconds: that phase was never entered, and
+    // `phaseReports` has said so since it was written. What makes the halving
+    // fire downstream is the transcript carrying no débat words, which is the
+    // rubric's own question and needs nothing added here.
+    const h = harness();
+    await intoArmedDebate(h);
+
+    h.controller.finishWithoutDebate();
+    await settle();
+
+    assert.deepEqual(
+      h.finished[0]?.phases.map((report) => report.phase),
+      ["monologue"],
+    );
+    assert.equal(h.report("debate"), undefined);
+    assert.deepEqual(
+      h.recorder.calls,
+      ["monologue", "end:monologue"],
+      "and the débat opened no artefact to close",
+    );
+  });
+
+  it("refuses on a débat with a clock running — that is a walk-out", async () => {
+    const h = harness();
+    await intoArmedDebate(h);
+    await pressRecord(h);
+    h.advanceClock(120);
+
+    h.controller.finishWithoutDebate();
+    await settle();
+
+    assert.equal(h.controller.getSnapshot().phase, "debate", "still in it");
+    assert.deepEqual(h.finished, [], "and nothing was handed over");
+  });
+
+  it("refuses on the monologue, armed or not", async () => {
+    // The monologue's armed exit archives the sitting rather than finishing it —
+    // nothing has been said, so there is nothing to correct. Two different
+    // answers to "the part has not begun", which is why `examExitRoute` asks
+    // which part it is.
+    const h = harness();
+    h.controller.start();
+    await h.controller.advanceEarly();
+
+    assert.equal(h.controller.getSnapshot().awaitingStart, true);
+    h.controller.finishWithoutDebate();
+    await settle();
+    assert.equal(h.controller.getSnapshot().phase, "monologue");
+
+    await pressRecord(h);
+    h.advanceClock(30);
+    h.controller.finishWithoutDebate();
+    await settle();
+    assert.equal(h.controller.getSnapshot().phase, "monologue");
+    assert.deepEqual(h.finished, []);
+  });
+
+  it("waits for the exposé to be written down before sending the sitting (#206)", async () => {
+    // The monologue is transcribed off its RECORDING, in a call started at the
+    // handover and normally waited out when the débat's session opens — which
+    // is the one thing this exit never does. Without the wait the payload
+    // carried whatever the socket had, and for a real exposé the socket has
+    // nothing: a monologue-only sitting with zero candidate words, refused as a
+    // transcription the app lost.
+    // Definite assignment: the resolver is handed over inside the executor,
+    // which runs before `harness()` returns, and TypeScript cannot see that
+    // through the callback.
+    let release!: (text: string) => void;
+    const h = harness({
+      transcribeMonologue: () =>
+        new Promise<string>((resolve) => {
+          release = resolve;
+        }),
+    });
+    await intoArmedDebate(h);
+
+    const finishing = h.controller.finishWithoutDebate();
+    await settle();
+    assert.equal(h.finished.length, 0, "nothing left the tab while the exposé was in flight");
+    assert.equal(h.controller.getSnapshot().phase, "debate", "and the épreuve had not moved");
+
+    release("Le télétravail a transformé le rapport au bureau.");
+    await finishing;
+    await settle();
+
+    assert.equal(h.finished.length, 1);
+    assert.deepEqual(
+      h.finished[0]?.transcript.map((entry) => entry.text),
+      ["Le télétravail a transformé le rapport au bureau."],
+      "the words the recording gave up, not the socket's",
+    );
+  });
+
+  it("gives up on a transcription that never answers, rather than the épreuve", async () => {
+    // The same thirty-second bound the débat's own wait has, read off `tick()`
+    // — which is why this must happen before `finish()` stops the ticker.
+    const h = harness({ transcribeMonologue: () => new Promise<string>(() => {}) });
+    await intoArmedDebate(h);
+
+    const finishing = h.controller.finishWithoutDebate();
+    await settle();
+    assert.equal(h.finished.length, 0, "still holding");
+
+    // Silently: nothing is being captured in a part that never began.
+    h.advanceClockSilently(31);
+    await finishing;
+    await settle();
+
+    assert.equal(h.finished.length, 1, "the sitting went anyway");
+    assert.equal(
+      events(h, "monologue-transcription-timeout").length,
+      1,
+      "and said why the exposé is not in it",
+    );
+  });
+
+  it("silences a consigne still being spoken, and is not undone by it", async () => {
+    // « Retour » is on screen throughout the handover, so this is reachable: the
+    // transition into the débat is suspended inside `announce()`, and it resumes
+    // AFTER the épreuve has finished. Without the phase re-check in `advance()`
+    // it would resume into a sitting that is over and arm a débat nobody can sit.
+    const announcer = new FakeAnnouncer();
+    const h = harness({ announcer });
+
+    h.controller.start();
+    await h.controller.advanceEarly();
+    await pressRecord(h);
+    h.session().candidateSays("Le télétravail a transformé le rapport au bureau.");
+    h.advanceClock(SPOKEN_MONOLOGUE_SECONDS);
+    await h.controller.advanceEarly();
+    // The débat's consigne is the next clip, and it is the one that holds.
+    announcer.behaviour = "hold";
+    h.session().finishTurn();
+    await new Promise((resolve) => setImmediate(resolve));
+
+    const speaking = h.controller.getSnapshot();
+    assert.equal(speaking.phase, "debate");
+    assert.equal(speaking.announcementPlaying, true, "the handover is still being read out");
+
+    // The closing clip must not hold too, or the finish would never hand over.
+    announcer.behaviour = "played";
+    h.controller.finishWithoutDebate();
+    await settle();
+
+    assert.equal(announcer.stops, 1, "the consigne was cut off rather than talked over");
+    const after = h.controller.getSnapshot();
+    assert.equal(after.phase, "finished", "and it stayed finished");
+    assert.equal(after.announcementPlaying, false);
+    assert.deepEqual(
+      events(h, "phase-armed").map((event) => event.detail),
+      ["monologue"],
+      "the débat was never armed, so nothing re-armed it after the fact",
+    );
+    assert.equal(h.finished.length, 1);
+  });
+});
