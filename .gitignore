@@ -59,3 +59,7 @@ next-env.d.ts
 # A captured Clerk session (see e2e/capture-session.ts) — a live credential
 # for whoever ran it, never a repository file.
 /e2e/.auth/
+
+# Fallow's local analysis cache (`.github/workflows/fallow.yml` runs the
+# same analyzer in CI, from a clean checkout).
+.fallow/
