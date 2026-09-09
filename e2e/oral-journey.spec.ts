@@ -2,6 +2,8 @@ import { existsSync } from "node:fs";
 
 import { expect, test, type Page } from "@playwright/test";
 
+import { reachEpreuve } from "./reach-epreuve";
+
 /**
  * The candidate's journey through one production orale, end to end.
  *
@@ -108,20 +110,7 @@ test.describe("one production orale, start to finish", () => {
     test.setTimeout(15 * 60_000);
 
     await test.step("1. the candidate reaches an épreuve", async () => {
-      await page.goto("/app/sujets");
-      // Two clicks, not one. The catalogue is a grid of sujet CARDS, and the
-      // launch CTA lives on the sheet a card opens: #131 removed the dialog
-      // between the sheet and the épreuve, not the sheet itself. Both accessible
-      // names carry the sujet, so the six of them stay distinguishable
-      // (`SujetCard`, `StartExamButton`).
-      await page
-        .getByRole("button", { name: /^Lire le sujet/ })
-        .first()
-        .click();
-      // No `.first()`: one sheet is mounted at a time, and saying so here is
-      // what would make a second one a failure rather than a silent pick.
-      await page.getByRole("button", { name: /^Passer l'épreuve sur le sujet/ }).click();
-      await expect(page).toHaveURL(/\/app\/oral\/\d+/);
+      await reachEpreuve(page);
     });
 
     await test.step("2. the préparation is on screen", async () => {
