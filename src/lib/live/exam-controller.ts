@@ -375,6 +375,12 @@ export interface ExamFinishedPayload {
    * Undefined on every real sitting. See `ExamController`'s `devSeconds`.
    */
   devSeconds?: Record<RecordedPhase, number>;
+  /**
+   * DEVELOPMENT ONLY — the seconds the dev time-skip fast-forwarded past, per
+   * part (#203). Undefined on every real sitting. See `ExamController`'s
+   * `devSkippedSeconds`.
+   */
+  devSkippedSeconds?: Record<RecordedPhase, number>;
 }
 
 export interface ExamControllerDeps {
@@ -790,6 +796,33 @@ export class ExamController {
    * to dress a short sitting up as a long one.
    */
   private devSeconds: Record<RecordedPhase, number> = { monologue: 0, debate: 0 };
+
+  /**
+   * DEVELOPMENT ONLY — the seconds the time-skip fast-forwarded past, per part
+   * (#203).
+   *
+   * Zero on every real sitting and every production build: `devSkipTime` and
+   * `devSkipToEnd` are the only writers and both return before this line
+   * there.
+   *
+   * **Why it is counted at all.** Rewinding `phaseStart` moves the clock the
+   * whole exam is run off — the cue grid, the last question, the closing lead,
+   * the time-up — so everything the tester is watching already behaves as if
+   * the time had passed. What it cannot move is the audio: the finish route
+   * measures a real sitting's duration out of the uploaded bytes precisely so
+   * that no client can claim one, and a skipped sitting therefore graded and
+   * displayed as the eight minutes it really spoke rather than the ten it
+   * reached. So the jump is counted here and sent as its own quantity, and the
+   * route ADDS it to the measured duration — under `DEV_TOOLS_ENABLED`, the
+   * same gate the panel that produced it is behind, and the same frontier a
+   * typed phase's {@link devSeconds} already crosses.
+   *
+   * Additive rather than substitutive, and that is the whole reason it can be
+   * trusted to be useful: with no skip the duration is exactly today's, so a
+   * development sitting is graded the way production grades it and the rubric's
+   * thresholds stay testable against the real numbers.
+   */
+  private devSkippedSeconds: Record<RecordedPhase, number> = { monologue: 0, debate: 0 };
 
   /**
    * DEVELOPMENT ONLY — the phases whose content was typed rather than spoken
@@ -1220,11 +1253,15 @@ export class ExamController {
    *
    * What it deliberately does NOT touch: `examStart`. Transcript timestamps
    * are `now - examStart`, so a skip moves no words; only this part's clock
-   * jumps. The cost, same as the reference's: `phaseSeconds` at the boundary
-   * claims the skipped time, so a skipped sitting reports minutes nobody
-   * spoke. The server measures a real sitting's duration from the audio bytes,
-   * so the claim travels no further than the payload — and no production build
-   * carries this method at all.
+   * jumps.
+   *
+   * What it DOES now carry off the page (#203): the jump is banked in
+   * {@link devSkippedSeconds} and sent as its own quantity, so the duration the
+   * server grades and the results page prints is the measured audio PLUS the
+   * time skipped — the ten minutes the tester drove the épreuve to, rather than
+   * the eight it spoke. Every guard on that claim, and why it does not weaken
+   * the rule that a client cannot announce a duration, is on that field. No
+   * production build carries this method at all.
    *
    * Refused while the phase is armed (no clock to move), while a closing
    * handshake owns the end of the part, and while the monologue is held —
@@ -1236,7 +1273,13 @@ export class ExamController {
     if (this.phase !== "monologue" && this.phase !== "debate") return;
     if (this.phaseStart === null || this.closing || this.monologueHeld) return;
 
+    // Read off the stamp rather than off the argument: `rewindStartBy` floors a
+    // non-positive skip at zero, and what is banked has to be what the clock
+    // actually moved — a claim that outran the clock would be the one thing
+    // this field must never be.
+    const before = this.phaseStart;
     this.phaseStart = rewindStartBy(this.phaseStart, seconds);
+    this.devSkippedSeconds[this.phase] += Math.round((before - this.phaseStart) / 1000);
     this.log("dev-time-skip", { seconds, phase: this.phase });
     this.tick();
   }
@@ -1249,13 +1292,23 @@ export class ExamController {
    * time-up — the monologue thanks and hands over, the débat sends its led
    * closing directive. Same guards, same mechanism, same port as
    * {@link devSkipTime}.
+   *
+   * What it banks is the JUMP, not the part's duration (#203): landing on 13:00
+   * from 11:00 skipped two minutes, not thirteen. And a clock already past the
+   * end banks nothing — this lands it exactly ON the duration, which is a
+   * rewind, and a rewind is not time skipped.
    */
   devSkipToEnd(): void {
     if (!DEV_TOOLS_ENABLED) return;
     if (this.phase !== "monologue" && this.phase !== "debate") return;
     if (this.phaseStart === null || this.closing || this.monologueHeld) return;
 
+    const before = this.phaseStart;
     this.phaseStart = this.now() - phaseDurationSeconds(this.phase) * 1000;
+    this.devSkippedSeconds[this.phase] += Math.max(
+      0,
+      Math.round((before - this.phaseStart) / 1000),
+    );
     this.log("dev-time-skip", { toEnd: true, phase: this.phase });
     this.tick();
   }
@@ -3671,6 +3724,12 @@ export class ExamController {
       devSeconds:
         this.devSeconds.monologue > 0 || this.devSeconds.debate > 0
           ? { ...this.devSeconds }
+          : undefined,
+      // Same rule, same reason (#203): a sitting nobody fast-forwarded sends no
+      // such field at all rather than a pair of zeroes the route has to read.
+      devSkippedSeconds:
+        this.devSkippedSeconds.monologue > 0 || this.devSkippedSeconds.debate > 0
+          ? { ...this.devSkippedSeconds }
           : undefined,
     });
   }

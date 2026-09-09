@@ -233,6 +233,9 @@ export function ExamClient({
         // Undefined on any sitting that was actually spoken, and ignored by the
         // route in a production build (#36).
         devSeconds: payload.devSeconds,
+        // Undefined on any sitting nobody fast-forwarded, and ignored by the
+        // route in a production build the same way (#203).
+        devSkippedSeconds: payload.devSkippedSeconds,
       });
       form.set("payload", json);
 

@@ -4634,6 +4634,53 @@ describe("the dev time-skip (#149)", () => {
 
     assert.equal(h.controller.getSnapshot().elapsed, 60);
   });
+
+  it("banks what it skipped and sends it off the page, per part (#203)", async () => {
+    // The half of the tool that used to stop at the browser: the clock moved,
+    // the examiner behaved as though it had, and the correction was then graded
+    // on the audio alone. The jump travels as its own quantity so the route can
+    // ADD it to what it measured.
+    const h = harness();
+    await intoDebate(h);
+    h.controller.devSkipTime(120);
+    h.controller.devSkipTime(30);
+    h.advanceClock(PHASE_DURATIONS.debate);
+    await completeClosing(h);
+
+    assert.equal(h.controller.getSnapshot().phase, "finished");
+    assert.deepEqual(h.finished[0]?.devSkippedSeconds, { monologue: 0, debate: 150 });
+  });
+
+  it("counts « Fin du temps » as the jump it made, not the part's length", async () => {
+    // Landing on 7:00 from 1:10 skipped the difference. Sending the phase's
+    // duration instead would make a skipped sitting claim its own length twice.
+    const h = harness();
+    await intoMonologue(h);
+    h.session().candidateSays("Premièrement, il supprime des trajets subis.");
+    h.advanceClock(SPOKEN_MONOLOGUE_SECONDS);
+
+    h.controller.devSkipToEnd();
+
+    await completeClosing(h);
+    h.advanceClock(PHASE_DURATIONS.debate);
+    await completeClosing(h);
+
+    assert.deepEqual(h.finished[0]?.devSkippedSeconds, {
+      monologue: PHASE_DURATIONS.monologue - SPOKEN_MONOLOGUE_SECONDS,
+      debate: 0,
+    });
+  });
+
+  it("sends no claim at all when nobody skipped anything", async () => {
+    // Absence and zero say the same thing here, and the field a real sitting
+    // never carries is the one a production build can never be asked about.
+    const h = harness();
+    await intoDebate(h);
+    h.advanceClock(PHASE_DURATIONS.debate);
+    await completeClosing(h);
+
+    assert.equal(h.finished[0]?.devSkippedSeconds, undefined);
+  });
 });
 
 describe("a directive the examiner reads aloud instead of obeying (#187)", () => {

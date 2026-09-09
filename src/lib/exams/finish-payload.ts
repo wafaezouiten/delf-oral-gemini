@@ -187,6 +187,32 @@ export const finishPayloadSchema = z.object({
       debate: z.number().nonnegative().max(MAX_PHASE_SECONDS),
     })
     .optional(),
+  /**
+   * DEVELOPMENT ONLY — the seconds the dev time-skip fast-forwarded past (#203).
+   *
+   * The second number in this file that can reach a grade, and it stands behind
+   * the same three things `devSeconds` does: ignored outright in a production
+   * build, gated on the flag the panel that produces it is gated on, and bounded
+   * here. Where it differs is what it does to the duration — it is ADDED to the
+   * measured one rather than substituted for it, so it cannot exist without a
+   * real measurement underneath and a sitting nobody skipped is graded on
+   * exactly the number it is graded on today.
+   *
+   * Why the browser has to say it at all: the skip is a rewind of the phase's
+   * start stamp, so the clock the épreuve is actually run off — the cue grid,
+   * the last question, the closing lead — already counts it, while the audio
+   * cannot. Without this field the tester watches the examiner call time at
+   * 13:00 and then reads a correction of the eight minutes that were spoken.
+   *
+   * Validated here regardless of environment, for `devSeconds`' reason: a schema
+   * that changes shape with `NODE_ENV` proves nothing about production.
+   */
+  devSkippedSeconds: z
+    .object({
+      monologue: z.number().nonnegative().max(MAX_PHASE_SECONDS),
+      debate: z.number().nonnegative().max(MAX_PHASE_SECONDS),
+    })
+    .optional(),
 });
 
 export type FinishPayload = z.infer<typeof finishPayloadSchema>;

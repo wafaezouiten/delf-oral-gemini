@@ -24,7 +24,9 @@
  */
 
 import { COMPETENCY_MAX } from "@/lib/delf/constants";
+import type { GrilleBand } from "@/lib/delf/grille";
 import { FULL_DEVELOPMENT_SECONDS, type DurationCharge } from "@/lib/delf/orale-rubric";
+import { chargesAreAttributable } from "@/lib/ui/criterion-breakdown";
 import { formatScore25 } from "@/lib/ui/format-score";
 
 export type CorrectionPart = "monologue" | "debate";
@@ -47,6 +49,13 @@ export interface CorrectionScores {
    *  reason the halving's fields are: a stash or a row may predate them. */
   durationPenalty?: number;
   durationCharges?: readonly DurationCharge[];
+  /**
+   * The five bands, so a charge can be checked against the row it claims to
+   * have come off (#203). Optional like the rest — without it the check falls
+   * back to comparing totals, which is weaker and still catches the case that
+   * produced the issue. See {@link chargesAreAttributable}.
+   */
+  criteria?: Record<string, GrilleBand>;
 }
 
 /** One paragraph, or the absence of one. */
@@ -179,18 +188,38 @@ function chargeClause(charge: DurationCharge): string {
  * that cost, and — the half a candidate cannot infer — that the points came off
  * one pragmatic criterion and touched none of the three language ones.
  *
- * **What it must never say is that a band was lowered.** The charge is priced
- * from the band and the band itself is left exactly as the corrector set it
- * (`applySittingDurationPenalty`), so « Interaction » can read 5 on the same
- * page as this sentence. « Votre note d'interaction a été abaissée » would
- * describe something the reader can see is untrue on the row above. The points
- * are « au titre de » the criterion, which is what actually happened.
+ * **What it used to promise, and no longer can.** Until #203 the paragraph ended
+ * « et les notes affichées ci-dessus sont bien celles du correcteur », because
+ * the charge was priced from the band and never written back onto it: the row
+ * said 5 while the mark had paid 4. That was true and it was also the bug — the
+ * reader added the five figures, got 25, and read 21 at the top of the page. The
+ * row now carries both numbers (`criterion-breakdown.ts`), so the sentence points
+ * at what changed instead of insisting nothing did. What it still must not claim
+ * is that the *corrector* lowered anything: the earned band is on the row beside
+ * the awarded one, and the justification inside it belongs to the earned one.
  *
  * Charges worth 0 points are dropped rather than listed: a criterion already at
  * the bottom of the grille loses nothing to the clock, and « cela a coûté 0
  * point » explains a penalty nobody received.
+ *
+ * **Silence when the charges do not add up to what was docked.** `durationCharges`
+ * has no column and is rebuilt from the durations the page can still see, which
+ * are not always the ones the mark was graded on. A rebuilt charge that cost
+ * something other than `duration_penalty` is about a different sitting, and this
+ * paragraph is where that used to surface as « 0 minutes … 4 points » over a mark
+ * docked 2. The rows decline to attribute such a charge; so does this, and by
+ * asking {@link chargesAreAttributable} rather than a second copy of the rule.
+ * The points are still accounted for — the breakdown lists them under the rows —
+ * they are simply no longer explained by a part and a duration nobody can vouch
+ * for.
  */
-function durationNotice(charges: readonly DurationCharge[]): string | null {
+function durationNotice(
+  charges: readonly DurationCharge[],
+  durationPenalty: number,
+  criteria?: Record<string, GrilleBand>,
+): string | null {
+  if (!chargesAreAttributable(charges, durationPenalty, criteria)) return null;
+
   const charged = charges.filter((charge) => charge.points > 0);
   if (charged.length === 0) return null;
 
@@ -201,9 +230,10 @@ function durationNotice(charges: readonly DurationCharge[]): string | null {
         charged.map(chargeClause).join(`${NBSP}; `);
 
   return (
-    `${sentence}. Votre lexique, votre morphosyntaxe et votre prononciation ne sont ` +
-    `jamais pénalisés par la durée${NBSP}: ils portent sur ce que vous avez ` +
-    `réellement dit, et les notes affichées ci-dessus sont bien celles du correcteur.`
+    `${sentence}. Sur la ligne concernée, la note du correcteur est suivie de celle ` +
+    `retenue après cette pénalité. Votre lexique, votre morphosyntaxe et votre ` +
+    `prononciation ne sont jamais pénalisés par la durée${NBSP}: ils portent sur ce ` +
+    `que vous avez réellement dit.`
   );
 }
 
@@ -220,6 +250,8 @@ export function correctionNotices(scores: CorrectionScores): CorrectionNotices {
     // duration rule could ever charge (or a stash that predates the field) is
     // never captioned with a charge it did not take.
     duration:
-      (scores.durationPenalty ?? 0) > 0 ? durationNotice(scores.durationCharges ?? []) : null,
+      (scores.durationPenalty ?? 0) > 0
+        ? durationNotice(scores.durationCharges ?? [], scores.durationPenalty ?? 0, scores.criteria)
+        : null,
   };
 }
