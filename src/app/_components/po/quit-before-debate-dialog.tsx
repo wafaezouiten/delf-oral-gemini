@@ -1,9 +1,8 @@
 "use client";
 
-import { useEffect, useRef } from "react";
-
 import { dangerButton, secondaryButton } from "@/app/_components/button-styles";
 import { AlertIcon } from "./icons";
+import { ExamDialog } from "./exam-dialog";
 
 /**
  * « Quitter avant le débat ? » — Retour on a débat that has not begun (#199).
@@ -49,7 +48,8 @@ import { AlertIcon } from "./icons";
  * everything past the wait — the encode, the upload, its progress and its retry
  * — is « Épreuve terminée »'s and has been since #86.
  *
- * The `<dialog>` mechanics are `ExitDialog`'s, documented there.
+ * The `<dialog>` itself is `ExamDialog`'s, shared with the two dialogs either
+ * side of this one.
  */
 export function QuitBeforeDebateDialog({
   open,
@@ -64,75 +64,50 @@ export function QuitBeforeDebateDialog({
   /** Ends the épreuve with the débat unspoken and sends it for correction. */
   onConfirm: () => void;
 }) {
-  const ref = useRef<HTMLDialogElement>(null);
-
-  useEffect(() => {
-    const dialog = ref.current;
-    if (!dialog) return;
-    if (open && !dialog.open) dialog.showModal();
-    if (!open && dialog.open) dialog.close();
-  }, [open]);
-
   return (
-    <dialog
-      ref={ref}
-      // Escape closes a modal dialog without going through the buttons, so the
-      // parent's state has to hear about it or the dialog cannot be reopened.
-      onCancel={(event) => {
-        event.preventDefault();
-        onCancel();
-      }}
-      aria-labelledby="quit-before-debate-title"
-      className="bg-card text-foreground border-border m-auto w-[min(27rem,92vw)] border p-0 backdrop:bg-black/50"
-    >
-      <div className="space-y-3 p-4 sm:p-5">
-        <h2 id="quit-before-debate-title" className="font-serif text-lg font-semibold">
-          Quitter avant le débat ?
-        </h2>
-
-        {/* The cost, in its own frame. Said in words rather than as a figure
-            because the figure does not exist yet — the halving is applied to a
-            mark the correcteur has not produced — and a dialog that invented one
-            would be the arithmetic this product does not promise. */}
-        <div className="border-danger/40 bg-danger-subtle text-danger flex items-center gap-2.5 border p-3">
-          <AlertIcon className="size-4 shrink-0" />
-          <p className="text-sm font-semibold">
-            Le débat comptera comme absent : votre note sera divisée par deux.
-          </p>
-        </div>
-
-        <p className="text-muted-foreground text-sm leading-relaxed">
-          Votre exposé sera corrigé et apparaîtra dans votre historique. L&apos;épreuve
-          s&apos;arrête ici : vous ne pourrez pas revenir au débat.
+    <ExamDialog open={open} title="Quitter avant le débat ?" onCancel={onCancel}>
+      {/* The cost, in its own frame. Said in words rather than as a figure
+          because the figure does not exist yet — the halving is applied to a
+          mark the correcteur has not produced — and a dialog that invented one
+          would be the arithmetic this product does not promise. */}
+      <div className="border-danger/40 bg-danger-subtle text-danger flex items-center gap-2.5 border p-3">
+        <AlertIcon className="size-4 shrink-0" />
+        <p className="text-sm font-semibold">
+          Le débat comptera comme absent : votre note sera divisée par deux.
         </p>
-
-        <div className="flex flex-wrap justify-end gap-2 pt-1">
-          {/* Autofocused, like its neighbours: the dialog opens on the way out,
-              so the key the candidate is most likely to press next should be the
-              one that keeps their débat.
-
-              « Continuer », not « Continuer l'épreuve », which is what this said
-              first. Both siblings label their safe button that way, and the
-              longer version was also the reason this row was the only one of the
-              three to wrap onto two lines at 375px — the confirm here carries
-              four words where theirs carry one. */}
-          <button
-            type="button"
-            onClick={onCancel}
-            className={secondaryButton}
-            disabled={pending}
-            autoFocus
-          >
-            Continuer
-          </button>
-          {/* « Envoi… » rather than a longer sentence about transcription: the
-              candidate has decided to leave and is watching one button, and what
-              they need to know is that the click landed. */}
-          <button type="button" onClick={onConfirm} disabled={pending} className={dangerButton}>
-            {pending ? "Envoi…" : "Quitter et faire corriger"}
-          </button>
-        </div>
       </div>
-    </dialog>
+
+      <p className="text-muted-foreground text-sm leading-relaxed">
+        Votre exposé sera corrigé et apparaîtra dans votre historique. L&apos;épreuve s&apos;arrête
+        ici : vous ne pourrez pas revenir au débat.
+      </p>
+
+      <div className="flex flex-wrap justify-end gap-2 pt-1">
+        {/* Autofocused, like its neighbours: the dialog opens on the way out,
+            so the key the candidate is most likely to press next should be the
+            one that keeps their débat.
+
+            « Continuer », not « Continuer l'épreuve », which is what this said
+            first. Both siblings label their safe button that way, and the
+            longer version was also the reason this row was the only one of the
+            three to wrap onto two lines at 375px — the confirm here carries
+            four words where theirs carry one. */}
+        <button
+          type="button"
+          onClick={onCancel}
+          className={secondaryButton}
+          disabled={pending}
+          autoFocus
+        >
+          Continuer
+        </button>
+        {/* « Envoi… » rather than a longer sentence about transcription: the
+            candidate has decided to leave and is watching one button, and what
+            they need to know is that the click landed. */}
+        <button type="button" onClick={onConfirm} disabled={pending} className={dangerButton}>
+          {pending ? "Envoi…" : "Quitter et faire corriger"}
+        </button>
+      </div>
+    </ExamDialog>
   );
 }
