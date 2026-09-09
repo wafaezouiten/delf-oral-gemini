@@ -403,6 +403,34 @@ describe("deriving the rows", () => {
     assert.deepEqual(write.phases[0].endedAt, MONOLOGUE.endedAt);
   });
 
+  it("stores the duration the correction was graded on when the route resolved one", () => {
+    // The route's `gradedSeconds` (#203): the measurement plus whatever the
+    // development time-skip added to it. The row has to follow the grade rather
+    // than the file, or the results page prints a duration the mark beside it
+    // was never computed from.
+    const write = deriveCorrectionWrite({
+      phases: [
+        {
+          phase: "monologue",
+          startedAt: +MONOLOGUE.startedAt,
+          endedAt: +MONOLOGUE.endedAt!,
+          gradedSeconds: 522.6,
+        },
+      ],
+      recordings: [
+        { phase: "monologue", mimeType: "audio/ogg", byteSize: 210_000, durationSeconds: 402.6 },
+      ],
+      correction: correction(),
+      disposedAt,
+    });
+    assert.equal(write.phases[0].spokenSeconds, 523, "the graded duration, rounded");
+    assert.equal(
+      write.recordings[0].durationSeconds,
+      403,
+      "and the recording still describes its own bytes",
+    );
+  });
+
   it("gives a phase with no recording zero seconds rather than the clock's", () => {
     // A candidate who talked for seven minutes into a dead microphone has not
     // been shown to have produced the épreuve, and the penalty should say so.

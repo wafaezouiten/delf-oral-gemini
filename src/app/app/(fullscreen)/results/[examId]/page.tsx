@@ -64,8 +64,25 @@ export default async function ResultsPage({ params }: PageProps<"/app/results/[e
   // whole — so fall back rather than render a result with a blank subject.
   if (!topic) return <ResultsClient examId={examId} />;
 
+  /**
+   * How long a part lasted, as the correction on this page was graded on.
+   *
+   * `oral_exam_phases.spoken_seconds`, not the recording row: the finish route
+   * resolves ONE duration per part and writes it to both the corrector and this
+   * column, so reading it here is what keeps the number printed beside the mark
+   * the number the mark was computed from. On every real sitting the two are the
+   * same measurement; they part company only under the development time-skip
+   * (#203), where the recording is the eight minutes that were spoken and this
+   * is the ten the épreuve's clock reached.
+   *
+   * Falls back to the recording for a sitting whose phase rows are missing —
+   * nothing writes a recording without its phase report, but a row is cheaper to
+   * fall back from than to assume.
+   */
   const measured = (phase: "monologue" | "debate") =>
-    sitting.recordings.find((row) => row.phase === phase)?.durationSeconds ?? 0;
+    sitting.phases.find((row) => row.phase === phase)?.spokenSeconds ??
+    sitting.recordings.find((row) => row.phase === phase)?.durationSeconds ??
+    0;
 
   // The recordings whose bytes were kept (#98): a uri to serve and no purge
   // stamp. Everything else — pre-#98 sittings, vaultless deployments, uploads
@@ -150,8 +167,7 @@ export default async function ResultsPage({ params }: PageProps<"/app/results/[e
     },
     topic,
     transcript: sitting.transcript,
-    // The server's measurement of the audio, which is also the number the
-    // duration penalty was computed from — not the browser's clock.
+    // The number the duration penalty was computed from — see `measured`.
     monologueSeconds: measured("monologue"),
     debateSeconds: measured("debate"),
     reconnectCount: sitting.reconnectCount,
