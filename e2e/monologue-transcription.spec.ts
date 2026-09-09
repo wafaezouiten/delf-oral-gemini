@@ -14,7 +14,7 @@ import { expect, test } from "@playwright/test";
  * The microphone is a WAV file rather than the fake device's beep — Chrome loops
  * `--use-file-for-fake-audio-capture`, so a couple of minutes of French speech
  * fills a monologue of any length. Render one with
- * `scripts/make-expose-wav.ts` and point `E2E_EXPOSE_WAV` at it.
+ * `pnpm test:e2e:wav` and point `E2E_EXPOSE_WAV` at it.
  *
  * `E2E_EXPOSE_SECONDS` is how long to speak for; the failure this exists to
  * catch does not appear at short lengths.
@@ -43,7 +43,7 @@ test.use({
 test.describe("a spoken exposé reaches the correction", () => {
   test.skip(
     !SIGNED_IN || !HAS_AUDIO,
-    "Needs E2E_STORAGE_STATE (pnpm test:e2e:auth) and E2E_EXPOSE_WAV (scripts/make-expose-wav.ts).",
+    "Needs E2E_STORAGE_STATE (pnpm test:e2e:auth) and E2E_EXPOSE_WAV (pnpm test:e2e:wav).",
   );
   if (SIGNED_IN) test.use({ storageState: STORAGE_STATE });
 
