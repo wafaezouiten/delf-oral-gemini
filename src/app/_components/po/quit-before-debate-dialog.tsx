@@ -98,9 +98,15 @@ export function QuitBeforeDebateDialog({
         <div className="flex flex-wrap justify-end gap-2 pt-1">
           {/* Autofocused, like its neighbours: the dialog opens on the way out,
               so the key the candidate is most likely to press next should be the
-              one that keeps their débat. */}
+              one that keeps their débat.
+
+              « Continuer », not « Continuer l'épreuve », which is what this said
+              first. Both siblings label their safe button that way, and the
+              longer version was also the reason this row was the only one of the
+              three to wrap onto two lines at 375px — the confirm here carries
+              four words where theirs carry one. */}
           <button type="button" onClick={onCancel} className={secondaryButton} autoFocus>
-            Continuer l&apos;épreuve
+            Continuer
           </button>
           <button type="button" onClick={onConfirm} className={dangerButton}>
             Quitter et faire corriger
