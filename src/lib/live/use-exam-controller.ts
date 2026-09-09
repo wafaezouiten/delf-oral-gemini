@@ -12,6 +12,7 @@
 
 import { useEffect, useMemo, useRef, useSyncExternalStore } from "react";
 
+import type { PhaseRecording } from "@/lib/audio/archive";
 import { ExaminerAnnouncer } from "@/lib/audio/announcer";
 import { MicRecorder } from "@/lib/audio/recorder";
 import { ExaminerAudioPlayer } from "@/lib/audio/player";
@@ -53,6 +54,46 @@ function reportPhase(examId: string, report: FinalisedPhaseReport): void {
   });
 }
 
+/**
+ * Ask the server to read the monologue's recording back as text.
+ *
+ * Unlike `reportPhase` above this is NOT insurance and IS awaited: the exposé
+ * is not transcribed by the session that heard it (see the controller's
+ * `transcribeMonologue` dep, and `lib/gemini/transcribe-monologue.ts` for the
+ * measurements), so without this the monologue reaches the corrector empty. The
+ * débat is held for it, briefly, because its examiner is seeded with what the
+ * candidate argued.
+ *
+ * Throws on anything that is not a transcript, and the controller turns that
+ * into a logged nothing — the épreuve continues either way.
+ */
+async function fetchMonologueTranscript(
+  examId: string,
+  recording: PhaseRecording,
+): Promise<string> {
+  const form = new FormData();
+  // Named for the phase it is, though the route only ever takes one: a file
+  // field called `audio` in a request called monologue-transcript is the same
+  // fact twice, and the server reads the type off the blob rather than the name.
+  form.set(
+    "audio",
+    recording.blob,
+    `monologue.${recording.mimeType.includes("ogg") ? "ogg" : "wav"}`,
+  );
+
+  const response = await fetch(`/api/exams/${examId}/monologue-transcript`, {
+    method: "POST",
+    body: form,
+  });
+  if (!response.ok) {
+    throw new Error(`the transcription route answered ${response.status}`);
+  }
+  const body: unknown = await response.json();
+  const text = (body as { text?: unknown }).text;
+  if (typeof text !== "string") throw new Error("the transcription route sent no text");
+  return text;
+}
+
 export function useExamController(options: {
   /** The sitting. Reaches the token route, which refuses to mint for a sitting
    *  the caller does not own — so it stops here rather than in the controller,
@@ -91,6 +132,7 @@ export function useExamController(options: {
         createAnnouncer: (callbacks) => new ExaminerAnnouncer(callbacks),
         onFinished,
         onPhaseFinalised: (report) => reportPhase(examId, report),
+        transcribeMonologue: (recording) => fetchMonologueTranscript(examId, recording),
       }),
     [examId, topic, onFinished],
   );

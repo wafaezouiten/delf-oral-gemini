@@ -63,6 +63,7 @@ import {
   separateDirectiveEcho,
   debateSessionHistory,
   entriesForPhase,
+  replaceCandidateSpeech,
   type TranscriptEntry,
   type TranscriptPhase,
 } from "@/lib/delf/transcript";
@@ -374,6 +375,12 @@ export interface ExamFinishedPayload {
    * Undefined on every real sitting. See `ExamController`'s `devSeconds`.
    */
   devSeconds?: Record<RecordedPhase, number>;
+  /**
+   * DEVELOPMENT ONLY — the seconds the dev time-skip fast-forwarded past, per
+   * part (#203). Undefined on every real sitting. See `ExamController`'s
+   * `devSkippedSeconds`.
+   */
+  devSkippedSeconds?: Record<RecordedPhase, number>;
 }
 
 export interface ExamControllerDeps {
@@ -427,6 +434,26 @@ export interface ExamControllerDeps {
    * everything about that is the binding's problem (`use-exam-controller.ts`).
    */
   onPhaseFinalised?: (report: FinalisedPhaseReport) => void;
+  /**
+   * Read the monologue's recording back as text.
+   *
+   * The exposé is NOT transcribed by the session that heard it: past somewhere
+   * under four minutes inside one open manual-VAD activity, the `activityEnd`
+   * that should emit the whole thing emits nothing at all and never does. The
+   * measurements, the automatic-VAD control that rules out the length of the
+   * audio, and why releasing the floor periodically is worse, are all in
+   * `lib/gemini/transcribe-monologue.ts`. A DELF exposé is five to seven
+   * minutes, so this is the ordinary path and not the exceptional one.
+   *
+   * Optional, and absent means the monologue keeps whatever the socket managed
+   * to deliver — which for a short exposé is everything. That is what lets the
+   * phase-machine tests say nothing about transcription, and it is also the
+   * honest behaviour for a build with no route behind it.
+   *
+   * Resolving to the empty string is a real answer: a recording with no speech
+   * in it. Rejecting is a failure the épreuve survives — see `advance()`.
+   */
+  transcribeMonologue?: (recording: PhaseRecording) => Promise<string>;
   /** Injected so tests can drive a fake clock. */
   now?: () => number;
   /**
@@ -439,6 +466,20 @@ export interface ExamControllerDeps {
 
 /** How long to wait for the examiner's closing sentence before advancing anyway. */
 const CLOSING_SAFETY_MS = 12_000;
+
+/**
+ * How long the débat may be held for the monologue's transcription.
+ *
+ * The wait is real but almost always already spent: the transcription starts at
+ * the phase boundary and the débat's own consigne plays for eleven seconds
+ * after it, during which the candidate is listening rather than waiting. What
+ * this bounds is the tail — a transcriber that has hung must not leave a
+ * candidate looking at a part that will not open. Past it the débat starts with
+ * the monologue unseeded, which is a worse débat and still an épreuve; the
+ * transcript itself is not lost, because the call keeps running and lands in
+ * the finish payload if it ever answers.
+ */
+const MONOLOGUE_TRANSCRIPTION_WAIT_MS = 30_000;
 const TICK_MS = 250;
 
 /**
@@ -755,6 +796,33 @@ export class ExamController {
    * to dress a short sitting up as a long one.
    */
   private devSeconds: Record<RecordedPhase, number> = { monologue: 0, debate: 0 };
+
+  /**
+   * DEVELOPMENT ONLY — the seconds the time-skip fast-forwarded past, per part
+   * (#203).
+   *
+   * Zero on every real sitting and every production build: `devSkipTime` and
+   * `devSkipToEnd` are the only writers and both return before this line
+   * there.
+   *
+   * **Why it is counted at all.** Rewinding `phaseStart` moves the clock the
+   * whole exam is run off — the cue grid, the last question, the closing lead,
+   * the time-up — so everything the tester is watching already behaves as if
+   * the time had passed. What it cannot move is the audio: the finish route
+   * measures a real sitting's duration out of the uploaded bytes precisely so
+   * that no client can claim one, and a skipped sitting therefore graded and
+   * displayed as the eight minutes it really spoke rather than the ten it
+   * reached. So the jump is counted here and sent as its own quantity, and the
+   * route ADDS it to the measured duration — under `DEV_TOOLS_ENABLED`, the
+   * same gate the panel that produced it is behind, and the same frontier a
+   * typed phase's {@link devSeconds} already crosses.
+   *
+   * Additive rather than substitutive, and that is the whole reason it can be
+   * trusted to be useful: with no skip the duration is exactly today's, so a
+   * development sitting is graded the way production grades it and the rubric's
+   * thresholds stay testable against the real numbers.
+   */
+  private devSkippedSeconds: Record<RecordedPhase, number> = { monologue: 0, debate: 0 };
 
   /**
    * DEVELOPMENT ONLY — the phases whose content was typed rather than spoken
@@ -1185,11 +1253,15 @@ export class ExamController {
    *
    * What it deliberately does NOT touch: `examStart`. Transcript timestamps
    * are `now - examStart`, so a skip moves no words; only this part's clock
-   * jumps. The cost, same as the reference's: `phaseSeconds` at the boundary
-   * claims the skipped time, so a skipped sitting reports minutes nobody
-   * spoke. The server measures a real sitting's duration from the audio bytes,
-   * so the claim travels no further than the payload — and no production build
-   * carries this method at all.
+   * jumps.
+   *
+   * What it DOES now carry off the page (#203): the jump is banked in
+   * {@link devSkippedSeconds} and sent as its own quantity, so the duration the
+   * server grades and the results page prints is the measured audio PLUS the
+   * time skipped — the ten minutes the tester drove the épreuve to, rather than
+   * the eight it spoke. Every guard on that claim, and why it does not weaken
+   * the rule that a client cannot announce a duration, is on that field. No
+   * production build carries this method at all.
    *
    * Refused while the phase is armed (no clock to move), while a closing
    * handshake owns the end of the part, and while the monologue is held —
@@ -1201,7 +1273,13 @@ export class ExamController {
     if (this.phase !== "monologue" && this.phase !== "debate") return;
     if (this.phaseStart === null || this.closing || this.monologueHeld) return;
 
+    // Read off the stamp rather than off the argument: `rewindStartBy` floors a
+    // non-positive skip at zero, and what is banked has to be what the clock
+    // actually moved — a claim that outran the clock would be the one thing
+    // this field must never be.
+    const before = this.phaseStart;
     this.phaseStart = rewindStartBy(this.phaseStart, seconds);
+    this.devSkippedSeconds[this.phase] += Math.round((before - this.phaseStart) / 1000);
     this.log("dev-time-skip", { seconds, phase: this.phase });
     this.tick();
   }
@@ -1214,13 +1292,23 @@ export class ExamController {
    * time-up — the monologue thanks and hands over, the débat sends its led
    * closing directive. Same guards, same mechanism, same port as
    * {@link devSkipTime}.
+   *
+   * What it banks is the JUMP, not the part's duration (#203): landing on 13:00
+   * from 11:00 skipped two minutes, not thirteen. And a clock already past the
+   * end banks nothing — this lands it exactly ON the duration, which is a
+   * rewind, and a rewind is not time skipped.
    */
   devSkipToEnd(): void {
     if (!DEV_TOOLS_ENABLED) return;
     if (this.phase !== "monologue" && this.phase !== "debate") return;
     if (this.phaseStart === null || this.closing || this.monologueHeld) return;
 
+    const before = this.phaseStart;
     this.phaseStart = this.now() - phaseDurationSeconds(this.phase) * 1000;
+    this.devSkippedSeconds[this.phase] += Math.max(
+      0,
+      Math.round((before - this.phaseStart) / 1000),
+    );
     this.log("dev-time-skip", { toEnd: true, phase: this.phase });
     this.tick();
   }
@@ -2488,22 +2576,52 @@ export class ExamController {
    * and `advance()` re-checks the phase on the far side of it so the suspended
    * call finds the épreuve already over and returns.
    *
-   * Handed off rather than awaited, through `advanceDetached()` and for its
-   * reason (#65): `advance()` ends by speaking a consigne and encoding a
-   * sitting, the caller is a click handler with a dialog to close, and a
-   * transition that fails must still say so somewhere instead of becoming an
-   * unhandled rejection in a console nobody has open. The screen the candidate
-   * lands on is `finished`, and everything after it — the encode, the upload,
-   * its retry — is that screen's, unchanged.
+   * **The exposé is waited for first, and it is the whole reason this awaits
+   * anything.** The monologue is not transcribed by the session that heard it
+   * (#206) — it is read back off its own recording, in a call started at the
+   * handover — and the only place that wait happens is `openSession()`, which
+   * runs from « Enregistrer ». This path never presses it, so without this the
+   * finish payload carried whatever the socket had, which for a real exposé is
+   * nothing: a monologue-only sitting with zero candidate words, refused by
+   * `participationRefusal` as a transcription the app lost. Same wait as the
+   * débat's, same thirty-second bound driven from `tick()` — which is still
+   * running here, and is not once `finish()` has stopped the ticker, so this
+   * cannot be deferred into it.
+   *
+   * The transition itself is still handed off, through `advanceDetached()` and
+   * for its reason (#65): `advance()` ends by speaking a consigne and encoding a
+   * sitting, and a transition that fails must say so somewhere rather than
+   * become an unhandled rejection in a console nobody has open. What the caller
+   * awaits is the wait, so a dialog can say it is waiting; the screen the
+   * candidate lands on is `finished`, and everything after it — the encode, the
+   * upload, its retry — is that screen's, unchanged.
    */
-  finishWithoutDebate(): void {
-    if (this.phase !== "debate") return;
-    // Armed, and armed only. A débat with a clock running is a walk-out, and
-    // must keep going through the dialog that says so.
-    if (this.phaseStart !== null) return;
-    if (this.destroyed) return;
+  async finishWithoutDebate(): Promise<void> {
+    if (!this.canFinishWithoutDebate()) return;
+
+    await this.awaitMonologueTranscript();
+    // Re-checked, because that wait can run for thirty seconds. Nothing on
+    // screen can start the débat meanwhile — the confirmation is a modal
+    // `<dialog>`, so the passation behind it is inert — but this is a public
+    // method and the guard is one line.
+    if (!this.canFinishWithoutDebate()) return;
+
+    // The silence and the transition, with no await between them, and the order
+    // is the whole of it. `skipAnnouncement()` resolves the `announce()` the
+    // handover's own transition is suspended inside, which then resumes ON THE
+    // NEXT MICROTASK — so the advance below, running synchronously, flips the
+    // phase first and that call finds the épreuve over and returns
+    // (`hasMovedOn`). An await in between let it resume in the gap instead, arm
+    // a débat that was already being left, and file a progress report the finish
+    // was about to supersede.
     if (this.announcementPlaying) this.skipAnnouncement();
     this.advanceDetached();
+  }
+
+  /** An armed débat, and nothing else. A débat with a clock running is a
+   *  walk-out and must keep going through the dialog that says so. */
+  private canFinishWithoutDebate(): boolean {
+    return this.phase === "debate" && this.phaseStart === null && !this.destroyed;
   }
 
   /**
@@ -3038,7 +3156,8 @@ export class ExamController {
     }
 
     /**
-     * Compress the monologue now, not at the finish (#86).
+     * Compress the monologue now, not at the finish (#86) — and, on the same
+     * artefact, read it back as text.
      *
      * Its samples are final — `endPhase()` above flushed the framer's tail, and
      * nothing re-opens the monologue once the débat exists — and the candidate
@@ -3047,11 +3166,20 @@ export class ExamController {
      * is memoized by the archive, so the finish reuses it if it succeeded and
      * simply encodes afresh if it did not. Nothing here may hold the débat's
      * consigne behind a codec.
+     *
+     * The transcription rides the SAME promise rather than asking for the
+     * artefact a second time, which is the whole reason it can start here: the
+     * encode is already under way at this exact moment and the memoized result
+     * is what both of them wait for. What follows is the one thing in this
+     * sequence the débat genuinely needs — its session is seeded with what the
+     * candidate argued (`debateSessionHistory`), so the exposé's words have to
+     * exist before the examiner connects, and `openSession` waits for them.
      */
     const recorder = this.recorder;
     if (current === "monologue" && target === "debate" && recorder) {
       const encodeStart = this.now();
-      recorder.recordingFor("monologue").then(
+      const artefact = recorder.recordingFor("monologue");
+      artefact.then(
         (recording) => {
           if (!recording) return;
           this.log("monologue-preencoded", {
@@ -3061,6 +3189,7 @@ export class ExamController {
         },
         (error) => this.log("monologue-preencode-failed", String(error)),
       );
+      this.monologueTranscription = this.transcribeMonologue(artefact);
     }
 
     this.log("phase-transition", `${current} -> ${target}`);
@@ -3290,6 +3419,15 @@ export class ExamController {
       },
     };
 
+    // The exposé, before the examiner who has to argue with it opens its socket.
+    //
+    // The transcription started at the phase boundary and has had the débat's
+    // consigne and the candidate's own click to finish in; this is where the
+    // remainder, if any, is waited out. It sits before the history provider
+    // rather than inside it because the provider is called again on every
+    // reconnect, and by then the answer is long since in the transcript.
+    if (target === "debate") await this.awaitMonologueTranscript();
+
     // Only the débat is seeded: it is a fresh session that would otherwise know
     // nothing about the monologue it is supposed to challenge. A provider
     // rather than the turns themselves, because the manager reads it again on
@@ -3445,6 +3583,120 @@ export class ExamController {
     );
   }
 
+  /**
+   * The monologue's transcription, from the moment it is asked for until it has
+   * been written into the transcript — or `null` where none was ever started.
+   *
+   * Held so `openSession("debate")` can wait for it. Never rejects: everything
+   * that can go wrong is turned into a logged nothing by the method below,
+   * because a failed transcription costs the exposé's words and must not cost
+   * the épreuve.
+   */
+  private monologueTranscription: Promise<void> | null = null;
+
+  /**
+   * Read the monologue's artefact back as text and put it in the transcript.
+   *
+   * REPLACES what the socket delivered for the part rather than adding to it —
+   * see `replaceCandidateSpeech` for why, which is that appending would count a
+   * short exposé twice.
+   *
+   * Every exit is a log and a shrug. No artefact means a phase that captured
+   * nothing (a typed exposé has already dropped its recording by the time this
+   * runs, and reaches here with `null`). No dep means a build with no route
+   * behind it. An empty string means a recording with no speech in it, which is
+   * a real answer and not a failure — and one the absence rule is entitled to
+   * see, so it must not be papered over with the socket's words either.
+   */
+  private async transcribeMonologue(artefact: Promise<PhaseRecording | null>): Promise<void> {
+    const transcribe = this.deps.transcribeMonologue;
+    if (!transcribe) return;
+    const startedAt = this.now();
+    try {
+      const recording = await artefact;
+      if (!recording) {
+        this.log("monologue-transcription-skipped", "no artefact");
+        return;
+      }
+      const text = await transcribe(recording);
+      this.log("monologue-transcribed", {
+        ms: this.now() - startedAt,
+        chars: text.trim().length,
+      });
+      // After the await, and read fresh: the sitting may have been torn down
+      // while the model was thinking, and writing into a destroyed controller's
+      // transcript would emit to listeners that are gone.
+      if (this.destroyed) return;
+      this.transcript = replaceCandidateSpeech(
+        this.transcript,
+        "monologue",
+        text,
+        this.phaseStamps.monologue.startedAt === null
+          ? 0
+          : this.phaseStamps.monologue.startedAt - this.examStart,
+      );
+      this.emit();
+    } catch (error) {
+      this.log("monologue-transcription-failed", String(error));
+    }
+  }
+
+  /** When the débat started waiting on the exposé, or null when it is not. */
+  private transcriptWaitStartedAt: number | null = null;
+  /** Ends that wait early, from the heartbeat or from a teardown. */
+  private releaseTranscriptWait: (() => void) | null = null;
+
+  /**
+   * Hold the débat until the exposé has been written down, but not for long.
+   *
+   * Almost always already over by the time this is reached: the transcription
+   * starts at the phase boundary and the débat's consigne plays for eleven
+   * seconds after it, then the part sits armed until the candidate presses
+   * « Commencer le débat ». What this bounds is the tail, so a transcriber that
+   * has hung cannot leave somebody looking at a part that will not open.
+   *
+   * **Stamped, not scheduled**, exactly as `closingHasTimedOut` is and for the
+   * same reason: this file has one clock, it is injected, and the last real
+   * `setTimeout` in it was ripped out of the closing handshake for ignoring
+   * `deps.now()` and costing the unit suite a genuine twelve-second sleep. A
+   * thirty-second one would have been worse, and the tell is that the timeout
+   * would have had no test — see `checkMonologueTranscriptWait`, which the
+   * heartbeat calls and the fake clock can drive.
+   */
+  private async awaitMonologueTranscript(): Promise<void> {
+    const pending = this.monologueTranscription;
+    if (!pending) return;
+    this.transcriptWaitStartedAt = this.now();
+    try {
+      await Promise.race([
+        pending,
+        new Promise<void>((resolve) => {
+          this.releaseTranscriptWait = resolve;
+        }),
+      ]);
+    } finally {
+      this.transcriptWaitStartedAt = null;
+      this.releaseTranscriptWait = null;
+    }
+  }
+
+  /**
+   * The débat has waited long enough for an exposé that is not coming.
+   *
+   * Called from `tick()`, so the deadline is read off the injected clock like
+   * every other timing decision here. Letting go does not abandon the
+   * transcription: the call is still running, and if it ever answers, the words
+   * land in the transcript and travel with the finish payload. What is lost is
+   * the SEED — this débat's examiner opens without the monologue behind it,
+   * which is a worse débat and still an épreuve.
+   */
+  private checkMonologueTranscriptWait(): void {
+    if (this.transcriptWaitStartedAt === null) return;
+    if (this.now() - this.transcriptWaitStartedAt < MONOLOGUE_TRANSCRIPTION_WAIT_MS) return;
+    this.log("monologue-transcription-timeout", MONOLOGUE_TRANSCRIPTION_WAIT_MS);
+    this.releaseTranscriptWait?.();
+  }
+
   /** Release the monologue floor exactly once. See `activityEnded`. */
   private endMonologueActivity(): void {
     if (this.activityEnded) return;
@@ -3578,6 +3830,12 @@ export class ExamController {
         this.devSeconds.monologue > 0 || this.devSeconds.debate > 0
           ? { ...this.devSeconds }
           : undefined,
+      // Same rule, same reason (#203): a sitting nobody fast-forwarded sends no
+      // such field at all rather than a pair of zeroes the route has to read.
+      devSkippedSeconds:
+        this.devSkippedSeconds.monologue > 0 || this.devSkippedSeconds.debate > 0
+          ? { ...this.devSkippedSeconds }
+          : undefined,
     });
   }
 
@@ -3628,7 +3886,25 @@ export class ExamController {
 
   /** Advance the clock. Public so a test can drive it without real time. */
   tick(): void {
-    if (!this.started || this.phase === "finished" || this.phaseStart === null) return;
+    if (!this.started || this.phase === "finished") return;
+
+    /**
+     * Before the clock's own early return, not after it.
+     *
+     * What this releases is a wait that holds a part OPEN, and a part waiting on
+     * « Enregistrer » has no clock at all — which is exactly the state the armed
+     * débat's exit does its waiting in (#199). Left below the `phaseStart` guard
+     * the thirty-second bound simply did not exist there, and a transcriber that
+     * never answered held the épreuve open for ever: the same shape of trap
+     * `canAdvance` documents about the closing handshake, one wait further on.
+     *
+     * Safe above the held-monologue branch too, which used to precede it: the
+     * check returns immediately unless a wait is actually running, and one only
+     * ever runs on the way into the débat.
+     */
+    this.checkMonologueTranscriptWait();
+
+    if (this.phaseStart === null) return;
 
     // Held: re-anchor the phase's start to now so the elapsed count stands
     // still. Re-anchoring rather than tracking a paused duration means every
@@ -3722,6 +3998,11 @@ export class ExamController {
     this.destroyed = true;
     this.stopTicker();
     this.clearClosingTimer();
+    // The heartbeat is what would otherwise end this wait, and it has just been
+    // stopped. Left alone, an `openSession` awaiting a transcription that never
+    // answers would hold its closure — and this controller — for the life of
+    // the tab.
+    this.releaseTranscriptWait?.();
     // Before anything is awaited: `close()` resolves any in-flight `play()` as
     // skipped, so an `announce()` a phase boundary is awaiting cannot strand
     // that boundary on a page that is going away — and `advance()` checks

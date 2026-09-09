@@ -34,21 +34,32 @@ import { AlertIcon } from "./icons";
  * unlike the dialog next door — this one does change the candidate's record on
  * purpose, and the safe choice is still the one that looks safe.
  *
- * **No `pending` and no `failed`, unlike the abandon.** That flow blocks on its
- * write because the zero it promised must be recorded before the screen changes.
- * This confirm does not write anything: it hands the sitting to the controller's
- * ordinary finish, and the candidate lands on « Épreuve terminée » — which owns
- * the encode, the upload, its progress and its retry, and has since #86. There
- * is no outcome for this dialog to wait on or to break bad news about.
+ * **`pending`, but no `failed`.** The abandon next door blocks on its write
+ * because the zero it promised must be recorded before the screen changes; this
+ * confirm writes nothing, and what it waits on is the exposé being written down
+ * — the monologue is transcribed off its own recording (#206) and that call is
+ * normally waited out when the débat's session opens, which is the one thing
+ * this exit never does. So the dialog holds while the controller waits, up to
+ * the same thirty seconds the débat would have. Dropping the candidate back onto
+ * an armed débat for that long, with nothing having visibly happened, is the
+ * alternative.
+ *
+ * No `failed`, though, because there is no outcome to report: a transcription
+ * that fails or times out costs the exposé's words and not the épreuve, and
+ * everything past the wait — the encode, the upload, its progress and its retry
+ * — is « Épreuve terminée »'s and has been since #86.
  *
  * The `<dialog>` mechanics are `ExitDialog`'s, documented there.
  */
 export function QuitBeforeDebateDialog({
   open,
+  pending = false,
   onCancel,
   onConfirm,
 }: {
   open: boolean;
+  /** The exposé is still being written down; the épreuve ends when it is. */
+  pending?: boolean;
   onCancel: () => void;
   /** Ends the épreuve with the débat unspoken and sends it for correction. */
   onConfirm: () => void;
@@ -105,11 +116,20 @@ export function QuitBeforeDebateDialog({
               longer version was also the reason this row was the only one of the
               three to wrap onto two lines at 375px — the confirm here carries
               four words where theirs carry one. */}
-          <button type="button" onClick={onCancel} className={secondaryButton} autoFocus>
+          <button
+            type="button"
+            onClick={onCancel}
+            className={secondaryButton}
+            disabled={pending}
+            autoFocus
+          >
             Continuer
           </button>
-          <button type="button" onClick={onConfirm} className={dangerButton}>
-            Quitter et faire corriger
+          {/* « Envoi… » rather than a longer sentence about transcription: the
+              candidate has decided to leave and is watching one button, and what
+              they need to know is that the click landed. */}
+          <button type="button" onClick={onConfirm} disabled={pending} className={dangerButton}>
+            {pending ? "Envoi…" : "Quitter et faire corriger"}
           </button>
         </div>
       </div>

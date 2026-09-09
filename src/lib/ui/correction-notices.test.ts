@@ -66,15 +66,108 @@ describe("the correction's penalty notices", () => {
       assert.match(shortDebate()!, /jamais pénalisés par la durée/);
     });
 
-    it("never claims a band was lowered, because none was", () => {
-      // The sentence sits on a page that prints « Interaction 5 » from the same
-      // correction: the charge is priced from the band and the band is left as
-      // the corrector set it. Saying otherwise would contradict the row above.
+    it("points at the row, which now carries both numbers (#203)", () => {
+      // Until #203 this sentence ended « les notes affichées ci-dessus sont
+      // bien celles du correcteur » — true, and the bug: the row read 5 while
+      // the mark had paid 2, so the five figures added to 25 above a 23. The
+      // row now prints the earned band and the awarded one, and the sentence
+      // says so. What it still must not say is that the CORRECTOR lowered
+      // anything, because the earned band is right there beside its own
+      // justification.
       const notice = shortDebate()!;
 
+      // Kept from the pre-#203 test, and deliberately still this broad: the row
+      // shows the corrector's band beside the retained one, so ANY wording that
+      // says a band was brought down describes something the reader can see is
+      // untrue. Cheap insurance against a future rewording, not just against
+      // one phrase.
       assert.ok(!/abaiss/i.test(notice), notice);
       assert.ok(!/ramené/i.test(notice), notice);
-      assert.match(notice, /les notes affichées ci-dessus sont bien celles du correcteur/);
+      assert.match(notice, /la note du correcteur est suivie de celle retenue/);
+      assert.ok(
+        !/sont bien celles du correcteur/.test(notice),
+        "the promise the rows can no longer keep must be gone",
+      );
+    });
+
+    it("says nothing when the charge does not cost what was docked", () => {
+      // The shape that opened #203: `durationCharges` has no column, so a
+      // stored correction has them rebuilt from durations that may not be the
+      // ones it was graded on. Here the rebuild prices 4 points against a
+      // `duration_penalty` of 2 — it is about a different sitting, and the old
+      // paragraph published its figures anyway (« 0 minutes … 4 points ») over
+      // a mark docked 2.
+      const notice = correctionNotices({
+        rawScore25: 25,
+        durationPenalty: 2,
+        durationCharges: [
+          {
+            part: "monologue",
+            criterion: "realisationTache",
+            tier: "strong",
+            seconds: 0,
+            from: 5,
+            to: 1,
+            points: 4,
+          },
+        ],
+      }).duration;
+
+      assert.equal(notice, null);
+    });
+
+    it("says nothing when the charge was priced off a band this correction lacks", () => {
+      const notice = correctionNotices({
+        rawScore25: 21,
+        durationPenalty: 2,
+        criteria: {
+          realisationTache: 5,
+          interaction: 3,
+          lexique: 5,
+          morphosyntaxe: 5,
+          phonologie: 3,
+        },
+        durationCharges: [
+          {
+            part: "debate",
+            criterion: "interaction",
+            tier: "moderate",
+            seconds: 6 * 60,
+            from: 5,
+            to: 3,
+            points: 2,
+          },
+        ],
+      }).duration;
+
+      assert.equal(notice, null, "the charge starts at 5; the row says 3");
+    });
+
+    it("still speaks when the bands corroborate the charge", () => {
+      const notice = correctionNotices({
+        rawScore25: 25,
+        durationPenalty: 2,
+        criteria: {
+          realisationTache: 5,
+          interaction: 5,
+          lexique: 5,
+          morphosyntaxe: 5,
+          phonologie: 5,
+        },
+        durationCharges: [
+          {
+            part: "debate",
+            criterion: "interaction",
+            tier: "moderate",
+            seconds: 6 * 60,
+            from: 5,
+            to: 3,
+            points: 2,
+          },
+        ],
+      }).duration;
+
+      assert.match(notice!, /^Votre débat a duré 6 minutes/);
     });
 
     it("names both parts when both ran short", () => {

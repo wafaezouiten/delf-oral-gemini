@@ -113,6 +113,8 @@ export function ExamClient({
   const [abandoning, setAbandoning] = useState(false);
   const [abandonFailed, setAbandonFailed] = useState(false);
   const [quitting, setQuitting] = useState(false);
+  /** The armed débat's exit is under way — see `quitBeforeDebate`. */
+  const [finishingWithoutDebate, setFinishingWithoutDebate] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<FinishFailure | null>(null);
   /**
@@ -245,6 +247,9 @@ export function ExamClient({
         // Undefined on any sitting that was actually spoken, and ignored by the
         // route in a production build (#36).
         devSeconds: payload.devSeconds,
+        // Undefined on any sitting nobody fast-forwarded, and ignored by the
+        // route in a production build the same way (#203).
+        devSkippedSeconds: payload.devSkippedSeconds,
       });
       form.set("payload", json);
 
@@ -615,16 +620,25 @@ export function ExamClient({
    * that already exists for it: no words in the débat, so `partsAbsent` calls it
    * absent and the /25 is halved.
    *
-   * Synchronous, unlike its two neighbours, and with no pending state to show.
-   * They both post a request whose outcome the candidate is waiting on; this one
-   * starts a phase transition the controller detaches and logs for itself, and
-   * what the candidate waits on afterwards — the encode, the upload, the
-   * correction — is `FinishedScreen`'s progress and has been since #86. So the
-   * dialog closes on the click and the next screen owns everything after it.
+   * The dialog is held open while this runs, unlike the first version of it,
+   * and the wait is not the finish. `finishWithoutDebate()` waits out the
+   * monologue's transcription first — the exposé is read back off its recording
+   * (#206), and the only other place that wait happens is the opening of the
+   * débat's session, which this exit is precisely the way around. Everything
+   * after it belongs to `FinishedScreen`, which the phase change puts on screen:
+   * the encode, the upload, its progress and its retry are all its since #86,
+   * which is why nothing here waits for the correction and there is no failure
+   * to catch.
    */
-  const quitBeforeDebate = () => {
+  const quitBeforeDebate = async () => {
+    if (finishingWithoutDebate) return;
+    setFinishingWithoutDebate(true);
+    await controller.finishWithoutDebate();
+    // Not reset on the way out: the phase is `finished` by now and this screen
+    // is gone. Reset only matters for the refusals — a guard that saw a débat
+    // already running — where the dialog has to become pressable again.
+    if (controller.getSnapshot().phase === "debate") setFinishingWithoutDebate(false);
     setExitPrompt(null);
-    controller.finishWithoutDebate();
   };
 
   /**
@@ -763,8 +777,9 @@ export function ExamClient({
       />
       <QuitBeforeDebateDialog
         open={exitPrompt === "finish"}
+        pending={finishingWithoutDebate}
         onCancel={() => setExitPrompt(null)}
-        onConfirm={quitBeforeDebate}
+        onConfirm={() => void quitBeforeDebate()}
       />
       <ExitDialog
         open={exitPrompt === "abandon"}
