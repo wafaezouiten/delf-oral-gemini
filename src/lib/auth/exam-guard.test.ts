@@ -30,34 +30,11 @@
 
 import assert from "node:assert/strict";
 import { before, beforeEach, describe, it, mock } from "node:test";
-import { pathToFileURL } from "node:url";
 
 import { drizzle } from "drizzle-orm/pg-proxy";
 
 import * as schema from "@/lib/db/schema";
-
-/**
- * Mock a package under both of the builds it ships.
- *
- * `mock.module` keys on the resolved file, and the resolver that answers is not
- * the one that will be asked later: this project has no `"type": "module"`, so
- * tsx compiles every `.ts` to CommonJS and `exam-guard.ts`'s imports arrive as
- * `require`. `mock.module("@clerk/nextjs/server")` resolves through the `import`
- * condition and mocks `dist/esm/…`, while the module under test then loads the
- * untouched `dist/cjs/…` — real Clerk, reaching for real request headers.
- *
- * So both are registered. Packages that ship one file for both conditions —
- * `next/navigation`, `server-only` — resolve to the same URL twice and the
- * second registration is refused; that is the expected case, not a failure.
- */
-function mockPackage(specifier: string, namedExports: Record<string, unknown>) {
-  mock.module(specifier, { namedExports });
-  try {
-    mock.module(pathToFileURL(require.resolve(specifier)).href, { namedExports });
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ERR_INVALID_STATE") throw error;
-  }
-}
+import { mockPackage } from "@/lib/testing/mock-package";
 
 const OWNER = "user_owner";
 const INTRUDER = "user_intruder";
