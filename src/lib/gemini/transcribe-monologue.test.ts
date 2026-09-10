@@ -77,6 +77,11 @@ mockPackage("@google/genai", {
 let transcribe: typeof import("./transcribe-monologue");
 
 before(async () => {
+  // The id is read once, as the module loads, so an override has to be gone
+  // before that: a developer with `GEMINI_TRANSCRIBE_MODEL` set in their shell
+  // would otherwise fail the case below that names the default, for no reason
+  // that has anything to do with their branch.
+  delete process.env.GEMINI_TRANSCRIBE_MODEL;
   transcribe = await import("./transcribe-monologue");
 });
 
