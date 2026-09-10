@@ -49,6 +49,7 @@ import { readsAsClosing } from "@/lib/delf/early-closing";
 import { rewindStartBy } from "@/lib/ui/po-player-view";
 import {
   closingInstruction,
+  type ClosingReason,
   examinerOpeningLine,
   lastQuestionInstruction,
   presenceCheckInstruction,
@@ -631,15 +632,74 @@ const SILENCE_HELD_REPORT_MS = 3 * SILENCE_STEP_MS;
 const TIME_CUE_INTERVAL_MS = 180_000;
 
 /**
- * How little may be left for an ordinary cue still to be worth sending.
+ * When the débat's last question is announced, and where the grid stands down
+ * behind it (#215).
  *
- * Under two minutes the grid stands down and the end of the débat belongs to
- * two spoken interventions instead: the last question (#108), announced as such
- * at this very crossing, and the closing handshake. A silent cue there would
- * land next to one of them with no turn boundary between, which is the blend
- * {@link checkCandidateSilence} is also written to avoid.
+ * Nine minutes thirty into a thirteen-minute part, measured forward from the
+ * start rather than back from the end. It used to be the two-minute crossing,
+ * which put the announcement two minutes before a deadline instead of at the
+ * end of the exchange: the candidate answered by 11:30 and the part still owed
+ * the clock ninety seconds of conversation nobody wanted, held open by an
+ * examiner under orders to keep going. Announced here, the last question is
+ * what its name says, and {@link checkDebateWrapUp} ends the part on its
+ * answer.
+ *
+ * A target rather than a stamp. Like every cue it waits for a quiet floor, so a
+ * candidate mid-argument at 9:30 pushes it later — up to
+ * {@link LAST_QUESTION_CUTOFF_MS} from the deadline, after which it is dropped.
+ * Ten o'clock is the usual worst case, and that is the window it was asked for.
+ *
+ * From this moment the three-minute grid stands down: the end of the débat
+ * belongs to two spoken interventions instead, the last question and the
+ * closing handshake, and a silent cue between them would land next to one with
+ * no turn boundary between — the blend {@link checkCandidateSilence} is also
+ * written to avoid.
  */
-const TIME_CUE_FLOOR_MS = 120_000;
+const LAST_QUESTION_TARGET_MS = 570_000;
+
+/**
+ * The earliest the débat may end of its own accord (#215).
+ *
+ * Ten minutes thirty, and the thirty seconds are the whole point.
+ * `FULL_DEVELOPMENT_SECONDS.debate` is 600: a débat measured under ten minutes
+ * drops the candidate into the `moderate` tier and costs them a band of
+ * « interaction ». So an end that arrives on its own has to clear that line
+ * with room to spare, and this is the room.
+ *
+ * It is compared against the controller's clock, while the grille reads the
+ * measured length of the recording — two deliberately different numbers. The
+ * drift runs the safe way: the débat's recording covers the closing handshake,
+ * which starts here and is still to come, so what is measured is longer than
+ * what is checked. The margin is there for the case where it is not.
+ *
+ * The clock's own deadline is untouched. This only decides when the part MAY
+ * stop early; {@link CLOSING_LEAD_MS} still ends it at thirteen minutes when
+ * the exchange runs that long.
+ */
+const DEBATE_WRAP_UP_FLOOR_MS = 630_000;
+
+/**
+ * How long the room stays quiet before that end is called (#215).
+ *
+ * Ten seconds, and the asymmetry is deliberate: closing too late costs a few
+ * seconds of silence, closing too early cuts the candidate off inside the one
+ * answer they were told was their last. A pause for breath inside a B2 answer
+ * runs to several seconds, and #213 raised the silence nudge to twenty for
+ * exactly that reason. Ten sits below the nudge — so a candidate who has
+ * genuinely finished is not asked « Vous m'entendez ? » on the way out — and
+ * far enough above a hesitation to tell the two apart.
+ *
+ * It sits two seconds above {@link EXAMINER_REPLY_WAIT_MS} and that proximity
+ * is a coincidence rather than a relationship, worth saying because the two
+ * constants now read next to each other. That one holds a CUE out of the gap
+ * where Gemini is composing a rebound, so that the app does not make the
+ * examiner ask something on top of a reply already on its way. This one is not
+ * waiting for a rebound at all: whether the examiner got its « merci » in
+ * before the room went quiet does not change that the exchange is over, which
+ * is the reasoning in {@link checkDebateWrapUp}. Ten happens to clear the
+ * composing gap as well, and nothing here depends on it.
+ */
+const DEBATE_WRAP_UP_QUIET_MS = 10_000;
 
 /**
  * How little may be left for the last question still to be worth asking (#108).
@@ -1077,6 +1137,21 @@ export class ExamController {
    * covered.
    */
   private lastQuestionCue: "pending" | "sent" | "missed" = "pending";
+
+  /**
+   * When the announcement went out, which is what makes an answer AN ANSWER TO
+   * IT rather than any voice in the room (#215).
+   *
+   * {@link checkDebateWrapUp} ends the débat on the answer to the last
+   * question, so it has to know the candidate spoke AFTER it was asked. The
+   * ledger {@link floorIsQuiet} already keeps — `cueCandidateVoiceAt`, the last
+   * moment the candidate grew the voiced total while nobody else was audible —
+   * answers that with one comparison, and needs no second measurement of its
+   * own. Null until the cue goes out, and null forever on a débat that missed
+   * it: a candidate who was never told the end was coming is not held to an
+   * end that arrives early.
+   */
+  private lastQuestionSentAt: number | null = null;
 
   /**
    * The examiner said goodbye in the middle of the débat (#85).
@@ -2266,6 +2341,16 @@ export class ExamController {
     if (this.silenceSince === null) return;
     if (this.phase !== "debate" || this.closing || this.devTextMode) return;
 
+    // The last question has been asked and answered, and the only thing between
+    // here and the closing sentence is the grading floor (#215). Nothing is
+    // owed into this silence: « Vous m'entendez ? » to a candidate who has
+    // finished and is waiting to be dismissed reads as the app not having heard
+    // the answer it is about to close on, and the step behind it re-asks the
+    // very question they just answered (#130). The examiner's own rebound
+    // arms this watch, so without the stand-down it fires on every wrap-up
+    // whose answer landed more than twenty seconds before the floor.
+    if (this.debateWrapUpArmed) return;
+
     if (!this.recorder || this.captureLost || this.captureStalled) return;
 
     const now = this.now();
@@ -2412,7 +2497,7 @@ export class ExamController {
     if (this.connection !== "connected") return false;
 
     const remaining = remainingSeconds("debate", this.elapsed);
-    if (remaining * 1000 < TIME_CUE_FLOOR_MS)
+    if (this.elapsed * 1000 >= LAST_QUESTION_TARGET_MS)
       return this.checkLastQuestionCue(now, quiet, remaining);
 
     // An index into the three-minute grid, not a count: a cue held back while
@@ -2468,12 +2553,79 @@ export class ExamController {
     if (!quiet) return false;
 
     this.lastQuestionCue = "sent";
+    this.lastQuestionSentAt = now;
     // The cue makes the examiner speak, so the silence window re-anchors on the
     // attempt, exactly as the grid cues and relances do: the answer to a
     // question not yet asked is not a silence.
     if (this.silenceSince !== null) this.silenceSince = now;
     this.log("debate-last-question", { remainingSeconds: remaining });
     this.sendControllerDirective("debate-last-question", lastQuestionInstruction());
+    return true;
+  }
+
+  /**
+   * End the débat on the answer to the last question (#215).
+   *
+   * The other half of moving the announcement to {@link
+   * LAST_QUESTION_TARGET_MS}. « Une dernière question » used to be followed by
+   * an answer and then by however much of the thirteen minutes was left, which
+   * the prompt fills — the examiner is told to keep going until the instruction
+   * to conclude arrives, and it does, with new angles on a débat that had
+   * finished. A real examiner closes on that answer. So does this.
+   *
+   * Four conditions, and each one is a way of being wrong about the end:
+   *
+   *  - **The question was actually asked.** `lastQuestionCue === "sent"`. A
+   *    débat that missed the announcement (its floor never went quiet in time)
+   *    runs to the clock exactly as before; nobody told that candidate the end
+   *    was near, so nothing here may bring it forward.
+   *  - **It was answered.** The candidate's voice grew after the cue went out.
+   *    Without this a candidate who freezes on the last question is closed out
+   *    of the answer they still owe, ten seconds after being asked for it —
+   *    the silence watch owns that case, and its relances re-ask the promised
+   *    question rather than escalating (#130).
+   *  - **The room has settled.** {@link DEBATE_WRAP_UP_QUIET_MS} of quiet, on
+   *    the ledger every cue reads, so a pause for breath inside the answer is
+   *    not read as its end. Whether the examiner rebounded first does not
+   *    matter and is deliberately not asked: both endings are correct, and
+   *    waiting to find out which one happened is the dead air this removes.
+   *  - **It is late enough.** {@link DEBATE_WRAP_UP_FLOOR_MS}, which is a
+   *    grading line and not a preference — see the constant.
+   *
+   * Returns whether it closed, so `tick()` can stop rather than run the clock's
+   * own branch behind it.
+   *
+   * `debateWrapUpArmed` is the first three conditions without the floor or the
+   * quiet, and it is separate because {@link checkCandidateSilence} needs the
+   * same question: once the last question has been asked and answered, the part
+   * is only waiting out its floor, and there is nothing left for the candidate
+   * to say into a silence.
+   */
+  private get debateWrapUpArmed(): boolean {
+    if (this.phase !== "debate" || this.closing || this.devTextMode) return false;
+    // A disconnected room cannot be closed by this — the closing directive has
+    // nowhere to go — so it is not armed either, and the silence watch keeps
+    // its ordinary duty over a débat waiting to reconnect.
+    if (this.connection !== "connected") return false;
+    if (this.lastQuestionCue !== "sent" || this.lastQuestionSentAt === null) return false;
+    return this.cueCandidateVoiceAt !== null && this.cueCandidateVoiceAt > this.lastQuestionSentAt;
+  }
+
+  private checkDebateWrapUp(now: number): boolean {
+    if (!this.debateWrapUpArmed) return false;
+    if (this.elapsed * 1000 < DEBATE_WRAP_UP_FLOOR_MS) return false;
+
+    // Read, never written: `floorIsQuiet` owns this ledger and runs later in
+    // the same tick. One tick of staleness against a ten-second window.
+    if (this.examinerSpeaking || this.announcementPlaying) return false;
+    if (this.floorQuietSince === null) return false;
+    if (now - this.floorQuietSince < DEBATE_WRAP_UP_QUIET_MS) return false;
+
+    this.log("debate-wrap-up", {
+      elapsedSeconds: Math.round(this.elapsed),
+      remainingSeconds: remainingSeconds("debate", this.elapsed),
+    });
+    this.beginClosingHandshake("exchange");
     return true;
   }
 
@@ -3026,7 +3178,7 @@ export class ExamController {
    * clock — the failure mode this guards against is the one the reference
    * implementation had to fix in production.
    */
-  private beginClosingHandshake(): void {
+  private beginClosingHandshake(reason: ClosingReason = "time"): void {
     if (this.phase !== "monologue" && this.phase !== "debate") {
       this.advanceDetached();
       return;
@@ -3035,14 +3187,14 @@ export class ExamController {
 
     this.closing = true;
     this.closingTurnComplete = false;
-    this.log("closing-handshake");
+    this.log("closing-handshake", { reason });
 
     // Tolerated for the same reason as the teardown steps, and this one is the
     // candidate's own « Terminer » rather than a development tool: a socket that
     // threw here never reached the stamp below, so `closingHasTimedOut()` could
     // never become true and the safety timeout — the whole reason a silent
     // examiner cannot strand anybody — was itself stranded (#65).
-    const instruction = closingInstruction(this.phase);
+    const instruction = closingInstruction(this.phase, reason);
     // A new turn, like every other directive (#101). This one does not go
     // through `sendControllerDirective` — it is tolerated rather than caught,
     // for the reason above — so it sets the break itself. Being the LAST thing
@@ -3992,6 +4144,13 @@ export class ExamController {
       this.advanceDetached();
       return;
     }
+
+    // BEFORE the deadline below, and the order says which end wins: a débat
+    // whose last question has been answered closes on that answer rather than
+    // on the clock (#215). The two cannot both be due — the wrap-up floor is
+    // two minutes twenty short of the lead — but the exchange is the reason
+    // this part ends, and the clock is only the backstop for when it does not.
+    if (this.checkDebateWrapUp(this.now())) return;
 
     // The débat's deadline is read with a lead (#108): the closing directive
     // sent at 0:00 is heard after it, so the sentence goes out early enough to

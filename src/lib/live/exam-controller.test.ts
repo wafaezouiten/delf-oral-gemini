@@ -4032,12 +4032,12 @@ describe("the last question and the call of time (#108)", () => {
   const events = (h: Harness, name: string) =>
     h.controller.getSnapshot().events.filter((event) => event.name === name);
 
-  it("announces the last question, aloud, when the grid stands down at two minutes", async () => {
+  it("announces the last question, aloud, once the grid has stood down", async () => {
     const h = harness();
     await intoDebate(h);
 
     quiet(h, 690);
-    assert.equal(announcements(h).length, 1, "the two-minute crossing is the moment");
+    assert.equal(announcements(h).length, 1, "the announcement is out by then");
     assert.match(announcements(h)[0], /à voix haute/, "this one the candidate is meant to hear");
     assert.match(announcements(h)[0], /aucun chiffre/, "but never as a number");
     assert.equal(events(h, "debate-last-question").length, 1, "and the sitting's log says so");
@@ -4054,7 +4054,7 @@ describe("the last question and the call of time (#108)", () => {
 
     h.advanceClock(680); // voiced audio keeps arriving: somebody is talking
     h.advanceClock(20);
-    assert.deepEqual(announcements(h), [], "the candidate is mid-answer at the crossing");
+    assert.deepEqual(announcements(h), [], "the candidate is mid-answer at the target");
 
     // Nine, not the bare two-second pause: the announcement waits out the reply
     // the examiner may owe that answer, like every cue does (#130).
@@ -4204,6 +4204,215 @@ describe("the last question and the call of time (#108)", () => {
 
     h.advanceClock(5);
     assert.equal(h.controller.getSnapshot().closing, true, "the boundary itself has not moved");
+  });
+
+  describe("and the end that follows the answer (#215)", () => {
+    /** The candidate answers, audibly, for `seconds` — then stops. `quiet`
+     *  re-baselines the voiced total, so growth here reads as their voice and
+     *  not as the examiner's through an open microphone. */
+    const answers = (h: Harness, seconds: number) => {
+      h.recorder.voiced.debate = seconds;
+      h.advanceClock(seconds);
+    };
+
+    const wrapUps = (h: Harness) => events(h, "debate-wrap-up");
+    /** Everything the silence watch says, both wordings plus the presence
+     *  check — the same shapes `checkCandidateSilence`'s own suite matches on. */
+    const nudges = (h: Harness) =>
+      h
+        .session()
+        .directives.filter(
+          (text) =>
+            text.includes("Vous m'entendez") ||
+            text.includes("Ne fais aucune remarque sur son silence"),
+        );
+    const lastDirective = (h: Harness) => h.session().directives[h.session().directives.length - 1];
+
+    it("announces the last question at nine thirty, not at the two-minute crossing", async () => {
+      // The move that makes the rest of this possible. Asked at 11:00 the
+      // announcement leaves its own answer nowhere to go: the exchange is over
+      // by 11:30 and the clock still owes ninety seconds.
+      const h = harness();
+      await intoDebate(h);
+
+      quiet(h, 560);
+      assert.deepEqual(announcements(h), [], "9:20 is not yet the target");
+
+      quiet(h, 15);
+      assert.equal(announcements(h).length, 1, "9:35 is, on a floor that is free");
+    });
+
+    it("ends the débat on the answer, minutes before the clock", async () => {
+      const h = harness();
+      await intoDebate(h);
+
+      quiet(h, 575);
+      assert.equal(announcements(h).length, 1, "asked");
+
+      answers(h, 25); // and answered
+      quiet(h, 20); // the room settles
+      quiet(h, 20); // and stays settled through the window
+
+      assert.equal(wrapUps(h).length, 1, "the exchange is what ended the part");
+      assert.equal(h.controller.getSnapshot().closing, true);
+      assert.ok(
+        h.controller.getSnapshot().elapsed < PHASE_DURATIONS.debate - 60,
+        "with more than a minute still on the clock",
+      );
+      assert.match(lastDirective(h), /l'entretien est terminé/);
+      assert.doesNotMatch(
+        lastDirective(h),
+        /Le temps de l'épreuve est écoulé/,
+        "and the examiner is not made to say time ran out when it did not",
+      );
+      assert.match(
+        lastDirective(h),
+        /Ne dis pas que le temps est écoulé/,
+        "it is told so outright, since the clock the candidate can see disagrees",
+      );
+    });
+
+    it("holds that end back until ten thirty, however early the answer lands", async () => {
+      // The one figure here that is not a preference. Under
+      // FULL_DEVELOPMENT_SECONDS.debate — 600 — the grille drops the candidate
+      // a band of « interaction », so an end that arrives on its own has to
+      // clear that line with room to spare.
+      const h = harness();
+      await intoDebate(h);
+
+      quiet(h, 575);
+      answers(h, 10); // a short answer, finished around 9:45
+      quiet(h, 30); // ten quiet seconds have long since passed
+
+      assert.deepEqual(wrapUps(h), [], "10:15 is inside the tier that costs a band");
+      assert.equal(h.controller.getSnapshot().closing, false);
+
+      quiet(h, 40);
+      assert.equal(wrapUps(h).length, 1, "10:55 is not");
+      assert.ok(
+        h.controller.getSnapshot().elapsed >= 630,
+        "the floor is the grading line, not the answer's timing",
+      );
+    });
+
+    it("stops nudging a candidate who is only waiting to be dismissed", async () => {
+      // The floor can hold the end back for a minute after the answer, and the
+      // examiner's own rebound arms the silence watch. Without a stand-down the
+      // app asks « Vous m'entendez ? » to somebody who has answered everything
+      // — and the step behind it re-asks the question they just answered (#130).
+      const h = harness();
+      await intoDebate(h);
+
+      quiet(h, 575);
+      h.session().examinerSays("Une dernière question : que répondez-vous aux artisans ?");
+      h.session().finishTurn();
+      answers(h, 12); // answered by 9:47, with the floor still forty seconds off
+      h.session().examinerSays("Je vois, merci."); // the brief rebound the directive asks for
+      h.session().finishTurn();
+
+      quiet(h, 25);
+      quiet(h, 25);
+
+      assert.deepEqual(nudges(h), [], "nothing is owed into this silence");
+      assert.equal(wrapUps(h).length, 1, "and the part closes on the floor, as it should");
+    });
+
+    it("keeps its ordinary duty over a débat that has lost its socket", async () => {
+      // The stand-down above is only sound while the close it is waiting for
+      // can actually happen. A disconnected room cannot be closed — the
+      // directive has nowhere to go — so the watch is not stood down over one.
+      const h = harness();
+      await intoDebate(h);
+
+      quiet(h, 575);
+      h.session().examinerSays("Une dernière question : que répondez-vous aux artisans ?");
+      h.session().finishTurn();
+      answers(h, 12);
+      h.session().examinerSays("Je vois, merci.");
+      h.session().finishTurn();
+
+      h.session().emitStates("reconnecting");
+      quiet(h, 25);
+      quiet(h, 25);
+
+      assert.deepEqual(wrapUps(h), [], "a socket that is gone cannot carry a closing");
+
+      h.session().emitStates("resuming", "connected");
+      quiet(h, 15);
+      assert.equal(wrapUps(h).length, 1, "and the connection was the only thing holding it");
+    });
+
+    it("does not hear its own closing sentence as an examiner walking out", async () => {
+      // « L'entretien est terminé » is literally in CLOSING_PHRASES, and the
+      // exchange directive steers the examiner straight at it. What keeps that
+      // from reading as an examiner walking out is `watchForEarlyClosing`'s
+      // stand-down on `this.closing`: without it the app contradicts its own
+      // goodbye, counts a fault against the examiner, and waives the débat's
+      // penalties on the strength of it (#92). Removing that guard fails this.
+      //
+      // What it does NOT pin is the ORDER of the flag and the directive inside
+      // `beginClosingHandshake` — checked by mutation, and it passes with the
+      // two swapped. Both happen synchronously before any turn can arrive, so
+      // the window between them is not reachable from a test that drives the
+      // session by hand. The ordering is still deliberate (see the comment
+      // there); it is simply not this test's claim.
+      const h = harness();
+      await intoDebate(h);
+
+      quiet(h, 575);
+      h.session().examinerSays("Une dernière question : que répondez-vous aux artisans ?");
+      h.session().finishTurn();
+      answers(h, 12);
+      quiet(h, 25);
+      quiet(h, 25);
+      assert.equal(wrapUps(h).length, 1, "the part is closing");
+
+      // The sentence the directive just asked for.
+      h.session().examinerSays("Merci, l'entretien est terminé. Au revoir.");
+      h.session().finishTurn();
+
+      assert.deepEqual(
+        events(h, "examiner-early-closing"),
+        [],
+        "a closing said on the app's own order is not a goodbye it has to answer",
+      );
+      assert.ok(
+        !h.session().directives.some((text) => text.includes("n'est PAS terminée")),
+        "and nothing contradicts it",
+      );
+    });
+
+    it("does not close out a candidate who has not answered it yet", async () => {
+      // Ten seconds of quiet after « une dernière question » is a candidate
+      // composing an answer, and closing on it takes the answer away. The
+      // silence watch owns that room, and its relances re-ask the promised
+      // question rather than escalating (#130).
+      const h = harness();
+      await intoDebate(h);
+
+      quiet(h, 575);
+      assert.equal(announcements(h).length, 1);
+
+      quiet(h, 120); // long past the floor, and never a word from them
+      assert.deepEqual(wrapUps(h), [], "silence is not an answer");
+      assert.equal(h.controller.getSnapshot().phase, "debate");
+    });
+
+    it("leaves a débat that missed the announcement to run its clock", async () => {
+      // Nobody told this candidate the end was coming, so nothing may bring it
+      // forward: the part they were sold is the one they get.
+      const h = harness();
+      await intoDebate(h);
+
+      h.advanceClock(690); // talking through the whole window
+      h.advanceClock(50);
+      quiet(h, 6);
+      assert.equal(events(h, "debate-last-question-missed").length, 1, "the drop is on the record");
+
+      answers(h, 8);
+      quiet(h, 20);
+      assert.deepEqual(wrapUps(h), [], "an unannounced end is not an end");
+    });
   });
 });
 
