@@ -1,0 +1,65 @@
+{
+  "$schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json",
+
+  // Fallow scores this repository on every trunk push and every opened pull
+  // request (`.github/workflows/fallow.yml`), and until this file existed it
+  // scored the whole tree as if it were application code. It is not.
+  //
+  // `scripts/` is a drawer of measurements and verifications, each run by hand
+  // through `pnpm tsx`; `e2e/` is a Playwright suite the runner collects by
+  // glob. Both are reached by a person typing a command, never by an import, so
+  // both were reported as dead — and then reported a second time as duplicates,
+  // because a probe written by forking the probe before it is exactly what a
+  // probe should be. Twelve of the seventeen clone groups one release added
+  // (#207) were scripts under this directory agreeing with each other.
+  //
+  // What that noise cost, measured on `develop` the day this landed:
+  //
+  //     dead-code issues     83 → 49
+  //     clone groups         78 → 9
+  //     duplication        2.72% → 0.75%
+  //     maintainability     91.7 → 93.0
+  //
+  // Nothing under `src/` is silenced here. The point is not a better score; it
+  // is that the score should be about the application.
+
+  // Every script is an entry point of its own. `package.json` names some of
+  // them (`verify:db`, `smoke`, `announcements`, …) and the rest are run as
+  // `pnpm tsx scripts/…`, which no static analyzer can see.
+  //
+  // The cost of saying so: a genuinely abandoned script will never be flagged
+  // again. That is a fair trade for a drawer whose purpose is to hold
+  // measurements already taken — the value of `probe-monologue-close.ts` is the
+  // numbers in its header, which `lib/gemini/transcribe-monologue.ts` quotes.
+  "entry": ["scripts/**/*.{ts,mjs}", "e2e/**/*.ts"],
+
+  // The capture worklet is fetched by URL at runtime —
+  // `audioWorklet.addModule("/worklets/pcm-capture.js")` in `lib/audio/
+  // recorder.ts` — so nothing imports it, and nothing can.
+  "dynamicallyLoaded": ["public/worklets/*.js"],
+
+  // Loaded by name from `.prettierrc`, which is configuration and not an
+  // import. `pnpm format:check` fails without it.
+  "ignoreDependencies": ["prettier-plugin-tailwindcss"],
+
+  // This codebase exports for two reasons: to be imported, and to be reached by
+  // a test. `browserMicrophone`, `realTimers` and `browserLiveTransport` are
+  // seams — the default is used one line below its own export, and the export
+  // exists so a test can pass something else. Constants such as `EVAL_MODEL`,
+  // `FRAME_MS` and `PHASE_LABELS` are exported to be asserted on. Between this
+  // setting and the entry globs above, the 28 reported unused exports come down
+  // to four.
+  "ignoreExportsUsedInFile": true,
+
+  "duplicates": {
+    // `scripts/` for the reason above, and the tests for one more: an arrange
+    // block SHOULD look like the last one. Repetition is how a case stays
+    // readable on its own, and folding it away hides what the test sets up.
+    //
+    // `src/` is deliberately absent. The clone this leaves standing in the
+    // application is the ownership preamble six API routes share — `authorizeExam`
+    // then `EXAM_ACCESS_DENIALS` — which is repeated on purpose, argued for in
+    // each route that carries it, and worth continuing to see.
+    "ignore": ["scripts/**", "e2e/**", "**/*.test.ts"]
+  }
+}
