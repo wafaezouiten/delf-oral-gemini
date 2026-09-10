@@ -3035,7 +3035,7 @@ describe("breaking a silence in the débat (#84, #101)", () => {
 
   /** One whole escalation step: the wait, then the examiner's own nudge landing
    *  and ending, which is what re-arms the window for the next one. */
-  function silentStep(h: Harness, seconds = 16): void {
+  function silentStep(h: Harness, seconds = 26): void {
     h.advanceClock(seconds);
     h.session().finishTurn();
   }
@@ -3059,7 +3059,7 @@ describe("breaking a silence in the débat (#84, #101)", () => {
     const h = harness();
     await intoSilentDebate(h);
 
-    h.advanceClock(9);
+    h.advanceClock(19);
     assert.deepEqual(presenceChecks(h), [], "nine seconds is a candidate thinking");
 
     h.advanceClock(2);
@@ -3072,8 +3072,8 @@ describe("breaking a silence in the débat (#84, #101)", () => {
     const h = harness();
     await intoSilentDebate(h);
 
-    silentStep(h, 11); // « Vous m'entendez ? »
-    h.advanceClock(11);
+    silentStep(h, 21); // « Vous m'entendez ? »
+    h.advanceClock(21);
     assert.deepEqual(relances(h), [], "the steps after the first are longer on purpose");
 
     h.advanceClock(5);
@@ -3085,7 +3085,7 @@ describe("breaking a silence in the débat (#84, #101)", () => {
     const h = harness();
     await intoSilentDebate(h);
 
-    h.advanceClock(11);
+    h.advanceClock(21);
     h.advanceClock(1);
     h.advanceClock(1);
     assert.equal(presenceChecks(h).length, 1, "a directive is not a promise the model will speak");
@@ -3105,7 +3105,7 @@ describe("breaking a silence in the débat (#84, #101)", () => {
     assert.deepEqual(presenceChecks(h), [], "the candidate has been listening, not silent");
 
     player.speak(false);
-    h.advanceClock(11);
+    h.advanceClock(21);
     assert.equal(presenceChecks(h).length, 1, "the window opens when the speaker runs out");
   });
 
@@ -3142,7 +3142,7 @@ describe("breaking a silence in the débat (#84, #101)", () => {
     await intoSilentDebate(h);
 
     h.recorder.voiced.debate = 0.08; // two frames in eleven seconds
-    h.advanceClock(11);
+    h.advanceClock(21);
 
     assert.equal(presenceChecks(h).length, 1, "two clicks in eleven seconds is not an answer");
   });
@@ -3151,8 +3151,8 @@ describe("breaking a silence in the débat (#84, #101)", () => {
     const h = harness();
     await intoSilentDebate(h);
 
-    h.recorder.voiced.debate = 8; // eight of the eleven seconds carried speech
-    h.advanceClock(11);
+    h.recorder.voiced.debate = 16; // sixteen of the twenty-one seconds carried speech
+    h.advanceClock(21);
 
     assert.deepEqual(nudges(h), [], "that is an answer in progress, not a room");
   });
@@ -3164,14 +3164,14 @@ describe("breaking a silence in the débat (#84, #101)", () => {
     const h = harness();
     await intoSilentDebate(h);
 
-    silentStep(h, 11);
+    silentStep(h, 21);
     for (let step = 0; step < 5; step += 1) silentStep(h);
 
     assert.equal(presenceChecks(h).length, 1, "« Vous m'entendez ? » opens the silence, once");
     assert.equal(relances(h).length, 5, "and the question keeps coming back");
     assert.deepEqual(
       events(h, "silence-relance").map((event) => event.detail),
-      [1, 2, 3, 4, 5].map((attempt) => JSON.stringify({ attempt, waitedSeconds: 16 })),
+      [1, 2, 3, 4, 5].map((attempt) => JSON.stringify({ attempt, waitedSeconds: 26 })),
       "the log counts them and says what each one waited through, which is what" +
         " replaced the stand-down it used to record",
     );
@@ -3184,7 +3184,7 @@ describe("breaking a silence in the débat (#84, #101)", () => {
     const h = harness();
     await intoSilentDebate(h);
 
-    silentStep(h, 11);
+    silentStep(h, 21);
     silentStep(h);
     silentStep(h);
 
@@ -3200,10 +3200,10 @@ describe("breaking a silence in the débat (#84, #101)", () => {
     const h = harness();
     await intoSilentDebate(h);
 
-    h.advanceClock(11);
+    h.advanceClock(21);
     h.session().examinerSays("Vous m'entendez ?");
     h.session().finishTurn();
-    h.advanceClock(16);
+    h.advanceClock(26);
     h.session().examinerSays("Autrement dit :");
     h.session().examinerSays(" y perd-on des collègues ?");
 
@@ -3232,10 +3232,10 @@ describe("breaking a silence in the débat (#84, #101)", () => {
     const h = harness();
     await intoSilentDebate(h);
 
-    silentStep(h, 11);
+    silentStep(h, 21);
     h.session().candidateSays("Pardon, je réfléchissais.");
     h.session().finishTurn();
-    h.advanceClock(11);
+    h.advanceClock(21);
 
     assert.equal(
       presenceChecks(h).length,
@@ -3277,11 +3277,11 @@ describe("breaking a silence in the débat (#84, #101)", () => {
     const h = harness();
     await intoSilentDebate(h);
 
-    h.advanceClock(11);
+    h.advanceClock(21);
     h.session().examinerSays("Vous m'entendez ?");
     h.session().finishTurn();
     for (let step = 0; step < 2; step += 1) {
-      h.advanceClock(16);
+      h.advanceClock(26);
       h.session().examinerSays(`Reformulons, ${step + 1}.`);
       h.session().finishTurn();
     }
@@ -3313,7 +3313,7 @@ describe("breaking a silence in the débat (#84, #101)", () => {
     assert.deepEqual(nudges(h), [], "nothing was said, so nothing was spent");
 
     h.session().emitStates("connected");
-    h.advanceClock(11);
+    h.advanceClock(21);
     assert.equal(presenceChecks(h).length, 1, "and the candidate gets it once they can hear it");
 
     silentStep(h);
@@ -3338,7 +3338,7 @@ describe("breaking a silence in the débat (#84, #101)", () => {
     }
     assert.deepEqual(nudges(h), [], "the candidate was listening to the question");
 
-    h.advanceClock(11); // the queue has run out: the floor is theirs from here
+    h.advanceClock(21); // the queue has run out: the floor is theirs from here
     assert.equal(presenceChecks(h).length, 1, "and the window starts when the speaker does");
   });
 
@@ -3360,7 +3360,7 @@ describe("breaking a silence in the débat (#84, #101)", () => {
     assert.equal(events(h, "examiner-playback-stalled").length, 1, "the stall is on the record");
     assert.equal(player.resumes, resumesBefore + 1, "and a resume was attempted");
 
-    for (let tick = 0; tick < 11; tick += 1) h.advanceClock(1);
+    for (let tick = 0; tick < 21; tick += 1) h.advanceClock(1);
     assert.equal(
       presenceChecks(h).length,
       1,
@@ -3406,7 +3406,7 @@ describe("breaking a silence in the débat (#84, #101)", () => {
     assert.equal(events(h, "examiner-playback-stalled").length, 1);
 
     player.enqueue("the relance, into the same dead speaker");
-    h.advanceClock(11);
+    h.advanceClock(21);
     assert.deepEqual(events(h, "examiner-playback-recovered"), [], "growth is not recovery");
 
     player.drain(2); // the context came back: audio is reaching the speaker again
@@ -3426,10 +3426,10 @@ describe("breaking a silence in the débat (#84, #101)", () => {
     player.speak(true);
     h.advanceClock(20); // the examiner's question is still coming out of the speaker
     player.speak(false);
-    h.advanceClock(11);
+    h.advanceClock(21);
 
     const detail = events(h, "silence-presence-check")[0]?.detail ?? "";
-    assert.match(detail, /"waitedSeconds":31/, "the whole armed stretch, not just the step");
+    assert.match(detail, /"waitedSeconds":41/, "the whole armed stretch, not just the step");
     assert.match(detail, /"examiner-speaking":/, "and what held it for the other twenty");
   });
 
@@ -3577,7 +3577,8 @@ describe("an examiner that says goodbye seven minutes early (#85)", () => {
       quiet(h, 4);
       assert.deepEqual(cues(h), [], "four quiet seconds after a question is a candidate thinking");
 
-      h.advanceClock(3); // the candidate starts answering
+      h.recorder.voiced.debate = 3; // the candidate answers, and is heard doing it
+      h.advanceClock(3);
       quiet(h, 9); // and finishes; the reply gap (#130) is waited out as before
       assert.equal(cues(h).length, 1, "the cue rides the first settled pause after the answer");
     });
@@ -3606,7 +3607,7 @@ describe("an examiner that says goodbye seven minutes early (#85)", () => {
     it("lets the cue out of a silent room, but after the presence check (#193)", async () => {
       // A candidate who never answers must not hold the cue for ever, and must
       // be asked « Vous m'entendez ? » before any cue makes the examiner speak
-      // again: the twelve-second hold sits between the silence watch's two
+      // again: the twenty-two-second hold sits between the silence watch's two
       // steps for exactly this ordering.
       const h = harness();
       await intoDebate(h);
@@ -3616,13 +3617,13 @@ describe("an examiner that says goodbye seven minutes early (#85)", () => {
       h.session().examinerSays("Pensez-vous que tout le monde dispose des mêmes conditions ?");
       h.session().finishTurn();
 
-      quiet(h, 11);
-      assert.deepEqual(cues(h), [], "eleven quiet seconds: still the candidate's floor");
+      quiet(h, 21);
+      assert.deepEqual(cues(h), [], "twenty-one quiet seconds: still the candidate's floor");
       const presence = h.session().directives.filter((text) => text.includes("Vous m'entendez"));
       assert.equal(presence.length, 1, "the silence watch has asked whether anyone is there");
       h.session().finishTurn(); // « Vous m'entendez ? » spoken
 
-      quiet(h, 13);
+      quiet(h, 23);
       assert.equal(cues(h).length, 1, "and the cue follows it, before the next relance step");
     });
 
@@ -3680,7 +3681,7 @@ describe("an examiner that says goodbye seven minutes early (#85)", () => {
       // The examiner asks something at 2:50, and the candidate says nothing.
       h.session().examinerSays("Et le lien social, il se construit où ?");
       h.session().finishTurn();
-      h.advanceClock(11);
+      h.advanceClock(21);
 
       // Three minutes have passed, but the question is unanswered, so the cue
       // is held (#193) and the silence watch's first step goes out alone.
@@ -3692,9 +3693,9 @@ describe("an examiner that says goodbye seven minutes early (#85)", () => {
       );
       h.session().finishTurn(); // « Vous m'entendez ? » spoken, still nothing back
 
-      // Fifteen seconds on, the cue (twelve) and the relance step (fifteen) are
-      // both due on the same tick.
-      h.advanceClock(15);
+      // Twenty-five seconds on, the cue (twenty-two) and the relance step
+      // (twenty-five) are both due on the same tick.
+      h.advanceClock(25);
       assert.equal(cues(h).length, 1, "the cue takes the tick");
       assert.equal(
         h.session().directives.filter((text) => text.includes("Relance-le sur le fond")).length,
@@ -3761,23 +3762,26 @@ describe("an examiner that says goodbye seven minutes early (#85)", () => {
       );
     });
 
-    it("stops answering after twice, and keeps logging", async () => {
+    it("stops answering after four, and keeps logging", async () => {
       // A model that has decided the épreuve is over may say so again, and an app
       // that contradicts it every time is two machines arguing in front of the
-      // candidate.
+      // candidate. Four rather than two since the sitting in #213, which produced four
+      // wind-ups spread across eight minutes of débat — see
+      // `MAX_EARLY_CLOSING_RECOVERIES` for why spacing is what the ration was
+      // really sized against.
       const h = harness();
       await intoDebate(h);
       h.advanceClock(360);
 
-      for (let turn = 0; turn < 4; turn += 1) {
+      for (let turn = 0; turn < 6; turn += 1) {
         h.session().examinerSays("Au revoir.");
         h.session().finishTurn();
       }
 
-      assert.equal(events(h, "examiner-early-closing").length, 4, "every one is on the record");
-      assert.equal(recoveries(h).length, 2, "only the first two are answered");
+      assert.equal(events(h, "examiner-early-closing").length, 6, "every one is on the record");
+      assert.equal(recoveries(h).length, 4, "only the first four are answered");
       assert.match(
-        events(h, "examiner-early-closing")[3].detail ?? "",
+        events(h, "examiner-early-closing")[5].detail ?? "",
         /"answered":false/,
         "and the log says which were not",
       );
@@ -3793,26 +3797,90 @@ describe("an examiner that says goodbye seven minutes early (#85)", () => {
       await intoDebate(h);
       h.advanceClock(360);
 
-      for (let turn = 0; turn < 3; turn += 1) {
+      for (let turn = 0; turn < 5; turn += 1) {
         h.session().examinerSays("Au revoir.");
         h.session().finishTurn();
       }
-      assert.equal(events(h, "examiner-early-closing").length, 3);
-      assert.equal(recoveries(h).length, 2, "the third went unanswered — no break pending");
+      assert.equal(events(h, "examiner-early-closing").length, 5);
+      assert.equal(recoveries(h).length, 4, "the fifth went unanswered — no break pending");
 
-      // Coalesces into the third goodbye's entry; the merged text still
+      // Coalesces into the fifth goodbye's entry; the merged text still
       // contains « au revoir », but no NEW goodbye was spoken.
       h.session().examinerSays(" Très bien, je vous écoute encore.");
       assert.equal(
         events(h, "examiner-early-closing").length,
-        3,
+        5,
         "stale goodbye text is not counted again",
       );
 
       // A repeated goodbye in the same merged entry is new text and still
       // counts — the guarantee the every-one-on-the-record test above pins.
       h.session().examinerSays(" Au revoir.");
-      assert.equal(events(h, "examiner-early-closing").length, 4, "a genuine repeat still counts");
+      assert.equal(events(h, "examiner-early-closing").length, 6, "a genuine repeat still counts");
+    });
+
+    it("answers a wrap-up that only thanks the candidate, at the turn boundary", async () => {
+      // #213 at 5:33 and again at 7:10: a summary, « Je vous remercie »,
+      // and then nothing for the rest of the minute. The candidate answered the
+      // first with « Mais il en reste 7 minutes, non ? » and got « Vous
+      // m'entendez ? » back, because no list saw it and the silence watch was
+      // the only thing left running.
+      const h = harness();
+      await intoDebate(h);
+      h.advanceClock(360);
+
+      h.session().examinerSays(
+        "Vous proposez donc une approche globale pour évaluer l'ensemble des impacts.",
+      );
+      h.session().examinerSays(" Je vous remercie.");
+      assert.deepEqual(
+        events(h, "examiner-early-closing"),
+        [],
+        "nothing is decided while the turn may still be going somewhere",
+      );
+
+      h.session().finishTurn();
+      assert.equal(
+        events(h, "examiner-early-closing").length,
+        1,
+        "and the whole turn is a goodbye",
+      );
+      assert.equal(recoveries(h).length, 1, "contradicted, with minutes still on the clock");
+    });
+
+    it("leaves a thank-you that goes on to ask something alone", async () => {
+      // The other half of the same reading. An examiner being polite in the
+      // middle of an objection must not be contradicted: `resumeDebateInstruction`
+      // orders a NEW objection, and sending it on top of a question just asked is
+      // the two-questions-in-a-row failure #193 exists to prevent.
+      const h = harness();
+      await intoDebate(h);
+      h.advanceClock(360);
+
+      h.session().examinerSays("Je vous remercie pour cette précision.");
+      h.session().examinerSays(" Mais comment financer un tel réseau ?");
+      h.session().finishTurn();
+
+      assert.deepEqual(events(h, "examiner-early-closing"), [], "that was an objection, politely");
+      assert.deepEqual(recoveries(h), []);
+    });
+
+    it("answers an end announced before the app has authorised one", async () => {
+      // #213 at 4:56, eight minutes from the end: « Nous arrivons au
+      // terme de notre débat ». It asked one more question afterwards, so it is
+      // not a walk-out — but the candidate was told the épreuve was ending, and
+      // that is the same lie `resumeDebateInstruction` answers.
+      const h = harness();
+      await intoDebate(h);
+      h.advanceClock(300);
+
+      h.session().examinerSays(
+        "Nous arrivons au terme de notre débat. Pour finir, ne risque-t-on pas de masquer d'autres problèmes ?",
+      );
+      h.session().finishTurn();
+
+      assert.equal(events(h, "examiner-early-closing").length, 1);
+      assert.equal(recoveries(h).length, 1);
     });
 
     it("leaves the closing sentence the app asked for alone", async () => {
@@ -3837,17 +3905,17 @@ describe("an examiner that says goodbye seven minutes early (#85)", () => {
 
     it("carries every goodbye out of the tab on the finish payload (#92)", async () => {
       // The event log below dies with the page; this is the number that does
-      // not. Three goodbyes, of which only two were answered — the count is of
-      // the fault, not of the recovery, so the third is in it.
+      // not. Five goodbyes, of which only four were answered — the count is of
+      // the fault, not of the recovery, so the fifth is in it.
       const h = harness();
       await intoDebate(h);
       h.advanceClock(360);
 
-      for (let turn = 0; turn < 3; turn += 1) {
+      for (let turn = 0; turn < 5; turn += 1) {
         h.session().examinerSays("Au revoir.");
         h.session().finishTurn();
       }
-      assert.equal(recoveries(h).length, 2, "the third goodbye went unanswered");
+      assert.equal(recoveries(h).length, 4, "the fifth goodbye went unanswered");
 
       // The clock runs out and the app opens the real closing — whose goodbye
       // must NOT be counted, or every sitting would report an incident.
@@ -3855,7 +3923,7 @@ describe("an examiner that says goodbye seven minutes early (#85)", () => {
       await completeClosing(h);
 
       assert.equal(h.controller.getSnapshot().phase, "finished");
-      assert.equal(h.finished[0]?.earlyClosingCount, 3, "answered or not, all three are counted");
+      assert.equal(h.finished[0]?.earlyClosingCount, 5, "answered or not, all five are counted");
 
       // The invariant the finish route's clamp leans on: a genuine payload's
       // transcript backs its count in MAGNITUDE, not just in presence, because
@@ -4033,6 +4101,29 @@ describe("the last question and the call of time (#108)", () => {
     );
   });
 
+  it("does not contradict the announcement it just ordered", async () => {
+    // The gate on `WRAPPING_UP_PHRASES`, end to end. « Nous arrivons à la fin »
+    // is a goodbye when the model invents it and the directive's own example
+    // when the app asks for it, and the app has just asked. Contradicting it
+    // here would put « Erreur : l'épreuve n'est PAS terminée » on top of the
+    // sentence the controller ordered one turn earlier.
+    const h = harness();
+    await intoDebate(h);
+    quiet(h, 690);
+    assert.equal(announcements(h).length, 1);
+
+    h.session().examinerSays(
+      "Nous arrivons à la fin de cet entretien. Une dernière question : le télétravail est-il un progrès ?",
+    );
+    h.session().finishTurn();
+
+    assert.deepEqual(events(h, "examiner-early-closing"), [], "the app asked for those words");
+    assert.deepEqual(
+      h.session().directives.filter((text) => text.includes("n'est PAS terminée")),
+      [],
+    );
+  });
+
   it("keeps the promise when the silence outlives the announcement (#130)", async () => {
     // The escalation's later steps order « une question NOUVELLE », which after
     // « une dernière question » is the app breaking its own announcement
@@ -4047,11 +4138,11 @@ describe("the last question and the call of time (#108)", () => {
     // silence watch opens on it.
     h.session().finishTurn();
 
-    quiet(h, 11); // « Vous m'entendez ? »
+    quiet(h, 21); // « Vous m'entendez ? »
     h.session().finishTurn();
-    quiet(h, 16); // the first relance
+    quiet(h, 26); // the first relance
     h.session().finishTurn();
-    quiet(h, 16); // the step that used to demand a fresh question
+    quiet(h, 26); // the step that used to demand a fresh question
 
     const reasks = h
       .session()
