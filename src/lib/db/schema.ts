@@ -279,9 +279,16 @@ export const oralExamPhases = pgTable(
      * criterion that part is graded on. The thresholds are NOT the same for
      * both — the exposé's is its own announced 7 minutes, because it cannot
      * legally run longer, and the débat's is 8; `FULL_DEVELOPMENT_SECONDS` in
-     * `delf/orale-rubric.ts` is where that asymmetry is argued. Note this
-     * column is the CLIENT's clock and is an audit trail only: the figure the
-     * rubric actually reads is measured server-side from the uploaded bytes.
+     * `delf/orale-rubric.ts` is where that asymmetry is argued.
+     *
+     * NOT the client's clock, which is the wall time the candidate watched
+     * count down and is recoverable from `started_at`/`ended_at` beside it.
+     * This is the figure the rubric actually read — measured server-side out of
+     * the uploaded bytes — so a stored row and the correction that cites it
+     * cannot disagree (#17). The finish route resolves it once, as
+     * `gradedSeconds`, and hands the same number to the corrector and to this
+     * column; the only thing that can move it off the measurement is the
+     * development time-skip (#203), which no production build carries.
      */
     spokenSeconds: integer("spoken_seconds").notNull().default(0),
 

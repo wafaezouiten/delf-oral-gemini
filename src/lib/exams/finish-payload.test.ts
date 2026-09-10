@@ -301,6 +301,49 @@ describe("keeping the audit trail worth having", () => {
     });
   });
 
+  describe("the development time-skip's claim (#203)", () => {
+    // The second field that can reach a mark, standing behind the same guards
+    // as the one above — and one more of its own: the route ADDS it to the
+    // measured duration rather than substituting it, so it can never exist
+    // without a real measurement underneath.
+    it("is optional, and absent on every sitting nobody fast-forwarded", () => {
+      assert.equal(accepts(payload()), true);
+      assert.equal(accepts(payload({ devSkippedSeconds: undefined })), true);
+    });
+
+    it("accepts a plausible pair", () => {
+      assert.equal(accepts(payload({ devSkippedSeconds: { monologue: 0, debate: 150 } })), true);
+    });
+
+    it("refuses a half-filled claim, so neither phase can default silently", () => {
+      assert.equal(accepts(payload({ devSkippedSeconds: { monologue: 120 } })), false);
+      assert.equal(accepts(payload({ devSkippedSeconds: {} })), false);
+    });
+
+    it("refuses the values that would poison the arithmetic", () => {
+      assert.equal(
+        accepts(payload({ devSkippedSeconds: { monologue: Number.NaN, debate: 0 } })),
+        false,
+      );
+      assert.equal(accepts(payload({ devSkippedSeconds: { monologue: -1, debate: 0 } })), false);
+      assert.equal(
+        accepts(payload({ devSkippedSeconds: { monologue: Number.POSITIVE_INFINITY, debate: 0 } })),
+        false,
+      );
+    });
+
+    it("is bounded by the same ceiling as the wall clock beside it", () => {
+      assert.equal(
+        accepts(payload({ devSkippedSeconds: { monologue: MAX_PHASE_SECONDS, debate: 0 } })),
+        true,
+      );
+      assert.equal(
+        accepts(payload({ devSkippedSeconds: { monologue: MAX_PHASE_SECONDS + 1, debate: 0 } })),
+        false,
+      );
+    });
+  });
+
   describe("what the microphone heard, per part", () => {
     // The only field here that cannot raise a mark: the route reads it to
     // REFUSE to produce one, when a part carries minutes of voiced speech and

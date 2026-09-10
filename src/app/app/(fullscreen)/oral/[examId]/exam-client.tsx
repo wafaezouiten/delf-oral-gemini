@@ -6,7 +6,8 @@ import { useRouter } from "next/navigation";
 import { Notice } from "@/app/_components/notice";
 import { dangerButton } from "@/app/_components/button-styles";
 import { ExitDialog } from "@/app/_components/po/exit-dialog";
-import { QuitPreparationDialog } from "@/app/_components/po/quit-preparation-dialog";
+import { QuitBeforeDebateDialog } from "@/app/_components/po/quit-before-debate-dialog";
+import { QuitBeforeSpeakingDialog } from "@/app/_components/po/quit-before-speaking-dialog";
 import { useExamController } from "@/lib/live/use-exam-controller";
 import type { ExamFinishedPayload } from "@/lib/live/exam-controller";
 import { isOpusEncodingSupported } from "@/lib/audio/opus-encoder";
@@ -22,6 +23,7 @@ import {
   describeFinishFailure,
   type FinishFailure,
 } from "@/lib/ui/finish-failure";
+import { examExitRoute, type ExamExitRoute } from "@/lib/ui/exam-exit";
 import { finishStage } from "@/lib/ui/finish-progress";
 import {
   clearSavedExaminerPrompt,
@@ -96,11 +98,23 @@ export function ExamClient({
    * to arbitrate.
    */
   const [promptPanelOpen, setPromptPanelOpen] = useState(false);
-  const [showExitDialog, setShowExitDialog] = useState(false);
+  /**
+   * Which confirmation « Retour » opened, or null for none (#199).
+   *
+   * The route rather than a boolean, and **decided when the button is pressed
+   * rather than read live while the dialog is up.** A running monologue whose
+   * clock expires under an open dialog becomes an armed débat, and a panel that
+   * silently rewrote itself from « Vous aurez 0/25 » to « votre note sera
+   * divisée par deux » mid-read would be asking the candidate to confirm
+   * something other than what they read. Frozen, the dialog keeps the promise it
+   * made — including its confirm, which is the one that matters.
+   */
+  const [exitPrompt, setExitPrompt] = useState<ExamExitRoute | null>(null);
   const [abandoning, setAbandoning] = useState(false);
   const [abandonFailed, setAbandonFailed] = useState(false);
-  const [showQuitPreparation, setShowQuitPreparation] = useState(false);
-  const [quittingPreparation, setQuittingPreparation] = useState(false);
+  const [quitting, setQuitting] = useState(false);
+  /** The armed débat's exit is under way — see `quitBeforeDebate`. */
+  const [finishingWithoutDebate, setFinishingWithoutDebate] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<FinishFailure | null>(null);
   /**
@@ -233,6 +247,9 @@ export function ExamClient({
         // Undefined on any sitting that was actually spoken, and ignored by the
         // route in a production build (#36).
         devSeconds: payload.devSeconds,
+        // Undefined on any sitting nobody fast-forwarded, and ignored by the
+        // route in a production build the same way (#203).
+        devSkippedSeconds: payload.devSkippedSeconds,
       });
       form.set("payload", json);
 
@@ -549,13 +566,24 @@ export function ExamClient({
   };
 
   /**
-   * Quit during the préparation (#113): archive the sitting, then leave.
+   * Quit before a word has been said (#113, #199): archive the sitting, then
+   * leave.
    *
    * NOT the abandon path, and the difference is the issue. Nothing has been said
-   * during the préparation, so there is no performance to score zero — leaving
-   * here must not be the walk-out that quitting mid-exposé is. The sitting is
-   * archived instead (the reset's stamp, #69), so a deliberate exit does not
-   * strand a row that looks like a crashed tab.
+   * during the préparation — nor during the monologue that is still waiting on
+   * « Enregistrer », which is where #199 moved the boundary — so there is no
+   * performance to score zero, and leaving here must not be the walk-out that
+   * quitting mid-exposé is. The sitting is archived instead (the reset's stamp,
+   * #69), so a deliberate exit does not strand a row that looks like a crashed
+   * tab.
+   *
+   * The route it posts to is still `/leave`, and its guard is still
+   * `phase = 'preparation'` — which is not a leak of the old boundary but the
+   * reason this reaches no further than it should: that column only advances
+   * when a speaking phase *finalises*, so it still reads `'preparation'`
+   * throughout an armed monologue and stops reading it the moment the exposé is
+   * banked. The rule the client applies and the rule the row enforces happen to
+   * be the same rule, and `preparation-exit.ts` says so from the other side.
    *
    * Awaited like the abandon, for the #38 reason — `router.push` is a soft
    * navigation, so there is nothing to outrun and the click's work should be
@@ -569,9 +597,9 @@ export function ExamClient({
    * tableau de bord — the walk-out needed the refresh precisely because its
    * zero does.
    */
-  const quitPreparation = async () => {
-    if (quittingPreparation) return;
-    setQuittingPreparation(true);
+  const quitWithoutRecord = async () => {
+    if (quitting) return;
+    setQuitting(true);
 
     const outcome = await requestPreparationExit(examId);
     if (!outcome.recorded) {
@@ -579,6 +607,38 @@ export function ExamClient({
     }
 
     leave();
+  };
+
+  /**
+   * Quit an armed débat (#199): end the épreuve with the débat unspoken.
+   *
+   * Neither of the two above, and that is the point of it. The exposé has been
+   * given, so there is a prestation and archiving it would throw away work the
+   * candidate actually did; the débat has not begun, so there is nothing to
+   * score a zero for. The sitting is *finished* instead — the ordinary finish,
+   * down to the screen it lands on — and the missing half is charged by the rule
+   * that already exists for it: no words in the débat, so `partsAbsent` calls it
+   * absent and the /25 is halved.
+   *
+   * The dialog is held open while this runs, unlike the first version of it,
+   * and the wait is not the finish. `finishWithoutDebate()` waits out the
+   * monologue's transcription first — the exposé is read back off its recording
+   * (#206), and the only other place that wait happens is the opening of the
+   * débat's session, which this exit is precisely the way around. Everything
+   * after it belongs to `FinishedScreen`, which the phase change puts on screen:
+   * the encode, the upload, its progress and its retry are all its since #86,
+   * which is why nothing here waits for the correction and there is no failure
+   * to catch.
+   */
+  const quitBeforeDebate = async () => {
+    if (finishingWithoutDebate) return;
+    setFinishingWithoutDebate(true);
+    await controller.finishWithoutDebate();
+    // Not reset on the way out: the phase is `finished` by now and this screen
+    // is gone. Reset only matters for the refusals — a guard that saw a débat
+    // already running — where the dialog has to become pressable again.
+    if (controller.getSnapshot().phase === "debate") setFinishingWithoutDebate(false);
+    setExitPrompt(null);
   };
 
   /**
@@ -691,23 +751,52 @@ export function ExamClient({
     );
   }
 
-  // The walk-out confirmation, from the exposé onwards only. The préparation
-  // renders its own dialog below (#113): this one's zero is a promise the
-  // product keeps by stamping `abandoned_at`, and before the exposé there is no
-  // performance for that zero to be about.
-  const exitDialog = (
-    <ExitDialog
-      open={showExitDialog}
-      pending={abandoning}
-      failed={abandonFailed}
-      onCancel={() => {
-        setShowExitDialog(false);
-        setAbandonFailed(false);
-      }}
-      onConfirm={() => void abandon()}
-      onLeaveAnyway={leave}
-    />
+  /**
+   * The three confirmations behind « Retour », one of which is open (#199).
+   *
+   * All three are rendered on every screen rather than one per branch, because
+   * which of them a candidate is owed is `examExitRoute`'s answer and not the
+   * screen's: the armed monologue and the running monologue are the same screen
+   * and different promises. They are also mounted throughout rather than
+   * conditionally, so a close is an `open` prop going false and the browser's
+   * own `close()` runs — the pattern each dialog's effect is written for.
+   *
+   * `stage` is read live while `exitPrompt` is frozen, and only that: both sides
+   * of the préparation → monologue boundary route to `archive`, so what moves
+   * under an open dialog is the word for where the candidate is, never what
+   * leaving costs them.
+   */
+  const exitDialogs = (
+    <>
+      <QuitBeforeSpeakingDialog
+        open={exitPrompt === "archive"}
+        stage={state.phase === "preparation" ? "preparation" : "monologue"}
+        pending={quitting}
+        onCancel={() => setExitPrompt(null)}
+        onConfirm={() => void quitWithoutRecord()}
+      />
+      <QuitBeforeDebateDialog
+        open={exitPrompt === "finish"}
+        pending={finishingWithoutDebate}
+        onCancel={() => setExitPrompt(null)}
+        onConfirm={() => void quitBeforeDebate()}
+      />
+      <ExitDialog
+        open={exitPrompt === "abandon"}
+        pending={abandoning}
+        failed={abandonFailed}
+        onCancel={() => {
+          setExitPrompt(null);
+          setAbandonFailed(false);
+        }}
+        onConfirm={() => void abandon()}
+        onLeaveAnyway={leave}
+      />
+    </>
   );
+
+  /** What « Retour » opens from where the candidate is standing right now. */
+  const openExitPrompt = () => setExitPrompt(examExitRoute(state.phase, state.awaitingStart));
 
   if (state.phase === "preparation") {
     return (
@@ -718,7 +807,7 @@ export function ExamClient({
           onNotes={setNotes}
           remaining={state.remaining}
           onStartExam={() => void controller.advanceEarly()}
-          onExit={() => setShowQuitPreparation(true)}
+          onExit={openExitPrompt}
           checking={checkingBrowser}
           examinerModel={examinerModel}
           examinerSaving={examinerSaving}
@@ -727,12 +816,7 @@ export function ExamClient({
           notices={hasNotices || canEncode === false ? preparationNotices : undefined}
           announcement={announcement}
         />
-        <QuitPreparationDialog
-          open={showQuitPreparation}
-          pending={quittingPreparation}
-          onCancel={() => setShowQuitPreparation(false)}
-          onConfirm={() => void quitPreparation()}
-        />
+        {exitDialogs}
       </>
     );
   }
@@ -759,7 +843,7 @@ export function ExamClient({
         onToggleNotes={() => setNotesOpen((open) => !open)}
         transcript={state.transcript}
         onAdvance={advance}
-        onExit={() => setShowExitDialog(true)}
+        onExit={openExitPrompt}
         emptyTranscript={state.monologueHeld}
         onRetryTranscription={() => controller.restartMonologue()}
         notices={hasNotices ? notices : undefined}
@@ -863,7 +947,7 @@ export function ExamClient({
           ) : undefined
         }
       />
-      {exitDialog}
+      {exitDialogs}
     </>
   );
 }

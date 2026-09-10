@@ -60,14 +60,18 @@ import {
   type CorrectionRow,
 } from "@/lib/exams/sitting-persistence";
 import { resolveEarlyClosingCount } from "@/lib/delf/early-closing";
-import { PARTICIPATION_WORD_FLOOR, partsSpokenButUntranscribed } from "@/lib/delf/orale-rubric";
 import { findTopic } from "@/lib/delf/topics";
-import { candidateWordCount } from "@/lib/delf/transcript";
 // Lives outside this file so it can be unit-tested: nothing in a route that
 // imports `server-only`, Clerk and the database client can be loaded by
 // `node --test`, and the request validation is the last thing that should go
 // uncovered for that reason. See `finish-payload.test.ts`.
 import { finishPayloadSchema } from "@/lib/exams/finish-payload";
+// The rule that settles one part's duration, extracted for the same reason —
+// it is the arithmetic that decides a mark, and #203 gave it a second input.
+import { gradedPhaseSeconds } from "@/lib/exams/graded-duration";
+// The two refusals a sitting nobody can be heard in earns, and the order
+// between them — extracted so a test can hold the order. See its module comment.
+import { participationRefusal } from "@/lib/exams/participation-refusal";
 // The binary half of the same request, extracted for the same reason.
 import {
   MAX_RECORDING_BYTES,
@@ -244,72 +248,26 @@ export async function POST(request: Request, context: { params: Promise<{ examId
   const topic = findTopic(payload.topicSlug);
   if (!topic) return NextResponse.json({ error: "Sujet inconnu" }, { status: 404 });
 
-  // Refuse to invent a grade for an exam that never happened. A model handed an
-  // empty transcript will still confidently return five scores.
-  //
-  // The same floor the rubric now applies per part, imported rather than
-  // written twice: this gate and the halving are the same judgement about what
-  // counts as having spoken, asked at two scopes, and a bare 20 here would let
-  // them drift apart silently.
-  if (candidateWordCount(payload.transcript) < PARTICIPATION_WORD_FLOOR) {
-    return NextResponse.json(
-      {
-        error:
-          "La transcription ne contient presque aucune parole du candidat. L'épreuve ne peut pas être évaluée.",
-      },
-      { status: 422 },
-    );
-  }
-
   /**
-   * The same refusal, asked per part, and answered by the microphone.
+   * Refuse to grade a sitting nobody can be heard in — and say whose failure it
+   * was, in that order.
    *
-   * The gate above catches a sitting with no words in it at all. This one
-   * catches the sitting that has plenty — a full débat, say — and is missing
-   * one part's worth, in a way only a transcription failure explains: minutes
-   * of measured voiced speech under a transcript that shows almost none.
-   *
-   * Refusing is the point, and it is not the conservative option. Grading on
-   * would have produced a number, and the rubric would then have halved it and
-   * had the correction page tell the candidate they never presented their
-   * monologue — which is the failure this whole path exists to stop being
-   * reported as theirs. A 422 costs them the sitting; the alternative costs
-   * them the sitting AND blames them for it.
-   *
-   * Placed before `readRecordings`, so a refusal is decided without spending
-   * the upload, and long before anything paid is called.
-   *
-   * `voicedSeconds` absent means a client that predates the field, which has no
-   * evidence to offer either way: `partsSpokenButUntranscribed` is then asked
-   * about zeroes and answers with nothing, so those sittings behave exactly as
-   * they did before this existed.
+   * Both halves and, more importantly, the order between them live in
+   * `participation-refusal.ts`. Asked here rather than after `readRecordings`
+   * so a refusal is decided without spending the upload, and long before
+   * anything paid is called.
    */
-  const untranscribed = partsSpokenButUntranscribed(
-    {
-      monologueWords: candidateWordCount(payload.transcript, "monologue"),
-      debateWords: candidateWordCount(payload.transcript, "debate"),
-    },
-    {
-      monologueSeconds: payload.voicedSeconds?.monologue ?? 0,
-      debateSeconds: payload.voicedSeconds?.debate ?? 0,
-    },
-  );
-  if (untranscribed.length > 0) {
-    const named =
-      untranscribed.length === 2
-        ? "des deux parties de l'épreuve"
-        : untranscribed[0] === "monologue"
-          ? "de votre monologue"
-          : "de votre débat";
+  const refusal = participationRefusal(payload.transcript, {
+    monologueSeconds: payload.voicedSeconds?.monologue ?? 0,
+    debateSeconds: payload.voicedSeconds?.debate ?? 0,
+  });
+  if (refusal) {
     return NextResponse.json(
-      {
-        error:
-          `La transcription ${named} n'a pas été enregistrée correctement : ` +
-          `le microphone vous a bien entendu, mais vos paroles ne sont pas parvenues jusqu'au ` +
-          `correcteur. L'épreuve ne peut pas être évaluée, et ce n'est pas de votre fait.`,
-        reason: "transcription",
-        parts: untranscribed,
-      },
+      // `reason` and `parts` only where they mean something: an absent sitting
+      // has no part to name, and the screen reads the message either way.
+      refusal.reason === "transcription"
+        ? { error: refusal.message, reason: refusal.reason, parts: refusal.parts }
+        : { error: refusal.message },
       { status: 422 },
     );
   }
@@ -361,34 +319,44 @@ export async function POST(request: Request, context: { params: Promise<{ examId
     recordings.find((recording) => recording.phase === phase)?.durationSeconds ?? 0;
 
   /**
-   * DEVELOPMENT ONLY — the duration a typed phase claims (#36).
+   * The duration of a part, as everything downstream of this route sees it.
    *
-   * Three conditions, and each removes a different way this could become the
-   * client-claimed duration the rest of this file exists to refuse:
+   * ONE number per part, and that is the point: it is what the rubric's tiers
+   * and duration penalty are computed from, what the corrector is told, and
+   * what `oral_exam_phases.spoken_seconds` stores — so the row a results page
+   * renders cannot disagree with the correction beside it (#17). On a real
+   * sitting it is the measured audio and nothing else; the two development
+   * claims below are the only things that can move it, `gradedPhaseSeconds`
+   * owns what each of them is allowed to do, and neither is read at all in a
+   * production build.
    *
-   *  1. **Only where the dev tooling is switched on.** Off by default, vetoed
-   *     outright on a production deployment, and granted elsewhere only by
-   *     `NEXT_PUBLIC_DEV_TOOLS=1` on that specific environment. See
-   *     `lib/dev-tools.ts` — and note this is the same flag the panel that
-   *     produces the claim is gated on, so the two cannot disagree.
-   *  2. **Only with no recording for that phase.** Audio present always wins, so
-   *     a real sitting cannot have its measured duration talked upwards.
-   *  3. **Bounded by the schema**, like every other number the browser sends.
-   *
-   * What it buys: a typed sitting measures zero seconds and would otherwise take
-   * the short-duration penalty every single time, which makes the threshold —
-   * the rubric's one piece of arithmetic that changes a mark — untestable
-   * without twenty minutes of speaking French.
+   * NOT `oral_recordings.duration_seconds`, which stays the length of the bytes
+   * it describes — that column is what the playback route serves and what the
+   * player prints before it has fetched a single frame.
    */
-  const devSeconds = (phase: OralSpeakingPhase): number | null => {
-    if (!DEV_TOOLS_ENABLED) return null;
-    if (!payload.devSeconds) return null;
-    if (recordings.some((recording) => recording.phase === phase)) return null;
-    return payload.devSeconds[phase];
-  };
+  const gradedSeconds = (phase: OralSpeakingPhase): number =>
+    gradedPhaseSeconds({
+      measuredSeconds: measuredSeconds(phase),
+      hasRecording: recordings.some((recording) => recording.phase === phase),
+      devClaimedSeconds: payload.devSeconds?.[phase],
+      devSkippedSeconds: payload.devSkippedSeconds?.[phase],
+      devToolsEnabled: DEV_TOOLS_ENABLED,
+    });
 
-  const monologueSeconds = devSeconds("monologue") ?? measuredSeconds("monologue");
-  const debateSeconds = devSeconds("debate") ?? measuredSeconds("debate");
+  const monologueSeconds = gradedSeconds("monologue");
+  const debateSeconds = gradedSeconds("debate");
+
+  /**
+   * The phase rows, carrying that same duration to the writer (#203).
+   *
+   * Resolved here rather than in `deriveArtefactRows` because this is where the
+   * decision about what a client may claim lives, and the derivation stays a
+   * pure mapping of what it was handed.
+   */
+  const phaseReports = payload.phases.map((report) => ({
+    ...report,
+    gradedSeconds: gradedSeconds(report.phase),
+  }));
 
   /**
    * The examiner's early goodbyes (#92) — the client's count, clamped to what
@@ -530,7 +498,7 @@ export async function POST(request: Request, context: { params: Promise<{ examId
       // what the results page keys the « not held against you » note on,
       // so it must be the number the grading actually honoured.
       earlyClosingCount,
-      phases: payload.phases,
+      phases: phaseReports,
       recordings: measuredRecordings,
       /**
        * Keep the bytes the rows will point at (#98). Called by the winner of
@@ -613,7 +581,7 @@ export async function POST(request: Request, context: { params: Promise<{ examId
     after(async () => {
       try {
         const outcome = await attachCorrection(store, ref, {
-          phases: payload.phases,
+          phases: phaseReports,
           recordings: measuredRecordings,
           evaluate: async () => {
             graded = await grade();
