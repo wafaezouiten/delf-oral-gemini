@@ -92,6 +92,39 @@ describe("examiner prompt", () => {
     for (const phase of ["monologue", "debate"] as const) {
       assert.ok(closingInstruction(phase).includes("N'évalue pas"));
     }
+    // Including the one that ends a débat early, which is a closing like any
+    // other in every respect but its reason (#215).
+    assert.ok(closingInstruction("debate", "exchange").includes("N'évalue pas"));
+  });
+
+  describe("the two ways a débat ends (#215)", () => {
+    it("claims the clock ran out only when it did", () => {
+      // « Le temps de l'épreuve est écoulé » is a statement about the world, and
+      // at 10:40 it is a false one: the candidate can see the clock it
+      // contradicts. The exchange variant says what actually happened instead.
+      assert.match(closingInstruction("debate", "time"), /Le temps de l'épreuve est écoulé/);
+      assert.doesNotMatch(
+        closingInstruction("debate", "exchange"),
+        /Le temps de l'épreuve est écoulé/,
+      );
+      assert.match(closingInstruction("debate", "exchange"), /l'entretien est terminé/);
+    });
+
+    it("defaults to the clock, so an unsaid reason cannot invent an early end", () => {
+      assert.equal(closingInstruction("debate"), closingInstruction("debate", "time"));
+      assert.equal(closingInstruction("monologue"), closingInstruction("monologue", "exchange"));
+    });
+
+    it("forbids the early one the vocabulary of time entirely", () => {
+      // The identity block's one exception to « ne parle jamais du temps » was
+      // written for the last question and for nothing else. A closing that
+      // volunteers « il nous reste deux minutes » would be reading the clock to
+      // the candidate, which no examiner does.
+      const exchange = closingInstruction("debate", "exchange");
+      assert.match(exchange, /Ne dis pas que le temps est écoulé/);
+      assert.match(exchange, /ne prononce aucun chiffre/);
+      assert.match(exchange, /Ne pose plus aucune question/);
+    });
   });
 
   describe("what the examiner says into a silence (#84)", () => {
