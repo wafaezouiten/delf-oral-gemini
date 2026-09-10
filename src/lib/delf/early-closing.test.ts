@@ -82,6 +82,36 @@ describe("hearing an examiner wind the débat up early", () => {
     );
   });
 
+  it("gives up the wrap-up reading for the rest of the débat, and that is the trade", () => {
+    // `lastQuestionCue` only ever moves `pending → sent`, so past the
+    // announcement this list is off until the part ends — a SECOND wind-up
+    // there, one the app did not order, goes unanswered. Deliberate rather
+    // than overlooked: after the announcement the examiner really is at the
+    // end, the closing handshake is at most two minutes away, and « nous
+    // arrivons à la fin » has stopped being false. What the app cannot afford
+    // is to contradict its own directive to buy that case.
+    //
+    // The cost is bounded because the unconditional list is not gated at all:
+    // a wind-up that goes on to dismiss the candidate is still caught, in the
+    // closing two minutes as anywhere else, and dismissal is the failure #85
+    // was written for.
+    const windUp = "Nous arrivons à la fin de cet échange. Merci beaucoup.";
+
+    assert.equal(
+      readsAsClosing(windUp, { lastQuestionAnnounced: true, turnComplete: true }),
+      false,
+      "a second wind-up after the announcement is not answered",
+    );
+    assert.equal(
+      readsAsClosing(`${windUp} Vous pouvez disposer.`, {
+        lastQuestionAnnounced: true,
+        turnComplete: true,
+      }),
+      true,
+      "but sending the candidate away is a goodbye whenever it is said",
+    );
+  });
+
   it("hears a summary and a thank-you as the dead stop it was", () => {
     // 5:33 and 7:10. No dismissal, no « au revoir », nothing the goodbye list
     // could see — and then silence for the rest of the minute.
