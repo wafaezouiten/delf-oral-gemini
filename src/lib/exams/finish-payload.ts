@@ -156,8 +156,43 @@ export const finishPayloadSchema = z.object({
    * mid-sitting across the deploy finishes from a page whose controller has
    * never heard of the field, and a 400 there costs them a twenty-minute
    * épreuve. Absent means "no evidence", which is what that page actually has.
+   *
+   * SUPERSEDED by `soloVoicedSeconds` below, and kept only for that deploy
+   * window. It measured every frame over the threshold, the examiner's own
+   * voice through an open microphone included, which made it useless for the
+   * one part where somebody else does most of the talking — see the successor.
+   * The route reads it only when the successor is absent, which is to say only
+   * from a page loaded before this shipped, and such a page behaves exactly as
+   * it did then rather than losing the protection outright.
    */
   voicedSeconds: z
+    .object({
+      monologue: z.number().nonnegative().max(MAX_PHASE_SECONDS),
+      debate: z.number().nonnegative().max(MAX_PHASE_SECONDS),
+    })
+    .optional(),
+  /**
+   * The same measure, taken only while the examiner was NOT audible.
+   *
+   * The distinction is the whole point, and the sitting that forced it is a
+   * candidate who gave a full exposé and then sat through the débat without
+   * answering a single question. That is a walk-out, and the rubric has an
+   * answer for it: `applyAbsentPartPenalty` halves the mark. It never ran.
+   * `voicedSeconds` reported dozens of seconds of "speech" in that débat —
+   * the examiner's own voice coming back through the microphone, plus room
+   * tone that `autoGainControl` lifts as the room gets quieter — the route
+   * read fifteen of them as proof the app had lost the candidate's words, and
+   * refused the entire sitting with « ce n'est pas de votre fait ». The exposé
+   * went in the bin with it, since this refusal is decided before anything is
+   * written.
+   *
+   * Counting only the frames the examiner cannot have produced is what makes
+   * the fifteen-second bar mean what its own comment always claimed
+   * (`PARTICIPATION_VOICED_FLOOR`). Same trust properties as its predecessor:
+   * a forged value cannot raise a mark, only cause a refusal; it reaches no
+   * column; it is consumed inside the request that carries it.
+   */
+  soloVoicedSeconds: z
     .object({
       monologue: z.number().nonnegative().max(MAX_PHASE_SECONDS),
       debate: z.number().nonnegative().max(MAX_PHASE_SECONDS),

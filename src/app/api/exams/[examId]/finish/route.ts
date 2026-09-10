@@ -256,10 +256,17 @@ export async function POST(request: Request, context: { params: Promise<{ examId
    * `participation-refusal.ts`. Asked here rather than after `readRecordings`
    * so a refusal is decided without spending the upload, and long before
    * anything paid is called.
+   *
+   * The evidence is `soloVoicedSeconds` — voiced audio with the examiner
+   * silent — and falls back to its predecessor only for a page loaded before
+   * that field existed. Which of the two arrives decides whether a candidate
+   * who sat out the débat is graded on half a mark or refused a mark at all;
+   * the schema's own comments carry the argument.
    */
+  const voiced = payload.soloVoicedSeconds ?? payload.voicedSeconds;
   const refusal = participationRefusal(payload.transcript, {
-    monologueSeconds: payload.voicedSeconds?.monologue ?? 0,
-    debateSeconds: payload.voicedSeconds?.debate ?? 0,
+    monologueSeconds: voiced?.monologue ?? 0,
+    debateSeconds: voiced?.debate ?? 0,
   });
   if (refusal) {
     return NextResponse.json(

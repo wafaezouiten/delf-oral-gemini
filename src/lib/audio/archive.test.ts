@@ -122,6 +122,73 @@ describe("audio that belongs to no phase", () => {
   });
 });
 
+/**
+ * Voiced audio, and the half of it the examiner cannot have produced.
+ *
+ * The distinction exists because of one sitting: a full exposé, then a débat
+ * the candidate sat through in silence. The microphone is open for all thirteen
+ * minutes of that débat while the examiner talks into the room, so the plain
+ * voiced measure read it as speech — and the finish route, whose bar is fifteen
+ * CUMULATIVE seconds, concluded that the app had lost the candidate's words and
+ * refused to grade the sitting at all. The rubric's answer to a walk-out
+ * (`applyAbsentPartPenalty`, which halves the mark) never got to run, and the
+ * exposé was thrown out with the débat.
+ */
+describe("telling the candidate from the room", () => {
+  it("counts speech under both measures while nothing else is audible", () => {
+    const archive = new PhaseArchive();
+    archive.begin("debate");
+    fill(archive, 4);
+
+    assert.equal(archive.voicedSeconds("debate"), 4);
+    assert.equal(archive.soloVoicedSeconds("debate"), 4);
+  });
+
+  it("stops crediting the candidate while the examiner is being played", () => {
+    const archive = new PhaseArchive();
+    archive.begin("debate");
+    archive.setPlaybackAudible(true);
+    fill(archive, 40);
+    archive.setPlaybackAudible(false);
+    fill(archive, 2);
+
+    // A walk-out, as the two measures see it: forty-two seconds of audible
+    // room, of which two could have been the candidate. The first number
+    // clears the route's fifteen-second bar on its own; the second is the one
+    // that leaves the tab.
+    assert.equal(archive.voicedSeconds("debate"), 42);
+    assert.equal(archive.soloVoicedSeconds("debate"), 2);
+  });
+
+  it("keeps filing the audio itself, which is the épreuve and not the turn", () => {
+    // The artefact must still contain the examiner's half — a correction is
+    // defended with the recording of what happened, not with the candidate's
+    // turns cut out of it.
+    const archive = new PhaseArchive();
+    archive.begin("debate");
+    archive.setPlaybackAudible(true);
+    fill(archive, 5);
+
+    assert.equal(archive.measuredSeconds("debate"), 5);
+    assert.equal(archive.soloVoicedSeconds("debate"), 0);
+  });
+
+  it("assumes silence until told otherwise", () => {
+    // Every archive built without a speaker beside it — and the monologue,
+    // where nobody else is supposed to be audible at all.
+    const archive = new PhaseArchive();
+    archive.begin("monologue");
+    fill(archive, 3);
+
+    assert.equal(archive.soloVoicedSeconds("monologue"), 3);
+  });
+
+  it("reports zero for a phase it never heard", () => {
+    const archive = new PhaseArchive();
+    assert.equal(archive.soloVoicedSeconds("debate"), 0);
+  });
+});
+
 describe("dropping a typed phase (#51)", () => {
   it("removes the phase's audio, artefact and measurement in one act", async () => {
     // The typed exposé's stub: the room tone captured before the panel was

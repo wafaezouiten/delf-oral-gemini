@@ -92,6 +92,9 @@ interface Segment {
   /** Samples in frames that carried speech rather than room tone. See
    *  {@link voicedSeconds} for what this is and is not. */
   voicedSamples: number;
+  /** The same count, taken only while nothing else was audible in the room.
+   *  See {@link soloVoicedSeconds} for why the two must not be conflated. */
+  soloVoicedSamples: number;
 }
 
 export class PhaseArchive {
@@ -101,6 +104,16 @@ export class PhaseArchive {
   private open: RecordedPhase | null = null;
   /** Samples that arrived while no phase was open. Reported, not filed. */
   private discardedSamples = 0;
+  /**
+   * Whether somebody other than the candidate is audible in the room right now.
+   *
+   * Set from outside because the archive cannot know: it sees the microphone's
+   * frames and nothing else, and the examiner reaches the microphone the same
+   * way a passing lorry does. `false` until told otherwise, which is what an
+   * archive with no speaker beside it — every test, and the monologue — should
+   * assume. See {@link soloVoicedSeconds}.
+   */
+  private playbackAudible = false;
   /**
    * Encodes already made, one per phase, keyed by how many samples they cover.
    *
@@ -136,7 +149,7 @@ export class PhaseArchive {
   begin(phase: RecordedPhase): void {
     if (this.open === phase) return;
     if (!this.segments.has(phase)) {
-      this.segments.set(phase, { frames: [], samples: 0, voicedSamples: 0 });
+      this.segments.set(phase, { frames: [], samples: 0, voicedSamples: 0, soloVoicedSamples: 0 });
     }
     this.open = phase;
   }
@@ -144,6 +157,18 @@ export class PhaseArchive {
   /** Stop filing. Audio that arrives now belongs to no task. */
   end(): void {
     this.open = null;
+  }
+
+  /**
+   * Tell the archive whether the examiner is being played into the room.
+   *
+   * Frames still land in the artefact — the recording is of the épreuve, not of
+   * the candidate's turns — and {@link voicedSeconds} still counts them. What
+   * changes is {@link soloVoicedSeconds}, which stops accruing for as long as
+   * this is true.
+   */
+  setPlaybackAudible(audible: boolean): void {
+    this.playbackAudible = audible;
   }
 
   /** Which phase is being recorded, or null between phases. */
@@ -172,12 +197,21 @@ export class PhaseArchive {
     // candidate actually say anything?" — the frames are retained for the
     // artefact, but walking twenty minutes of them again to decide whether to
     // show a dialog would be work done at exactly the wrong moment.
-    if (isVoiced(frame)) segment.voicedSamples += frame.length;
+    if (isVoiced(frame)) {
+      segment.voicedSamples += frame.length;
+      if (!this.playbackAudible) segment.soloVoicedSamples += frame.length;
+    }
   }
 
   /** Samples filed under a phase that carried speech. */
   voicedSamplesIn(phase: RecordedPhase): number {
     return this.segments.get(phase)?.voicedSamples ?? 0;
+  }
+
+  /** Samples filed under a phase that carried speech while the examiner was
+   *  silent. See {@link soloVoicedSeconds}. */
+  soloVoicedSamplesIn(phase: RecordedPhase): number {
+    return this.segments.get(phase)?.soloVoicedSamples ?? 0;
   }
 
   /** Samples filed under a phase. */
@@ -207,6 +241,38 @@ export class PhaseArchive {
    */
   voicedSeconds(phase: RecordedPhase): number {
     return this.voicedSamplesIn(phase) / this.sampleRate;
+  }
+
+  /**
+   * The same measure, taken only while the examiner was NOT being played into
+   * the room — the closest this file can get to "seconds the candidate spoke".
+   *
+   * {@link voicedSeconds} answers "was this microphone carrying anything?", and
+   * across the monologue that is very nearly the same question, because nobody
+   * else is supposed to be audible. Across the débat it is not, and the gap
+   * broke a rule that depended on it. The examiner talks for most of a
+   * thirteen-minute débat, straight into an open microphone with
+   * `autoGainControl` lifting whatever the room has; the browser's echo
+   * canceller reduces the return path but does not zero it. Meanwhile the bar
+   * downstream (`PARTICIPATION_VOICED_FLOOR`, fifteen seconds) is CUMULATIVE:
+   * 375 frames of 40 ms out of the ~16,500 a débat holds, 2.3% of the part. So
+   * a candidate who sat through the débat in silence still measured well over
+   * fifteen "voiced" seconds, `partsSpokenButUntranscribed` read that as an
+   * exposé the app had lost, and the finish route refused the whole sitting —
+   * telling a candidate who had walked out that the failure was ours, and
+   * throwing away the monologue they HAD given rather than halving the mark
+   * (`applyAbsentPartPenalty`, which is what should have answered).
+   *
+   * This number is not fooled by that, because the frames it declines to count
+   * are exactly the ones the examiner's own voice could have produced.
+   *
+   * It is still a floor and still crude — see the header of
+   * `voice-activity.ts`. A candidate who only ever speaks over the examiner
+   * measures zero here; that is the direction to be wrong in, since a low
+   * reading only ever moves a refusal towards grading the sitting.
+   */
+  soloVoicedSeconds(phase: RecordedPhase): number {
+    return this.soloVoicedSamplesIn(phase) / this.sampleRate;
   }
 
   measuredSeconds(phase: RecordedPhase): number {

@@ -386,6 +386,20 @@ export class MicRecorder {
     return this.archive.voicedSeconds(phase);
   }
 
+  /** The same, counted only while the examiner was silent — the evidence the
+   *  finish route weighs against an empty transcript. See
+   *  `PhaseArchive.soloVoicedSeconds`, which is where the distinction is argued. */
+  soloVoicedSeconds(phase: RecordedPhase): number {
+    return this.archive.soloVoicedSeconds(phase);
+  }
+
+  /** Whether the examiner is audible right now, which the microphone cannot
+   *  tell from the candidate. Passed straight through; the archive owns what it
+   *  does with it. */
+  setPlaybackAudible(audible: boolean): void {
+    this.archive.setPlaybackAudible(audible);
+  }
+
   /** The phase currently being recorded, or null between phases. */
   get recordingPhase(): RecordedPhase | null {
     return this.archive.openPhase;

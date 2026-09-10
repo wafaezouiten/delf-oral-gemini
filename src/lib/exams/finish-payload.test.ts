@@ -388,5 +388,42 @@ describe("keeping the audit trail worth having", () => {
         false,
       );
     });
+
+    describe("and the half of it the examiner cannot have produced", () => {
+      // `soloVoicedSeconds`, which is what the route now weighs. Same shape and
+      // same bounds as the field it supersedes — held separately because it is
+      // a separate field on the wire for the length of one deploy, and a
+      // schema that only tested the old one would let the new one through
+      // unvalidated.
+      it("takes the same pair, under the same bounds", () => {
+        assert.equal(accepts(payload({ soloVoicedSeconds: { monologue: 280, debate: 3 } })), true);
+        assert.equal(accepts(payload({ soloVoicedSeconds: { monologue: 0, debate: 0 } })), true);
+        assert.equal(accepts(payload({ soloVoicedSeconds: { monologue: 280 } })), false);
+        assert.equal(
+          accepts(payload({ soloVoicedSeconds: { monologue: Number.NaN, debate: 0 } })),
+          false,
+        );
+        assert.equal(accepts(payload({ soloVoicedSeconds: { monologue: -1, debate: 0 } })), false);
+        assert.equal(
+          accepts(payload({ soloVoicedSeconds: { monologue: MAX_PHASE_SECONDS + 1, debate: 0 } })),
+          false,
+        );
+      });
+
+      it("is optional, and may arrive beside its predecessor", () => {
+        // The deploy window, both directions: a page from before this field
+        // sends only the old one, and nothing forbids a page sending both.
+        assert.equal(accepts(payload({ soloVoicedSeconds: undefined })), true);
+        assert.equal(
+          accepts(
+            payload({
+              voicedSeconds: { monologue: 300, debate: 45 },
+              soloVoicedSeconds: { monologue: 295, debate: 3 },
+            }),
+          ),
+          true,
+        );
+      });
+    });
   });
 });

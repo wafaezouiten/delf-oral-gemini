@@ -63,6 +63,28 @@ describe("participationRefusal", () => {
     assert.match(refusal!.message, /des deux parties/);
   });
 
+  it("grades a walk-out rather than refusing it", () => {
+    // The sitting that made `soloVoicedSeconds` necessary: a full exposé, then
+    // a débat the candidate never spoke in. The seconds passed here are voiced
+    // audio measured with the EXAMINER SILENT, so a débat spent listening to
+    // questions reads as the two or three seconds of room it actually was —
+    // and not as the forty-odd the open microphone collected while the
+    // examiner talked. Refuse this and the halving in `applyAbsentPartPenalty`
+    // never runs, the exposé is discarded with the débat, and the candidate is
+    // told the failure was ours.
+    assert.equal(
+      participationRefusal(
+        [
+          entry("monologue", "candidate", SPEECH),
+          entry("debate", "examiner", SPEECH),
+          entry("debate", "examiner", SPEECH),
+        ],
+        { monologueSeconds: 330, debateSeconds: 3 },
+      ),
+      null,
+    );
+  });
+
   it("calls a silent sitting absent, which is what it is", () => {
     // Nothing said and nothing heard: « euh… non, ça va, merci » clears
     // neither bar, and the refusal that names the candidate is the honest one.
