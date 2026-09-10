@@ -174,15 +174,15 @@ export function devSubmitDisabled(state: DevSubmitState): boolean {
  * A sample exposé, for the « Exemple » button.
  *
  * Long enough that {@link SPOKEN_WORDS_PER_MINUTE} puts it clear of
- * `SHORT_DEVELOPMENT_SECONDS` (240 s) on its own, so the button produces a
- * monologue in the middle duration tier rather than the bottom one.
+ * `FULL_DEVELOPMENT_SECONDS.monologue` (240 s) on its own, so the button
+ * produces an exposé the clock charges nothing for. It used to land one tier
+ * short — the threshold was the announced 420 s and this estimates around 300
+ * — until the user's second correction to #189 put it at four minutes.
  *
- * It cannot produce a charge-free sitting, and it cannot on its own produce a
- * charge-free monologue either: the exposé's full-development time is its
- * announced 420 s (#189) and this sample estimates around 300. A typed sitting
- * meant to score without a duration charge has to claim BOTH durations — which
- * is what the duration field is for, since nobody is going to type seven
- * minutes of argument and then eight more.
+ * It still cannot produce a charge-free SITTING: the débat has no words in it,
+ * so `interaction` is charged the bottom tier. A typed sitting meant to score
+ * without any duration charge has to claim both durations, which is what the
+ * duration field is for — nobody is going to type ten minutes of débat.
  */
 export function exampleExpose(subject: string): string {
   return [
