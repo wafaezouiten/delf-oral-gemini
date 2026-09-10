@@ -3,6 +3,8 @@ import { resolve } from "node:path";
 
 import { expect, test } from "@playwright/test";
 
+import { reachEpreuve } from "./reach-epreuve";
+
 /**
  * A SPOKEN monologue of a realistic length, and what the finish makes of it.
  *
@@ -68,13 +70,7 @@ test.describe("a spoken exposé reaches the correction", () => {
       seen.finish = { status: response.status(), body: (await response.text()).slice(0, 600) };
     });
 
-    await page.goto("/app/sujets");
-    await page
-      .getByRole("button", { name: /^Lire le sujet/ })
-      .first()
-      .click();
-    await page.getByRole("button", { name: /^Passer l'épreuve sur le sujet/ }).click();
-    await expect(page).toHaveURL(/\/app\/oral\/\d+/);
+    await reachEpreuve(page);
 
     await page.getByRole("button", { name: "Commencer la passation" }).click();
 
