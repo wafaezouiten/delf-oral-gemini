@@ -2247,6 +2247,11 @@ export class ExamController {
     const now = this.now();
     const voiced = this.recorder.voicedSeconds("debate");
     const baseline = this.deafBaseline;
+    // Moved on EVERY tick, including the ones that bail out below. That is what
+    // makes the echo holds discard those seconds rather than merely skip them:
+    // left unmoved, the growth an examiner turn put in the microphone would be
+    // waiting in the difference and land whole on the first quiet tick after
+    // it. Read once above and compared below, so the update can sit here.
     this.deafBaseline = voiced;
     // The first reading only opens the ledger. Without this the seconds the
     // microphone carried before the débat's session was up would all land in
