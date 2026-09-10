@@ -4216,6 +4216,16 @@ describe("the last question and the call of time (#108)", () => {
     };
 
     const wrapUps = (h: Harness) => events(h, "debate-wrap-up");
+    /** Everything the silence watch says, both wordings plus the presence
+     *  check — the same shapes `checkCandidateSilence`'s own suite matches on. */
+    const nudges = (h: Harness) =>
+      h
+        .session()
+        .directives.filter(
+          (text) =>
+            text.includes("Vous m'entendez") ||
+            text.includes("Ne fais aucune remarque sur son silence"),
+        );
     const lastDirective = (h: Harness) => h.session().directives[h.session().directives.length - 1];
 
     it("announces the last question at nine thirty, not at the two-minute crossing", async () => {
@@ -4283,6 +4293,53 @@ describe("the last question and the call of time (#108)", () => {
         h.controller.getSnapshot().elapsed >= 630,
         "the floor is the grading line, not the answer's timing",
       );
+    });
+
+    it("stops nudging a candidate who is only waiting to be dismissed", async () => {
+      // The floor can hold the end back for a minute after the answer, and the
+      // examiner's own rebound arms the silence watch. Without a stand-down the
+      // app asks « Vous m'entendez ? » to somebody who has answered everything
+      // — and the step behind it re-asks the question they just answered (#130).
+      const h = harness();
+      await intoDebate(h);
+
+      quiet(h, 575);
+      h.session().examinerSays("Une dernière question : que répondez-vous aux artisans ?");
+      h.session().finishTurn();
+      answers(h, 12); // answered by 9:47, with the floor still forty seconds off
+      h.session().examinerSays("Je vois, merci."); // the brief rebound the directive asks for
+      h.session().finishTurn();
+
+      quiet(h, 25);
+      quiet(h, 25);
+
+      assert.deepEqual(nudges(h), [], "nothing is owed into this silence");
+      assert.equal(wrapUps(h).length, 1, "and the part closes on the floor, as it should");
+    });
+
+    it("keeps its ordinary duty over a débat that has lost its socket", async () => {
+      // The stand-down above is only sound while the close it is waiting for
+      // can actually happen. A disconnected room cannot be closed — the
+      // directive has nowhere to go — so the watch is not stood down over one.
+      const h = harness();
+      await intoDebate(h);
+
+      quiet(h, 575);
+      h.session().examinerSays("Une dernière question : que répondez-vous aux artisans ?");
+      h.session().finishTurn();
+      answers(h, 12);
+      h.session().examinerSays("Je vois, merci.");
+      h.session().finishTurn();
+
+      h.session().emitStates("reconnecting");
+      quiet(h, 25);
+      quiet(h, 25);
+
+      assert.deepEqual(wrapUps(h), [], "a socket that is gone cannot carry a closing");
+
+      h.session().emitStates("resuming", "connected");
+      quiet(h, 15);
+      assert.equal(wrapUps(h).length, 1, "and the connection was the only thing holding it");
     });
 
     it("does not close out a candidate who has not answered it yet", async () => {

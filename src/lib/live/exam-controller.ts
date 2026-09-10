@@ -688,6 +688,16 @@ const DEBATE_WRAP_UP_FLOOR_MS = 630_000;
  * exactly that reason. Ten sits below the nudge — so a candidate who has
  * genuinely finished is not asked « Vous m'entendez ? » on the way out — and
  * far enough above a hesitation to tell the two apart.
+ *
+ * It sits two seconds above {@link EXAMINER_REPLY_WAIT_MS} and that proximity
+ * is a coincidence rather than a relationship, worth saying because the two
+ * constants now read next to each other. That one holds a CUE out of the gap
+ * where Gemini is composing a rebound, so that the app does not make the
+ * examiner ask something on top of a reply already on its way. This one is not
+ * waiting for a rebound at all: whether the examiner got its « merci » in
+ * before the room went quiet does not change that the exchange is over, which
+ * is the reasoning in {@link checkDebateWrapUp}. Ten happens to clear the
+ * composing gap as well, and nothing here depends on it.
  */
 const DEBATE_WRAP_UP_QUIET_MS = 10_000;
 
@@ -2331,6 +2341,16 @@ export class ExamController {
     if (this.silenceSince === null) return;
     if (this.phase !== "debate" || this.closing || this.devTextMode) return;
 
+    // The last question has been asked and answered, and the only thing between
+    // here and the closing sentence is the grading floor (#215). Nothing is
+    // owed into this silence: « Vous m'entendez ? » to a candidate who has
+    // finished and is waiting to be dismissed reads as the app not having heard
+    // the answer it is about to close on, and the step behind it re-asks the
+    // very question they just answered (#130). The examiner's own rebound
+    // arms this watch, so without the stand-down it fires on every wrap-up
+    // whose answer landed more than twenty seconds before the floor.
+    if (this.debateWrapUpArmed) return;
+
     if (!this.recorder || this.captureLost || this.captureStalled) return;
 
     const now = this.now();
@@ -2574,17 +2594,26 @@ export class ExamController {
    *
    * Returns whether it closed, so `tick()` can stop rather than run the clock's
    * own branch behind it.
+   *
+   * `debateWrapUpArmed` is the first three conditions without the floor or the
+   * quiet, and it is separate because {@link checkCandidateSilence} needs the
+   * same question: once the last question has been asked and answered, the part
+   * is only waiting out its floor, and there is nothing left for the candidate
+   * to say into a silence.
    */
-  private checkDebateWrapUp(now: number): boolean {
-    if (this.phase !== "debate") return false;
-    if (this.closing || this.devTextMode) return false;
+  private get debateWrapUpArmed(): boolean {
+    if (this.phase !== "debate" || this.closing || this.devTextMode) return false;
+    // A disconnected room cannot be closed by this — the closing directive has
+    // nowhere to go — so it is not armed either, and the silence watch keeps
+    // its ordinary duty over a débat waiting to reconnect.
     if (this.connection !== "connected") return false;
     if (this.lastQuestionCue !== "sent" || this.lastQuestionSentAt === null) return false;
-    if (this.elapsed * 1000 < DEBATE_WRAP_UP_FLOOR_MS) return false;
+    return this.cueCandidateVoiceAt !== null && this.cueCandidateVoiceAt > this.lastQuestionSentAt;
+  }
 
-    const answered =
-      this.cueCandidateVoiceAt !== null && this.cueCandidateVoiceAt > this.lastQuestionSentAt;
-    if (!answered) return false;
+  private checkDebateWrapUp(now: number): boolean {
+    if (!this.debateWrapUpArmed) return false;
+    if (this.elapsed * 1000 < DEBATE_WRAP_UP_FLOOR_MS) return false;
 
     // Read, never written: `floorIsQuiet` owns this ledger and runs later in
     // the same tick. One tick of staleness against a ten-second window.
