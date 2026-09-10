@@ -4342,6 +4342,46 @@ describe("the last question and the call of time (#108)", () => {
       assert.equal(wrapUps(h).length, 1, "and the connection was the only thing holding it");
     });
 
+    it("does not hear its own closing sentence as an examiner walking out", async () => {
+      // « L'entretien est terminé » is literally in CLOSING_PHRASES, and the
+      // exchange directive steers the examiner straight at it. What keeps that
+      // from reading as an examiner walking out is `watchForEarlyClosing`'s
+      // stand-down on `this.closing`: without it the app contradicts its own
+      // goodbye, counts a fault against the examiner, and waives the débat's
+      // penalties on the strength of it (#92). Removing that guard fails this.
+      //
+      // What it does NOT pin is the ORDER of the flag and the directive inside
+      // `beginClosingHandshake` — checked by mutation, and it passes with the
+      // two swapped. Both happen synchronously before any turn can arrive, so
+      // the window between them is not reachable from a test that drives the
+      // session by hand. The ordering is still deliberate (see the comment
+      // there); it is simply not this test's claim.
+      const h = harness();
+      await intoDebate(h);
+
+      quiet(h, 575);
+      h.session().examinerSays("Une dernière question : que répondez-vous aux artisans ?");
+      h.session().finishTurn();
+      answers(h, 12);
+      quiet(h, 25);
+      quiet(h, 25);
+      assert.equal(wrapUps(h).length, 1, "the part is closing");
+
+      // The sentence the directive just asked for.
+      h.session().examinerSays("Merci, l'entretien est terminé. Au revoir.");
+      h.session().finishTurn();
+
+      assert.deepEqual(
+        events(h, "examiner-early-closing"),
+        [],
+        "a closing said on the app's own order is not a goodbye it has to answer",
+      );
+      assert.ok(
+        !h.session().directives.some((text) => text.includes("n'est PAS terminée")),
+        "and nothing contradicts it",
+      );
+    });
+
     it("does not close out a candidate who has not answered it yet", async () => {
       // Ten seconds of quiet after « une dernière question » is a candidate
       // composing an answer, and closing on it takes the answer away. The

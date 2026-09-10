@@ -16,10 +16,21 @@
 import type { OralTopic } from "./topics";
 
 /**
- * Bumped whenever the wording below changes.
+ * Bumped whenever {@link buildExaminerInstruction}'s output changes — the
+ * identity block and the two phase instructions, and nothing else.
  *
- * **Nothing reads it yet, and the comment here used to claim otherwise.** It
- * said the version was "stored on every evaluation so an old result can be
+ * **Not the runtime directives** (#215). `closingInstruction`,
+ * `lastQuestionInstruction`, the relances and the recoveries are spoken wording
+ * too, and changing them deliberately leaves this alone. What reads the version
+ * is `/api/dev/examiner-prompt`, which serves it alongside a SYSTEM INSTRUCTION
+ * so the dev panel can tell a saved prompt that the shipped text has moved on
+ * under it (#166). A directive is not part of what was saved, so bumping this
+ * for one would mark every stored prompt stale over a change that is not in it
+ * — a warning that is false the first time and ignored the second.
+ *
+ * **What used to be here.** The comment said nothing read it, which was true
+ * when it was written and stopped being true with that panel. Before that it
+ * claimed the version was "stored on every evaluation so an old result can be
  * traced back to the examiner that produced it", which is not true and never
  * was: the `prompt_version` column on a correction is written from
  * `EVAL_PROMPT_VERSION` in `lib/gemini/evaluate.ts`, a different constant
