@@ -268,6 +268,25 @@ export class ExaminerAudioPlayer {
   }
 
   /**
+   * The speaker's own clock — the one thing a dead speaker cannot move.
+   *
+   * `AudioContext.currentTime` advances while and only while the context is
+   * running, whatever is or is not queued on top of it. That makes it the
+   * honest answer to "is this device actually playing?", which the queue's
+   * length is not: a queue that is not shrinking is either a suspended context
+   * or Gemini streaming a turn in faster than it is spoken, and those two are
+   * the same picture (see `ExamController.examinerPlaybackHold`, which used to
+   * read them off `bufferedSeconds` and could not tell them apart).
+   *
+   * Zero with no context. The reader compares consecutive samples for CHANGE
+   * rather than growth, so a context that is replaced — and starts counting
+   * from zero again — reads as moving rather than as frozen.
+   */
+  get playedSeconds(): number {
+    return this.context?.currentTime ?? 0;
+  }
+
+  /**
    * Drop everything queued — the candidate interrupted, or the phase ended.
    *
    * The handler is detached before `stop()` rather than left to fire: stopping
