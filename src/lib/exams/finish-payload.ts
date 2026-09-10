@@ -199,6 +199,33 @@ export const finishPayloadSchema = z.object({
     })
     .optional(),
   /**
+   * How long the candidate HAD to produce that, per part: seconds recorded
+   * while the examiner was silent, speech or not.
+   *
+   * The denominator, and the half that makes the numerator mean anything.
+   * Gating the count on the examiner's voice lowered the false reading by
+   * something like a factor of twenty; it did not remove it, because fifteen
+   * CUMULATIVE seconds is still a small ask — most of a thirty-second gap
+   * between two questions, and nothing at all of a débat. A share is what
+   * separates the two populations: a part whose transcript was genuinely lost
+   * has the candidate audible for much of their own time, and a part they sat
+   * out has a little room noise scattered through it. See
+   * `PARTICIPATION_VOICED_SHARE`, which is where the figure is argued and which
+   * way it fails.
+   *
+   * Sent as seconds rather than as a ratio on purpose. The rule is the
+   * server's, the bound below is checkable, and a share arriving pre-divided
+   * would be the graded party choosing the arithmetic. Optional for the same
+   * reason as its numerator: absent, the floor decides alone, which is what the
+   * page that sent no denominator was doing anyway.
+   */
+  soloSeconds: z
+    .object({
+      monologue: z.number().nonnegative().max(MAX_PHASE_SECONDS),
+      debate: z.number().nonnegative().max(MAX_PHASE_SECONDS),
+    })
+    .optional(),
+  /**
    * DEVELOPMENT ONLY — the seconds a typed phase claims to have lasted (#36).
    *
    * The one number in this file that can reach a grade, which is why the bound

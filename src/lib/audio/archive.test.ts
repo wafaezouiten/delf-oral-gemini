@@ -26,6 +26,13 @@ function fill(archive: PhaseArchive, seconds: number): void {
   for (const frame of frames(seconds)) archive.append(frame);
 }
 
+/** `seconds` of an open microphone in a quiet room: filed, measured, never
+ *  voiced. What the candidate's own time is made of when they do not use it. */
+function silence(archive: PhaseArchive, seconds: number): void {
+  const perFrame = INPUT_SAMPLE_RATE / 25;
+  for (let i = 0; i < Math.round(seconds * 25); i++) archive.append(new Int16Array(perFrame));
+}
+
 describe("measuring a phase", () => {
   it("takes the duration from the samples", () => {
     const archive = new PhaseArchive();
@@ -158,6 +165,28 @@ describe("telling the candidate from the room", () => {
     // that leaves the tab.
     assert.equal(archive.voicedSeconds("debate"), 42);
     assert.equal(archive.soloVoicedSeconds("debate"), 2);
+    // And the denominator that makes those two seconds legible: the candidate
+    // had two seconds of their own, and used them. Forty voiced seconds over
+    // eleven minutes and two over two are very different sittings, and only
+    // this number can tell the route which one it is holding.
+    assert.equal(archive.soloSeconds("debate"), 2);
+  });
+
+  it("counts the candidate's own time whether or not they filled it", () => {
+    // The walk-out's real shape: the examiner talks, then waits, then talks
+    // again. What lands in the waiting is a little room and a lot of nothing,
+    // and the nothing is exactly what the share needs to see.
+    const archive = new PhaseArchive();
+    archive.begin("debate");
+    archive.setPlaybackAudible(true);
+    fill(archive, 60);
+    archive.setPlaybackAudible(false);
+    fill(archive, 3);
+    silence(archive, 37);
+
+    assert.equal(archive.soloVoicedSeconds("debate"), 3);
+    assert.equal(archive.soloSeconds("debate"), 40, "the silence is opportunity, not absence");
+    assert.equal(archive.measuredSeconds("debate"), 100);
   });
 
   it("keeps filing the audio itself, which is the épreuve and not the turn", () => {

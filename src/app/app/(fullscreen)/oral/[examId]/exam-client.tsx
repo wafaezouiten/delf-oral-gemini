@@ -246,6 +246,9 @@ export function ExamClient({
         // `finishPayloadSchema`, which is also where the older `voicedSeconds`
         // this replaced is buried.
         soloVoicedSeconds: payload.soloVoicedSeconds,
+        // And how long they had to produce it, which is what makes the first
+        // number mean something. The route divides; this tab does not.
+        soloSeconds: payload.soloSeconds,
         // Undefined on any sitting that was actually spoken, and ignored by the
         // route in a production build (#36).
         devSeconds: payload.devSeconds,

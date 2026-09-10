@@ -393,6 +393,12 @@ export class MicRecorder {
     return this.archive.soloVoicedSeconds(phase);
   }
 
+  /** And how long the candidate had to produce it — the seconds recorded with
+   *  the examiner silent, speech or not. See `PhaseArchive.soloSeconds`. */
+  soloSeconds(phase: RecordedPhase): number {
+    return this.archive.soloSeconds(phase);
+  }
+
   /** Whether the examiner is audible right now, which the microphone cannot
    *  tell from the candidate. Passed straight through; the archive owns what it
    *  does with it. */

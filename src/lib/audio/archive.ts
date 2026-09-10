@@ -95,6 +95,9 @@ interface Segment {
   /** The same count, taken only while nothing else was audible in the room.
    *  See {@link soloVoicedSeconds} for why the two must not be conflated. */
   soloVoicedSamples: number;
+  /** Samples filed while nothing else was audible, voiced or not — the
+   *  candidate's opportunity to speak. See {@link soloSeconds}. */
+  soloSamples: number;
 }
 
 export class PhaseArchive {
@@ -149,7 +152,13 @@ export class PhaseArchive {
   begin(phase: RecordedPhase): void {
     if (this.open === phase) return;
     if (!this.segments.has(phase)) {
-      this.segments.set(phase, { frames: [], samples: 0, voicedSamples: 0, soloVoicedSamples: 0 });
+      this.segments.set(phase, {
+        frames: [],
+        samples: 0,
+        voicedSamples: 0,
+        soloVoicedSamples: 0,
+        soloSamples: 0,
+      });
     }
     this.open = phase;
   }
@@ -197,6 +206,7 @@ export class PhaseArchive {
     // candidate actually say anything?" — the frames are retained for the
     // artefact, but walking twenty minutes of them again to decide whether to
     // show a dialog would be work done at exactly the wrong moment.
+    if (!this.playbackAudible) segment.soloSamples += frame.length;
     if (isVoiced(frame)) {
       segment.voicedSamples += frame.length;
       if (!this.playbackAudible) segment.soloVoicedSamples += frame.length;
@@ -212,6 +222,12 @@ export class PhaseArchive {
    *  silent. See {@link soloVoicedSeconds}. */
   soloVoicedSamplesIn(phase: RecordedPhase): number {
     return this.segments.get(phase)?.soloVoicedSamples ?? 0;
+  }
+
+  /** Samples filed under a phase while the examiner was silent, whether or not
+   *  they carried anything. See {@link soloSeconds}. */
+  soloSamplesIn(phase: RecordedPhase): number {
+    return this.segments.get(phase)?.soloSamples ?? 0;
   }
 
   /** Samples filed under a phase. */
@@ -273,6 +289,27 @@ export class PhaseArchive {
    */
   soloVoicedSeconds(phase: RecordedPhase): number {
     return this.soloVoicedSamplesIn(phase) / this.sampleRate;
+  }
+
+  /**
+   * How long the candidate HAD to speak in a part: the seconds recorded while
+   * the examiner was not being played, silence included.
+   *
+   * The denominator {@link soloVoicedSeconds} is measured against, and the
+   * reason a cumulative floor alone was never going to be enough. Fifteen
+   * seconds is a lot of a thirty-second gap and nothing at all of six minutes,
+   * and only this number can tell those apart. See
+   * `PARTICIPATION_VOICED_SHARE`, which is where the comparison is made and
+   * argued.
+   *
+   * Not the same as `measuredSeconds − (the examiner's airtime)` computed
+   * anywhere else, and deliberately measured here rather than derived: it
+   * counts the frames that actually arrived, so a microphone that died halfway
+   * through a débat reports the opportunity the candidate really had rather
+   * than the one the clock says they were given.
+   */
+  soloSeconds(phase: RecordedPhase): number {
+    return this.soloSamplesIn(phase) / this.sampleRate;
   }
 
   measuredSeconds(phase: RecordedPhase): number {

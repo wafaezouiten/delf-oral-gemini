@@ -110,6 +110,10 @@ export interface RecorderLike {
    *  the three that survives a débat spent listening to the examiner through an
    *  open microphone. See `PhaseArchive.soloVoicedSeconds`. */
   soloVoicedSeconds(phase: RecordedPhase): number;
+  /** How long the candidate had to produce that: seconds recorded with the
+   *  examiner silent, speech or not. The denominator the route's share test is
+   *  taken against — see `PARTICIPATION_VOICED_SHARE`. */
+  soloSeconds(phase: RecordedPhase): number;
   /** Tell the recorder the examiner is (or is no longer) being played into the
    *  room, so it can keep the two voiced measures apart. Called from the
    *  player's own `onSpeakingChange`, and once at install for a recorder that
@@ -389,6 +393,17 @@ export interface ExamFinishedPayload {
    * field only ever speaks up to excuse, never to accuse.
    */
   soloVoicedSeconds: Record<RecordedPhase, number>;
+  /**
+   * How long the candidate had to produce that, per part: seconds recorded
+   * while the examiner was silent, speech or not.
+   *
+   * Sent because the field above is not enough on its own. Fifteen voiced
+   * seconds is most of a thirty-second gap between two questions and a
+   * rounding error across a thirteen-minute débat, and only the two numbers
+   * together say which of those happened. The route divides them; see
+   * `PARTICIPATION_VOICED_SHARE`.
+   */
+  soloSeconds: Record<RecordedPhase, number>;
   /**
    * DEVELOPMENT ONLY — the seconds typed phases claim to have lasted (#36).
    * Undefined on every real sitting. See `ExamController`'s `devSeconds`.
@@ -3865,6 +3880,13 @@ export class ExamController {
       monologue: Math.round(recorder?.soloVoicedSeconds("monologue") ?? 0),
       debate: Math.round(recorder?.soloVoicedSeconds("debate") ?? 0),
     };
+    // The denominator, sent beside the numerator rather than divided here: the
+    // rule is the route's, and a share computed in the tab is a share the
+    // graded party chose the arithmetic for.
+    const soloSeconds: Record<RecordedPhase, number> = {
+      monologue: Math.round(recorder?.soloSeconds("monologue") ?? 0),
+      debate: Math.round(recorder?.soloSeconds("debate") ?? 0),
+    };
     // The blobs are cut and own their bytes; the PCM behind them is a second
     // copy of a sitting, and this tab is about to load a results page.
     recorder?.discard();
@@ -3896,6 +3918,7 @@ export class ExamController {
       reconnectCount: this.reconnectCount,
       earlyClosingCount: this.earlyClosingCount,
       soloVoicedSeconds,
+      soloSeconds,
       // Only when something was actually typed, so a real sitting sends no such
       // field at all rather than a pair of zeroes the route has to interpret.
       devSeconds:

@@ -24,16 +24,30 @@ function entry(
 
 const HEARD = PARTICIPATION_VOICED_FLOOR + 1;
 
+/**
+ * The microphone's evidence for one sitting, in the shape the refusal takes it.
+ *
+ * `soloSeconds` is left out of every case here on purpose. This file is about
+ * WHICH refusal is given and in what order; whether a part was heard at length
+ * is `partsSpokenButUntranscribed`'s question, and the share half of it is
+ * held in `orale-rubric.test.ts` next to the figure it uses. Omitting the
+ * denominator is also a real payload — a page from before it existed — so
+ * these cases are not a shape the route never sees.
+ */
+function heard(monologueSeconds: number, debateSeconds: number) {
+  return {
+    monologue: { voicedSeconds: monologueSeconds },
+    debate: { voicedSeconds: debateSeconds },
+  };
+}
+
 describe("participationRefusal", () => {
   it("grades a sitting where both parts were spoken", () => {
     const transcript = [
       entry("monologue", "candidate", SPEECH),
       entry("debate", "candidate", SPEECH),
     ];
-    assert.equal(
-      participationRefusal(transcript, { monologueSeconds: 300, debateSeconds: 600 }),
-      null,
-    );
+    assert.equal(participationRefusal(transcript, heard(300, 600)), null);
   });
 
   it("blames the app, not the candidate, for a lost monologue and a walk-out", () => {
@@ -41,7 +55,7 @@ describe("participationRefusal", () => {
     // Live API never transcribed, and a débat left at once. Zero words in
     // total, so the blanket floor would have answered first — and would have
     // told a candidate who spoke for six minutes that they had said nothing.
-    const refusal = participationRefusal([], { monologueSeconds: 360, debateSeconds: 2 });
+    const refusal = participationRefusal([], heard(360, 2));
     assert.equal(refusal?.reason, "transcription");
     assert.deepEqual(refusal?.parts, ["monologue"]);
     assert.match(refusal!.message, /le microphone vous a bien entendu/);
@@ -49,16 +63,13 @@ describe("participationRefusal", () => {
   });
 
   it("still names one part when the other carried the sitting", () => {
-    const refusal = participationRefusal([entry("debate", "candidate", SPEECH)], {
-      monologueSeconds: 360,
-      debateSeconds: 600,
-    });
+    const refusal = participationRefusal([entry("debate", "candidate", SPEECH)], heard(360, 600));
     assert.equal(refusal?.reason, "transcription");
     assert.match(refusal!.message, /de votre monologue/);
   });
 
   it("names both parts when both were heard and neither arrived", () => {
-    const refusal = participationRefusal([], { monologueSeconds: 360, debateSeconds: 600 });
+    const refusal = participationRefusal([], heard(360, 600));
     assert.deepEqual(refusal?.parts, ["monologue", "debate"]);
     assert.match(refusal!.message, /des deux parties/);
   });
@@ -79,7 +90,7 @@ describe("participationRefusal", () => {
           entry("debate", "examiner", SPEECH),
           entry("debate", "examiner", SPEECH),
         ],
-        { monologueSeconds: 330, debateSeconds: 3 },
+        heard(330, 3),
       ),
       null,
     );
@@ -88,17 +99,17 @@ describe("participationRefusal", () => {
   it("calls a silent sitting absent, which is what it is", () => {
     // Nothing said and nothing heard: « euh… non, ça va, merci » clears
     // neither bar, and the refusal that names the candidate is the honest one.
-    const refusal = participationRefusal([entry("debate", "candidate", "Non, ça va.")], {
-      monologueSeconds: 1,
-      debateSeconds: 2,
-    });
+    const refusal = participationRefusal(
+      [entry("debate", "candidate", "Non, ça va.")],
+      heard(1, 2),
+    );
     assert.equal(refusal?.reason, "absent");
     assert.match(refusal!.message, /presque aucune parole du candidat/);
   });
 
   it("reads a payload with no voiced seconds exactly as it did before", () => {
     // A client that predates the field offers no evidence, so the count decides.
-    const refusal = participationRefusal([], { monologueSeconds: 0, debateSeconds: 0 });
+    const refusal = participationRefusal([], heard(0, 0));
     assert.equal(refusal?.reason, "absent");
   });
 
@@ -107,17 +118,11 @@ describe("participationRefusal", () => {
       entry("monologue", "candidate", SPEECH),
       entry("debate", "candidate", SPEECH),
     ];
-    assert.equal(
-      participationRefusal(transcript, { monologueSeconds: HEARD, debateSeconds: HEARD }),
-      null,
-    );
+    assert.equal(participationRefusal(transcript, heard(HEARD, HEARD)), null);
   });
 
   it("ignores the examiner, who is never the one being graded", () => {
-    const refusal = participationRefusal([entry("monologue", "examiner", SPEECH)], {
-      monologueSeconds: 360,
-      debateSeconds: 0,
-    });
+    const refusal = participationRefusal([entry("monologue", "examiner", SPEECH)], heard(360, 0));
     assert.equal(refusal?.reason, "transcription");
   });
 });

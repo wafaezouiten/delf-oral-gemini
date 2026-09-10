@@ -268,6 +268,15 @@ class FakeRecorder implements RecorderLike {
     return this.solo[phase] ?? this.voicedSeconds(phase);
   }
 
+  /** The candidate's own time, defaulted to the whole phase — an examiner who
+   *  never spoke, which is what the monologue is and what a test that does not
+   *  care about the share is describing. */
+  opportunity: Record<RecordedPhase, number | null> = { monologue: null, debate: null };
+
+  soloSeconds(phase: RecordedPhase): number {
+    return this.opportunity[phase] ?? this.seconds[phase];
+  }
+
   /** Every value the controller pushed, in order — the flag's history rather
    *  than its current state, because what matters is that it moves with the
    *  examiner's voice and starts out matching it. */
@@ -1732,6 +1741,20 @@ describe("recording the candidate", () => {
         0,
         "a walk-out must reach the route as a walk-out, not as a lost transcript",
       );
+    });
+
+    it("carries the time the candidate had, beside what they did with it", async () => {
+      // The denominator. Without it the seconds above are an absolute quantity
+      // with no sense of the part they sit in, and fifteen of them is most of a
+      // gap between two questions and a rounding error across a débat.
+      const h = harness();
+      await intoMonologue(h);
+      h.recorder.solo.debate = 30;
+      h.recorder.opportunity.debate = 120;
+      await runToFinish(h, () => {});
+
+      assert.equal(h.finished[0]?.soloSeconds.debate, 120);
+      assert.equal(h.finished[0]?.soloVoicedSeconds.debate, 30);
     });
 
     it("tells the microphone when the examiner is audible", async () => {
