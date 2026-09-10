@@ -27,10 +27,11 @@ function fill(archive: PhaseArchive, seconds: number): void {
 }
 
 /** `seconds` of an open microphone in a quiet room: filed, measured, never
- *  voiced. What the candidate's own time is made of when they do not use it. */
+ *  voiced. What the candidate's own time is made of when they do not use it.
+ *  The same frames as `frames()`, emptied — so the two helpers cannot drift on
+ *  how long a frame is. */
 function silence(archive: PhaseArchive, seconds: number): void {
-  const perFrame = INPUT_SAMPLE_RATE / 25;
-  for (let i = 0; i < Math.round(seconds * 25); i++) archive.append(new Int16Array(perFrame));
+  for (const frame of frames(seconds)) archive.append(new Int16Array(frame.length));
 }
 
 describe("measuring a phase", () => {

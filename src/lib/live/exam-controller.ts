@@ -1900,6 +1900,18 @@ export class ExamController {
       // `onSpeakingChange` will not fire again until that sentence ends — so a
       // recorder that assumed silence would credit the examiner's own voice to
       // the candidate for exactly as long as the prompt was on screen.
+      //
+      // Which makes the order of the two devices in this method load-bearing:
+      // `examinerSpeaking` is only ever written by the player's
+      // `onSpeakingChange`, so opening the microphone first would seed from a
+      // field that still means "nobody has asked yet" rather than "the room is
+      // quiet". Checked rather than left to the reading, because that mistake
+      // is invisible in the recording and surfaces only as a grade.
+      if (!this.player) {
+        console.warn(
+          "[exam] the microphone opened before the speaker: playback state is a default, not a reading",
+        );
+      }
       recorder.setPlaybackAudible(this.examinerSpeaking);
       // The development text mode can be switched on during preparation, before
       // there is any microphone to turn off. The device has to arrive already

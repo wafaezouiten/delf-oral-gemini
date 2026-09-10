@@ -264,6 +264,13 @@ export async function POST(request: Request, context: { params: Promise<{ examId
    * out the débat is graded on half a mark or refused a mark at all; the
    * schema's own comments carry the argument, and the rule itself is
    * `partsSpokenButUntranscribed`.
+   *
+   * The two are resolved independently, and nothing in the schema ties them:
+   * a hand-built payload could pair the old `voicedSeconds` numerator, which
+   * counted the examiner's voice too, with the new `soloSeconds` denominator.
+   * Left that way on purpose. The mismatch inflates the share and so biases
+   * toward a refusal, never toward a mark — the safe direction a forged value
+   * is allowed to move in here — and the real client sends the pair together.
    */
   const voiced = payload.soloVoicedSeconds ?? payload.voicedSeconds;
   const refusal = participationRefusal(payload.transcript, {
