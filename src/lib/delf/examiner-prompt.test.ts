@@ -288,14 +288,27 @@ describe("examiner prompt", () => {
     it("steers an example the early-closing watch will not mistake for a goodbye", () => {
       // The sentence the directive offers is what the model is likeliest to
       // parrot, and `readsAsClosing` reads every examiner turn. If the example
-      // ever drifts onto that phrase list, the app would contradict the very
-      // announcement it asked for — this is the test that holds the two files
-      // apart.
+      // ever drifted onto the unconditional phrase list, the app would
+      // contradict the very announcement it asked for — this is the test that
+      // holds the two files apart.
+      //
+      // « Nous arrivons à la fin » IS on a list now (`WRAPPING_UP_PHRASES`),
+      // and the gate is the whole reason it can be: the watch reads it as a
+      // goodbye only while no last question has been announced. Both halves
+      // are asserted, because the second is what the example depends on and
+      // the first is what makes the list worth having.
+      const example =
+        "Nous arrivons à la fin de cet entretien. Une dernière question : le télétravail est-il vraiment un progrès ?";
+
       assert.equal(
-        readsAsClosing(
-          "Nous arrivons à la fin de cet entretien. Une dernière question : le télétravail est-il vraiment un progrès ?",
-        ),
+        readsAsClosing(example, { lastQuestionAnnounced: true }),
         false,
+        "the app does not argue with the directive it just sent",
+      );
+      assert.equal(
+        readsAsClosing(example),
+        true,
+        "and the same sentence unprompted is a débat being wound up early",
       );
     });
 

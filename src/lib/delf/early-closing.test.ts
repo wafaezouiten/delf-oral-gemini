@@ -55,6 +55,72 @@ describe("hearing an examiner say goodbye seven minutes early (#85)", () => {
   });
 });
 
+describe("hearing an examiner wind the débat up early", () => {
+  // The sitting in #213, verbatim. Thirteen minutes of débat, four announced endings,
+  // and not one of them on any list before this: the candidate answered the
+  // second with « Mais il en reste 7 minutes, non ? » and got the silence
+  // watch's « Vous m'entendez ? » back.
+
+  it("hears the end announced before the app has authorised one", () => {
+    for (const text of [
+      "Nous arrivons au terme de notre débat. Pour finir, concentrer l'attention sur les particules fines ne risque-t-il pas de masquer d'autres problèmes ?",
+      "Nous arrivons à la fin de cet échange. Pour terminer, pensez-vous que cette mesure soit vraiment l'unique façon de rendre les centres-villes plus agréables ?",
+    ]) {
+      assert.ok(readsAsClosing(text), `missed at 4:56 and 9:39: ${text}`);
+    }
+  });
+
+  it("says nothing about the same sentence once the app has asked for it", () => {
+    // The gate, from the other side. `lastQuestionInstruction` orders exactly
+    // this announcement in the closing two minutes; contradicting it would be
+    // the app arguing with its own directive in the examiner's mouth.
+    assert.equal(
+      readsAsClosing("Nous arrivons à la fin de cet échange. Pour terminer, une question.", {
+        lastQuestionAnnounced: true,
+      }),
+      false,
+    );
+  });
+
+  it("hears a summary and a thank-you as the dead stop it was", () => {
+    // 5:33 and 7:10. No dismissal, no « au revoir », nothing the goodbye list
+    // could see — and then silence for the rest of the minute.
+    for (const text of [
+      "Vous proposez donc une approche globale pour évaluer l'ensemble des impacts de cette mesure. Je vous remercie.",
+      "Vous insistez sur la transparence de la communication pour favoriser l'adhésion. Je vous remercie.",
+    ]) {
+      assert.ok(readsAsClosing(text, { turnComplete: true }), `missed: ${text}`);
+    }
+  });
+
+  it("leaves a thank-you that still asks something alone", () => {
+    // The discriminator, and the reason the thanks reading waits for a whole
+    // turn: a wrap-up hands the floor back with nothing to answer. Contradicting
+    // a polite mid-objection thank-you would order « une nouvelle objection » on
+    // top of a question just asked, which is #193's two-questions-in-a-row.
+    for (const text of [
+      "Je vous remercie pour cette précision, mais ne pensez-vous pas que le coût reste prohibitif ?",
+      "Je vous remercie. Alors, comment financer un tel réseau ?",
+    ]) {
+      assert.ok(!readsAsClosing(text, { turnComplete: true }), `false positive: ${text}`);
+    }
+  });
+
+  it("does not read a thank-you off half a turn", () => {
+    // Mid-turn the question mark has not arrived yet, so the same sentence must
+    // read as nothing at all until the turn is whole. This is what keeps the
+    // controller's fragment-by-fragment watch from firing on politeness.
+    const half = "Je vous remercie pour cette précision,";
+
+    assert.equal(readsAsClosing(half), false, "still being spoken");
+    assert.equal(
+      readsAsClosing(half, { turnComplete: true }),
+      true,
+      "and a goodbye once it is not",
+    );
+  });
+});
+
 describe("corroborating the finish payload's count against its own transcript (#92)", () => {
   const turn = (over: Partial<TranscriptEntry>): TranscriptEntry => ({
     phase: "debate",
