@@ -32,6 +32,14 @@
  * candidate is the mistake the waiver exists to stop. The list stays broad;
  * what changed is that additions to it should now weigh a waived penalty, not
  * just a spare directive.
+ *
+ * There are three lists now rather than one, because a later sitting produced
+ * two goodbyes neither broad nor narrow wording could have caught together:
+ * {@link CLOSING_PHRASES} reads as a goodbye unconditionally,
+ * {@link WRAPPING_UP_PHRASES} only while the app has not itself authorised an
+ * end-of-débat announcement, and {@link CLOSING_THANKS_PHRASES} only on a
+ * completed turn that asks nothing. Each list's doc says which failure it was
+ * written for and what its condition buys.
  */
 
 import type { TranscriptEntry } from "./transcript";
@@ -64,6 +72,9 @@ function normalise(text: string): string {
  *  - Taking leave. « Au revoir » has no other use in the middle of a débat.
  *  - Announcing a part that does not exist. The DELF B2 production orale has two
  *    parts; the model announced a third and then dismissed the candidate into it.
+ *
+ * These read as a goodbye whatever surrounds them and whatever the app has
+ * already authorised, which is what separates them from the two lists below.
  */
 const CLOSING_PHRASES: readonly string[] = [
   "vous pouvez disposer",
@@ -85,15 +96,123 @@ const CLOSING_PHRASES: readonly string[] = [
 ];
 
 /**
+ * Telling the candidate the débat is ending — which is a goodbye when nobody
+ * asked for it, and the app's own words when somebody did.
+ *
+ * The sitting in #213 produced « Nous arrivons au terme de notre débat » at 4:56 of
+ * thirteen minutes and « Nous arrivons à la fin de cet échange » at 9:39, and
+ * neither was on any list: the model was winding the exchange up twice, out
+ * loud, to a candidate who had eight minutes and then three left. Announcing
+ * the end early is not the same failure as walking out — the model asked one
+ * more question each time — but it is the same lie told to the candidate, and
+ * the candidate cannot tell them apart. `resumeDebateInstruction` is the right
+ * answer to both.
+ *
+ * **Gated on the last question having been announced, and that gate is the
+ * whole design.** `lastQuestionInstruction` asks for exactly this sentence —
+ * « Nous arrivons à la fin de cet entretien. Une dernière question : … » — in
+ * the closing two minutes, and contradicting the announcement the app itself
+ * ordered would be the app arguing with its own directive in front of the
+ * candidate. So these phrases count only while the announcement is still
+ * pending. Before it, « nous arrivons à la fin » is false; after it, it is
+ * true, and `examiner-prompt.ts` is where the wording it is allowed to take
+ * lives.
+ *
+ * The same gate is why « touche à sa fin » can be listed at all: it is the
+ * directive's own opening words, and a model that echoes them can only do so
+ * after the directive has been sent.
+ */
+const WRAPPING_UP_PHRASES: readonly string[] = [
+  "nous arrivons au terme",
+  "nous en arrivons au terme",
+  "nous arrivons a la fin",
+  "nous en arrivons a la fin",
+  "nous approchons de la fin",
+  "touche a sa fin",
+  "nous allons conclure",
+  "il est temps de conclure",
+];
+
+/**
+ * Thanking the candidate and stopping — the quietest way to abandon a débat,
+ * and the one that needs a whole turn to recognise.
+ *
+ * The sitting in #213, twice: « Vous proposez donc une approche globale pour évaluer
+ * l'ensemble des impacts de cette mesure. Je vous remercie. » at 5:33, and the
+ * same shape again at 7:10. Summary, thanks, silence — no dismissal, no « au
+ * revoir », nothing the list above could see. The candidate answered the second
+ * one with « Mais il en reste 7 minutes, non ? », which is the reader doing the
+ * app's job for it.
+ *
+ * **Only when the turn asks nothing, and only once the turn is whole.** « Je
+ * vous remercie pour cette précision, mais ne pensez-vous pas que… ? » is an
+ * examiner being polite mid-objection, and contradicting it would send
+ * `resumeDebateInstruction` — « enchaîne immédiatement avec une nouvelle
+ * objection » — on top of a question just asked, which is the two-questions-in-
+ * a-row hazard #193 exists to prevent. The discriminator is that a wrap-up
+ * hands the floor back with nothing to answer, so a question mark anywhere in
+ * the turn disqualifies it. That reading is only sound on a COMPLETED turn:
+ * mid-turn, the question mark has not arrived yet. Hence `turnComplete`, and
+ * hence the controller running this reading at the turn boundary rather than
+ * on every fragment.
+ *
+ * The genuine closing says « je vous remercie » too — `closingInstruction`
+ * asks for it in so many words — and is not a false positive here for the
+ * reason the whole file is only ever consulted outside a closing handshake.
+ */
+const CLOSING_THANKS_PHRASES: readonly string[] = [
+  "je vous remercie",
+  "merci pour cet echange",
+  "merci pour ce debat",
+  "merci pour cette discussion",
+];
+
+/** How the caller says what the app has already authorised, and how much of a
+ *  turn it is holding. See each phrase list for what its flag buys. */
+export interface ClosingReadOptions {
+  /**
+   * Whether `lastQuestionInstruction` has gone out. Defaults to false, the
+   * broadest reading: a caller that cannot know — the finish route, reading a
+   * stored transcript — only ever CAPS a claim with what it finds, so reading
+   * more turns as goodbyes there can never invent one.
+   */
+  lastQuestionAnnounced?: boolean;
+  /** Whether `text` is a whole examiner turn rather than the fragments of one
+   *  so far. Defaults to false; only {@link CLOSING_THANKS_PHRASES} reads it. */
+  turnComplete?: boolean;
+}
+
+/**
  * Does this examiner turn read as a goodbye?
  *
  * Called with the turn accumulated so far, not with one transcription fragment:
  * Gemini splits a sentence across fragments on its own schedule, and « vous
  * pouvez » in one and « quitter la salle » in the next is the same goodbye.
  */
-export function readsAsClosing(text: string): boolean {
+export function readsAsClosing(text: string, options: ClosingReadOptions = {}): boolean {
   const haystack = normalise(text);
-  return CLOSING_PHRASES.some((phrase) => haystack.includes(phrase));
+  if (CLOSING_PHRASES.some((phrase) => haystack.includes(phrase))) return true;
+  if (
+    !options.lastQuestionAnnounced &&
+    WRAPPING_UP_PHRASES.some((phrase) => haystack.includes(phrase))
+  ) {
+    return true;
+  }
+  if (!options.turnComplete || asksSomething(text)) return false;
+  return CLOSING_THANKS_PHRASES.some((phrase) => haystack.includes(phrase));
+}
+
+/**
+ * Is there a question anywhere in this turn?
+ *
+ * The question mark and nothing cleverer. Gemini's transcription punctuates
+ * its own output reliably, and every alternative — interrogative openers,
+ * inversion, « est-ce que » — is a French grammar exercise whose failures land
+ * on the side that sends a spurious directive. A missed question mark costs a
+ * wrap-up that goes uncontradicted, which is the failure the app already had.
+ */
+function asksSomething(text: string): boolean {
+  return text.includes("?");
 }
 
 /**
@@ -103,13 +222,25 @@ export function readsAsClosing(text: string): boolean {
  * Débat examiner turns only, exactly where detection ever listened: a phrase
  * in the candidate's own mouth, or anywhere in the monologue, corroborates
  * nothing.
+ *
+ * Read at the WIDEST setting the options allow — whole turns, and no last
+ * question ever announced — which is deliberate and is safe in exactly one
+ * direction. A stored transcript says nothing about when the app's directives
+ * went out, so this cannot reconstruct the reading the controller made; and it
+ * does not need to, because {@link resolveEarlyClosingCount} only ever CAPS the
+ * client's claim with this number. Reading more turns as goodbyes here can
+ * loosen a cap; it can never invent a goodbye the controller did not count. A
+ * narrower reading could do the opposite — clamp away a genuine incident
+ * because the stored text no longer shows what the live socket heard.
  */
 export function countClosingTurns(
   entries: ReadonlyArray<Pick<TranscriptEntry, "phase" | "speaker" | "text">>,
 ): number {
   return entries.filter(
     (entry) =>
-      entry.phase === "debate" && entry.speaker === "examiner" && readsAsClosing(entry.text),
+      entry.phase === "debate" &&
+      entry.speaker === "examiner" &&
+      readsAsClosing(entry.text, { turnComplete: true }),
   ).length;
 }
 

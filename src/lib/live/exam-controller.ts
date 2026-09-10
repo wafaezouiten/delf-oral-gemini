@@ -499,38 +499,52 @@ const CAPTURE_STALL_MS = 4_000;
  * How long the candidate may say nothing, once the examiner has stopped
  * speaking, before the examiner speaks again (#84).
  *
- * #84 asked for 7 to 10 seconds and this took the middle of it; #101 asks for
+ * #84 asked for 7 to 10 seconds and this took the middle of it; #101 asked for
  * the top, because the relance now comes round again and a window that fires
  * early would make a candidate who is merely thinking hear the examiner twice
  * before they have begun. It is a different kind of number from
  * `silenceDurationMs` in `gemini/live-config.ts`, which is 1 s: that one
  * decides when a candidate who IS speaking has finished, and it is long because
  * a B2 candidate hunting for a word must not be cut off. This one decides when a
- * candidate who has not started at all should be helped, and ten seconds of
- * nothing is well past any pause for thought while still being a silence the
- * candidate is living through.
+ * candidate who has not started at all should be helped.
  *
- * Ten seconds buys the FIRST step of a silence — « Vous m'entendez ? ». Every
- * step after it waits {@link SILENCE_STEP_MS}, which is longer, because by then
- * the candidate has been spoken to and is owed room to answer.
+ * **Twenty seconds, and ten was measurably too few.** The sitting in #213 opened with
+ * the examiner's first objection, « Vous m'entendez ? » ten seconds later, a
+ * rephrasing fifteen seconds after that, and the candidate's answer at 1:27 —
+ * a considered reply to a considered objection, interrupted twice on its way
+ * out. Ten seconds is well past a pause for thought inside a sentence, which is
+ * what it was reasoned against; it is not past the pause between hearing a B2
+ * objection and knowing how to answer it. What the doubling costs is that a
+ * genuinely dead microphone goes unremarked for twenty seconds rather than ten,
+ * against a rung of the mic ladder that is watching for that anyway
+ * ({@link CAPTURE_STALL_MS}, four seconds).
+ *
+ * It buys the FIRST step of a silence — « Vous m'entendez ? ». Every step after
+ * it waits {@link SILENCE_STEP_MS}, which is longer, because by then the
+ * candidate has been spoken to and is owed room to answer.
  */
-const SILENCE_NUDGE_MS = 10_000;
+const SILENCE_NUDGE_MS = 20_000;
 
 /**
  * How long each step after the first waits.
  *
- * Longer than the ten seconds before « Vous m'entendez ? », and deliberately:
- * the first step asks a four-word question that is answered in one, while the
- * second repeats the examiner's question and the ones after it ask a new one —
- * things a candidate needs a moment to think about. Fifteen seconds of silence
- * after being spoken to is unambiguous, and it keeps a walked-out sitting to one
- * intervention every twenty-odd seconds rather than one every twelve.
+ * Longer than the twenty seconds before « Vous m'entendez ? », and
+ * deliberately: the first step asks a four-word question that is answered in
+ * one, while the second repeats the examiner's question and the ones after it
+ * ask a new one — things a candidate needs a moment to think about.
+ * Twenty-five seconds of silence after being spoken to is unambiguous, and it
+ * keeps a walked-out sitting to one intervention every half minute or so.
+ *
+ * It moved with {@link SILENCE_NUDGE_MS} rather than staying at fifteen: the
+ * ordering is the point, and a step SHORTER than the first window would give a
+ * candidate less room once the examiner has spoken to them than before it did,
+ * which inverts the reason there are two numbers.
  *
  * Measured in SILENCE, like the first: the window does not run while the
- * examiner is audible, so this is fifteen seconds after the nudge was heard, not
- * fifteen seconds after it was sent.
+ * examiner is audible, so this is twenty-five seconds after the nudge was
+ * heard, not twenty-five seconds after it was sent.
  */
-const SILENCE_STEP_MS = 15_000;
+const SILENCE_STEP_MS = 25_000;
 
 /**
  * How much of an interval has to carry speech before the candidate counts as
@@ -709,15 +723,19 @@ const EXAMINER_REPLY_WAIT_MS = 8_000;
  *
  * So while the examiner's last turn ended after the candidate's last voice,
  * an answer is presumed owed and the cue waits this long from the moment the
- * floor went quiet. Twelve seconds sits between the silence watch's two
+ * floor went quiet. Twenty-two seconds sits between the silence watch's two
  * steps on purpose: LONGER than {@link SILENCE_NUDGE_MS}, so a candidate who
  * has gone quiet is asked « Vous m'entendez ? » before any cue makes the
  * examiner re-ask, and SHORTER than {@link SILENCE_STEP_MS}, so in a room
  * that stays silent the cue still gets out between two relances rather than
  * never. A candidate who starts answering ends the hold at once — their voice
  * hands the floor to the other rule.
+ *
+ * It was twelve, between a ten-second nudge and a fifteen-second step; it
+ * follows both of those upwards, because what it is anchored to is the
+ * ordering and not the figure.
  */
-const CANDIDATE_ANSWER_WAIT_MS = 12_000;
+const CANDIDATE_ANSWER_WAIT_MS = 22_000;
 
 /**
  * How many times one débat will contradict an examiner that has said goodbye.
@@ -725,9 +743,19 @@ const CANDIDATE_ANSWER_WAIT_MS = 12_000;
  * Rationed for the same reason as the presence check: a model that has decided
  * the épreuve is over may say so again, and an app that answers every time is
  * two machines arguing in front of the candidate. Every occurrence is logged;
- * only the first two are answered.
+ * only the first four are answered.
+ *
+ * Two, until the sitting in #213 showed what the ration was actually sized against. It
+ * was set for a model repeating its goodbye immediately, where the second
+ * contradiction is the argument; what that sitting produced was four wind-ups
+ * spread across eight minutes — 4:56, 5:33, 7:10, 9:39 — each a normal stretch
+ * of débat apart, and the last two would have gone unanswered under a ration of
+ * two. An examiner that stops dead twice in eight minutes is not arguing with
+ * the app; it is abandoning the candidate twice, and the candidate is the one
+ * who pays for the unanswered half. The loop the ration guards against is
+ * consecutive, and a débat has no room for four consecutive anything.
  */
-const MAX_EARLY_CLOSING_RECOVERIES = 2;
+const MAX_EARLY_CLOSING_RECOVERIES = 4;
 
 /** The two phases that produce a recording, in exam order. */
 const SPEAKING_PHASES: readonly RecordedPhase[] = ["monologue", "debate"];
@@ -1556,7 +1584,7 @@ export class ExamController {
    * arriving now would blend into the sentence it is answering — the hazard
    * `tick()` is ordered around. It is answered at the turn boundary instead.
    */
-  private watchForEarlyClosing(): void {
+  private watchForEarlyClosing(turnComplete = false): void {
     if (this.phase !== "debate" || this.closing || this.earlyClosingHeard) return;
     const index = this.transcript.length - 1;
     const turn = this.transcript[index];
@@ -1570,7 +1598,17 @@ export class ExamController {
       this.countedGoodbye?.index === index
         ? turn.text.slice(this.countedGoodbye.textLength)
         : turn.text;
-    if (!readsAsClosing(unscanned)) return;
+    if (
+      !readsAsClosing(unscanned, {
+        // The app's own end-of-débat announcement must not be contradicted:
+        // once `lastQuestionInstruction` has gone out, « nous arrivons à la
+        // fin » is the sentence it asked for (see `WRAPPING_UP_PHRASES`).
+        lastQuestionAnnounced: this.lastQuestionCue === "sent",
+        turnComplete,
+      })
+    ) {
+      return;
+    }
     this.earlyClosingHeard = true;
     this.countedGoodbye = { index, textLength: turn.text.length };
     // Counted at detection, not at the answer: the branch in
@@ -1597,6 +1635,12 @@ export class ExamController {
    * already in flight.
    */
   private answerEarlyClosing(): boolean {
+    // One more reading, now that the turn is whole. A wrap-up that only thanks
+    // the candidate is a goodbye exactly when nothing follows it, and mid-turn
+    // "nothing follows it" is not yet a fact — see `CLOSING_THANKS_PHRASES`.
+    // Idempotent: the watch returns at once if a goodbye is already on the
+    // record, so a turn caught mid-flight is not counted a second time here.
+    this.watchForEarlyClosing(true);
     if (!this.earlyClosingHeard) return false;
     this.earlyClosingHeard = false;
     // The turn is now wholly spoken, so the mark advances over all of it:

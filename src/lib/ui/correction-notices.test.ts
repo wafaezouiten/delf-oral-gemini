@@ -57,7 +57,7 @@ describe("the correction's penalty notices", () => {
     it("names the part, both durations, the cost and the criterion", () => {
       const notice = shortDebate();
 
-      assert.match(notice!, /^Votre débat a duré 6 minutes sur les 10 attendues/);
+      assert.match(notice!, /^Votre débat a duré 6 minutes, en deçà des 10 minutes attendues/);
       assert.match(notice!, /coûté 2 points au titre de l'interaction/);
     });
 
@@ -197,8 +197,8 @@ describe("the correction's penalty notices", () => {
       }).duration;
 
       assert.match(notice!, /^Les deux parties ont été plus courtes/);
-      assert.match(notice!, /votre monologue a duré 2 minutes sur les 7 attendues/);
-      assert.match(notice!, /votre débat a duré 3 minutes sur les 10 attendues/);
+      assert.match(notice!, /votre monologue a duré 2 minutes, en deçà des 4 minutes attendues/);
+      assert.match(notice!, /votre débat a duré 3 minutes, en deçà des 10 minutes attendues/);
     });
 
     it("leaves out a part whose criterion had nothing left to lose", () => {
@@ -230,7 +230,7 @@ describe("the correction's penalty notices", () => {
         ],
       }).duration;
 
-      assert.match(mixed!, /^Votre monologue a duré 1 minute sur les 7 attendues/);
+      assert.match(mixed!, /^Votre monologue a duré 1 minute, en deçà des 4 minutes attendues/);
       assert.ok(!mixed!.includes("débat"), mixed!);
 
       const nothingToLose = correctionNotices({

@@ -223,12 +223,16 @@ describe("what a stub of seconds is", () => {
   // to be re-argued rather than silently kept.
 
   it("sits far under the heaviest duration tier, so it can never change a mark", () => {
-    // A phase measuring under `SHORT_DEVELOPMENT_SECONDS` is in the bottom tier
-    // whether it reads 8 seconds or 0 — the drop turns one already-charged
-    // reading into the other, and nothing else. Were this floor ever to reach
-    // that threshold, dropping a recording could move a part between tiers,
-    // which is exactly what it must not do.
-    assert.ok(MIN_RECORDING_SECONDS < SHORT_DEVELOPMENT_SECONDS / 2);
+    // A phase measuring under its `SHORT_DEVELOPMENT_SECONDS` floor is in the
+    // bottom tier whether it reads 8 seconds or 0 — the drop turns one
+    // already-charged reading into the other, and nothing else. Were this floor
+    // ever to reach that threshold, dropping a recording could move a part
+    // between tiers, which is exactly what it must not do. Measured against the
+    // LOWER of the two floors, since the guarantee has to hold for both parts.
+    assert.ok(
+      MIN_RECORDING_SECONDS <
+        Math.min(SHORT_DEVELOPMENT_SECONDS.monologue, SHORT_DEVELOPMENT_SECONDS.debate) / 2,
+    );
   });
 
   it("still measures a stub — the floor is a decision about grading, not format", async () => {

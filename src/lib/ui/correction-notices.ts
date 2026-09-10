@@ -167,12 +167,23 @@ function points(n: number): string {
   return n === 1 ? "1 point" : `${n} points`;
 }
 
-/** « votre débat a duré 6 minutes sur les 10 attendues, ce qui a coûté 2 points
- *  au titre de l'interaction » — one part's share of the paragraph. */
+/**
+ * « votre débat a duré 6 minutes, en deçà des 10 minutes attendues, ce qui a
+ * coûté 2 points au titre de l'interaction » — one part's share of the
+ * paragraph.
+ *
+ * « en deçà des N minutes attendues » rather than the older « sur les N
+ * attendues », because the threshold stopped being a target the moment the
+ * exposé's moved to four minutes. The épreuve asks the candidate for « ~5–7
+ * min » of monologue; a sentence reading « sur les 4 attendues » beside that
+ * consigne would name a third figure and contradict both. What
+ * {@link FULL_DEVELOPMENT_SECONDS} actually is, on either part, is the floor
+ * under which the clock is charged — so that is what this says.
+ */
 function chargeClause(charge: DurationCharge): string {
   return (
-    `${PART_SUBJECT[charge.part]} a duré ${minutes(charge.seconds)} ` +
-    `sur les ${wholeMinutes(FULL_DEVELOPMENT_SECONDS[charge.part])} attendues, ` +
+    `${PART_SUBJECT[charge.part]} a duré ${minutes(charge.seconds)}, ` +
+    `en deçà des ${minutes(FULL_DEVELOPMENT_SECONDS[charge.part])} attendues, ` +
     `ce qui a coûté ${points(charge.points)} au titre de ${CHARGED_CRITERION[charge.part]}`
   );
 }

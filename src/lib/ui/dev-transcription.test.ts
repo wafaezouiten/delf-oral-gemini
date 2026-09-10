@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { SHORT_DEVELOPMENT_SECONDS, durationTier } from "@/lib/delf/orale-rubric";
+import { FULL_DEVELOPMENT_SECONDS, durationTier } from "@/lib/delf/orale-rubric";
 import {
   DEV_PANEL_COPY,
   DEV_SUBMIT_COPY,
@@ -115,29 +115,29 @@ describe("the example exposé", () => {
     assert.match(exampleExpose(subject), new RegExp(subject.replace(/[?]/g, "\\?")));
   });
 
-  it("is long enough to keep the exposé out of the heaviest duration tier", () => {
+  it("is long enough for the exposé to cost the candidate nothing", () => {
     // Otherwise the one button that exists to produce a gradeable sitting
-    // produces one charged two bands of « réalisation de la tâche » for its
-    // length. Asserted against the rubric's own tiers rather than a number
-    // copied out of them, so moving a threshold fails here instead of quietly
-    // making the sample too short.
+    // produces one charged for its length. Asserted against the rubric's own
+    // tiers rather than a number copied out of them, so moving a threshold
+    // fails here instead of quietly making the sample too short.
     const estimate = estimateSpokenSeconds(countWords(exampleExpose("un sujet")));
     assert.ok(
-      estimate >= SHORT_DEVELOPMENT_SECONDS,
-      `the sample estimates ${estimate}s, under the ${SHORT_DEVELOPMENT_SECONDS}s threshold`,
+      estimate >= FULL_DEVELOPMENT_SECONDS.monologue,
+      `the sample estimates ${estimate}s, under the ${FULL_DEVELOPMENT_SECONDS.monologue}s threshold`,
     );
-    assert.equal(durationTier("monologue", estimate), "moderate");
+    assert.equal(durationTier("monologue", estimate), "full");
   });
 
-  it("does not on its own make a penalty-free sitting (#189)", () => {
-    // The surprising half: the sample reads as a full exposé and still lands
-    // one tier short, because the monologue's full-development time is the
-    // 420 s the épreuve announces (#189) and this estimates around 300. Typing
-    // it and sending nothing for the débat is charged on both criteria. A
-    // sitting meant to score without a duration charge has to claim both
-    // durations, which is what the dev duration field is for.
+  it("still does not on its own make a penalty-free sitting (#189)", () => {
+    // The sample used to land one tier short on its own, because the exposé's
+    // full-development time was the 420 s the épreuve announces and this
+    // estimates around 300. The user's second correction put that threshold at
+    // four minutes, so the typed exposé now clears it — but the sitting is
+    // still charged, on the other criterion, for a débat nobody had. A sitting
+    // meant to score without any duration charge has to claim both durations,
+    // which is what the dev duration field is for.
     const estimate = estimateSpokenSeconds(countWords(exampleExpose("un sujet")));
-    assert.notEqual(durationTier("monologue", estimate), "full", "the exposé alone is not enough");
+    assert.equal(durationTier("monologue", estimate), "full", "the exposé itself is enough now");
     assert.equal(durationTier("debate", 0), "strong", "and an unclaimed débat is the bottom tier");
   });
 });

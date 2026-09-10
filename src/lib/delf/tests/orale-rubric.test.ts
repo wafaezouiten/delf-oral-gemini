@@ -130,15 +130,16 @@ const TOP_BANDS: CriteriaBands = {
   phonologie: 5,
 };
 
-test("each part has its own full-development time, and one shared floor", () => {
-  // #189's figures as corrected by the user: eight minutes for the debat, and
-  // for the exposé its own announced maximum, because seven is the longest it
-  // can run. They replaced 168 s and 312 s (40 % of each part's expected time).
-  // The whole argument is on `FULL_DEVELOPMENT_SECONDS`; the matrix that
-  // exercises it is in `duration-tiers.test.ts`.
-  assert.equal(FULL_DEVELOPMENT_SECONDS.monologue, 420);
+test("each part has its own full-development time and its own floor", () => {
+  // #189's figures as twice corrected by the user: ten minutes for the débat,
+  // four for the exposé, and a floor apiece. They replaced 168 s and 312 s
+  // (40 % of each part's expected time). The whole argument is on
+  // `FULL_DEVELOPMENT_SECONDS`; the matrix that exercises it is in
+  // `duration-tiers.test.ts`.
+  assert.equal(FULL_DEVELOPMENT_SECONDS.monologue, 240);
   assert.equal(FULL_DEVELOPMENT_SECONDS.debate, 600);
-  assert.equal(SHORT_DEVELOPMENT_SECONDS, 240);
+  assert.equal(SHORT_DEVELOPMENT_SECONDS.monologue, 150);
+  assert.equal(SHORT_DEVELOPMENT_SECONDS.debate, 240);
 });
 
 test("a part under the full threshold is short even when the other one is not", () => {
@@ -263,7 +264,7 @@ test("scoreSitting docks before it tests the floor", () => {
   // the other side of it. Testing the floor against the pre-penalty score would
   // pass a candidate the rubric has just failed.
   const scored = scoreSitting(bands(1), {
-    monologueSeconds: 400,
+    monologueSeconds: 180,
     debateSeconds: 10,
     ...SPOKE,
     phonologyHeard: true,
@@ -406,14 +407,14 @@ test("the duration penalty still applies on top of a capped phonologie", () => {
   // Two independent rules, and a sitting can earn both. Neither is allowed to
   // swallow the other.
   const scored = scoreSitting(bands(5), {
-    monologueSeconds: 400,
+    monologueSeconds: 180,
     debateSeconds: 10,
     ...SPOKE,
     phonologyHeard: false,
   });
 
   assert.equal(scored.rawScore25, 23, "capped before the sum");
-  // 400 s of monologue is now the middle tier (one band off réalisation de la
+  // 180 s of monologue is the middle tier (one band off réalisation de la
   // tâche, 5 → 3) and 10 s of débat the bottom one (interaction 5 → 1).
   assert.equal(scored.durationPenalty, 6);
   assert.equal(scored.score25, 17);
