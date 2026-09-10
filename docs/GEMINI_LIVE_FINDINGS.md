@@ -127,6 +127,57 @@ Three consequences, all handled:
   the route refuses to grade a part the microphone heard at length and the
   transcript does not contain, rather than scoring it as an absence.
 
+## 7. A session can stop listening with the socket still open (#218)
+
+The failure that has no error attached to it. A Live session keeps its WebSocket
+open, keeps answering nothing, and stops emitting `inputTranscription` for audio
+that is still being streamed to it. No `error`, no `close`, no `goAway` — every
+recovery `session-manager.ts` owns is triggered by one of those three, so from
+inside the app a dead session is indistinguishable from a candidate who has
+stopped talking. It presents as the relance ladder asking « Vous m'entendez ? »
+on a loop over somebody who is answering.
+
+Eight-turn débats against the real service, shipped `debateConfig`, the same
+9.5 s of French TTS spoken into each turn:
+
+| Examiner                                        | Config         | Turns heard          | Examiner audio before it died |
+| ----------------------------------------------- | -------------- | -------------------- | ----------------------------- |
+| `gemini-3.1-flash-live-preview`                 | as shipped     | **8 / 8**            | — (still speaking at turn 8)  |
+| `gemini-2.5-flash-native-audio-preview-12-2025` | as shipped     | 3, then intermittent | ~53 s                         |
+| `gemini-2.5-flash-native-audio-preview-12-2025` | no compression | 6, then nothing      | ~92 s                         |
+
+So `contextWindowCompression` is not the trigger — removing it only postpones
+the death — and the default examiner does not do this at all.
+
+**A reconnect revives it.** Probed directly: a session that had gone deaf at
+2:23 was closed, reopened with its resumption handle, and both spoke (11 s) and
+heard the candidate again. That is what makes this recoverable rather than
+merely reportable, and it is what `ExamController.checkSessionDeafness` does —
+voiced seconds measured by the recorder in the tab, with no transcription coming
+back, is the only evidence available that the socket has stopped listening.
+
+## 8. Generation runs ~3× faster than speech, and `turnComplete` does not always wait
+
+Measured on one opening question per model:
+
+| Examiner                                        | Audio  | Delivered over | `turnComplete` | Playback would end |
+| ----------------------------------------------- | ------ | -------------- | -------------- | ------------------ |
+| `gemini-3.1-flash-live-preview`                 | 14.8 s | 4.4 s (3.3×)   | 17.3 s         | 16.5 s             |
+| `gemini-2.5-flash-native-audio-preview-12-2025` | 17.0 s | 5.8 s (2.9×)   | 12.2 s         | 22.8 s             |
+
+Two consequences the app has to hold:
+
+- The player's queue GROWS monotonically for `audio ÷ 3` seconds at the start of
+  every turn. Anything that reads "the queue is not shrinking" as a dead speaker
+  is wrong on every turn longer than ~18 seconds of speech — which is what
+  `PLAYBACK_STALL_MS` did until #218. `AudioContext.currentTime` is the honest
+  signal: it moves during the burst and stands still in the fault.
+- The default examiner paces `turnComplete` to roughly the natural end of the
+  speech; the native-audio one sends it as soon as the bytes are out, ten
+  seconds before the candidate has heard the question. Anything armed on
+  `turnComplete` — the silence window above all — has to be held by the speaker,
+  not by the turn.
+
 ---
 
 ## The three claims, as verified
