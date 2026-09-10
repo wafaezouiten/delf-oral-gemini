@@ -12,6 +12,10 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Sibling checkouts, when two sessions work this repository at once. The
+    // patterns above are anchored at the root, so a built worktree's own
+    // `.next/types/*` is not covered by `.next/**` and was linted as source.
+    ".claude/worktrees/**",
   ]),
 ]);
 
