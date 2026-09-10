@@ -12,7 +12,7 @@
  * the test needs from this file is French, continuous and long enough to loop
  * without an obvious seam; it does not need the words to be an argument.
  *
- *   pnpm tsx scripts/make-expose-wav.ts [out.wav]
+ *   pnpm test:e2e:wav [out.wav]
  */
 
 import { readFileSync, readdirSync, writeFileSync } from "node:fs";
