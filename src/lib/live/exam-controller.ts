@@ -153,6 +153,10 @@ export interface PlayerLike {
    *  throw it away, so a question the candidate never heard leaves a record of
    *  how much of it there was. See {@link ExamController.handleInterruption}. */
   readonly bufferedSeconds: number;
+  /** The speaker's own clock. Read only for whether it MOVED between two ticks,
+   *  which is how {@link ExamController.examinerPlaybackHold} tells a dead
+   *  device from a full one. */
+  readonly playedSeconds: number;
 }
 
 /** Diagnostics from the audio layer, routed into the same session log the
@@ -641,15 +645,68 @@ const OPENING_DRAIN_GRACE_MS = 1_000;
  * relance, no « Vous m'entendez ? », no line in the log. Waiting for that audio
  * is waiting for a bus that has been cancelled.
  *
- * So progress is what earns the hold: the buffer DROPPING between ticks, which
- * is what actual playback does continuously. Six seconds without a single drop,
- * with audio queued, is a stall — longer than the burst in which Gemini streams
- * a whole turn into the queue (buffered grows for two or three seconds while
- * generation outruns playback, and that must not read as a stall), and shorter
- * than the first silence window, so a dead speaker costs seconds rather than
- * the épreuve.
+ * So progress is what earns the hold: the speaker's own CLOCK moving between
+ * ticks, which is what a running context does continuously and a suspended one
+ * cannot do at all. Six seconds of a frozen clock, with audio queued, is a
+ * stall — shorter than the first silence window, so a dead speaker costs
+ * seconds rather than the épreuve.
+ *
+ * It used to be the QUEUE that had to move, and six seconds was chosen to clear
+ * the burst in which Gemini streams a whole turn in faster than it is spoken.
+ * That burst is not two or three seconds — measured against the real service it
+ * is `audio ÷ 3`, so any turn past ~18 seconds of speech outgrew the threshold
+ * and was called dead while it was playing perfectly (#218). The clock does not
+ * have to be given the benefit of any doubt; it either moved or it did not.
  */
 const PLAYBACK_STALL_MS = 6_000;
+
+/**
+ * How much of the candidate's own speech may go unanswered by the SESSION
+ * before the app stops believing the session is listening (#218).
+ *
+ * Not a fact about the candidate — a fact about the socket. A Gemini Live
+ * session can stop ingesting audio while the WebSocket stays open and healthy:
+ * no error, no `close`, no `goAway`, nothing for `session-manager.ts` to react
+ * to. Measured on `gemini-2.5-flash-native-audio-preview-12-2025`, an 8-turn
+ * débat against the real service went silent and deaf after ~50 seconds of the
+ * examiner's own speech and never recovered; with `contextWindowCompression`
+ * removed it lasted to ~90 seconds and then did the same. The default examiner
+ * ran the same script with all eight turns heard.
+ *
+ * From inside the tab that failure is indistinguishable from a candidate who
+ * has stopped talking — which is why it presents as « Vous m'entendez ? » on a
+ * loop over someone who is answering. The one thing the app knows that the
+ * socket does not is that the MICROPHONE is still carrying speech: the recorder
+ * measures voiced seconds locally (`audio/voice-activity.ts`). Voiced audio
+ * going in with no transcription coming back is the signature, and eight
+ * seconds of it is far past any answer a live session swallows in passing.
+ */
+const DEAF_VOICED_SECONDS = 8;
+
+/**
+ * How long the microphone must then be QUIET before the verdict is taken.
+ *
+ * Transcription does not arrive while the candidate speaks — it arrives when
+ * the service's voice-activity detection declares the turn over, ~1.5 s of
+ * silence later, plus delivery. So a healthy session looks exactly like a deaf
+ * one for as long as the candidate keeps talking, and a watchdog without this
+ * would cut the connection under a candidate mid-answer, which is the one thing
+ * worse than the fault it is fixing. Four seconds is the VAD window plus the
+ * delivery gap, with room to spare.
+ */
+const DEAF_QUIET_MS = 4_000;
+
+/**
+ * How many times one débat may be reconnected on this evidence.
+ *
+ * The reconnect is cheap and mostly invisible — a token mint and a resume — but
+ * it is not free: a session that comes back without its memory is answered with
+ * a directive (#133), and a candidate does not want to be re-greeted every
+ * minute. Three is enough to carry a 13-minute débat over a model that dies
+ * once, and few enough that a model dying repeatedly ends up in the log as
+ * itself rather than as an endless recovery.
+ */
+const MAX_DEAF_RECONNECTS = 3;
 
 const SILENCE_HELD_REPORT_MS = 3 * SILENCE_STEP_MS;
 
@@ -1077,16 +1134,29 @@ export class ExamController {
   /**
    * The playback-progress ledger behind {@link PLAYBACK_STALL_MS}.
    *
-   * `lastBufferedSeconds` is compared, not displayed: a drop between two ticks
-   * is proof the audio is really reaching the speaker. `playbackStalled` is
-   * sticky across enqueues on purpose — new audio landing in a dead player
-   * grows the buffer without draining it, and growth must not read as recovery
-   * or every relance sent into the stall would re-arm the very hold that
-   * swallowed the last one. Only a drop clears it. Deliberately NOT reset at a
+   * `lastPlayedSeconds` is compared, not displayed: the speaker's clock moving
+   * between two ticks is proof the device is really playing. `playbackStalled`
+   * is sticky across enqueues on purpose — new audio landing in a dead player
+   * changes nothing about the clock, and must not read as recovery, or every
+   * relance sent into the stall would re-arm the very hold that swallowed the
+   * last one. Only the clock moving clears it. Deliberately NOT reset at a
    * phase boundary: the player is the sitting's, and a context that died in the
    * monologue is still dead when the débat opens.
+   *
+   * **It used to be the QUEUE that was compared** — a `bufferedSeconds` that
+   * fell between two ticks — and that could not tell a dead speaker from a full
+   * one (#218). Gemini streams a turn in about three times faster than it is
+   * spoken, so the queue grows monotonically for `audio ÷ 3` seconds at the
+   * start of every turn; measured against the real service, that is 4.4 s for a
+   * 14.8 s question on `gemini-3.1-flash-live-preview` and 5.8 s for a 17 s one
+   * on `gemini-2.5-flash-native-audio-preview-12-2025`. Any turn past ~18
+   * seconds of speech therefore spent longer than {@link PLAYBACK_STALL_MS}
+   * growing, was declared a dead speaker, and had the hold taken off it — which
+   * put « Vous m'entendez ? » inside a question the candidate was still
+   * listening to. The clock has no such ambiguity: it moves in the burst and
+   * stands still in the fault.
    */
-  private lastBufferedSeconds = 0;
+  private lastPlayedSeconds = 0;
   private playbackStuckSince: number | null = null;
   private playbackStalled = false;
 
@@ -1095,6 +1165,26 @@ export class ExamController {
    *  a single voiced frame is not somebody answering. */
   private lastVoicedSeconds = 0;
   private lastVoicedAt: number | null = null;
+
+  /**
+   * The deafness ledger (#218): what the microphone has carried that the
+   * session never acknowledged.
+   *
+   * `unheardVoicedSeconds` accumulates voiced seconds and is zeroed by any
+   * candidate transcription — the session proving it is still listening.
+   * `unheardSince` is when that stretch of speech last grew, so
+   * {@link DEAF_QUIET_MS} can be measured from the candidate STOPPING rather
+   * than from the start of an answer they are still giving. `deafBaseline` is
+   * the recorder's own total at the last reading; it is null until the ledger
+   * is opened, which is what keeps the seconds recorded before the débat out of
+   * it.
+   */
+  private deafBaseline: number | null = null;
+  private unheardVoicedSeconds = 0;
+  private unheardSince: number | null = null;
+  /** Bounded by {@link MAX_DEAF_RECONNECTS}, and counted per sitting rather than
+   *  per session: three recoveries is three, whichever socket needed them. */
+  private deafReconnects = 0;
 
   /**
    * The next thing the examiner says is a new turn, not more of the last one
@@ -2207,6 +2297,133 @@ export class ExamController {
   }
 
   /**
+   * The session delivered a transcription of the candidate: it is listening
+   * (#218).
+   *
+   * Called from the session's own callback rather than from
+   * {@link addFragment}, and the difference matters — this is a claim about the
+   * SOCKET, and the only fragments that prove anything about the socket are the
+   * ones that arrived on it. A typed turn in the development text mode proves
+   * nothing, and the monologue's transcription is written into the transcript
+   * long after the session that failed to speak it has been closed.
+   */
+  private noteSessionHeard(): void {
+    this.unheardVoicedSeconds = 0;
+    this.unheardSince = null;
+  }
+
+  /** Forget what the microphone carried, without crediting the session for it.
+   *  Used where the seconds are not evidence — no socket to be deaf, no
+   *  recorder to trust — so a stretch of them cannot accumulate into a verdict
+   *  about a session that was never asked. */
+  private resetDeafnessLedger(): void {
+    this.unheardVoicedSeconds = 0;
+    this.unheardSince = null;
+    this.deafBaseline = null;
+  }
+
+  /**
+   * Whether the live session has stopped listening, and the reconnect that
+   * answers it (#218).
+   *
+   * **The failure.** A Gemini Live session can stop ingesting audio while its
+   * WebSocket stays open: no error, no `close`, no `goAway`. Every recovery
+   * `session-manager.ts` owns is triggered by one of those three, so the app
+   * streams the microphone into a session that will never answer, and the only
+   * thing that happens is {@link checkCandidateSilence} reading its own silence
+   * as the candidate's and asking « Vous m'entendez ? » on a loop over someone
+   * who is talking. Reproduced against the real service on
+   * `gemini-2.5-flash-native-audio-preview-12-2025`; see
+   * {@link DEAF_VOICED_SECONDS} for the runs.
+   *
+   * **The evidence.** Voiced seconds measured by the recorder in this tab, with
+   * no transcription coming back on the socket. Both halves are required and
+   * neither is enough: a candidate can be silent (no voiced audio, nothing to
+   * transcribe, healthy session) and a candidate can be mid-answer (voiced
+   * audio, nothing transcribed YET, healthy session — transcription arrives
+   * when the service declares the turn over, not while they speak). So the
+   * verdict needs {@link DEAF_VOICED_SECONDS} of speech AND
+   * {@link DEAF_QUIET_MS} of quiet after it.
+   *
+   * **What it is not allowed to read.** Anything the examiner's own voice put
+   * in the room, which is why the growth is discarded whole while the speaker
+   * or a consigne is audible; and anything at all while the socket is down,
+   * where the manager's own reconnect owns the recovery and audio is being
+   * buffered rather than ignored.
+   *
+   * **The answer.** A forced reconnect — the same path a `goAway` takes,
+   * resumption handle and all. Probed: a session that had gone deaf came back
+   * on the handle and both spoke and heard again, which is what makes this
+   * worth doing rather than merely worth reporting.
+   *
+   * Returns whether it fired, so `tick()` can leave the relance alone on a tick
+   * that has just pulled the socket out from under it.
+   */
+  private checkSessionDeafness(): boolean {
+    if (this.phase !== "debate" || this.closing || this.devTextMode) return false;
+    // The monologue is excluded by the phase check above and would have to be:
+    // manual voice-activity detection emits no transcription at all until the
+    // phase's `activityEnd` (#206), so an unanswered microphone is what a
+    // HEALTHY monologue looks like from here.
+    if (!this.recorder || this.captureLost || this.captureStalled) {
+      this.resetDeafnessLedger();
+      return false;
+    }
+    if (this.connection !== "connected") {
+      this.resetDeafnessLedger();
+      return false;
+    }
+
+    const now = this.now();
+    const voiced = this.recorder.voicedSeconds("debate");
+    const baseline = this.deafBaseline;
+    // Moved on EVERY tick, including the ones that bail out below. That is what
+    // makes the echo holds discard those seconds rather than merely skip them:
+    // left unmoved, the growth an examiner turn put in the microphone would be
+    // waiting in the difference and land whole on the first quiet tick after
+    // it. Read once above and compared below, so the update can sit here.
+    this.deafBaseline = voiced;
+    // The first reading only opens the ledger. Without this the seconds the
+    // microphone carried before the débat's session was up would all land in
+    // the first tick as one unanswered stretch.
+    if (baseline === null) return false;
+
+    if (this.examinerSpeaking || (this.player?.bufferedSeconds ?? 0) > 0) return false;
+    if (this.announcementPlaying) return false;
+
+    const grew = voiced - baseline;
+    if (grew > 0) {
+      this.unheardVoicedSeconds += grew;
+      this.unheardSince = now;
+    }
+
+    if (this.unheardVoicedSeconds < DEAF_VOICED_SECONDS) return false;
+    if (this.unheardSince === null || now - this.unheardSince < DEAF_QUIET_MS) return false;
+
+    const unheard = Number(this.unheardVoicedSeconds.toFixed(1));
+    this.resetDeafnessLedger();
+
+    if (this.deafReconnects >= MAX_DEAF_RECONNECTS) {
+      // Said once per verdict rather than suppressed: a débat that keeps
+      // reaching this is the model failing repeatedly, and that belongs in the
+      // log of the sitting it cost.
+      this.log("live-session-deaf-unrecovered", { unheard, reconnects: this.deafReconnects });
+      return false;
+    }
+
+    this.deafReconnects += 1;
+    this.log("live-session-deaf", { unheard, attempt: this.deafReconnects });
+    void this.forceReconnect();
+    // The relance ladder is measuring the same silence and reading it as the
+    // candidate's. It is left armed and merely re-anchored: the recovery is
+    // about to put a question into the room, and a nudge sent into a socket
+    // being replaced is a nudge dropped without a word (`sendDirective` opens
+    // with `if (!this.socket) return`).
+    if (this.silenceSince !== null) this.silenceSince = now;
+    return true;
+  }
+
+  /**
    * Whether the microphone has been carrying speech since the last look.
    *
    * A rate, not a change. The recorder's voiced total was built to answer "did
@@ -2234,28 +2451,36 @@ export class ExamController {
    * Whether the examiner is audibly speaking, as far as the watch is concerned
    * — and null the moment that claim stops being checkable.
    *
-   * Playing audio DRAINS: `bufferedSeconds` falls between any two ticks that
-   * playback crossed. A queue that holds its level while audio is scheduled is
-   * one of two things — Gemini streaming a turn in faster than real time
-   * (buffered grows for a few seconds, then drains for the rest of the turn),
-   * or a speaker that has died and will never play what it holds. The first
-   * clears itself well inside {@link PLAYBACK_STALL_MS}; the second is declared
-   * a stall: logged once, answered with a `resume()` in case the context merely
-   * suspended, and the hold is dropped so the silence escalation runs — the
-   * question is on screen even when the room is silent, and « Vous
-   * m'entendez ? » is the precise thing to ask over a speaker that may be dead.
+   * Playing audio MOVES THE SPEAKER'S CLOCK: `playedSeconds` advances between
+   * any two ticks that playback crossed, and stands still in the one fault this
+   * is written against — a suspended `AudioContext` that schedules every chunk
+   * and plays none. That is declared a stall: logged once, answered with a
+   * `resume()` in case the context merely suspended, and the hold is dropped so
+   * the silence escalation runs — the question is on screen even when the room
+   * is silent, and « Vous m'entendez ? » is the precise thing to ask over a
+   * speaker that may be dead.
    *
-   * A drop is also what ends a stall, because it is the one thing a dead
-   * speaker cannot do. Growth is not recovery: every relance sent into the
-   * stall enqueues more audio, and letting that re-arm the hold would hand the
-   * watch back to the fault it just escaped.
+   * **The queue is the wrong instrument for this and was the one used** (#218):
+   * a queue that is not shrinking is either that dead context or Gemini
+   * streaming a turn in faster than it is spoken, and no threshold separates
+   * them — see {@link lastPlayedSeconds} for the measurements that put a
+   * healthy burst on the wrong side of it. The clock separates them exactly.
+   *
+   * The clock moving is also what ends a stall, because it is the one thing a
+   * dead speaker cannot do. More audio is not recovery: every relance sent into
+   * the stall enqueues another turn, and letting that re-arm the hold would
+   * hand the watch back to the fault it just escaped.
    */
   private examinerPlaybackHold(now: number): string | null {
     const buffered = this.player?.bufferedSeconds ?? 0;
-    const dropped = buffered < this.lastBufferedSeconds;
-    this.lastBufferedSeconds = buffered;
+    const played = this.player?.playedSeconds ?? 0;
+    // CHANGED, not advanced: a player replaced mid-sitting starts its clock at
+    // zero again, and a comparison that only accepted growth would then read a
+    // healthy new context as frozen for as long as the old one had run.
+    const moving = played !== this.lastPlayedSeconds;
+    this.lastPlayedSeconds = played;
 
-    if (dropped) {
+    if (moving) {
       this.playbackStuckSince = null;
       if (this.playbackStalled) {
         this.playbackStalled = false;
@@ -2271,10 +2496,10 @@ export class ExamController {
 
     // A speaking flag with an empty queue cannot stall — it is the real
     // player's last instant of a turn, and the fakes' whole fiction — so the
-    // clock only runs while there is audio that ought to be draining.
+    // clock only runs while there is audio that ought to be playing.
     if (buffered <= 0) {
       this.playbackStuckSince = null;
-    } else if (!dropped) {
+    } else if (!moving) {
       this.playbackStuckSince ??= now;
       if (now - this.playbackStuckSince >= PLAYBACK_STALL_MS) {
         this.playbackStalled = true;
@@ -3588,6 +3813,11 @@ export class ExamController {
     // turn is not a reply to anything the débat's candidate will say.
     this.cueCandidateVoiceAt = null;
     this.examinerTurnEndedAt = null;
+    // The deafness ledger is about a socket, and this is a new one (#218). The
+    // COUNT of recoveries deliberately survives: it bounds the sitting, not the
+    // session, and a session opened by the last recovery must not hand itself a
+    // fresh budget.
+    this.resetDeafnessLedger();
 
     const callbacks: SessionManagerCallbacks = {
       onStateChange: (state) => {
@@ -3609,7 +3839,13 @@ export class ExamController {
         this.connection = state;
         this.emit();
       },
-      onCandidateTranscript: (text) => this.addFragment("candidate", text),
+      onCandidateTranscript: (text) => {
+        // Proof the socket is still ingesting audio, and the only proof there
+        // is (#218). Before the append, so it holds even for a fragment the
+        // transcript itself drops as blank.
+        this.noteSessionHeard();
+        this.addFragment("candidate", text);
+      },
       onExaminerTranscript: (text) => this.addFragment("examiner", text),
       onExaminerAudio: (base64) => this.player?.enqueue(base64),
       onInterrupted: () => this.handleInterruption(),
@@ -4253,6 +4489,13 @@ export class ExamController {
     // Which of the two wins does not much matter — a cue and a relance both end
     // in the examiner asking something — but sending both does.
     if (this.checkDebateTimeCue()) return;
+    // Before the relance and after everything that speaks (#218). A session
+    // that has stopped listening is the one reading of a silent room that the
+    // relance cannot help with — nudging a deaf socket is how a candidate ends
+    // up being asked « Vous m'entendez ? » four times while answering — so the
+    // reconnect gets the tick, and the ladder resumes against the session that
+    // comes back.
+    if (this.checkSessionDeafness()) return;
     this.checkCandidateSilence();
   }
 

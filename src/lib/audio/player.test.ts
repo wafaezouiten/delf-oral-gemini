@@ -423,6 +423,24 @@ describe("teardown", () => {
     h.player.enqueue(chunk(40));
     assert.equal(context.sources.length, 0);
   });
+
+  it("reports the speaker's own clock, moving or not (#218)", async () => {
+    // What the silence watch reads to tell a dead device from a full one: a
+    // queue that is filling faster than it empties looks exactly like a
+    // suspended context, and the clock does not.
+    const h = harness();
+    await h.player.resume();
+    const context = h.context();
+
+    for (let i = 0; i < 5; i += 1) h.player.enqueue(chunk(500));
+    const frozen = h.player.playedSeconds;
+    h.player.enqueue(chunk(500));
+    assert.equal(h.player.playedSeconds, frozen, "queueing more is not playing any");
+    assert.ok(h.player.bufferedSeconds > 0, "and the queue really is holding audio");
+
+    context.advance(1);
+    assert.ok(h.player.playedSeconds > frozen, "time at the device is what moves it");
+  });
 });
 
 describe("a full monologue and débat", () => {

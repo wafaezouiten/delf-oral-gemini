@@ -401,6 +401,10 @@ class FakePlayer implements PlayerLike {
   get bufferedSeconds(): number {
     return this.chunks.length;
   }
+  /** The speaker's clock, moved only by {@link drain} — i.e. only by audio
+   *  actually reaching the device. A test that enqueues and never drains is
+   *  describing a context that plays nothing, and the clock says so. */
+  playedSeconds = 0;
   constructor(
     private readonly options: DeviceOptions = {},
     private readonly callbacks: { onSpeakingChange?: (speaking: boolean) => void } = {},
@@ -415,11 +419,13 @@ class FakePlayer implements PlayerLike {
   enqueue(base64: string): void {
     this.chunks.push(base64);
   }
-  /** Playback progressing: the real player's queue drains continuously while
-   *  audio is actually reaching the speaker, and a test that leaves the queue
-   *  frozen is describing a stalled one — see `examinerPlaybackHold`. */
+  /** Playback progressing: the real player's clock advances continuously while
+   *  audio is actually reaching the speaker, and a test that never drains is
+   *  describing a stalled one — see `examinerPlaybackHold`. The clock moves
+   *  even when the queue is already empty, because a running context's does. */
   drain(n = 1): void {
     this.chunks.splice(0, n);
+    this.playedSeconds += n;
   }
   interrupt(): void {
     this.interrupts += 1;
@@ -3563,6 +3569,191 @@ describe("breaking a silence in the débat (#84, #101)", () => {
     h.advanceClock(60);
 
     assert.deepEqual(h.session().directives, [], "the examiner listens, and that is the exercise");
+  });
+
+  it("does not read a long turn outrunning the speaker as a stall (#218)", async () => {
+    // The measured shape of the bug: Gemini streams a turn in about three times
+    // faster than it is spoken, so the QUEUE grows monotonically for `audio ÷ 3`
+    // seconds — 5.8 s for a 17-second question on the native-audio examiner. Six
+    // seconds without the queue shrinking used to be a dead speaker, so a long
+    // question was declared dead while it was playing, the hold came off, and
+    // « Vous m'entendez ? » went out inside the question the candidate was still
+    // listening to. What the speaker is actually doing is moving its clock.
+    const h = harness();
+    await intoSilentDebate(h);
+    const player = h.players[h.players.length - 1];
+
+    // Nine seconds of burst: three chunks queued per second, one played.
+    for (let second = 0; second < 9; second += 1) {
+      for (let chunk = 0; chunk < 3; chunk += 1) player.enqueue(`burst-${second}-${chunk}`);
+      h.advanceClock(1);
+      player.drain();
+    }
+    assert.ok(player.bufferedSeconds > 0, "the queue really did grow throughout");
+    assert.deepEqual(
+      events(h, "examiner-playback-stalled"),
+      [],
+      "a queue filling faster than it empties is a turn arriving, not a dead device",
+    );
+
+    for (let second = 0; second < 18; second += 1) {
+      h.advanceClock(1);
+      player.drain();
+    }
+    assert.deepEqual(nudges(h), [], "and the candidate was listening to all of it");
+  });
+});
+
+describe("a live session that stops listening (#218)", () => {
+  /** The examiner has asked its question and the floor is the candidate's, with
+   *  the speaker quiet — the state every case below starts from. */
+  async function intoAnsweringDebate(h: Harness): Promise<void> {
+    h.controller.start();
+    await h.controller.advanceEarly();
+    await pressRecord(h);
+    h.session().candidateSays("Le télétravail a transformé le rapport au bureau.");
+    h.advanceClock(SPOKEN_MONOLOGUE_SECONDS);
+    await h.controller.advanceEarly();
+    await completeClosing(h);
+    h.recorder.voiced.debate = 0;
+    h.session().examinerSays("Le bureau n'est-il pas ce qui fait tenir un collectif ?");
+    h.session().finishTurn();
+    // One tick of quiet floor, which is what opens the deafness ledger: the
+    // first reading is a baseline and never a verdict, so that the seconds the
+    // microphone carried before this session existed cannot land in it. The
+    // real heartbeat is 250 ms and does this before the candidate draws breath.
+    h.advanceClock(1);
+  }
+
+  /** The candidate speaks for `seconds`, measured by the microphone in this tab
+   *  and by nothing else: the session transcribes none of it. */
+  function speaksUnheard(h: Harness, seconds: number): void {
+    h.recorder.voiced.debate = (h.recorder.voiced.debate ?? 0) + seconds;
+    h.advanceClock(seconds);
+  }
+
+  const events = (h: Harness, name: string) =>
+    h.controller.getSnapshot().events.filter((event) => event.name === name);
+
+  it("reconnects when the microphone is carrying speech the socket never answers", async () => {
+    // The reported sitting: the examiner asks, the candidate answers, and
+    // nothing appears in the conversation — the session had stopped ingesting
+    // audio with the WebSocket still open, so no error, no close and no goAway
+    // ever reached the session manager. Only this tab knows the room is not
+    // silent.
+    const h = harness();
+    await intoAnsweringDebate(h);
+    const reconnectsBefore = h.session().reconnects;
+
+    speaksUnheard(h, 9);
+    assert.equal(h.session().reconnects, reconnectsBefore, "not while they are still talking");
+
+    h.advanceClock(5); // they stop, and the transcription that always follows does not
+    assert.equal(h.session().reconnects, reconnectsBefore + 1, "the session is replaced");
+    assert.equal(events(h, "live-session-deaf").length, 1, "and the sitting's log says why");
+  });
+
+  it("waits for the candidate to stop before deciding anything", async () => {
+    // Transcription arrives when the service declares the turn over, not while
+    // the candidate speaks. A watchdog without that in it would cut the socket
+    // out from under a long answer — which is worse than the fault it fixes.
+    const h = harness();
+    await intoAnsweringDebate(h);
+    const reconnectsBefore = h.session().reconnects;
+
+    for (let step = 0; step < 6; step += 1) speaksUnheard(h, 5);
+
+    assert.equal(
+      h.session().reconnects,
+      reconnectsBefore,
+      "thirty seconds of unbroken speech is an answer in progress",
+    );
+  });
+
+  it("counts nothing the examiner's own voice put in the room", async () => {
+    // Echo cancellation is a best effort. While the speaker is audible the
+    // microphone's voiced seconds are the examiner's, and reading them as an
+    // unanswered candidate would reconnect the session mid-question.
+    const h = harness();
+    await intoAnsweringDebate(h);
+    const player = h.players[h.players.length - 1];
+    const reconnectsBefore = h.session().reconnects;
+
+    player.speak(true);
+    for (let step = 0; step < 4; step += 1) speaksUnheard(h, 5);
+    player.speak(false);
+    h.advanceClock(6);
+
+    assert.equal(h.session().reconnects, reconnectsBefore, "that was the room, not an answer");
+  });
+
+  it("is answered by a transcription, however small", async () => {
+    const h = harness();
+    await intoAnsweringDebate(h);
+    const reconnectsBefore = h.session().reconnects;
+
+    speaksUnheard(h, 6);
+    h.session().candidateSays("Je ne suis pas d'accord");
+    speaksUnheard(h, 6);
+    h.advanceClock(5);
+
+    assert.equal(
+      h.session().reconnects,
+      reconnectsBefore,
+      "the socket proved it was listening, and the ledger starts again from there",
+    );
+  });
+
+  it("stands down while the socket is already being replaced", async () => {
+    // The manager owns that recovery, and audio is being buffered for it rather
+    // than ignored — a second reconnect on top would abandon the buffer.
+    const h = harness();
+    await intoAnsweringDebate(h);
+    h.session().emitStates("reconnecting");
+    const reconnectsBefore = h.session().reconnects;
+
+    speaksUnheard(h, 12);
+    h.advanceClock(5);
+
+    assert.equal(h.session().reconnects, reconnectsBefore);
+  });
+
+  it("gives up after three, and says so rather than looping", async () => {
+    // A model that dies once is worth carrying over. A model that dies every
+    // minute is a fact about the model, and it belongs in the log of the sitting
+    // it cost rather than in an endless recovery the candidate sits through.
+    const h = harness();
+    await intoAnsweringDebate(h);
+
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      // The quiet tick first: a recovery closes the ledger, and the reading that
+      // reopens it is a baseline rather than a verdict — the seconds the
+      // microphone carried while the socket was being replaced belong to no
+      // session.
+      h.advanceClock(1);
+      speaksUnheard(h, 9);
+      h.advanceClock(5);
+    }
+
+    assert.equal(events(h, "live-session-deaf").length, 3, "three recoveries and no more");
+    assert.equal(events(h, "live-session-deaf-unrecovered").length, 1, "the fourth is reported");
+  });
+
+  it("never applies to the monologue, where silence on the socket is the design", async () => {
+    // Manual voice-activity detection emits no transcription at all until the
+    // phase's `activityEnd` (#206), so seven minutes of unanswered microphone is
+    // what a HEALTHY exposé looks like from here.
+    const h = harness();
+    h.controller.start();
+    await h.controller.advanceEarly();
+    await pressRecord(h);
+    const reconnectsBefore = h.session().reconnects;
+
+    h.recorder.voiced.monologue = 40;
+    h.advanceClock(40);
+    h.advanceClock(10);
+
+    assert.equal(h.session().reconnects, reconnectsBefore, "the examiner is listening, in silence");
   });
 });
 
