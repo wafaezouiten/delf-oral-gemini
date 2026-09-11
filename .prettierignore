@@ -18,3 +18,9 @@ public/
 # Rewritten by `next dev` (see the note at the top of the file itself);
 # formatting it would fight the generator.
 AGENTS.md
+
+# Sibling checkouts, when two sessions work this repository at once. Untracked
+# and not in .gitignore, so the rule above about Prettier reading .gitignore
+# does not cover them — and a worktree that has been built carries its own
+# `.next/types/*`, which is generated code this repository never formats.
+.claude/worktrees/
