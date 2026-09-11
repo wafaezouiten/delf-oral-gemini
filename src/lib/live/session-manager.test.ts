@@ -263,6 +263,12 @@ function recorder(): { callbacks: SessionManagerCallbacks; log: Recorded } {
       },
       onTurnComplete: () => {
         log.turnCompletions += 1;
+        // Journaled alongside the session's own events, so a test can assert
+        // what the session did BEFORE the controller heard the boundary by
+        // reading one log in order (#224). Not an event the session emits:
+        // the name is the recorder's, and no assertion on the session's
+        // events should ever expect it.
+        log.events.push({ name: "turn-complete" });
       },
       onEvent: (name, detail) => log.events.push({ name, detail }),
     },
@@ -1052,26 +1058,21 @@ describe("the examiner's turn in flight (#220)", () => {
 
   it("releases the hold before the controller hears the turn is complete", async () => {
     // The controller answers a turn boundary with directives and cues; what the
-    // candidate said during the turn must reach the socket ahead of them.
+    // candidate said during the turn must reach the socket ahead of them. An
+    // ORDER, read off the one log the recorder keeps: the release is the
+    // session's event, the boundary is the recorder's marker.
     const h = harness();
     await h.session.connect();
-    let chunksAtTurnComplete = -1;
-    const socket = h.transport.socket;
-    // The session keeps the callbacks object by reference, so the hook can be
-    // installed after construction.
-    const callbacks = (h.session as unknown as { callbacks: SessionManagerCallbacks }).callbacks;
-    const onTurnComplete = callbacks.onTurnComplete;
-    callbacks.onTurnComplete = () => {
-      chunksAtTurnComplete = socket.audioChunks.length;
-      onTurnComplete();
-    };
 
-    socket.emit(examinerSpeaks());
+    h.transport.socket.emit(examinerSpeaks());
     h.session.sendAudio("chunk-a");
-    socket.emit(turnComplete);
+    h.transport.socket.emit(turnComplete);
 
-    assert.equal(chunksAtTurnComplete, 1);
-    assert.equal(h.log.turnCompletions, 1);
+    assert.deepEqual(
+      h.eventNames().filter((name) => name === "held-audio-released" || name === "turn-complete"),
+      ["held-audio-released", "turn-complete"],
+    );
+    assert.deepEqual(h.transport.socket.audioChunks, ["chunk-a"]);
   });
 
   it("opens the hold on the turn's transcription when that lands before its audio", async () => {
@@ -1154,15 +1155,86 @@ describe("the examiner's turn in flight (#220)", () => {
 
     h.transport.socket.emit(examinerSpeaks());
     h.session.sendAudio("during-the-turn");
+    // The replacement's mint is parked so the outage has a duration: with the
+    // test timers the reconnect is otherwise instant, and a chunk sent after
+    // it would go out live and prove nothing about the buffer.
+    const gate = h.transport.holdMint();
     h.transport.socket.drop();
     await flush();
     // The turn died with its socket: what follows is the ordinary outage path.
     h.session.sendAudio("during-the-outage");
-    h.timers.runScheduled();
+    gate.release();
     await flush();
 
     assert.equal(h.transport.sockets.length, 2);
     assert.deepEqual(h.transport.socket.audioChunks, ["during-the-turn", "during-the-outage"]);
+    assert.deepEqual(
+      h.eventNames().filter((name) => name.endsWith("-audio") || name.startsWith("held-audio")),
+      ["held-audio-released", "flushing-buffered-audio"],
+    );
+  });
+
+  it("carries the hold across a FRESH reconnect too, after the seed and before the recovery", async () => {
+    // #223. The socket dies mid-turn before any resumption handle arrived, so
+    // the replacement is the amnesia path (#133): a new session, re-seeded
+    // from the provider, told to pick the débat back up by a directive the
+    // controller sends in answer to `reconnected-fresh`. The candidate's held
+    // words have to land between those two — after the exchange the examiner
+    // is being reminded of, before the instruction to carry on — and ahead of
+    // what was said during the outage, in the order it was all said.
+    const h = harness({
+      initialHistory: () => [{ role: "user", parts: [{ text: "Mon exposé." }] }],
+    });
+    await h.session.connect();
+
+    h.transport.socket.emit(examinerSpeaks());
+    h.session.sendAudio("during-the-turn");
+    const gate = h.transport.holdMint();
+    h.transport.socket.drop();
+    await flush();
+    h.session.sendAudio("during-the-outage");
+    const eventsBeforeReconnect = h.log.events.length;
+    gate.release();
+    await flush();
+
+    assert.equal(h.transport.sockets.length, 2);
+    assert.equal(h.transport.socket.contents.length, 1, "the fresh session was re-seeded");
+    assert.deepEqual(h.transport.socket.audioChunks, ["during-the-turn", "during-the-outage"]);
+    const ordered = [
+      "history-seeded",
+      "held-audio-released",
+      "flushing-buffered-audio",
+      "reconnected-fresh",
+    ];
+    assert.deepEqual(
+      h
+        .eventNames()
+        .slice(eventsBeforeReconnect)
+        .filter((name) => ordered.includes(name)),
+      ordered,
+    );
+  });
+
+  it("drops a room-tone hold on a fresh reconnect rather than serving it to the re-seeded session", async () => {
+    // #223. Same path, nothing said: the hold is the room, and a session that
+    // has just been reminded of the exchange must not be handed a burst of it.
+    const h = harness();
+    await h.session.connect();
+
+    h.transport.socket.emit(examinerSpeaks());
+    for (let i = 0; i < 10; i += 1) h.session.sendAudio(SILENT);
+    h.transport.socket.drop();
+    await flush();
+    h.timers.runScheduled();
+    await flush();
+
+    assert.equal(h.transport.sockets.length, 2);
+    assert.deepEqual(h.transport.socket.audioChunks, []);
+    assert.deepEqual(
+      h.log.events.filter((event) => event.name === "held-audio-discarded").map((e) => e.detail),
+      [{ chunks: 10 }],
+    );
+    assert.ok(h.eventNames().includes("reconnected-fresh"));
   });
 
   it("does not hold during the monologue, whose examiner has no turn to speak into", async () => {
