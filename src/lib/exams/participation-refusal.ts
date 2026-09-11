@@ -54,6 +54,12 @@ function namedParts(parts: Array<"monologue" | "debate">): string {
  * evidence to offer either way: the first question is then asked of zeroes and
  * answers with nothing, and such a sitting behaves exactly as it did before
  * any of this existed.
+ *
+ * What « heard at length » means is entirely `partsSpokenButUntranscribed`'s
+ * business, and it is not one comparison any more — the seconds are measured
+ * with the examiner silent, and they are weighed both absolutely and against
+ * the time the candidate actually had. This module owns the ORDER of the two
+ * refusals and nothing else, which is the only part of it that was ever wrong.
  */
 export function participationRefusal(
   transcript: readonly TranscriptEntry[],

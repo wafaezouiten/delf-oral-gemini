@@ -360,13 +360,99 @@ export const PARTICIPATION_WORD_FLOOR = 20;
  * Note this is VOICED seconds, not recorded ones. A recording's length is how
  * long the part ran and a silent candidate's is just as long as anybody's;
  * `audio/voice-activity.ts` is what makes this a claim about a person.
+ *
+ * **And note it is a FLOOR, not the whole test.** On its own it is a claim
+ * about an absolute quantity of noise with no sense of how long the part gave
+ * the candidate to make it — fifteen seconds is most of a thirty-second gap
+ * between two questions and 2.3% of a thirteen-minute débat. That is how a
+ * candidate who answered nothing came to be read as one the app had lost. The
+ * proportion is the other half; see {@link PARTICIPATION_VOICED_SHARE}.
  */
 export const PARTICIPATION_VOICED_FLOOR = 15;
 
-/** Seconds of voiced audio measured per part, from the microphone. */
+/**
+ * And how much of the candidate's OWN time that voiced audio has to fill.
+ *
+ * The second half of the test, and the half that survives a room. The floor
+ * above asks "was there enough of it?"; this asks "was there enough of it for
+ * how long they had?" — voiced seconds over
+ * `PhaseArchive.soloSeconds`, the time recorded with nobody else audible.
+ *
+ * **Why a share separates the two populations and a count does not.** Consider
+ * the débat, where the failure was. If the candidate never speaks, the
+ * examiner fills nearly all of it — relance after relance into the silence —
+ * so their own time is a couple of minutes of dead air, and what lands in it
+ * is room tone, a cough, a chair. If the candidate DOES speak, their own time
+ * is both much longer and mostly full, because the gaps in the examiner's
+ * airtime exist precisely because somebody else was holding the floor. The two
+ * cases differ by a factor of several in proportion while both can clear
+ * fifteen absolute seconds.
+ *
+ * **A third, and here is the width of the gap it sits in.** Conversational
+ * French leaves something like a fifth to a third of a turn under the RMS
+ * threshold — breaths, stops between clauses, the pause before an example — so
+ * a candidate genuinely holding the floor measures somewhere near 0.7, and a
+ * hesitant one well clear of 0.33. Intermittent room noise in the silences
+ * runs at a small fraction of them. A third is comfortably below the first
+ * population and comfortably above the second, which is the only property this
+ * number needs; it is not tuned to a measurement, and there is no measurement
+ * of a real cohort to tune it to.
+ *
+ * **Which way it fails.** Set too high, this re-creates the failure the whole
+ * rule exists to prevent (#206): a genuine exposé lost in transcription is
+ * called absent, the mark is halved, and the correction page tells someone who
+ * spoke for seven minutes that they did not. Set too low, a walk-out is
+ * refused a mark and the sitting is discarded. Both are real harms, which is
+ * why this sits in the middle of the gap rather than at either edge of it —
+ * and why it is ANDed with the floor rather than replacing it: a share is
+ * meaningless over two seconds of opportunity, and the floor is what stops a
+ * part nobody had time to speak in from satisfying a proportion.
+ */
+export const PARTICIPATION_VOICED_SHARE = 1 / 3;
+
+/**
+ * What the microphone measured about one part, as evidence about a person.
+ *
+ * Both numbers are taken with the examiner NOT audible — see
+ * `PhaseArchive.soloVoicedSeconds` for why anything else is a measurement of
+ * the room rather than of the candidate.
+ */
+export interface PartSpeechEvidence {
+  /** Seconds of voiced audio, with nobody else audible. */
+  voicedSeconds: number;
+  /**
+   * Seconds recorded with nobody else audible at all — the candidate's own
+   * time, and the denominator {@link PARTICIPATION_VOICED_SHARE} is taken
+   * against.
+   *
+   * Undefined where the client did not measure it, which is a page loaded
+   * before it existed. The share is then not asked and the floor decides
+   * alone, exactly as it did on that page.
+   */
+  soloSeconds?: number;
+}
+
+/** Voiced speech measured per part, from the microphone. */
 export interface SittingVoicedSpeech {
-  monologueSeconds: number;
-  debateSeconds: number;
+  monologue: PartSpeechEvidence;
+  debate: PartSpeechEvidence;
+}
+
+/**
+ * Whether one part's audio is enough to contradict an empty transcript.
+ *
+ * Both tests, in the order they are cheapest to read: enough voiced audio in
+ * absolute terms, and enough of it relative to the time the candidate had.
+ * A part with no opportunity at all cannot pass — it cannot pass the floor
+ * either, since the voiced seconds are a subset of the solo ones, so the guard
+ * on the division is a guard against `0 / 0` rather than a rule of its own.
+ */
+function heardAtLength(evidence: PartSpeechEvidence): boolean {
+  if (evidence.voicedSeconds < PARTICIPATION_VOICED_FLOOR) return false;
+  const opportunity = evidence.soloSeconds;
+  if (opportunity === undefined) return true;
+  if (!(opportunity > 0)) return false;
+  return evidence.voicedSeconds / opportunity >= PARTICIPATION_VOICED_SHARE;
 }
 
 /**
@@ -393,22 +479,24 @@ export interface SittingVoicedSpeech {
  * instead: no mark at all is the only honest output when half the evidence is
  * gone, and it is the same judgement the route already makes about a transcript
  * that is empty outright.
+ *
+ * **What « heard at length » had to become.** It was one comparison — fifteen
+ * cumulative voiced seconds — and it swallowed every walk-out, because a
+ * microphone left open through a débat hears the examiner, the room and the
+ * gain control long before it hears nothing at all. It is now two, over a
+ * measure that excludes the examiner in the first place: see
+ * {@link PARTICIPATION_VOICED_FLOOR} and {@link PARTICIPATION_VOICED_SHARE},
+ * and `PhaseArchive.soloVoicedSeconds` for how the number is taken.
  */
 export function partsSpokenButUntranscribed(
   participation: SittingParticipation,
   voiced: SittingVoicedSpeech,
 ): Array<"monologue" | "debate"> {
   const lost: Array<"monologue" | "debate"> = [];
-  if (
-    participation.monologueWords < PARTICIPATION_WORD_FLOOR &&
-    voiced.monologueSeconds >= PARTICIPATION_VOICED_FLOOR
-  ) {
+  if (participation.monologueWords < PARTICIPATION_WORD_FLOOR && heardAtLength(voiced.monologue)) {
     lost.push("monologue");
   }
-  if (
-    participation.debateWords < PARTICIPATION_WORD_FLOOR &&
-    voiced.debateSeconds >= PARTICIPATION_VOICED_FLOOR
-  ) {
+  if (participation.debateWords < PARTICIPATION_WORD_FLOOR && heardAtLength(voiced.debate)) {
     lost.push("debate");
   }
   return lost;

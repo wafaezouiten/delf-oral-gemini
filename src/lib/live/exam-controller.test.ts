@@ -259,6 +259,33 @@ class FakeRecorder implements RecorderLike {
     return this.voiced[phase] ?? this.seconds[phase];
   }
 
+  /** Voiced audio with the examiner silent, defaulted to "the same" so a test
+   *  that does not care about the distinction does not have to state it. The
+   *  gap between the two is what the real archive measures; here it is set. */
+  solo: Record<RecordedPhase, number | null> = { monologue: null, debate: null };
+
+  soloVoicedSeconds(phase: RecordedPhase): number {
+    return this.solo[phase] ?? this.voicedSeconds(phase);
+  }
+
+  /** The candidate's own time, defaulted to the whole phase — an examiner who
+   *  never spoke, which is what the monologue is and what a test that does not
+   *  care about the share is describing. */
+  opportunity: Record<RecordedPhase, number | null> = { monologue: null, debate: null };
+
+  soloSeconds(phase: RecordedPhase): number {
+    return this.opportunity[phase] ?? this.seconds[phase];
+  }
+
+  /** Every value the controller pushed, in order — the flag's history rather
+   *  than its current state, because what matters is that it moves with the
+   *  examiner's voice and starts out matching it. */
+  playbackAudible: boolean[] = [];
+
+  setPlaybackAudible(audible: boolean): void {
+    this.playbackAudible.push(audible);
+  }
+
   /** Phases whose artefact was asked for on its own — the early encode the
    *  controller starts as the débat opens (#86). */
   prepared: RecordedPhase[] = [];
@@ -1670,20 +1697,80 @@ describe("recording the candidate", () => {
      * called the monologue absent, and halved the mark of a candidate who had
      * spoken for seven minutes — which is the failure this exists to stop
      * being reported as theirs.
+     *
+     * It is the SOLO measure that leaves the tab, not the plain one. See
+     * « the examiner's own voice is not the candidate's evidence » below.
      */
     it("carries what the microphone measured in each part", async () => {
       const h = harness();
       await intoMonologue(h);
       // After the phase opens: `h.recorder` is the device the controller asked
       // for, and nothing exists to configure until it has.
-      h.recorder.voiced.monologue = 284.4;
-      h.recorder.voiced.debate = 410.6;
+      h.recorder.solo.monologue = 284.4;
+      h.recorder.solo.debate = 410.6;
       await runToFinish(h, () => {});
 
       // Whole seconds: the comparison downstream is against a fifteen-second
       // floor, and a payload field is not the place for sample-accurate
       // fractions of one.
-      assert.deepEqual(h.finished[0]?.voicedSeconds, { monologue: 284, debate: 411 });
+      assert.deepEqual(h.finished[0]?.soloVoicedSeconds, { monologue: 284, debate: 411 });
+    });
+
+    /**
+     * The examiner's own voice is not the candidate's evidence.
+     *
+     * The sitting behind this: a full exposé, then a débat sat through in
+     * silence. The plain voiced measure read minutes of "speech" in that
+     * débat — the examiner coming back through an open microphone, plus room
+     * tone that `autoGainControl` lifts — the finish route read fifteen of
+     * those seconds as proof it had LOST the candidate's words, and refused
+     * the whole sitting as its own failure. The exposé went with it, and the
+     * halving that should have answered a walk-out never ran.
+     */
+    it("carries the measure the examiner cannot have produced", async () => {
+      const h = harness();
+      await intoMonologue(h);
+      // Forty seconds of audible room across a débat the candidate said
+      // nothing in, and none of it theirs.
+      h.recorder.voiced.debate = 40;
+      h.recorder.solo.debate = 0;
+      await runToFinish(h, () => {});
+
+      assert.equal(
+        h.finished[0]?.soloVoicedSeconds.debate,
+        0,
+        "a walk-out must reach the route as a walk-out, not as a lost transcript",
+      );
+    });
+
+    it("carries the time the candidate had, beside what they did with it", async () => {
+      // The denominator. Without it the seconds above are an absolute quantity
+      // with no sense of the part they sit in, and fifteen of them is most of a
+      // gap between two questions and a rounding error across a débat.
+      const h = harness();
+      await intoMonologue(h);
+      h.recorder.solo.debate = 30;
+      h.recorder.opportunity.debate = 120;
+      await runToFinish(h, () => {});
+
+      assert.equal(h.finished[0]?.soloSeconds.debate, 120);
+      assert.equal(h.finished[0]?.soloVoicedSeconds.debate, 30);
+    });
+
+    it("tells the microphone when the examiner is audible", async () => {
+      const h = harness();
+      await intoMonologue(h);
+
+      // Seeded at install, before the player has changed state again: a
+      // recorder that opened mid-sentence must not credit that sentence.
+      assert.equal(h.recorder.playbackAudible.length > 0, true);
+
+      const before = h.recorder.playbackAudible.length;
+      h.players[0].speak(true);
+      assert.equal(h.recorder.playbackAudible.at(-1), true);
+      h.players[0].speak(false);
+      assert.equal(h.recorder.playbackAudible.at(-1), false);
+      assert.equal(h.recorder.playbackAudible.length, before + 2);
     });
 
     it("reports zero for a part nobody spoke in, rather than nothing", async () => {
@@ -1698,7 +1785,7 @@ describe("recording the candidate", () => {
       h.recorder.voiced.debate = 0;
       await runToFinish(h, () => {});
 
-      const voiced = h.finished[0]?.voicedSeconds;
+      const voiced = h.finished[0]?.soloVoicedSeconds;
       assert.ok(voiced, "the field is present even when half of it is zero");
       assert.equal(voiced.debate, 0);
       assert.ok(voiced.monologue > 0, "and the part that did happen still reads as speech");

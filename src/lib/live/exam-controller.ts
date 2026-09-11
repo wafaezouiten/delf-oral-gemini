@@ -107,6 +107,19 @@ export interface RecorderLike {
   /** Of those, the seconds that carried speech. The two differ exactly when a
    *  microphone worked and the candidate did not speak into it. */
   voicedSeconds(phase: RecordedPhase): number;
+  /** And of THOSE, the seconds nobody else was audible for — the only one of
+   *  the three that survives a débat spent listening to the examiner through an
+   *  open microphone. See `PhaseArchive.soloVoicedSeconds`. */
+  soloVoicedSeconds(phase: RecordedPhase): number;
+  /** How long the candidate had to produce that: seconds recorded with the
+   *  examiner silent, speech or not. The denominator the route's share test is
+   *  taken against — see `PARTICIPATION_VOICED_SHARE`. */
+  soloSeconds(phase: RecordedPhase): number;
+  /** Tell the recorder the examiner is (or is no longer) being played into the
+   *  room, so it can keep the two voiced measures apart. Called from the
+   *  player's own `onSpeakingChange`, and once at install for a recorder that
+   *  opened mid-sentence. */
+  setPlaybackAudible(audible: boolean): void;
   /** Seconds recorded across the sitting. Read by the stall watchdog, which
    *  only cares that the number is still moving. */
   readonly recordedSeconds: number;
@@ -357,7 +370,8 @@ export interface ExamFinishedPayload {
    */
   earlyClosingCount: number;
   /**
-   * Seconds of VOICED audio the microphone measured, per part.
+   * Seconds of VOICED audio the microphone measured while the examiner was
+   * silent, per part.
    *
    * Not a duration and not a grade: the only question it answers is whether
    * the candidate was audibly in a part at all. The route pairs it with the
@@ -366,11 +380,31 @@ export interface ExamFinishedPayload {
    * the app having lost the words, never the candidate having declined to say
    * them. See `partsSpokenButUntranscribed` on the finish route.
    *
+   * **While the examiner was silent** is the whole of the fix for a walk-out
+   * being refused instead of halved. The plain voiced measure counts every
+   * frame over the threshold, including the examiner's own voice returning
+   * through an open microphone for most of a thirteen-minute débat — so a
+   * candidate who answered nothing still cleared the route's fifteen-second
+   * bar, and the sitting was thrown out as an app failure rather than graded on
+   * the exposé they had given. `PhaseArchive.soloVoicedSeconds` carries the
+   * arithmetic.
+   *
    * Zero for both when there was no recorder at all, and that is the truthful
    * reading: a sitting with no microphone has no evidence either way, and this
    * field only ever speaks up to excuse, never to accuse.
    */
-  voicedSeconds: Record<RecordedPhase, number>;
+  soloVoicedSeconds: Record<RecordedPhase, number>;
+  /**
+   * How long the candidate had to produce that, per part: seconds recorded
+   * while the examiner was silent, speech or not.
+   *
+   * Sent because the field above is not enough on its own. Fifteen voiced
+   * seconds is most of a thirty-second gap between two questions and a
+   * rounding error across a thirteen-minute débat, and only the two numbers
+   * together say which of those happened. The route divides them; see
+   * `PARTICIPATION_VOICED_SHARE`.
+   */
+  soloSeconds: Record<RecordedPhase, number>;
   /**
    * DEVELOPMENT ONLY — the seconds typed phases claim to have lasted (#36).
    * Undefined on every real sitting. See `ExamController`'s `devSeconds`.
@@ -1936,6 +1970,24 @@ export class ExamController {
       }
 
       this.recorder = recorder;
+      // Seeded rather than left false. The speaker is opened above and can be
+      // mid-sentence by the time the permission prompt is answered, and
+      // `onSpeakingChange` will not fire again until that sentence ends — so a
+      // recorder that assumed silence would credit the examiner's own voice to
+      // the candidate for exactly as long as the prompt was on screen.
+      //
+      // Which makes the order of the two devices in this method load-bearing:
+      // `examinerSpeaking` is only ever written by the player's
+      // `onSpeakingChange`, so opening the microphone first would seed from a
+      // field that still means "nobody has asked yet" rather than "the room is
+      // quiet". Checked rather than left to the reading, because that mistake
+      // is invisible in the recording and surfaces only as a grade.
+      if (!this.player) {
+        console.warn(
+          "[exam] the microphone opened before the speaker: playback state is a default, not a reading",
+        );
+      }
+      recorder.setPlaybackAudible(this.examinerSpeaking);
       // The development text mode can be switched on during preparation, before
       // there is any microphone to turn off. The device has to arrive already
       // paused, or the toggle silently means nothing for the phase it was
@@ -1996,6 +2048,9 @@ export class ExamController {
             this.openingTurnAudible = true;
           }
           this.examinerSpeaking = speaking;
+          // The microphone hears this room too, and cannot tell the speaker
+          // from the candidate. Told here, at the one place that knows.
+          this.recorder?.setPlaybackAudible(speaking);
           this.emit();
         },
         onEvent: (name, detail) => this.log(name, detail),
@@ -3985,9 +4040,16 @@ export class ExamController {
     // Read while the recorder still exists, for the same reason `phaseReports`
     // is: `discard()` is one line below and takes the samples these were
     // measured from with it.
-    const voicedSeconds: Record<RecordedPhase, number> = {
-      monologue: Math.round(recorder?.voicedSeconds("monologue") ?? 0),
-      debate: Math.round(recorder?.voicedSeconds("debate") ?? 0),
+    const soloVoicedSeconds: Record<RecordedPhase, number> = {
+      monologue: Math.round(recorder?.soloVoicedSeconds("monologue") ?? 0),
+      debate: Math.round(recorder?.soloVoicedSeconds("debate") ?? 0),
+    };
+    // The denominator, sent beside the numerator rather than divided here: the
+    // rule is the route's, and a share computed in the tab is a share the
+    // graded party chose the arithmetic for.
+    const soloSeconds: Record<RecordedPhase, number> = {
+      monologue: Math.round(recorder?.soloSeconds("monologue") ?? 0),
+      debate: Math.round(recorder?.soloSeconds("debate") ?? 0),
     };
     // The blobs are cut and own their bytes; the PCM behind them is a second
     // copy of a sitting, and this tab is about to load a results page.
@@ -4019,7 +4081,8 @@ export class ExamController {
       phases,
       reconnectCount: this.reconnectCount,
       earlyClosingCount: this.earlyClosingCount,
-      voicedSeconds,
+      soloVoicedSeconds,
+      soloSeconds,
       // Only when something was actually typed, so a real sitting sends no such
       // field at all rather than a pair of zeroes the route has to interpret.
       devSeconds:

@@ -256,10 +256,32 @@ export async function POST(request: Request, context: { params: Promise<{ examId
    * `participation-refusal.ts`. Asked here rather than after `readRecordings`
    * so a refusal is decided without spending the upload, and long before
    * anything paid is called.
+   *
+   * The evidence is `soloVoicedSeconds` over `soloSeconds` — voiced audio with
+   * the examiner silent, against the time the candidate had to produce it —
+   * and the numerator falls back to its predecessor only for a page loaded
+   * before that field existed. What arrives decides whether a candidate who sat
+   * out the débat is graded on half a mark or refused a mark at all; the
+   * schema's own comments carry the argument, and the rule itself is
+   * `partsSpokenButUntranscribed`.
+   *
+   * The two are resolved independently, and nothing in the schema ties them:
+   * a hand-built payload could pair the old `voicedSeconds` numerator, which
+   * counted the examiner's voice too, with the new `soloSeconds` denominator.
+   * Left that way on purpose. The mismatch inflates the share and so biases
+   * toward a refusal, never toward a mark — the safe direction a forged value
+   * is allowed to move in here — and the real client sends the pair together.
    */
+  const voiced = payload.soloVoicedSeconds ?? payload.voicedSeconds;
   const refusal = participationRefusal(payload.transcript, {
-    monologueSeconds: payload.voicedSeconds?.monologue ?? 0,
-    debateSeconds: payload.voicedSeconds?.debate ?? 0,
+    monologue: {
+      voicedSeconds: voiced?.monologue ?? 0,
+      soloSeconds: payload.soloSeconds?.monologue,
+    },
+    debate: {
+      voicedSeconds: voiced?.debate ?? 0,
+      soloSeconds: payload.soloSeconds?.debate,
+    },
   });
   if (refusal) {
     return NextResponse.json(

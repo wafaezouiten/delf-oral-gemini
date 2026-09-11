@@ -241,9 +241,14 @@ export function ExamClient({
         phases: payload.phases,
         reconnectCount: payload.reconnectCount,
         earlyClosingCount: payload.earlyClosingCount,
-        // What the microphone heard, per part. Only ever read to excuse a
-        // transcript the app lost — see the field on `finishPayloadSchema`.
-        voicedSeconds: payload.voicedSeconds,
+        // What the microphone heard with nobody else talking, per part. Only
+        // ever read to excuse a transcript the app lost — see the field on
+        // `finishPayloadSchema`, which is also where the older `voicedSeconds`
+        // this replaced is buried.
+        soloVoicedSeconds: payload.soloVoicedSeconds,
+        // And how long they had to produce it, which is what makes the first
+        // number mean something. The route divides; this tab does not.
+        soloSeconds: payload.soloSeconds,
         // Undefined on any sitting that was actually spoken, and ignored by the
         // route in a production build (#36).
         devSeconds: payload.devSeconds,

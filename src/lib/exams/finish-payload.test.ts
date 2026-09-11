@@ -388,5 +388,80 @@ describe("keeping the audit trail worth having", () => {
         false,
       );
     });
+
+    describe("and the half of it the examiner cannot have produced", () => {
+      // `soloVoicedSeconds`, which is what the route now weighs. Same shape and
+      // same bounds as the field it supersedes — held separately because it is
+      // a separate field on the wire for the length of one deploy, and a
+      // schema that only tested the old one would let the new one through
+      // unvalidated.
+      it("takes the same pair, under the same bounds", () => {
+        assert.equal(accepts(payload({ soloVoicedSeconds: { monologue: 280, debate: 3 } })), true);
+        assert.equal(accepts(payload({ soloVoicedSeconds: { monologue: 0, debate: 0 } })), true);
+        assert.equal(accepts(payload({ soloVoicedSeconds: { monologue: 280 } })), false);
+        assert.equal(
+          accepts(payload({ soloVoicedSeconds: { monologue: Number.NaN, debate: 0 } })),
+          false,
+        );
+        assert.equal(accepts(payload({ soloVoicedSeconds: { monologue: -1, debate: 0 } })), false);
+        assert.equal(
+          accepts(payload({ soloVoicedSeconds: { monologue: MAX_PHASE_SECONDS + 1, debate: 0 } })),
+          false,
+        );
+      });
+
+      it("takes a denominator under the same bounds", () => {
+        // `soloSeconds`, the candidate's own time. Bounded like every other
+        // duration here because it is a divisor: an unbounded one turns the
+        // share into an arbitrarily small number and the rule into a rubber
+        // stamp for every refusal.
+        assert.equal(accepts(payload({ soloSeconds: { monologue: 360, debate: 120 } })), true);
+        assert.equal(accepts(payload({ soloSeconds: { monologue: 0, debate: 0 } })), true);
+        assert.equal(accepts(payload({ soloSeconds: { debate: 120 } })), false);
+        assert.equal(
+          accepts(payload({ soloSeconds: { monologue: Number.NaN, debate: 0 } })),
+          false,
+        );
+        assert.equal(accepts(payload({ soloSeconds: { monologue: -1, debate: 0 } })), false);
+        assert.equal(
+          accepts(payload({ soloSeconds: { monologue: MAX_PHASE_SECONDS + 1, debate: 0 } })),
+          false,
+        );
+      });
+
+      it("does not require the two to be coherent, because the rule does not", () => {
+        // A numerator larger than its denominator is impossible from the
+        // archive — voiced solo samples are a subset of solo ones — and the
+        // schema still accepts it, because rejecting it here would cost a
+        // candidate their épreuve over a rounding disagreement between two
+        // `Math.round` calls. It can only ever make the share larger, which
+        // can only ever move the route towards refusing to grade; the floor
+        // and the transcript still have to agree with it.
+        assert.equal(
+          accepts(
+            payload({
+              soloVoicedSeconds: { monologue: 300, debate: 40 },
+              soloSeconds: { monologue: 299, debate: 39 },
+            }),
+          ),
+          true,
+        );
+      });
+
+      it("is optional, and may arrive beside its predecessor", () => {
+        // The deploy window, both directions: a page from before this field
+        // sends only the old one, and nothing forbids a page sending both.
+        assert.equal(accepts(payload({ soloVoicedSeconds: undefined })), true);
+        assert.equal(
+          accepts(
+            payload({
+              voicedSeconds: { monologue: 300, debate: 45 },
+              soloVoicedSeconds: { monologue: 295, debate: 3 },
+            }),
+          ),
+          true,
+        );
+      });
+    });
   });
 });
