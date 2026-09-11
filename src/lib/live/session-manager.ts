@@ -850,6 +850,11 @@ export class ExamLiveSession {
 
   private flushPendingAudio(): void {
     if (this.pendingAudio.length === 0) return;
+    // A true no-op with nothing to send to, not a logged one: the `onopen`
+    // call lands while `this.socket` is still null, and without this it
+    // reported a flush, sent nothing, and re-queued every chunk — a phantom
+    // `flushing-buffered-audio` in the session log ahead of the real one.
+    if (!this.socket || this.state !== "connected") return;
     const queued = this.pendingAudio;
     this.pendingAudio = [];
     this.bufferOverflowed = false;
