@@ -41,6 +41,8 @@ import {
   type LiveServerMessage,
 } from "@google/genai";
 
+import { base64ToInt16 } from "@/lib/audio/pcm";
+import { isVoiced } from "@/lib/audio/voice-activity";
 import { CLIENT_CONNECT_CONFIG, INPUT_MIME_TYPE, LIVE_MODEL } from "@/lib/gemini/constants";
 import type { OralTopic } from "@/lib/delf/topics";
 import { canTransition, describeTransition, type SessionState } from "./state-machine";
@@ -285,6 +287,49 @@ export class ExamLiveSession {
   private static readonly MAX_PENDING_CHUNKS = 50;
   /** Reported once per outage rather than once per dropped chunk. */
   private bufferOverflowed = false;
+
+  /**
+   * An examiner turn is in flight on the current socket: its first chunk has
+   * arrived and its `turnComplete` has not (#220).
+   *
+   * Under `activityHandling: NO_INTERRUPTION` the service does not queue the
+   * candidate's speech during a turn it is generating — it drops it. Measured
+   * against the real service with `debateConfig` as shipped
+   * (`scripts/probe-overlap.ts`): a sentence spoken entirely inside the
+   * examiner's turn produced no transcription and no reply, and a sentence that
+   * started inside the turn and ran past it was transcribed from the turn's
+   * edge onward, its opening clause gone. The comment on `debateConfig` used to
+   * promise the opposite.
+   *
+   * So while a turn is in flight the microphone is HELD here rather than
+   * streamed, and released as one burst at `turnComplete` — the same audio,
+   * delivered the moment the service will listen to it. Probed with the same
+   * script: both sentences came back complete, from the first word, and the
+   * examiner answered the short one. The window is bounded above by generation,
+   * which runs ~3× faster than speech (§8 of `docs/GEMINI_LIVE_FINDINGS.md`),
+   * so the burst is at most a third of the turn's length and lands well before
+   * the candidate has finished hearing it.
+   *
+   * What this cannot recover: the ~0.5 s between the server deciding the
+   * candidate's turn was over and its first chunk reaching this client. Nothing
+   * on this side can see that decision, so speech in that gap is still lost.
+   *
+   * **This is only correct because the débat forbids barge-in.** Under the
+   * default `activityHandling` a held chunk is an interruption the server never
+   * gets to hear, so the hold is keyed to the phase whose config pins
+   * `NO_INTERRUPTION` — and `live-config.test.ts` pins that pairing.
+   */
+  private examinerTurnInFlight = false;
+  /** Candidate audio held during an in-flight examiner turn, oldest first. */
+  private heldAudio: string[] = [];
+  /**
+   * Thirty seconds of chunks. Generation of even the longest examiner turn is
+   * a fraction of that; the cap exists for a turn that never completes — a
+   * session gone deaf (#218) — so the hold cannot grow for the rest of the
+   * épreuve. Past it the newest chunks are dropped and it is reported once.
+   */
+  private static readonly MAX_HELD_CHUNKS = 750;
+  private heldOverflowed = false;
   /**
    * Whether this session has ever been connected.
    *
@@ -475,6 +520,10 @@ export class ExamLiveSession {
       // have to land inside the reopened activity rather than in front of it.
       if (this.candidateActivityOpen) this.sendActivityStart("activity-reopened");
 
+      // A turn in flight died with the socket that was generating it; whatever
+      // the candidate said into it goes out first, then what they said during
+      // the outage — the order they were said in.
+      this.releaseHeldAudio();
       // Flushed HERE and not only in `onopen`, because `open()` resolves after
       // the socket is open: `onopen` therefore runs while `this.socket` is still
       // null, `sendAudio` refuses, and every buffered chunk is quietly pushed
@@ -537,9 +586,11 @@ export class ExamLiveSession {
       return;
     }
 
-    // This socket is done, so nothing further from it counts either.
+    // This socket is done, so nothing further from it counts either — the
+    // turn it was generating included.
     this.generation += 1;
     this.socket = null;
+    this.examinerTurnInFlight = false;
     this.clearGoAwayTimer();
 
     if (this.isFinished()) {
@@ -575,12 +626,28 @@ export class ExamLiveSession {
     const examinerText = content.outputTranscription?.text;
     if (examinerText) this.callbacks.onExaminerTranscript(examinerText);
 
+    const audio: string[] = [];
     for (const part of content.modelTurn?.parts ?? []) {
       const data = part.inlineData?.data;
-      if (data) this.callbacks.onExaminerAudio(data);
+      if (data) audio.push(data);
     }
 
-    if (content.turnComplete) this.callbacks.onTurnComplete();
+    // The turn opens on its first sign — text or audio, whichever lands first
+    // — and from here until `turnComplete` the microphone is held. See
+    // {@link examinerTurnInFlight}.
+    if ((examinerText || audio.length > 0) && this.holdsDuringExaminerTurn()) {
+      this.examinerTurnInFlight = true;
+    }
+    for (const data of audio) this.callbacks.onExaminerAudio(data);
+
+    if (content.turnComplete) {
+      // Released BEFORE the controller hears the turn is complete, so what the
+      // candidate said during it reaches the socket ahead of anything the
+      // controller sends in answer to the boundary — a directive, a cue.
+      this.examinerTurnInFlight = false;
+      this.releaseHeldAudio();
+      this.callbacks.onTurnComplete();
+    }
   }
 
   /**
@@ -740,6 +807,10 @@ export class ExamLiveSession {
       this.bufferAudio(base64);
       return;
     }
+    if (this.examinerTurnInFlight) {
+      this.holdAudio(base64);
+      return;
+    }
     try {
       this.socket.sendRealtimeInput({ audio: { data: base64, mimeType: INPUT_MIME_TYPE } });
     } catch (error) {
@@ -784,6 +855,60 @@ export class ExamLiveSession {
     this.bufferOverflowed = false;
     this.callbacks.onEvent("flushing-buffered-audio", { chunks: queued.length });
     for (const chunk of queued) this.sendAudio(chunk);
+  }
+
+  /**
+   * Whether this session holds the microphone during an examiner turn.
+   *
+   * The débat only. The monologue is manual VAD with the candidate's activity
+   * held open, so the examiner has no turn boundary to generate against while
+   * the candidate speaks, and its exposé is transcribed from the recording in
+   * any case (#206). The hold would cost nothing there and gain nothing.
+   */
+  private holdsDuringExaminerTurn(): boolean {
+    return this.phase === "debate";
+  }
+
+  /** Hold one chunk for the end of the examiner's turn, up to the cap. */
+  private holdAudio(base64: string): void {
+    if (this.heldAudio.length < ExamLiveSession.MAX_HELD_CHUNKS) {
+      this.heldAudio.push(base64);
+      return;
+    }
+    if (!this.heldOverflowed) {
+      this.heldOverflowed = true;
+      this.callbacks.onEvent("held-audio-overflow", { cap: ExamLiveSession.MAX_HELD_CHUNKS });
+    }
+  }
+
+  /**
+   * Send what was held during the turn, or drop it if nobody spoke.
+   *
+   * The common case is the quiet one: the candidate listens to the question
+   * and the hold is room tone plus whatever the browser's echo cancellation
+   * left of the examiner's own voice. Sending that back as a burst at every
+   * `turnComplete` would be pointless at best — and, if the residue crosses the
+   * detector's threshold, an echo served to the examiner in delayed form. So the
+   * hold is released only if at least one chunk in it crossed
+   * {@link isVoiced}'s bar, the same crude measure the recorder uses to say
+   * whether the microphone carried anything at all. A chunk that cannot be
+   * decoded is counted as voiced: what is in doubt is the candidate's words,
+   * and the cost of keeping room tone is a burst the server's VAD ignores.
+   *
+   * Released whole, silences included: they are the rhythm of the speech, and
+   * the server's silence window is what turns them into a turn boundary.
+   */
+  private releaseHeldAudio(): void {
+    if (this.heldAudio.length === 0) return;
+    const held = this.heldAudio;
+    this.heldAudio = [];
+    this.heldOverflowed = false;
+    if (!held.some(chunkIsVoiced)) {
+      this.callbacks.onEvent("held-audio-discarded", { chunks: held.length });
+      return;
+    }
+    this.callbacks.onEvent("held-audio-released", { chunks: held.length });
+    for (const chunk of held) this.sendAudio(chunk);
   }
 
   /**
@@ -869,6 +994,7 @@ export class ExamLiveSession {
     this.generation += 1;
     if (this.socket) this.discard(this.socket);
     this.socket = null;
+    this.examinerTurnInFlight = false;
   }
 
   /** End the phase for good. No reconnect follows. Safe to call twice. */
@@ -876,8 +1002,22 @@ export class ExamLiveSession {
     this.finished = true;
     this.clearGoAwayTimer();
     this.pendingAudio = [];
+    this.heldAudio = [];
     this.retireSocket();
     this.setState("closed");
+  }
+}
+
+/**
+ * Whether a base64 PCM16 chunk crossed the recorder's speech threshold.
+ *
+ * Kept, not dropped, when it cannot be decoded: see `releaseHeldAudio`.
+ */
+function chunkIsVoiced(base64: string): boolean {
+  try {
+    return isVoiced(base64ToInt16(base64));
+  } catch {
+    return true;
   }
 }
 

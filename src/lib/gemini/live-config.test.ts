@@ -107,6 +107,13 @@ describe("debate Live configuration", () => {
     // examiner. Nothing in the DELF exercice en interaction asks them to, and
     // every other way a turn can end is already the app's (the silence watch,
     // the time cues, the closing handshake).
+    //
+    // And it is load-bearing for more than the tuning (#220): the session
+    // manager HOLDS the débat's microphone while an examiner turn is in
+    // flight, because the service drops what it hears mid-generation under
+    // this setting. Under barge-in that hold would swallow the interruption
+    // the server is meant to act on. Flipping this line means removing the
+    // hold, not just the guarantee.
     const config = debateConfig({ topic: TOPIC });
     assert.equal(config.realtimeInputConfig?.activityHandling, ActivityHandling.NO_INTERRUPTION);
   });
