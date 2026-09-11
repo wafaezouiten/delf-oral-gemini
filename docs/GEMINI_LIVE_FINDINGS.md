@@ -178,6 +178,52 @@ Two consequences the app has to hold:
   `turnComplete` — the silence window above all — has to be held by the speaker,
   not by the turn.
 
+## 9. `NO_INTERRUPTION` drops the candidate's speech during a turn — it does not queue it (#220)
+
+`debateConfig` ships `activityHandling: NO_INTERRUPTION` (#158) so the
+examiner's own echo cannot cut its question short. The assumption written next
+to it was that speech during an examiner turn was still captured and
+transcribed, merely unable to interrupt. Probed (`scripts/probe-overlap.ts`):
+the examiner is asked its opening question, and 2 s after its first chunk the
+candidate (French TTS) starts speaking.
+
+| Utterance                                | Streamed live, as the app did       | Held, released at `turnComplete`        |
+| ---------------------------------------- | ----------------------------------- | --------------------------------------- |
+| 4.3 s, entirely inside the turn          | **no transcription, no reply**      | transcribed whole; the examiner replied |
+| 18.2 s, starting inside and running past | transcribed from the turn's edge on | transcribed whole, from the first word  |
+
+Timelines from the same run, default examiner `gemini-3.1-flash-live-preview`:
+
+```
+live  short: turn-open@1.6 | candidate-starts@3.7 | candidate-ends@8.8 | turnComplete#1@14.6
+live  long : turn-open@1.6 | candidate-starts@3.6 | turnComplete#1@13.5 | candidate-ends@24.8
+hold  short: turn-open@1.6 | candidate-starts@3.6 | candidate-ends@8.7 | turnComplete#1@13.7 | flush(217 chunks) | turnComplete#2@25.1
+hold  long : turn-open@1.5 | candidate-starts@3.6 | turnComplete#1@17.1 | flush(292 chunks) | candidate-ends@24.8 | turnComplete#2@44.3
+```
+
+What the live rows show is the drop: nothing said before `turnComplete` reaches
+the transcript, and there is no later message that delivers it. What the hold
+rows show is that a burst of up to ~12 s of audio delivered at `turnComplete`
+is ingested, transcribed and answered like real-time speech.
+
+Consequences held by the app:
+
+- `ExamLiveSession` holds the débat's microphone from the first sign of an
+  examiner turn (its transcription or its audio, whichever lands first) to
+  `turnComplete`, and releases the hold as one burst — only if some chunk in
+  it crossed the recorder's speech threshold, so the quiet common case (the
+  candidate listening, plus echo residue) is dropped rather than served back.
+- The hold is bounded (30 s) for a turn that never completes — the deaf
+  session of §7 — and it dies with its socket: a turn in flight on a dropped
+  socket releases on the reconnect, ahead of the outage buffer.
+- Still lost: the ~0.5 s between the server deciding the candidate's turn was
+  over and the first chunk reaching the client. Nothing on the client can see
+  that decision.
+- `gemini-2.5-flash-native-audio-preview-12-2025` queues overlapped speech
+  rather than dropping it — same probe, both utterances transcribed whole when
+  streamed live — and the hold is harmless there: transcribed whole again with
+  it on, a burst at `turnComplete` being what that model delivers anyway.
+
 ---
 
 ## The three claims, as verified
