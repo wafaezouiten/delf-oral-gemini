@@ -79,24 +79,40 @@ export async function waitForFileActive<T extends UploadedFileSnapshot>(
   let file = uploaded;
   for (let poll = 0; ; poll++) {
     if (file.state === undefined || file.state === "ACTIVE") return file;
-    if (file.state === "FAILED") {
-      // The file's own account, not a guess about it.
-      const detail = file.error?.message ? `: ${file.error.message}` : "";
-      throw new Error(`The uploaded file came back FAILED${detail}`);
-    }
-    if (!file.name) {
-      // PROCESSING with nothing to poll is unrecoverable here, and waiting the
-      // whole budget to say so would only delay the same answer.
-      throw new Error(`The uploaded file is ${file.state} and carries no name to poll`);
-    }
-    if (poll >= polls) {
-      throw new Error(
-        `The uploaded file was still ${file.state} after ${polls} polls (${(polls * delayMs) / 1000}s)`,
-      );
-    }
+
+    const refusal = refuseSnapshot(file, poll, polls, delayMs);
+    if (refusal) throw refusal;
 
     options.onPoll?.(file.state, poll + 1);
     await sleep(delayMs);
-    file = await get(file.name);
+    file = await get(file.name as string);
   }
+}
+
+/**
+ * Why a snapshot that is not yet `ACTIVE` cannot be waited on — or null when
+ * one more poll is the right answer. Three refusals, each in the file's own
+ * terms rather than a guess about it.
+ */
+function refuseSnapshot(
+  file: UploadedFileSnapshot,
+  poll: number,
+  polls: number,
+  delayMs: number,
+): Error | null {
+  if (file.state === "FAILED") {
+    const detail = file.error?.message ? `: ${file.error.message}` : "";
+    return new Error(`The uploaded file came back FAILED${detail}`);
+  }
+  if (!file.name) {
+    // PROCESSING with nothing to poll is unrecoverable here, and waiting the
+    // whole budget to say so would only delay the same answer.
+    return new Error(`The uploaded file is ${file.state} and carries no name to poll`);
+  }
+  if (poll >= polls) {
+    return new Error(
+      `The uploaded file was still ${file.state} after ${polls} polls (${(polls * delayMs) / 1000}s)`,
+    );
+  }
+  return null;
 }
