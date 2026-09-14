@@ -276,5 +276,3 @@ export const finishPayloadSchema = z.object({
     })
     .optional(),
 });
-
-export type FinishPayload = z.infer<typeof finishPayloadSchema>;
