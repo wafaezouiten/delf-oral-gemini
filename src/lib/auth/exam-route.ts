@@ -41,6 +41,13 @@ export interface ExamRequest<P extends ExamRouteParams> {
   receivedAt: number;
 }
 
+/**
+ * Give the handler a name — `examRoute(async function finishSitting(…) {…})`
+ * rather than an arrow. The coverage the workflow hands Fallow is per
+ * function, and a function needs a name and a line to be matched by; an arrow
+ * inside a `const POST = …` gets neither, and calling it `POST` gets it
+ * renamed `POST2` by the bundler. Named as what it does, it is measured.
+ */
 export type ExamRouteHandler<P extends ExamRouteParams> = (
   request: Request,
   exam: ExamRequest<P>,

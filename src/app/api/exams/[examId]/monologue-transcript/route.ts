@@ -44,7 +44,7 @@ export const maxDuration = 60;
  * check and still has an exposé to transcribe, so `access` is taken for the
  * denial `examRoute` already answered and nothing more.
  */
-export const POST = examRoute(async (request) => {
+export const POST = examRoute(async function transcribeExpose(request) {
   const declaredLength = Number(request.headers.get("content-length"));
   if (Number.isFinite(declaredLength) && declaredLength > MAX_RECORDING_BYTES) {
     return NextResponse.json({ error: "Enregistrement trop volumineux" }, { status: 413 });

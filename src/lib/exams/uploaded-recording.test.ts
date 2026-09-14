@@ -11,6 +11,7 @@ import {
   MIN_RECORDING_SECONDS,
   fitsInOneRequest,
   measureUploadedRecording,
+  readRecordings,
   selectDeliverable,
 } from "./uploaded-recording";
 
@@ -243,5 +244,66 @@ describe("what a stub of seconds is", () => {
 
     assert.equal(measured?.mimeType, "audio/ogg");
     assert.ok((measured?.durationSeconds ?? NaN) < MIN_RECORDING_SECONDS);
+  });
+});
+
+describe("reading the recordings out of the finish form", () => {
+  const form = (parts: Record<string, Blob | string>) => {
+    const data = new FormData();
+    for (const [name, value] of Object.entries(parts)) data.set(name, value);
+    return data;
+  };
+  const quiet = <T>(fn: () => Promise<T>) => {
+    const { info } = console;
+    console.info = () => {};
+    return fn().finally(() => Object.assign(console, { info }));
+  };
+
+  it("measures each present phase from its own bytes, in phase order", async () => {
+    const read = await readRecordings(
+      form({
+        "audio-debate": new Blob([await wav(90)]),
+        "audio-monologue": new Blob([await opus(300)]),
+      }),
+    );
+    assert.ok("recordings" in read);
+    assert.deepEqual(
+      read.recordings.map((r) => [r.phase, r.mimeType, r.durationSeconds]),
+      [
+        ["monologue", "audio/ogg", 300],
+        ["debate", "audio/wav", 90],
+      ],
+    );
+    assert.equal(read.recordings[1].byteSize, read.recordings[1].blob.size);
+  });
+
+  it("treats a missing or empty phase as absent, not as an error", async () => {
+    const read = await readRecordings(form({ "audio-debate": new Blob([]) }));
+    assert.deepEqual(read, { recordings: [] });
+  });
+
+  it("refuses an oversized file before reading its bytes, naming the phase", async () => {
+    const read = await readRecordings(
+      form({ "audio-monologue": new Blob([new Uint8Array(MAX_RECORDING_BYTES + 1)]) }),
+    );
+    assert.deepEqual(read, { rejected: "monologue", reason: "too-large" });
+  });
+
+  it("refuses bytes it cannot measure, naming the phase", async () => {
+    const read = await readRecordings(form({ "audio-debate": new Blob([new Uint8Array(4096)]) }));
+    assert.deepEqual(read, { rejected: "debate", reason: "unreadable" });
+  });
+
+  it("folds a stub under the floor into absence (#73), keeping the other phase", async () => {
+    const parts = form({
+      "audio-monologue": new Blob([await wav(MIN_RECORDING_SECONDS - 1)]),
+      "audio-debate": new Blob([await wav(MIN_RECORDING_SECONDS + 1)]),
+    });
+    const read = await quiet(() => readRecordings(parts));
+    assert.ok("recordings" in read);
+    assert.deepEqual(
+      read.recordings.map((r) => r.phase),
+      ["debate"],
+    );
   });
 });

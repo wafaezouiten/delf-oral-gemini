@@ -39,7 +39,7 @@ export interface ExitStampRoute {
 }
 
 export function exitStampRoute({ flag, stamp, failure, failureBody }: ExitStampRoute) {
-  return examRoute(async (_request, { access, params }) => {
+  return examRoute(async function stampExit(_request, { access, params }) {
     if (access.status !== "owned") {
       return NextResponse.json({ [flag]: false, persisted: false });
     }

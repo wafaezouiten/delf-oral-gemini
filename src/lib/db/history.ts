@@ -2,12 +2,7 @@ import "server-only";
 
 import { and, desc, eq, isNotNull, isNull, or, sql } from "drizzle-orm";
 
-import { ORAL_CRITERIA, type OralCriterion } from "@/lib/delf/criteria";
-import {
-  zeroCriteria,
-  type DashboardSitting,
-  type SittingRecording,
-} from "@/lib/ui/dashboard-view";
+import type { DashboardSitting, SittingRecording } from "@/lib/ui/dashboard-view";
 import {
   evaluations,
   getDb,
@@ -17,6 +12,7 @@ import {
   oralRecordings,
   oralTopics,
 } from "./index";
+import { sittingFromRow } from "./history-row";
 
 /**
  * The candidate's record — the one read the hub, the tableau de bord and the
@@ -54,13 +50,6 @@ import {
  * reports a standing wants the current record, and only the historique, which is
  * the one screen that must not forget, asks for the rest.
  */
-
-/** The five band columns, read back into the shape the view model wants. */
-function criteriaOf(row: Record<string, unknown>): Record<OralCriterion, number> {
-  return Object.fromEntries(
-    ORAL_CRITERIA.map((criterion) => [criterion, Number(row[criterion] ?? 0)]),
-  ) as Record<OralCriterion, number>;
-}
 
 /**
  * Measured speaking time per sitting, summed over the two phases.
@@ -179,9 +168,6 @@ const latestEvaluationByExam = (userId: string) =>
     .orderBy(evaluations.examId, desc(evaluations.createdAt), desc(evaluations.id))
     .as("latest_evaluations");
 
-/** The parts in the order they were sat — `json_agg` has no opinion about it. */
-const PHASE_ORDER: ReadonlyArray<SittingRecording["phase"]> = ["monologue", "debate"];
-
 /** What a caller can ask for beyond "this candidate's sittings". */
 export interface CandidateHistoryOptions {
   /**
@@ -266,41 +252,7 @@ export async function readCandidateHistory(
       // of time (nulls) or the beginning of it, depending on the direction.
       .orderBy(desc(sql`coalesce(${oralExams.abandonedAt}, ${oralExams.finishedAt})`));
 
-    return rows.map((row) => {
-      const abandoned = row.abandonedAt !== null;
-      return {
-        examId: row.examId,
-        topicSlug: row.topicSlug,
-        topicTitle: row.topicTitle,
-        outcome: abandoned ? ("abandoned" as const) : ("corrected" as const),
-        // The zero is the consequence of walking out, not a grading of it. See
-        // `DashboardSitting` for why it is not an evaluation row.
-        score25: abandoned ? 0 : (row.score25 ?? 0),
-        meetsFloor: abandoned ? false : (row.meetsFloor ?? false),
-        mode: abandoned ? null : row.mode,
-        criteria: abandoned ? zeroCriteria() : criteriaOf(row),
-        spokenSeconds: Number(row.spokenSeconds ?? 0),
-        phase: row.phase,
-        // Non-null by the WHERE clause: a row is here because it carries one
-        // stamp or the other. `startedAt` is the fallback rather than a cast, so
-        // a row that somehow had neither sorts by when it began instead of
-        // throwing on a page that is only reporting history.
-        endedAt: row.abandonedAt ?? row.finishedAt ?? new Date(0),
-        // Always read, even when the query filtered the archive out — the flag
-        // is what lets the historique partition one list instead of running a
-        // second query whose ordering could disagree with this one.
-        archivedAt: row.archivedAt,
-        // Null when the sitting has no `oral_recordings` rows at all, which the
-        // left join reports as an absent group rather than an empty one. Sorted
-        // into the order the halves were sat: `json_agg` returns them in
-        // whatever order the scan produced, and a « Débat » player above a
-        // « Monologue suivi » one is a record of the épreuve in the wrong
-        // order.
-        recordings: [...(row.recordings ?? [])].sort(
-          (a, b) => PHASE_ORDER.indexOf(a.phase) - PHASE_ORDER.indexOf(b.phase),
-        ),
-      };
-    });
+    return rows.map(sittingFromRow);
   } catch (error) {
     // A landing page is not worth a 500. The candidate loses their standing for
     // this render and keeps every way of sitting a new épreuve.
