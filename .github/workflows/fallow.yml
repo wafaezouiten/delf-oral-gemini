@@ -72,7 +72,14 @@ jobs:
       # file. So the unit suite runs under c8 here and the Istanbul map is
       # passed with `--coverage`. Coverage is best-effort: a run that fails
       # leaves that tree scored on the estimate, and the summary says which.
-      - run: pnpm install --frozen-lockfile
+      # `continue-on-error` here too: this job never fails the build, and an
+      # install that cannot complete (a registry blip, a lockfile a PR left
+      # inconsistent) must not be the one thing that reds it. Without
+      # node_modules there is no coverage and no analyzer; the step below
+      # then produces nothing and the summary says so.
+      - name: Install dependencies
+        continue-on-error: true
+        run: pnpm install --frozen-lockfile
 
       - name: Run Fallow
         id: fallow
@@ -125,20 +132,25 @@ jobs:
             BASE_SHA=$(git merge-base "origin/${GITHUB_BASE_REF}" HEAD)
             if [ -n "$BASE_SHA" ]; then
               BASE_TREE="$(mktemp -d)"
+              # Absolute, because it is written from inside the worktree and
+              # read — and the worktree removed — from out here.
+              BASE_LOG="$PWD/coverage-base.log"
               if git worktree add --detach "$BASE_TREE" "$BASE_SHA" >/dev/null 2>&1; then
                 BASE_COVERAGE_ARG=""
-                if (cd "$BASE_TREE" && pnpm install --frozen-lockfile >coverage-base.log 2>&1 && pnpm test:coverage >>coverage-base.log 2>&1) && [ -s "$BASE_TREE/coverage/coverage-final.json" ]; then
+                if (cd "$BASE_TREE" && pnpm install --frozen-lockfile >"$BASE_LOG" 2>&1 && pnpm test:coverage >>"$BASE_LOG" 2>&1) && [ -s "$BASE_TREE/coverage/coverage-final.json" ]; then
                   BASE_COVERAGE_ARG="--coverage $BASE_TREE/coverage/coverage-final.json"
                 elif ! grep -q '"test:coverage"' "$BASE_TREE/package.json"; then
                   echo "Before (\`$GITHUB_BASE_REF\`): predates \`pnpm test:coverage\` — scored on the estimate." >> coverage-notes.txt
                 else
-                  echo "Before (\`$GITHUB_BASE_REF\`): coverage run failed — $(grep -m1 -E 'fail [1-9]|ERR|Error' coverage-base.log || echo 'see the job log') — scored on the estimate." >> coverage-notes.txt
+                  echo "Before (\`$GITHUB_BASE_REF\`): coverage run failed — $(grep -m1 -E 'fail [1-9]|ERR|Error' "$BASE_LOG" || echo 'see the job log') — scored on the estimate." >> coverage-notes.txt
                 fi
                 $FALLOW --format json --quiet --root "$BASE_TREE" $BASE_COVERAGE_ARG > base.json 2>base.err
                 $FALLOW health --format badge --quiet --root "$BASE_TREE" $BASE_COVERAGE_ARG > base-badge.svg 2>>base.err
                 git worktree remove "$BASE_TREE" --force >/dev/null 2>&1
                 [ -s base.json ] && BASE_ARG="base.json"
                 [ -s base-badge.svg ] && BASE_BADGE_ARG="base-badge.svg"
+              else
+                rm -rf "$BASE_TREE"
               fi
             fi
           fi

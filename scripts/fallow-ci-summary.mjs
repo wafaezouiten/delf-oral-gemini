@@ -4,7 +4,7 @@
 // fallbacks are `develop` rather than `main`.
 //
 // Usage:
-//   node scripts/fallow-ci-summary.mjs <head-json> <head-badge> [audit-json] [base-json] [base-badge]
+//   node scripts/fallow-ci-summary.mjs <head-json> <head-badge> [audit-json] [base-json] [base-badge] [coverage-notes]
 //
 // - <head-json>: `fallow --format json --quiet` run on the PR/branch HEAD
 // - <head-badge>: `fallow health --format badge --quiet` on HEAD (for the grade)
