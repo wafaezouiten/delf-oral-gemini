@@ -19,7 +19,7 @@
  */
 
 import { OUTPUT_SAMPLE_RATE } from "@/lib/gemini/constants";
-import type { PlayerLike } from "@/lib/live/controller-ports";
+import type { PlayerLike } from "./ports";
 import { base64ToInt16 } from "./pcm";
 
 // ---------------------------------------------------------------- the seam

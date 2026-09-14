@@ -30,7 +30,7 @@
  */
 
 import { INPUT_SAMPLE_RATE } from "@/lib/gemini/constants";
-import type { RecorderLike } from "@/lib/live/controller-ports";
+import type { RecorderLike } from "./ports";
 import {
   PhaseArchive,
   type PhaseRecording,

@@ -1,29 +1,16 @@
 /**
- * The controller's ports: what it needs from the three devices it drives, and
- * nothing about how any of them is built.
+ * What the audio devices promise the controller: a microphone and a speaker
+ * as `exam-controller.ts` sees them, and nothing about how either is built.
  *
- * A leaf on purpose. `exam-controller.ts` imports these to type its fields,
- * and `audio/recorder.ts`, `audio/player.ts` and `session-manager.ts` import
- * them to say `implements` — so a device that forgets a method is a compile
- * error rather than a stub uploaded silently. Had the interfaces stayed in the
- * controller, that `implements` would have made the devices import the
- * orchestrator that drives them, and the session and the controller would
- * have imported each other; the seam these were written to keep is that the
- * devices do not know the controller exists.
+ * Kept on the audio side so the dependency runs one way — `live/` consumes
+ * `audio/`, never the reverse — and so a reader of `MicRecorder` or
+ * `ExaminerAudioPlayer` finds the contract the class `implements` next to the
+ * class. The `implements` is what makes a forgotten method a compile error
+ * rather than a stub uploaded silently. The session's port is the live
+ * layer's own and lives in `live/session-port.ts`.
  */
 
-import type { PhaseRecording, RecordedPhase } from "@/lib/audio/archive";
-
-/** What the controller needs from a Gemini session. */
-export interface LiveSessionLike {
-  connect(): Promise<void>;
-  close(): void;
-  reconnect(): Promise<void>;
-  sendAudio(base64: string): void;
-  sendDirective(text: string): void;
-  beginCandidateActivity(): void;
-  endCandidateActivity(): void;
-}
+import type { PhaseRecording, RecordedPhase } from "./archive";
 
 /** What the controller needs from the microphone. */
 export interface RecorderLike {

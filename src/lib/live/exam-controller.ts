@@ -68,7 +68,8 @@ import {
   type TranscriptPhase,
 } from "@/lib/delf/transcript";
 import type { PhaseRecording, RecordedPhase } from "@/lib/audio/archive";
-import type { LiveSessionLike, PlayerLike, RecorderLike } from "./controller-ports";
+import type { PlayerLike, RecorderLike } from "@/lib/audio/ports";
+import type { LiveSessionLike } from "./session-port";
 import type { ConnectionState, SessionManagerCallbacks } from "./session-manager";
 import { examStatus, type ExamStatus } from "./state-machine";
 
