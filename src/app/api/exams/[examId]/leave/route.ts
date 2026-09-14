@@ -31,47 +31,19 @@
  * those is an error the departing candidate could act on.
  */
 
-import { NextResponse } from "next/server";
-
-import { EXAM_ACCESS_DENIALS } from "@/lib/auth/exam-access";
-import { authorizeExam } from "@/lib/auth/exam-guard";
 import { archivePreparationExit } from "@/lib/db/sittings";
+import { exitStampRoute } from "@/lib/exams/exit-stamp-route";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export async function POST(_request: Request, context: { params: Promise<{ examId: string }> }) {
-  const { examId } = await context.params;
-
-  // Ownership before anything else, exactly as the abandon and finish routes do
-  // it: exam ids are sequential serials, and this takes a sitting off somebody's
-  // running list.
-  const access = await authorizeExam(examId);
-  if (access.status === "denied") {
-    const { status, error } = EXAM_ACCESS_DENIALS[access.reason];
-    return NextResponse.json({ error }, { status });
-  }
-
-  // No row to stamp — no database, a degraded `local-…` id, or an ownership
-  // question the database could not answer. The candidate still leaves.
-  if (access.status !== "owned") {
-    return NextResponse.json({ archived: false, persisted: false });
-  }
-
-  try {
-    const archived = await archivePreparationExit(
-      { examId: access.examId, userId: access.userId },
-      new Date(),
-    );
-    // `false` is not an error: the sitting was already left, already walked out
-    // of, or had moved past the préparation while the dialog was open — and
-    // writing nothing is the point of the guard. 200 either way, so a client
-    // cannot be taught to retry on it.
-    return NextResponse.json({ archived, persisted: true });
-  } catch (error) {
-    // Logged rather than surfaced. The candidate is already leaving, and the
-    // cost is a bookkeeping stamp on a sitting nothing will ever show.
-    console.error("[leave] could not archive exam", examId, "on préparation exit", error);
-    return NextResponse.json({ error: "Sortie non enregistrée" }, { status: 503 });
-  }
-}
+export const POST = exitStampRoute({
+  flag: "archived",
+  // `false` is not an error: the sitting was already left, already walked out
+  // of, or had moved past the préparation while the dialog was open — and
+  // writing nothing is the point of the guard. 200 either way, so a client
+  // cannot be taught to retry on it.
+  stamp: archivePreparationExit,
+  failure: (examId) => `[leave] could not archive exam ${examId} on préparation exit`,
+  failureBody: "Sortie non enregistrée",
+});

@@ -7,15 +7,14 @@ import { ANNOUNCEMENTS } from "@/lib/delf/announcements";
 import { countClosingTurns } from "@/lib/delf/early-closing";
 import { PHASE_DURATIONS } from "@/lib/delf/phases";
 import type { OralTopic } from "@/lib/delf/topics";
-import type { SessionManagerCallbacks } from "./session-manager";
+import type { PlayerLike, RecorderLike } from "@/lib/audio/ports";
 import {
   ExamController,
   type ExamFinishedPayload,
   type FinalisedPhaseReport,
-  type LiveSessionLike,
-  type PlayerLike,
-  type RecorderLike,
 } from "./exam-controller";
+import type { SessionManagerCallbacks } from "./session-manager";
+import type { LiveSessionLike } from "./session-port";
 
 /**
  * The §17 acceptance test.

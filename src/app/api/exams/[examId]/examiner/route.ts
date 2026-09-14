@@ -19,25 +19,14 @@
 
 import { NextResponse } from "next/server";
 
-import { EXAM_ACCESS_DENIALS } from "@/lib/auth/exam-access";
-import { authorizeExam } from "@/lib/auth/exam-guard";
+import { examRoute } from "@/lib/auth/exam-route";
 import { chooseExaminerModel } from "@/lib/db/sittings";
 import { isSelectableLiveModel } from "@/lib/gemini/constants";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export async function POST(request: Request, context: { params: Promise<{ examId: string }> }) {
-  const { examId } = await context.params;
-
-  // Ownership before anything else, exactly as the finish and progress routes
-  // do it: exam ids are sequential serials, and this writes onto the row.
-  const access = await authorizeExam(examId);
-  if (access.status === "denied") {
-    const { status, error } = EXAM_ACCESS_DENIALS[access.reason];
-    return NextResponse.json({ error }, { status });
-  }
-
+export const POST = examRoute(async (request, { access, params }) => {
   const body = (await request.json().catch(() => null)) as { model?: unknown } | null;
   const model = body?.model;
   if (typeof model !== "string" || !isSelectableLiveModel(model)) {
@@ -62,7 +51,7 @@ export async function POST(request: Request, context: { params: Promise<{ examId
     // the guard. 200 either way, so a client cannot be taught to retry it.
     return NextResponse.json({ recorded, persisted: true });
   } catch (error) {
-    console.error("[examiner] could not record the model choice for exam", examId, error);
+    console.error("[examiner] could not record the model choice for exam", params.examId, error);
     return NextResponse.json({ error: "Choix non enregistré" }, { status: 503 });
   }
-}
+});

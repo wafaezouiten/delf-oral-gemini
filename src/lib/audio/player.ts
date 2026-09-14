@@ -19,6 +19,7 @@
  */
 
 import { OUTPUT_SAMPLE_RATE } from "@/lib/gemini/constants";
+import type { PlayerLike } from "./ports";
 import { base64ToInt16 } from "./pcm";
 
 // ---------------------------------------------------------------- the seam
@@ -105,7 +106,7 @@ export interface ExaminerAudioPlayerOptions extends ExaminerAudioPlayerCallbacks
   leadSeconds?: number;
 }
 
-export class ExaminerAudioPlayer {
+export class ExaminerAudioPlayer implements PlayerLike {
   private context: AudioContextLike | null = null;
   /** Deduplicates concurrent `resume()` calls, which would otherwise each build
    *  an `AudioContext` and leak all but the last. */

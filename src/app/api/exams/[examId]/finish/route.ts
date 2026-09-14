@@ -50,8 +50,7 @@ import { z } from "zod";
 
 import { INPUT_SAMPLE_RATE } from "@/lib/gemini/constants";
 import { DEV_TOOLS_ENABLED } from "@/lib/dev-tools";
-import { EXAM_ACCESS_DENIALS } from "@/lib/auth/exam-access";
-import { authorizeExam } from "@/lib/auth/exam-guard";
+import { examRoute } from "@/lib/auth/exam-route";
 import type { OralSpeakingPhase } from "@/lib/db";
 import { neonSittingStore } from "@/lib/db/sittings";
 import {
@@ -175,31 +174,22 @@ async function readRecordings(
   return { recordings };
 }
 
-export async function POST(request: Request, context: { params: Promise<{ examId: string }> }) {
-  // When the request reached this function, so the wait #86 is about can be
-  // read off the logs as its segments rather than argued about as one blur.
-  const receivedAt = Date.now();
-  const { examId } = await context.params;
-
-  /**
-   * Authentication and ownership, before anything else this route does.
-   *
-   * Exam ids are sequential serials, so without the second check any signed-in
-   * user could finish — and overwrite the transcript of — a neighbouring id's
-   * exam. It runs first rather than after validation for two reasons: a caller
-   * who does not own the sitting learns nothing about the payload it would have
-   * accepted, and the (paid, minutes-long) model call has not started yet.
-   *
-   * `no-sitting` is not a refusal. The request is legal, it just addresses no
-   * row we can verify — no database, a degraded `local-…` id, or a lookup that
-   * failed — so the exam is graded and nothing is written. That is the same
-   * bargain the route has always made with a missing `DATABASE_URL`.
-   */
-  const access = await authorizeExam(examId);
-  if (access.status === "denied") {
-    const { status, error } = EXAM_ACCESS_DENIALS[access.reason];
-    return NextResponse.json({ error }, { status });
-  }
+/**
+ * Ownership runs first — before validation, so a caller who does not own the
+ * sitting learns nothing about the payload it would have accepted, and the
+ * (paid, minutes-long) model call has not started yet. `examRoute` holds it.
+ *
+ * `no-sitting` is not a refusal. The request is legal, it just addresses no
+ * row we can verify — no database, a degraded `local-…` id, or a lookup that
+ * failed — so the exam is graded and nothing is written. That is the same
+ * bargain the route has always made with a missing `DATABASE_URL`.
+ *
+ * `receivedAt` is when the request reached the function, so the wait #86 is
+ * about can be read off the logs as its segments rather than argued about as
+ * one blur.
+ */
+export const POST = examRoute(async (request, { access, params, receivedAt }) => {
+  const { examId } = params;
   const { userId } = access;
   const persistedExamId = access.status === "owned" ? access.examId : null;
 
@@ -649,7 +639,7 @@ export async function POST(request: Request, context: { params: Promise<{ examId
       { status: 502 },
     );
   }
-}
+});
 
 /** The stored subset of a correction. The rest is diagnostic, not a column. */
 function toCorrectionRow(result: EvaluationResult): CorrectionRow {

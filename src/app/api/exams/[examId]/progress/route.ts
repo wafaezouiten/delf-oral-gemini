@@ -26,26 +26,14 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { EXAM_ACCESS_DENIALS } from "@/lib/auth/exam-access";
-import { authorizeExam } from "@/lib/auth/exam-guard";
+import { examRoute } from "@/lib/auth/exam-route";
 import { neonSittingStore } from "@/lib/db/sittings";
 import { progressPayloadSchema } from "@/lib/exams/progress-payload";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export async function POST(request: Request, context: { params: Promise<{ examId: string }> }) {
-  const { examId } = await context.params;
-
-  // Ownership before anything else, exactly as the finish route does it: exam
-  // ids are sequential serials, so a signed-in stranger who skipped this could
-  // append turns to a neighbouring id's transcript.
-  const access = await authorizeExam(examId);
-  if (access.status === "denied") {
-    const { status, error } = EXAM_ACCESS_DENIALS[access.reason];
-    return NextResponse.json({ error }, { status });
-  }
-
+export const POST = examRoute(async (request, { access, params }) => {
   const parsed = progressPayloadSchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) {
     return NextResponse.json(
@@ -83,7 +71,13 @@ export async function POST(request: Request, context: { params: Promise<{ examId
   } catch (error) {
     // Logged rather than surfaced: nothing the candidate can do about it, and
     // failing the request would only make a fire-and-forget call noisy.
-    console.error("[progress] could not record phase", report.phase, "of exam", examId, error);
+    console.error(
+      "[progress] could not record phase",
+      report.phase,
+      "of exam",
+      params.examId,
+      error,
+    );
     return NextResponse.json({ error: "Progression non enregistrée" }, { status: 503 });
   }
-}
+});

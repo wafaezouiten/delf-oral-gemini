@@ -31,6 +31,12 @@
   // again. That is a fair trade for a drawer whose purpose is to hold
   // measurements already taken — the value of `probe-monologue-close.ts` is the
   // numbers in its header, which `lib/gemini/transcribe-monologue.ts` quotes.
+  // Sibling checkouts, when two sessions work this repository at once
+  // (`.claude/worktrees/`). Fallow does not traverse hidden directories, but
+  // it reports the one it skipped as an incomplete graph and hedges every
+  // finding with it; saying so here is what makes the findings unhedged.
+  "ignorePatterns": [".claude/**"],
+
   "entry": ["scripts/**/*.{ts,mjs}", "e2e/**/*.ts"],
 
   // The capture worklet is fetched by URL at runtime —
@@ -38,9 +44,23 @@
   // recorder.ts` — so nothing imports it, and nothing can.
   "dynamicallyLoaded": ["public/worklets/*.js"],
 
-  // Loaded by name from `.prettierrc`, which is configuration and not an
-  // import. `pnpm format:check` fails without it.
-  "ignoreDependencies": ["prettier-plugin-tailwindcss"],
+  // `prettier-plugin-tailwindcss` is loaded by name from `.prettierrc`, which
+  // is configuration and not an import; `pnpm format:check` fails without it.
+  //
+  // `dotenv` is a devDependency imported only by tooling — the scripts, the
+  // experiments and `drizzle.config.ts`, none of which ship; the application
+  // reads its environment from the platform. Fallow scores the scripts as
+  // application code because `entry` says they are, and then reports a
+  // devDependency reaching them as one reaching production. The finding is
+  // manifest-owned, so a per-path override cannot scope it; this is the one
+  // switch that can, at the cost that an unused `dotenv` would go unreported.
+  "ignoreDependencies": ["prettier-plugin-tailwindcss", "dotenv"],
+
+  // `scripts/comparison/incumbent-runner.ts` is run inside the incumbent's own
+  // checkout (`delf-preps`) and imports that tree's modules by relative path —
+  // paths that exist there and nowhere here. The two specifiers are named
+  // rather than globbed so a third unresolved import stays a finding.
+  "ignoreUnresolvedImports": ["../../src/lib/ai/orale-evaluation", "../../src/lib/constants/orale"],
 
   // This codebase exports for two reasons: to be imported, and to be reached by
   // a test. `browserMicrophone`, `realTimers` and `browserLiveTransport` are
@@ -56,10 +76,10 @@
     // block SHOULD look like the last one. Repetition is how a case stays
     // readable on its own, and folding it away hides what the test sets up.
     //
-    // `src/` is deliberately absent. The clone this leaves standing in the
-    // application is the ownership preamble six API routes share — `authorizeExam`
-    // then `EXAM_ACCESS_DENIALS` — which is repeated on purpose, argued for in
-    // each route that carries it, and worth continuing to see.
+    // `src/` is deliberately absent, so that a clone in the application is
+    // always reported. There are none as of #230: the last one standing — the
+    // ownership preamble the API routes shared — is `examRoute` now, and the
+    // zero is the contract this line keeps.
     "ignore": ["scripts/**", "e2e/**", "**/*.test.ts"]
   }
 }

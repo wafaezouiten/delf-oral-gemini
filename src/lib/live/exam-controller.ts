@@ -31,7 +31,6 @@
  */
 
 import type { AnnouncementOutcome, AnnouncerLike } from "@/lib/audio/announcer";
-import type { PhaseRecording, RecordedPhase } from "@/lib/audio/archive";
 import { DEV_TOOLS_ENABLED } from "@/lib/dev-tools";
 import { ANNOUNCEMENTS, type AnnouncementId } from "@/lib/delf/announcements";
 import {
@@ -68,96 +67,11 @@ import {
   type TranscriptEntry,
   type TranscriptPhase,
 } from "@/lib/delf/transcript";
+import type { PhaseRecording, RecordedPhase } from "@/lib/audio/archive";
+import type { PlayerLike, RecorderLike } from "@/lib/audio/ports";
+import type { LiveSessionLike } from "./session-port";
 import type { ConnectionState, SessionManagerCallbacks } from "./session-manager";
 import { examStatus, type ExamStatus } from "./state-machine";
-
-/** What the controller needs from a Gemini session. */
-export interface LiveSessionLike {
-  connect(): Promise<void>;
-  close(): void;
-  reconnect(): Promise<void>;
-  sendAudio(base64: string): void;
-  sendDirective(text: string): void;
-  beginCandidateActivity(): void;
-  endCandidateActivity(): void;
-}
-
-/** What the controller needs from the microphone. */
-export interface RecorderLike {
-  start(): Promise<void>;
-  stop(): Promise<void>;
-  /** Begin the artefact for a speaking phase. */
-  beginPhase(phase: RecordedPhase): void;
-  /** Close it, keeping what it captured. */
-  endPhase(): void;
-  /** Stop capturing and streaming without releasing the device, and start
-   *  again. The device stays open across both, so there is no second permission
-   *  prompt — which is the whole reason the development text mode can turn the
-   *  microphone off and back on mid-phase. See {@link ExamController.setDevTextMode}. */
-  pause(): void;
-  resume(): void;
-  /** Seconds of audio recorded for one phase, measured from the samples. */
-  measuredSeconds(phase: RecordedPhase): number;
-  /** Discard one phase's recording entirely (#51). Called at the phase
-   *  boundary for a phase whose content was typed, so its captured room tone
-   *  never leaves the tab dressed as the task. Required rather than optional
-   *  for the same reason `recordingFor` is: an implementation that forgot it
-   *  would upload the stub silently. */
-  dropPhase(phase: RecordedPhase): void;
-  /** Of those, the seconds that carried speech. The two differ exactly when a
-   *  microphone worked and the candidate did not speak into it. */
-  voicedSeconds(phase: RecordedPhase): number;
-  /** And of THOSE, the seconds nobody else was audible for — the only one of
-   *  the three that survives a débat spent listening to the examiner through an
-   *  open microphone. See `PhaseArchive.soloVoicedSeconds`. */
-  soloVoicedSeconds(phase: RecordedPhase): number;
-  /** How long the candidate had to produce that: seconds recorded with the
-   *  examiner silent, speech or not. The denominator the route's share test is
-   *  taken against — see `PARTICIPATION_VOICED_SHARE`. */
-  soloSeconds(phase: RecordedPhase): number;
-  /** Tell the recorder the examiner is (or is no longer) being played into the
-   *  room, so it can keep the two voiced measures apart. Called from the
-   *  player's own `onSpeakingChange`, and once at install for a recorder that
-   *  opened mid-sentence. */
-  setPlaybackAudible(audible: boolean): void;
-  /** Seconds recorded across the sitting. Read by the stall watchdog, which
-   *  only cares that the number is still moving. */
-  readonly recordedSeconds: number;
-  /** The finished artefacts, one per phase that captured anything. Compressing
-   *  them is what makes a sitting small enough to upload, and it is not
-   *  instant — see `audio/opus-encoder.ts`. */
-  recordings(): Promise<PhaseRecording[]>;
-  /**
-   * One phase's artefact on its own, or null where it captured nothing.
-   *
-   * One caller wants it: the controller asks for the monologue's artefact the
-   * moment the débat begins (#86), so the compression runs while the candidate
-   * debates instead of while they wait at « Épreuve terminée ». The archive
-   * memoizes the result, which is what makes the early call worth making —
-   * `recordings()` then finds the work already done. Required rather than
-   * optional, because an implementation that forgot it would lose the early
-   * encode silently; a compile error is the honest price.
-   */
-  recordingFor(phase: RecordedPhase): Promise<PhaseRecording | null>;
-  /** Release the recording's memory once the blobs are cut. */
-  discard(): void;
-}
-
-/** What the controller needs from the speaker. */
-export interface PlayerLike {
-  resume(): Promise<void>;
-  enqueue(base64: string): void;
-  interrupt(): void;
-  close(): Promise<void>;
-  /** Audio scheduled but not yet heard. Logged when an interruption is about to
-   *  throw it away, so a question the candidate never heard leaves a record of
-   *  how much of it there was. See {@link ExamController.handleInterruption}. */
-  readonly bufferedSeconds: number;
-  /** The speaker's own clock. Read only for whether it MOVED between two ticks,
-   *  which is how {@link ExamController.examinerPlaybackHold} tells a dead
-   *  device from a full one. */
-  readonly playedSeconds: number;
-}
 
 /** Diagnostics from the audio layer, routed into the same session log the
  *  Gemini connection writes to — a capture rate the browser refused and a
@@ -1496,19 +1410,7 @@ export class ExamController {
    * be silently undone, which is worse than a refusal.
    */
   devSkipTime(seconds: number): void {
-    if (!DEV_TOOLS_ENABLED) return;
-    if (this.phase !== "monologue" && this.phase !== "debate") return;
-    if (this.phaseStart === null || this.closing || this.monologueHeld) return;
-
-    // Read off the stamp rather than off the argument: `rewindStartBy` floors a
-    // non-positive skip at zero, and what is banked has to be what the clock
-    // actually moved — a claim that outran the clock would be the one thing
-    // this field must never be.
-    const before = this.phaseStart;
-    this.phaseStart = rewindStartBy(this.phaseStart, seconds);
-    this.devSkippedSeconds[this.phase] += Math.round((before - this.phaseStart) / 1000);
-    this.log("dev-time-skip", { seconds, phase: this.phase });
-    this.tick();
+    this.devMoveClock((start) => rewindStartBy(start, seconds), { seconds });
   }
 
   /**
@@ -1526,17 +1428,34 @@ export class ExamController {
    * rewind, and a rewind is not time skipped.
    */
   devSkipToEnd(): void {
+    this.devMoveClock(() => this.now() - phaseDurationSeconds(this.phase) * 1000, { toEnd: true });
+  }
+
+  /**
+   * The one mechanism under both skips: the same guards, the same banking, the
+   * same tick.
+   *
+   * What is banked is read off the stamp rather than off the argument: what
+   * the clock actually moved, floored at zero — `rewindStartBy` floors a
+   * non-positive skip itself, and landing a clock already past the end ON the
+   * end is a rewind, which is not time skipped. A claim that outran the clock
+   * would be the one thing this field must never be.
+   */
+  private devMoveClock(
+    move: (phaseStart: number) => number,
+    detail: { seconds: number } | { toEnd: true },
+  ): void {
     if (!DEV_TOOLS_ENABLED) return;
     if (this.phase !== "monologue" && this.phase !== "debate") return;
     if (this.phaseStart === null || this.closing || this.monologueHeld) return;
 
     const before = this.phaseStart;
-    this.phaseStart = this.now() - phaseDurationSeconds(this.phase) * 1000;
+    this.phaseStart = move(before);
     this.devSkippedSeconds[this.phase] += Math.max(
       0,
       Math.round((before - this.phaseStart) / 1000),
     );
-    this.log("dev-time-skip", { toEnd: true, phase: this.phase });
+    this.log("dev-time-skip", { ...detail, phase: this.phase });
     this.tick();
   }
 

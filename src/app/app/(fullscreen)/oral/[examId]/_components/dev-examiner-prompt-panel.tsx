@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import { cn } from "@/lib/ui/class-names";
+import { devFieldKeyDown } from "@/lib/ui/dev-field-keys";
 import {
   ACTIVE_PROMPT_COPY,
   DEV_PROMPT_COPY,
@@ -324,16 +325,7 @@ export function DevExaminerPromptPanel({
             ref={field}
             value={draft}
             onChange={(event) => setDraft(event.target.value)}
-            onKeyDown={(event) => {
-              // Ctrl/Cmd+Enter applies; plain Enter breaks the line, which in a
-              // field holding a multi-paragraph system instruction is not
-              // negotiable.
-              if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
-                event.preventDefault();
-                event.currentTarget.form?.requestSubmit();
-              }
-              if (event.key === "Escape") onActiveChange(false);
-            }}
+            onKeyDown={devFieldKeyDown(() => onActiveChange(false))}
             spellCheck={false}
             disabled={loading || failed}
             placeholder={loading ? "Chargement du prompt…" : "Prompt système de l'examinateur."}

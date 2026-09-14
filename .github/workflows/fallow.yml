@@ -33,7 +33,7 @@ concurrency:
 # Pinned for reproducible scores — `pnpm dlx fallow` (unpinned) pulls latest and
 # the numbers drift between runs. Bump deliberately.
 env:
-  FALLOW_VERSION: "2.86.0"
+  FALLOW_VERSION: "3.25.0"
 
 jobs:
   fallow:
