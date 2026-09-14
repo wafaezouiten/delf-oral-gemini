@@ -23,6 +23,12 @@ on:
     # trend. The full-history checkout below makes each run one of the more
     # expensive in the repo, which is why this workflow went on the diet and
     # the build gate did not.
+    #
+    # Since #232 each run also installs and runs the unit suite — twice on a
+    # PR, once per tree, so both columns of the table are scored on measured
+    # coverage rather than a guess. That is ~25 s of tests and a cached
+    # install per tree, accepted: it is what makes the hotspot column mean
+    # something, and the diet above is what keeps it to one run per PR.
     types: [opened, reopened, ready_for_review]
 
 # Avoid piling up runs on rapid pushes to the same ref.
@@ -74,9 +80,15 @@ jobs:
         run: |
           set +e
           # Coverage for the tree under test. `coverage/` is gitignored.
+          # Why a tree fell back to the estimate is written to coverage-notes.txt,
+          # which the summary prints: "estimated" alone cannot tell a failing
+          # suite on the base from a base that predates `test:coverage`.
+          : > coverage-notes.txt
           COVERAGE_ARG=""
-          if pnpm test:coverage >/dev/null 2>&1 && [ -s coverage/coverage-final.json ]; then
+          if pnpm test:coverage >coverage-head.log 2>&1 && [ -s coverage/coverage-final.json ]; then
             COVERAGE_ARG="--coverage coverage/coverage-final.json"
+          else
+            echo "After (this branch): coverage run failed — $(grep -m1 -E 'fail [1-9]|ERR|Error|not found' coverage-head.log || echo 'see the job log') — scored on the estimate." >> coverage-notes.txt
           fi
 
           # Whole-project scores (pre-existing context).
@@ -108,8 +120,12 @@ jobs:
               if git worktree add --detach "$BASE_TREE" "$BASE_SHA" >/dev/null 2>&1; then
                 BASE_COVERAGE_ARG=""
                 ln -s "$GITHUB_WORKSPACE/node_modules" "$BASE_TREE/node_modules"
-                if (cd "$BASE_TREE" && pnpm test:coverage >/dev/null 2>&1) && [ -s "$BASE_TREE/coverage/coverage-final.json" ]; then
+                if (cd "$BASE_TREE" && pnpm test:coverage >coverage-base.log 2>&1) && [ -s "$BASE_TREE/coverage/coverage-final.json" ]; then
                   BASE_COVERAGE_ARG="--coverage $BASE_TREE/coverage/coverage-final.json"
+                elif ! grep -q '"test:coverage"' "$BASE_TREE/package.json"; then
+                  echo "Before (\`$GITHUB_BASE_REF\`): predates \`pnpm test:coverage\` — scored on the estimate." >> coverage-notes.txt
+                else
+                  echo "Before (\`$GITHUB_BASE_REF\`): coverage run failed — $(grep -m1 -E 'fail [1-9]|ERR|Error' coverage-base.log || echo 'see the job log') — scored on the estimate." >> coverage-notes.txt
                 fi
                 pnpm exec fallow --format json --quiet --root "$BASE_TREE" $BASE_COVERAGE_ARG > base.json 2>/dev/null
                 pnpm exec fallow health --format badge --quiet --root "$BASE_TREE" $BASE_COVERAGE_ARG > base-badge.svg 2>/dev/null
@@ -121,7 +137,7 @@ jobs:
             fi
           fi
 
-          node scripts/fallow-ci-summary.mjs fallow.json fallow-badge.svg "$AUDIT_ARG" "$BASE_ARG" "$BASE_BADGE_ARG" >> "$GITHUB_OUTPUT"
+          node scripts/fallow-ci-summary.mjs fallow.json fallow-badge.svg "$AUDIT_ARG" "$BASE_ARG" "$BASE_BADGE_ARG" coverage-notes.txt >> "$GITHUB_OUTPUT"
 
       - name: Write job summary
         if: always()

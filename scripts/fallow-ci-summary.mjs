@@ -21,7 +21,10 @@
 
 import { readFileSync, writeFileSync } from "node:fs";
 
-const [jsonPath, badgePath, auditPath, basePath, baseBadgePath] = process.argv.slice(2);
+// - [coverage-notes]: one line per tree that fell back to estimated coverage,
+//   saying why — written by the workflow, printed under the table verbatim.
+const [jsonPath, badgePath, auditPath, basePath, baseBadgePath, coverageNotesPath] =
+  process.argv.slice(2);
 
 // `fallow health --format badge` aria-label is `fallow: <grade> (<score>)`.
 function parseBadge(svg) {
@@ -147,6 +150,12 @@ function gradeCell(badge) {
   return badge.grade != null ? `${badge.grade} (${badge.score})` : "n/a";
 }
 
+// Why a column reads "estimated", when it does. Empty when both were measured.
+const coverageNotes = safeRead(coverageNotesPath)
+  .split(/\r?\n/)
+  .filter((line) => line.trim() !== "")
+  .flatMap((line) => [`> ⚠️ ${line}`, ""]);
+
 const lines = [];
 
 if (auditParsed) {
@@ -172,6 +181,7 @@ if (parsed && hasBase) {
     `| Complexity hotspots | ${fmt(B.complexity)} | ${fmt(H.complexity)} | ${changeCell(B.complexity, H.complexity, { lowerBetter: true })} |`,
     `| Coverage behind CRAP | ${coverageCell(B.coverage)} | ${coverageCell(H.coverage)} | ${B.coverage === H.coverage ? "—" : "⚠️ not comparable"} |`,
     "",
+    ...coverageNotes,
     "_Report-only — does not affect the build status._",
     "",
   );
@@ -189,6 +199,7 @@ if (parsed && hasBase) {
     `| Complexity hotspots | ${fmt(H.complexity)} of ${fmt(H.analyzed)} functions above threshold |`,
     `| Coverage behind CRAP | ${coverageCell(H.coverage)} |`,
     "",
+    ...coverageNotes,
     "_Report-only — does not affect the build status._",
     "",
   );
