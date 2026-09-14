@@ -91,9 +91,14 @@ jobs:
             echo "After (this branch): coverage run failed — $(grep -m1 -E 'fail [1-9]|ERR|Error|not found' coverage-head.log || echo 'see the job log') — scored on the estimate." >> coverage-notes.txt
           fi
 
+          # The binary, not `pnpm exec`: pnpm checks node_modules against the
+          # lockfile before running anything and, finding it stale, reinstalls
+          # — onto stdout, into the JSON. Nothing but Fallow may write there.
+          FALLOW=./node_modules/.bin/fallow
+
           # Whole-project scores (pre-existing context).
-          pnpm exec fallow --format json --quiet $COVERAGE_ARG > fallow.json 2>/dev/null
-          pnpm exec fallow health --format badge --quiet $COVERAGE_ARG > fallow-badge.svg 2>/dev/null
+          $FALLOW --format json --quiet $COVERAGE_ARG > fallow.json 2>/dev/null
+          $FALLOW health --format badge --quiet $COVERAGE_ARG > fallow-badge.svg 2>/dev/null
 
           # On PRs, add two base-relative views:
           #   1. audit  → findings introduced vs inherited in changed files
@@ -104,32 +109,33 @@ jobs:
           BASE_BADGE_ARG=""
           if [ "$GITHUB_EVENT_NAME" = "pull_request" ] && [ -n "$GITHUB_BASE_REF" ]; then
             git fetch --no-tags origin "$GITHUB_BASE_REF" >/dev/null 2>&1
-            pnpm exec fallow audit --base "origin/${GITHUB_BASE_REF}" \
+            $FALLOW audit --base "origin/${GITHUB_BASE_REF}" \
               --format json --quiet $COVERAGE_ARG > audit.json 2>/dev/null
             [ -s audit.json ] && AUDIT_ARG="audit.json"
 
             # Analyze the branch point in a throwaway worktree for the
             # Before/After delta, including the composite health grade. The
             # base gets its OWN coverage, from its own tests, so both columns
-            # are measured the same way; this checkout's node_modules is lent
-            # to it by symlink — a PR that changes the lockfile may make that
-            # run fail, and then the base is scored on the estimate.
+            # are measured the same way — and its own install, from the pnpm
+            # store the head's install just filled. Not a symlink to the
+            # head's node_modules: pnpm verifies node_modules against the
+            # lockfile before every run, and through a link it "repairs" the
+            # head's install to the base's lockfile, taking c8 and fallow
+            # with it. Measured once, on this very PR.
             BASE_SHA=$(git merge-base "origin/${GITHUB_BASE_REF}" HEAD)
             if [ -n "$BASE_SHA" ]; then
               BASE_TREE="$(mktemp -d)"
               if git worktree add --detach "$BASE_TREE" "$BASE_SHA" >/dev/null 2>&1; then
                 BASE_COVERAGE_ARG=""
-                ln -s "$GITHUB_WORKSPACE/node_modules" "$BASE_TREE/node_modules"
-                if (cd "$BASE_TREE" && pnpm test:coverage >coverage-base.log 2>&1) && [ -s "$BASE_TREE/coverage/coverage-final.json" ]; then
+                if (cd "$BASE_TREE" && pnpm install --frozen-lockfile >coverage-base.log 2>&1 && pnpm test:coverage >>coverage-base.log 2>&1) && [ -s "$BASE_TREE/coverage/coverage-final.json" ]; then
                   BASE_COVERAGE_ARG="--coverage $BASE_TREE/coverage/coverage-final.json"
                 elif ! grep -q '"test:coverage"' "$BASE_TREE/package.json"; then
                   echo "Before (\`$GITHUB_BASE_REF\`): predates \`pnpm test:coverage\` — scored on the estimate." >> coverage-notes.txt
                 else
                   echo "Before (\`$GITHUB_BASE_REF\`): coverage run failed — $(grep -m1 -E 'fail [1-9]|ERR|Error' coverage-base.log || echo 'see the job log') — scored on the estimate." >> coverage-notes.txt
                 fi
-                pnpm exec fallow --format json --quiet --root "$BASE_TREE" $BASE_COVERAGE_ARG > base.json 2>base.err
-                pnpm exec fallow health --format badge --quiet --root "$BASE_TREE" $BASE_COVERAGE_ARG > base-badge.svg 2>>base.err
-                rm -f "$BASE_TREE/node_modules"
+                $FALLOW --format json --quiet --root "$BASE_TREE" $BASE_COVERAGE_ARG > base.json 2>base.err
+                $FALLOW health --format badge --quiet --root "$BASE_TREE" $BASE_COVERAGE_ARG > base-badge.svg 2>>base.err
                 git worktree remove "$BASE_TREE" --force >/dev/null 2>&1
                 [ -s base.json ] && BASE_ARG="base.json"
                 [ -s base-badge.svg ] && BASE_BADGE_ARG="base-badge.svg"
