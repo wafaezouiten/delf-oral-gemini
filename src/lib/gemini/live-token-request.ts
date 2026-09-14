@@ -110,28 +110,10 @@ export function parseLiveTokenRequest(body: unknown): LiveTokenParse {
     return { ok: false, status: 400, error: "Modèle inconnu" };
   }
 
-  // Length-bounded rather than inspected. There is nothing to validate about
-  // the CONTENT of a system instruction — replacing it wholesale is the
-  // feature — so the only questions are whether it is text and whether it is
-  // small enough to pin into a token. What keeps this safe is not this check
-  // but the gate below, which refuses it outright off a development build.
   const prompt = input.examinerPrompt;
-  if (
-    prompt !== undefined &&
-    (typeof prompt !== "string" ||
-      prompt.trim().length === 0 ||
-      prompt.length > MAX_EXAMINER_PROMPT_LENGTH)
-  ) {
+  if (prompt !== undefined && !isPinnableExaminerPrompt(prompt)) {
     return { ok: false, status: 400, error: "Prompt examinateur invalide" };
   }
-  const requestedExaminerPrompt =
-    typeof prompt === "string" && prompt.trim().length > 0 ? prompt : undefined;
-
-  const handle = input.resumptionHandle;
-  const resumptionHandle =
-    typeof handle === "string" && handle.length > 0 && handle.length <= MAX_RESUMPTION_HANDLE_LENGTH
-      ? handle
-      : undefined;
 
   return {
     ok: true,
@@ -140,10 +122,34 @@ export function parseLiveTokenRequest(body: unknown): LiveTokenParse {
       examId,
       requestedTopicSlug,
       requestedModel: model,
-      resumptionHandle,
-      requestedExaminerPrompt,
+      resumptionHandle: usableResumptionHandle(input.resumptionHandle),
+      requestedExaminerPrompt: prompt,
     },
   };
+}
+
+/**
+ * Length-bounded rather than inspected. There is nothing to validate about
+ * the CONTENT of a system instruction — replacing it wholesale is the feature
+ * — so the only questions are whether it is text and whether it is small
+ * enough to pin into a token. What keeps this safe is not this check but
+ * {@link gateLiveToken}, which refuses it outright off a development build.
+ */
+function isPinnableExaminerPrompt(prompt: unknown): prompt is string {
+  return (
+    typeof prompt === "string" &&
+    prompt.trim().length > 0 &&
+    prompt.length <= MAX_EXAMINER_PROMPT_LENGTH
+  );
+}
+
+/** A handle worth resuming on; anything else means a fresh connect, silently. */
+function usableResumptionHandle(handle: unknown): string | undefined {
+  return typeof handle === "string" &&
+    handle.length > 0 &&
+    handle.length <= MAX_RESUMPTION_HANDLE_LENGTH
+    ? handle
+    : undefined;
 }
 
 export type LiveTokenGate =

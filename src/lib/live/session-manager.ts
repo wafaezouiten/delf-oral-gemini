@@ -616,9 +616,11 @@ export class ExamLiveSession implements LiveSessionLike {
       this.handleGoAway(message.goAway.timeLeft);
     }
 
-    const content = message.serverContent;
-    if (!content) return;
+    if (message.serverContent) this.handleServerContent(message.serverContent);
+  }
 
+  /** The examiner's turn as it arrives: transcripts, audio, and its two edges. */
+  private handleServerContent(content: NonNullable<LiveServerMessage["serverContent"]>): void {
     if (content.interrupted) this.callbacks.onInterrupted();
 
     const candidateText = content.inputTranscription?.text;
@@ -627,11 +629,9 @@ export class ExamLiveSession implements LiveSessionLike {
     const examinerText = content.outputTranscription?.text;
     if (examinerText) this.callbacks.onExaminerTranscript(examinerText);
 
-    const audio: string[] = [];
-    for (const part of content.modelTurn?.parts ?? []) {
-      const data = part.inlineData?.data;
-      if (data) audio.push(data);
-    }
+    const audio = (content.modelTurn?.parts ?? []).flatMap((part) =>
+      part.inlineData?.data ? [part.inlineData.data] : [],
+    );
 
     // The turn opens on its first sign — text or audio, whichever lands first
     // — and from here until `turnComplete` the microphone is held. See
@@ -1041,15 +1041,20 @@ export function parseDurationMs(value: unknown): number | null {
     const seconds = Number.parseFloat(value.replace(/s$/, ""));
     return Number.isFinite(seconds) ? seconds * 1000 : null;
   }
-  if (value && typeof value === "object") {
-    const record = value as { seconds?: number | string; nanos?: number };
-    const seconds = Number(record.seconds ?? 0);
-    const nanos = Number(record.nanos ?? 0);
-    if (Number.isFinite(seconds) || Number.isFinite(nanos)) {
-      return (
-        (Number.isFinite(seconds) ? seconds : 0) * 1000 + (Number.isFinite(nanos) ? nanos : 0) / 1e6
-      );
-    }
-  }
+  if (value && typeof value === "object") return protobufDurationMs(value);
   return null;
+}
+
+/**
+ * The `{seconds, nanos}` form. Either half may be missing or unparseable;
+ * the duration is whatever parts are numbers, and null when neither is.
+ */
+function protobufDurationMs(value: object): number | null {
+  const record = value as { seconds?: number | string; nanos?: number };
+  const seconds = Number(record.seconds ?? 0);
+  const nanos = Number(record.nanos ?? 0);
+  if (!Number.isFinite(seconds) && !Number.isFinite(nanos)) return null;
+  return (
+    (Number.isFinite(seconds) ? seconds : 0) * 1000 + (Number.isFinite(nanos) ? nanos : 0) / 1e6
+  );
 }

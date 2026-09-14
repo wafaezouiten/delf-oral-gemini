@@ -2279,22 +2279,11 @@ export class ExamController {
    * that has just pulled the socket out from under it.
    */
   private checkSessionDeafness(): boolean {
-    if (this.phase !== "debate" || this.closing || this.devTextMode) return false;
-    // The monologue is excluded by the phase check above and would have to be:
-    // manual voice-activity detection emits no transcription at all until the
-    // phase's `activityEnd` (#206), so an unanswered microphone is what a
-    // HEALTHY monologue looks like from here.
-    if (!this.recorder || this.captureLost || this.captureStalled) {
-      this.resetDeafnessLedger();
-      return false;
-    }
-    if (this.connection !== "connected") {
-      this.resetDeafnessLedger();
-      return false;
-    }
+    const recorder = this.deafnessWatchRecorder();
+    if (!recorder) return false;
 
     const now = this.now();
-    const voiced = this.recorder.voicedSeconds("debate");
+    const voiced = recorder.voicedSeconds("debate");
     const baseline = this.deafBaseline;
     // Moved on EVERY tick, including the ones that bail out below. That is what
     // makes the echo holds discard those seconds rather than merely skip them:
@@ -2321,7 +2310,31 @@ export class ExamController {
 
     const unheard = Number(this.unheardVoicedSeconds.toFixed(1));
     this.resetDeafnessLedger();
+    return this.answerDeafness(unheard, now);
+  }
 
+  /**
+   * The microphone the deafness watch reads this tick, or null when there is
+   * nothing to read. Where that is because the microphone or the socket is
+   * not there, the ledger is reset too: seconds nobody could have heard are
+   * not evidence.
+   */
+  private deafnessWatchRecorder(): RecorderLike | null {
+    if (this.phase !== "debate" || this.closing || this.devTextMode) return null;
+    // The monologue is excluded by the phase check above and would have to be:
+    // manual voice-activity detection emits no transcription at all until the
+    // phase's `activityEnd` (#206), so an unanswered microphone is what a
+    // HEALTHY monologue looks like from here.
+    const microphone = this.captureLost || this.captureStalled ? null : this.recorder;
+    if (!microphone || this.connection !== "connected") {
+      this.resetDeafnessLedger();
+      return null;
+    }
+    return microphone;
+  }
+
+  /** The verdict is in: reconnect, or say why not. Returns whether it fired. */
+  private answerDeafness(unheard: number, now: number): boolean {
     if (this.deafReconnects >= MAX_DEAF_RECONNECTS) {
       // Said once per verdict rather than suppressed: a débat that keeps
       // reaching this is the model failing repeatedly, and that belongs in the
