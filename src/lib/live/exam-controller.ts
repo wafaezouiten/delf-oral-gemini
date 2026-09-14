@@ -1527,7 +1527,10 @@ export class ExamController {
    * end is a rewind, which is not time skipped. A claim that outran the clock
    * would be the one thing this field must never be.
    */
-  private devMoveClock(move: (phaseStart: number) => number, detail: object): void {
+  private devMoveClock(
+    move: (phaseStart: number) => number,
+    detail: { seconds: number } | { toEnd: true },
+  ): void {
     if (!DEV_TOOLS_ENABLED) return;
     if (this.phase !== "monologue" && this.phase !== "debate") return;
     if (this.phaseStart === null || this.closing || this.monologueHeld) return;

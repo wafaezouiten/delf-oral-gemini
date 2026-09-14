@@ -76,10 +76,10 @@
     // block SHOULD look like the last one. Repetition is how a case stays
     // readable on its own, and folding it away hides what the test sets up.
     //
-    // `src/` is deliberately absent. The clone this leaves standing in the
-    // application is the ownership preamble six API routes share — `authorizeExam`
-    // then `EXAM_ACCESS_DENIALS` — which is repeated on purpose, argued for in
-    // each route that carries it, and worth continuing to see.
+    // `src/` is deliberately absent, so that a clone in the application is
+    // always reported. There are none as of #230: the last one standing — the
+    // ownership preamble the API routes shared — is `examRoute` now, and the
+    // zero is the contract this line keeps.
     "ignore": ["scripts/**", "e2e/**", "**/*.test.ts"]
   }
 }
