@@ -16,6 +16,9 @@ export type ExitOutcome =
   /** No answer: offline, a dropped connection, or slower than the wait allows. */
   | { recorded: false; reason: "unreachable" };
 
+/** The body flag each route answers with. Closed, so a misspelt one cannot compile. */
+export type ExitFlag = "abandoned" | "archived";
+
 /**
  * POST `path`, and read the answer through `flag`.
  *
@@ -29,7 +32,7 @@ export type ExitOutcome =
  */
 export async function requestExitStamp(
   path: string,
-  flag: string,
+  flag: ExitFlag,
   fetchImpl: typeof fetch,
   timeoutMs: number,
 ): Promise<ExitOutcome> {
