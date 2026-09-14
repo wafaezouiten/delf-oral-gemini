@@ -46,8 +46,9 @@ import type { ErrorInfo } from "next/dist/client/components/error-boundary";
  */
 export interface ErrorPageProps {
   error: Error & { digest?: string };
-  /** Re-fetches and re-renders. Not `reset` — see above. */
-  retry: () => void;
+  /** Re-fetches and re-renders. Not `reset` — see above. Checked, not assumed:
+   *  see `Checked` below. */
+  retry: Checked<NextStillPassesRetry> extends true ? () => void : never;
 }
 
 /**
@@ -55,14 +56,17 @@ export interface ErrorPageProps {
  *
  * Two ways to fail, both loud. If `retry` is renamed or dropped, `ErrorInfo["retry"]`
  * is not a property and the indexed access errors. If its signature changes, the
- * conditional resolves to `never` and the assignment below cannot be made.
+ * conditional resolves to `false`, and `Checked<false>` is `TS2344` on the line
+ * above — which is why the check sits inside the type it protects rather than
+ * beside it as an exported constant: nothing has to import it for the checker
+ * to evaluate it.
  *
  * `error` is not asserted against `ErrorInfo["error"]`: Next types it `unknown`
  * and its own source says why (`TODO(NAR-804): Docs say this is an Error object,
  * but we don't guarantee that`). Narrowing it here is this app's choice, and
  * pinning it to Next's would only break on a change that does not matter.
  */
-type NextStillPassesRetry = ErrorInfo["retry"] extends () => void ? true : never;
+type NextStillPassesRetry = ErrorInfo["retry"] extends () => void ? true : false;
 
-/** Exported so the assertion is a value the checker must evaluate, not dead code. */
-export const ERROR_PROPS_MATCH_NEXT: NextStillPassesRetry = true;
+/** Only `true` gets through; any other argument is a compile error. */
+type Checked<T extends true> = T;

@@ -29,8 +29,7 @@
 
 import { NextResponse } from "next/server";
 
-import { EXAM_ACCESS_DENIALS } from "@/lib/auth/exam-access";
-import { authorizeExam } from "@/lib/auth/exam-guard";
+import { type ExamRequest, examRoute } from "@/lib/auth/exam-route";
 import type { OralSpeakingPhase } from "@/lib/db/schema";
 import { disposeRecording, findRecording } from "@/lib/db/sittings";
 import { decidePlayback, parseRecordedPhase } from "@/lib/exams/recording-playback";
@@ -39,32 +38,25 @@ import { isRecordingVaultConfigured, recordingVault } from "@/lib/storage/record
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-type RouteContext = { params: Promise<{ examId: string; phase: string }> };
+type RecordingParams = { examId: string; phase: string };
 
 type OwnedPhase =
   | { ok: true; examId: number; userId: string; phase: OralSpeakingPhase }
   | { ok: false; response: NextResponse };
 
 /**
- * The three questions both verbs ask before touching a row, in the one order
- * they may be asked in.
+ * The two questions both verbs ask after `examRoute` has asked the first, in
+ * the one order they may be asked in.
  *
- * Authorisation first, then the path: an unowned caller learns nothing about
- * which path shapes exist, same order as the finish route. Then persistence: a
- * sitting that was never persisted (no database, a degraded `local-…` id) has
- * no recording row, so there is nothing either verb could ever do for it. The
- * finish route grades those anyway; these two have no such fallback.
+ * Authorisation came first, so the path is only parsed for a caller who may
+ * see it: an unowned caller learns nothing about which path shapes exist. Then
+ * persistence: a sitting that was never persisted (no database, a degraded
+ * `local-…` id) has no recording row, so there is nothing either verb could
+ * ever do for it. The finish route grades those anyway; these two have no such
+ * fallback.
  */
-async function resolveOwnedPhase(context: RouteContext): Promise<OwnedPhase> {
-  const { examId, phase: phaseSegment } = await context.params;
-
-  const access = await authorizeExam(examId);
-  if (access.status === "denied") {
-    const { status, error } = EXAM_ACCESS_DENIALS[access.reason];
-    return { ok: false, response: NextResponse.json({ error }, { status }) };
-  }
-
-  const phase = parseRecordedPhase(phaseSegment);
+function resolveOwnedPhase({ access, params }: ExamRequest<RecordingParams>): OwnedPhase {
+  const phase = parseRecordedPhase(params.phase);
   if (!phase) {
     return {
       ok: false,
@@ -82,8 +74,8 @@ async function resolveOwnedPhase(context: RouteContext): Promise<OwnedPhase> {
   return { ok: true, examId: access.examId, userId: access.userId, phase };
 }
 
-export async function GET(request: Request, context: RouteContext) {
-  const owned = await resolveOwnedPhase(context);
+export const GET = examRoute<RecordingParams>(async (request, exam) => {
+  const owned = resolveOwnedPhase(exam);
   if (!owned.ok) return owned.response;
   const { examId, userId, phase } = owned;
 
@@ -161,7 +153,7 @@ export async function GET(request: Request, context: RouteContext) {
       "Content-Disposition": "inline",
     },
   });
-}
+});
 
 /**
  * DELETE — the candidate removes one of their own recordings, for good (#98).
@@ -183,8 +175,8 @@ export async function GET(request: Request, context: RouteContext) {
  * already gone, and a repeated press — the candidate asked for an absence,
  * and an absence is what there is.
  */
-export async function DELETE(_request: Request, context: RouteContext) {
-  const owned = await resolveOwnedPhase(context);
+export const DELETE = examRoute<RecordingParams>(async (_request, exam) => {
+  const owned = resolveOwnedPhase(exam);
   if (!owned.ok) return owned.response;
   const { examId, userId, phase } = owned;
 
@@ -218,4 +210,4 @@ export async function DELETE(_request: Request, context: RouteContext) {
     });
 
   return NextResponse.json({ deleted: true });
-}
+});

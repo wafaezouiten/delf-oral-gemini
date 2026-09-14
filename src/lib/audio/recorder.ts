@@ -30,6 +30,7 @@
  */
 
 import { INPUT_SAMPLE_RATE } from "@/lib/gemini/constants";
+import type { RecorderLike } from "@/lib/live/exam-controller";
 import {
   PhaseArchive,
   type PhaseRecording,
@@ -200,7 +201,7 @@ export interface MicRecorderOptions extends RecorderCallbacks {
   encodeRecording?: RecordingEncoder;
 }
 
-export class MicRecorder {
+export class MicRecorder implements RecorderLike {
   private capture: CaptureStream | null = null;
   private framer: PcmFramer | null = null;
 

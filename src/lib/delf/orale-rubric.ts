@@ -188,11 +188,10 @@ export const FULL_DEVELOPMENT_SECONDS: Record<"monologue" | "debate", number> = 
  *
  * The débat's floor is untouched at four minutes, #189's original figure.
  *
- * What these replaced: `minDurationSeconds(tache)`, 40 % of each part's
- * expected time floored at 30 s — 168 s of monologue and 312 s of débat, a
- * single threshold per part with a flat −3 behind it. That function is still
- * the incumbent's rule and still exported from `constants.ts`; it is no longer
- * this project's, and nothing in `src/` computes a mark from it any more.
+ * What these replaced: the incumbent's `minDurationSeconds(tache)`, 40 % of
+ * each part's expected time floored at 30 s — 168 s of monologue and 312 s of
+ * débat, a single threshold per part with a flat −3 behind it. It is written
+ * down in `constants.ts` and no longer implemented anywhere in this tree.
  */
 export const SHORT_DEVELOPMENT_SECONDS: Record<"monologue" | "debate", number> = {
   monologue: 150,

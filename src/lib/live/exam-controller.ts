@@ -1496,19 +1496,7 @@ export class ExamController {
    * be silently undone, which is worse than a refusal.
    */
   devSkipTime(seconds: number): void {
-    if (!DEV_TOOLS_ENABLED) return;
-    if (this.phase !== "monologue" && this.phase !== "debate") return;
-    if (this.phaseStart === null || this.closing || this.monologueHeld) return;
-
-    // Read off the stamp rather than off the argument: `rewindStartBy` floors a
-    // non-positive skip at zero, and what is banked has to be what the clock
-    // actually moved — a claim that outran the clock would be the one thing
-    // this field must never be.
-    const before = this.phaseStart;
-    this.phaseStart = rewindStartBy(this.phaseStart, seconds);
-    this.devSkippedSeconds[this.phase] += Math.round((before - this.phaseStart) / 1000);
-    this.log("dev-time-skip", { seconds, phase: this.phase });
-    this.tick();
+    this.devMoveClock((start) => rewindStartBy(start, seconds), { seconds });
   }
 
   /**
@@ -1526,17 +1514,31 @@ export class ExamController {
    * rewind, and a rewind is not time skipped.
    */
   devSkipToEnd(): void {
+    this.devMoveClock(() => this.now() - phaseDurationSeconds(this.phase) * 1000, { toEnd: true });
+  }
+
+  /**
+   * The one mechanism under both skips: the same guards, the same banking, the
+   * same tick.
+   *
+   * What is banked is read off the stamp rather than off the argument: what
+   * the clock actually moved, floored at zero — `rewindStartBy` floors a
+   * non-positive skip itself, and landing a clock already past the end ON the
+   * end is a rewind, which is not time skipped. A claim that outran the clock
+   * would be the one thing this field must never be.
+   */
+  private devMoveClock(move: (phaseStart: number) => number, detail: object): void {
     if (!DEV_TOOLS_ENABLED) return;
     if (this.phase !== "monologue" && this.phase !== "debate") return;
     if (this.phaseStart === null || this.closing || this.monologueHeld) return;
 
     const before = this.phaseStart;
-    this.phaseStart = this.now() - phaseDurationSeconds(this.phase) * 1000;
+    this.phaseStart = move(before);
     this.devSkippedSeconds[this.phase] += Math.max(
       0,
       Math.round((before - this.phaseStart) / 1000),
     );
-    this.log("dev-time-skip", { toEnd: true, phase: this.phase });
+    this.log("dev-time-skip", { ...detail, phase: this.phase });
     this.tick();
   }
 
