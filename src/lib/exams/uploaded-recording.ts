@@ -153,8 +153,14 @@ export function selectDeliverable<T>(
   return kept.filter((recording) => !dropped.has(recording));
 }
 
-/** One artefact, as the server reads it rather than as the client labels it. */
-export interface MeasuredRecording {
+/**
+ * One artefact, as the server reads it rather than as the client labels it.
+ *
+ * Not `MeasuredRecording`: that name belongs to `sitting-persistence.ts`, where
+ * it is the row-shaped record (phase, byte size) the route builds *from* this
+ * measurement. Two types with one name is a trap for the next reader.
+ */
+export interface UploadedRecordingMeasure {
   /** Taken from the bytes, not from the multipart headers. */
   mimeType: "audio/ogg" | "audio/wav";
   /** Measured from the artefact's own contents. See the two readers. */
@@ -197,7 +203,7 @@ export interface MeasuredRecording {
 export function measureUploadedRecording(
   bytes: ArrayBuffer,
   sampleRate: number,
-): MeasuredRecording | null {
+): UploadedRecordingMeasure | null {
   const opus = readOggOpus(bytes);
   if (opus) {
     return checkOggOpusFormat(opus, sampleRate)
