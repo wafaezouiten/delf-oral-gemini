@@ -45,7 +45,7 @@ import { base64ToInt16 } from "@/lib/audio/pcm";
 import { isVoiced } from "@/lib/audio/voice-activity";
 import { CLIENT_CONNECT_CONFIG, INPUT_MIME_TYPE, LIVE_MODEL } from "@/lib/gemini/constants";
 import type { OralTopic } from "@/lib/delf/topics";
-import type { LiveSessionLike } from "./exam-controller";
+import type { LiveSessionLike } from "./controller-ports";
 import { canTransition, describeTransition, type SessionState } from "./state-machine";
 
 export type LivePhase = "monologue" | "debate";
