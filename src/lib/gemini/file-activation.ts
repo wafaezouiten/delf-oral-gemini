@@ -80,26 +80,27 @@ export async function waitForFileActive<T extends UploadedFileSnapshot>(
   for (let poll = 0; ; poll++) {
     if (file.state === undefined || file.state === "ACTIVE") return file;
 
-    const refusal = refuseSnapshot(file, poll, polls, delayMs);
-    if (refusal) throw refusal;
+    const next = nextPoll(file, poll, polls, delayMs);
+    if (next instanceof Error) throw next;
 
     options.onPoll?.(file.state, poll + 1);
     await sleep(delayMs);
-    file = await get(file.name as string);
+    file = await get(next.name);
   }
 }
 
 /**
- * Why a snapshot that is not yet `ACTIVE` cannot be waited on — or null when
- * one more poll is the right answer. Three refusals, each in the file's own
- * terms rather than a guess about it.
+ * What to poll next for a snapshot that is not yet `ACTIVE` — or why it
+ * cannot be waited on. Three refusals, each in the file's own terms rather
+ * than a guess about it; otherwise the name, checked here so the caller
+ * need not.
  */
-function refuseSnapshot(
+function nextPoll(
   file: UploadedFileSnapshot,
   poll: number,
   polls: number,
   delayMs: number,
-): Error | null {
+): { name: string } | Error {
   if (file.state === "FAILED") {
     const detail = file.error?.message ? `: ${file.error.message}` : "";
     return new Error(`The uploaded file came back FAILED${detail}`);
@@ -114,5 +115,5 @@ function refuseSnapshot(
       `The uploaded file was still ${file.state} after ${polls} polls (${(polls * delayMs) / 1000}s)`,
     );
   }
-  return null;
+  return { name: file.name };
 }
