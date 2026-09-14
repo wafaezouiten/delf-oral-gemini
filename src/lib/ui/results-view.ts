@@ -24,6 +24,7 @@ import {
 } from "./criterion-breakdown";
 import { formatScore25 } from "./format-score";
 import { resultMetaLine, scoreToneLabel } from "./score-verdict";
+import type { PlayableRecording } from "./correction-transcript";
 import type { StoredResult } from "./stored-result";
 
 /**
@@ -95,7 +96,7 @@ export interface ResultsView {
   feedback: StoredResult["evaluation"]["feedback"];
   provenance: { examinerModel: string | null; correctorModel: string };
   /** The halves with audio to stream back — none for a stash, which never carries uris. */
-  playable: NonNullable<StoredResult["playable"]>;
+  playable: PlayableRecording[];
 }
 
 const PHONOLOGY_NOTE =

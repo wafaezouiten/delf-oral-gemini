@@ -8,6 +8,8 @@ import type { OralTopic } from "@/lib/delf/topics";
 import { candidateWordCount, type TranscriptEntry } from "@/lib/delf/transcript";
 import type { StoredCorrection, StoredSitting } from "@/lib/exams/sitting-persistence";
 
+import type { PlayableRecording } from "./correction-transcript";
+
 /**
  * The correction as the results page reads it — from the finish response's
  * stash in `sessionStorage`, or rebuilt from the stored rows on the server.
@@ -95,7 +97,7 @@ export interface StoredResult {
    * playback belongs to the server-read path alone. Absent or empty, the
    * transcript renders its parts without players.
    */
-  playable?: Array<{ phase: "monologue" | "debate"; mimeType: string; durationSeconds: number }>;
+  playable?: PlayableRecording[];
   /**
    * Which Live model played the examiner (#99). Optional for the same reason
    * `durationPenalty` is: this object also comes back out of `sessionStorage`,
