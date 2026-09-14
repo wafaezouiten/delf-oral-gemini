@@ -33,7 +33,7 @@ import { progressPayloadSchema } from "@/lib/exams/progress-payload";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export const POST = examRoute(async (request, { access, params }) => {
+export const POST = examRoute(async function recordProgress(request, { access, params }) {
   const parsed = progressPayloadSchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) {
     return NextResponse.json(

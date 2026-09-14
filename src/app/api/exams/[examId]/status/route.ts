@@ -23,7 +23,7 @@ import { neonSittingStore } from "@/lib/db/sittings";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export const GET = examRoute(async (_request, { access }) => {
+export const GET = examRoute(async function readCorrectionStatus(_request, { access }) {
   if (access.status !== "owned") {
     return NextResponse.json({ corrected: false });
   }

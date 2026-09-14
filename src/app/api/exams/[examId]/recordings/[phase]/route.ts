@@ -74,7 +74,7 @@ function resolveOwnedPhase({ access, params }: ExamRequest<RecordingParams>): Ow
   return { ok: true, examId: access.examId, userId: access.userId, phase };
 }
 
-export const GET = examRoute<RecordingParams>(async (request, exam) => {
+export const GET = examRoute<RecordingParams>(async function playRecording(request, exam) {
   const owned = resolveOwnedPhase(exam);
   if (!owned.ok) return owned.response;
   const { examId, userId, phase } = owned;
@@ -175,7 +175,7 @@ export const GET = examRoute<RecordingParams>(async (request, exam) => {
  * already gone, and a repeated press — the candidate asked for an absence,
  * and an absence is what there is.
  */
-export const DELETE = examRoute<RecordingParams>(async (_request, exam) => {
+export const DELETE = examRoute<RecordingParams>(async function deleteRecording(_request, exam) {
   const owned = resolveOwnedPhase(exam);
   if (!owned.ok) return owned.response;
   const { examId, userId, phase } = owned;

@@ -26,7 +26,7 @@ import { isSelectableLiveModel } from "@/lib/gemini/constants";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export const POST = examRoute(async (request, { access, params }) => {
+export const POST = examRoute(async function chooseExaminer(request, { access, params }) {
   const body = (await request.json().catch(() => null)) as { model?: unknown } | null;
   const model = body?.model;
   if (typeof model !== "string" || !isSelectableLiveModel(model)) {
