@@ -131,3 +131,94 @@ export function drawerReleaseVelocity(
   if (elapsed <= 0) return 0;
   return ((last.y - first.y) / elapsed) * 1000;
 }
+
+/**
+ * One drag of the handle, from the finger landing to its lifting, as data.
+ *
+ * The component keeps one of these in a ref and hands it back on every
+ * pointer event; everything the drag decides — whether it has become a drag
+ * at all, where the panel goes on each move, where it settles on release —
+ * is decided here, on numbers, where `node --test` can drive a whole gesture
+ * without a pointer.
+ */
+export interface DrawerGesture {
+  pointerId: number;
+  startClientY: number;
+  /** Where the panel was when the finger landed. */
+  startY: number;
+  /** Any real movement makes the gesture a drag, and its release not a tap. */
+  moved: boolean;
+  /** The trailing positions, for the release velocity. */
+  samples: Array<{ time: number; y: number }>;
+}
+
+/** How many trailing samples the velocity is read from. */
+const GESTURE_SAMPLES = 8;
+
+export function beginDrawerGesture(
+  pointerId: number,
+  clientY: number,
+  y: number,
+  time: number,
+): DrawerGesture {
+  return { pointerId, startClientY: clientY, startY: y, moved: false, samples: [{ time, y }] };
+}
+
+/**
+ * The finger moved: where the panel goes now. Records the sample and, past
+ * the tap slop, marks the gesture a drag. Mutates the gesture it is given —
+ * it lives in a ref, and a drag is a hundred moves a second.
+ */
+export function moveDrawerGesture(
+  gesture: DrawerGesture,
+  clientY: number,
+  time: number,
+  geometry: DrawerGeometry,
+): number {
+  const offset = clientY - gesture.startClientY;
+  if (isDrawerDrag(offset)) gesture.moved = true;
+  const y = clampDrawerY(gesture.startY + offset, geometry);
+  gesture.samples.push({ time, y });
+  if (gesture.samples.length > GESTURE_SAMPLES) gesture.samples.shift();
+  return y;
+}
+
+/**
+ * The finger lifted at `y`: where the panel settles, or null to leave it
+ * where it is.
+ *
+ * A gesture that never became a drag was a tap, and a tap toggles. A drag
+ * settles on its release velocity — a flick opens or closes, anything slower
+ * stays put — read off the trailing window with the release itself as the
+ * last sample: a finger that stopped and then lifted produced no moves since
+ * it stopped, and without this stamp its last movement would still read as
+ * the release speed.
+ */
+export function releaseDrawerGesture(
+  gesture: DrawerGesture,
+  y: number,
+  time: number,
+  geometry: DrawerGeometry,
+): number | null {
+  if (!gesture.moved) return drawerTapTarget(y, geometry);
+  gesture.samples.push({ time, y });
+  return drawerSettleAfterRelease(drawerReleaseVelocity(gesture.samples), geometry);
+}
+
+/**
+ * Where the panel rests when the layout is (re)measured.
+ *
+ * On the first placement an `initiallyOpen` drawer opens to the default — if
+ * the viewport can open at all; one too short to open into rests closed
+ * instead. After that a closed drawer stays closed, and an open one is left
+ * where the reader put it, re-clamped to the new lower limit: a re-clamp on
+ * layout change, not a snap on state change.
+ */
+export function drawerPlacementY(
+  state: { first: boolean; initiallyOpen: boolean; open: boolean; y: number },
+  geometry: DrawerGeometry,
+): number {
+  if (state.first && state.initiallyOpen && geometry.canOpen) return geometry.defaultY;
+  if (!state.open) return geometry.closedY;
+  return Math.min(state.y, geometry.closedY);
+}

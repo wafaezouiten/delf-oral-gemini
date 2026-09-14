@@ -33,6 +33,8 @@ import {
 } from "@/lib/delf/transcript";
 
 export const CORRECTION_TRANSCRIPT_COPY = {
+  recordingUnavailable:
+    "L'enregistrement de cette partie n'est plus disponible : il a été supprimé, ou il n'a pas pu être conservé.",
   kicker: "Transcription de l'épreuve",
   /**
    * Under an empty heading. Quiet — a paragraph, not the danger block below:
@@ -91,6 +93,13 @@ export interface CorrectionTranscriptTurn {
   timeLabel: string;
 }
 
+/** A recording the correction can stream back (#98), as the page was told. */
+export interface PlayableRecording {
+  phase: TranscriptPhase;
+  mimeType: string;
+  durationSeconds: number;
+}
+
 export interface CorrectionTranscriptSection {
   phase: TranscriptPhase;
   heading: string;
@@ -99,12 +108,63 @@ export interface CorrectionTranscriptSection {
   turns: CorrectionTranscriptTurn[];
   /** Printed under the heading when the part has no turns at all, else null. */
   emptyNote: string | null;
+  /**
+   * How the turns are set. A part where nobody but the candidate spoke is a
+   * monologue; anything else — the débat, or an exposé the examiner had to
+   * interrupt — is an exchange. Decided by who talked rather than by which
+   * phase it is, so a silent sitting still reads as an exchange rather than
+   * as an empty exposé.
+   */
+  shape: "monologue" | "exchange";
+  /** The recording to play above the words, when its bytes were kept. */
+  recording: PlayableRecording | null;
+  /** Said instead of a player, when the part ran but its audio is gone. */
+  recordingNote: string | null;
 }
 
 export interface CorrectionTranscriptView {
   sections: CorrectionTranscriptSection[];
   /** The red block, when the candidate is nowhere in the transcript. */
   silentNotice: { title: string; body: string } | null;
+}
+
+/**
+ * One part of the épreuve as the correction sets it. A named function rather
+ * than the arrow it was: the coverage the workflow hands Fallow is matched per
+ * named function, and an arrow inside `.map` has no name to be matched by.
+ */
+function sectionView(
+  phase: TranscriptPhase,
+  transcript: readonly TranscriptEntry[],
+  spoke: boolean,
+  seconds: Record<TranscriptPhase, number>,
+  playable: readonly PlayableRecording[],
+): CorrectionTranscriptSection {
+  const entries = entriesForPhase(transcript, phase);
+  const anchor = entries[0]?.timestamp ?? 0;
+  const recording = playable.find((entry) => entry.phase === phase) ?? null;
+  return {
+    phase,
+    heading: PHASE_HEADINGS[phase],
+    durationLabel: formatClock(seconds[phase]),
+    turns: entries.map((entry) => ({
+      entry,
+      timeLabel: formatTurnOffset(entry.timestamp - anchor),
+    })),
+    emptyNote: entries.length === 0 && spoke ? CORRECTION_TRANSCRIPT_COPY.emptySection : null,
+    shape:
+      entries.length > 0 && entries.every((entry) => entry.speaker === "candidate")
+        ? "monologue"
+        : "exchange",
+    recording,
+    // A part that ran and has nothing to play: the bytes were deleted, or
+    // never kept. A part that never ran says nothing — there was no audio
+    // to lose.
+    recordingNote:
+      recording === null && seconds[phase] > 0
+        ? CORRECTION_TRANSCRIPT_COPY.recordingUnavailable
+        : null,
+  };
 }
 
 /**
@@ -125,6 +185,7 @@ export interface CorrectionTranscriptView {
 export function correctionTranscriptView(
   stored: readonly TranscriptEntry[],
   durations: { monologueSeconds: number; debateSeconds: number },
+  playable: readonly PlayableRecording[] = [],
 ): CorrectionTranscriptView {
   // The rows written before the controller held directive echoes back (#187)
   // still carry them, and a candidate reading their correction must not meet
@@ -138,20 +199,9 @@ export function correctionTranscriptView(
     debate: durations.debateSeconds,
   };
 
-  const sections = PHASE_ORDER.map((phase): CorrectionTranscriptSection => {
-    const entries = entriesForPhase(transcript, phase);
-    const anchor = entries[0]?.timestamp ?? 0;
-    return {
-      phase,
-      heading: PHASE_HEADINGS[phase],
-      durationLabel: formatClock(seconds[phase]),
-      turns: entries.map((entry) => ({
-        entry,
-        timeLabel: formatTurnOffset(entry.timestamp - anchor),
-      })),
-      emptyNote: entries.length === 0 && spoke ? CORRECTION_TRANSCRIPT_COPY.emptySection : null,
-    };
-  });
+  const sections = PHASE_ORDER.map((phase) =>
+    sectionView(phase, transcript, spoke, seconds, playable),
+  );
 
   return {
     sections,

@@ -6,6 +6,7 @@ import {
   RESULTS_RAIL_MAX_PCT,
   RESULTS_RAIL_MIN_PCT,
   clampRailPct,
+  isRailKey,
   railPctAfterKey,
   railPctFromPointer,
 } from "./results-rail";
@@ -40,5 +41,13 @@ describe("the correction's transcript rail (#190)", () => {
     assert.equal(railPctAfterKey(RESULTS_RAIL_MIN_PCT, "ArrowRight"), RESULTS_RAIL_MIN_PCT);
     assert.equal(railPctAfterKey(50, "Home"), RESULTS_RAIL_DEFAULT_PCT);
     assert.equal(railPctAfterKey(50, "Tab"), 50);
+  });
+
+  it("answers to the three keys the splitter pattern names, and no other", () => {
+    assert.equal(isRailKey("ArrowLeft"), true);
+    assert.equal(isRailKey("ArrowRight"), true);
+    assert.equal(isRailKey("Home"), true);
+    assert.equal(isRailKey("ArrowUp"), false);
+    assert.equal(isRailKey("Enter"), false);
   });
 });

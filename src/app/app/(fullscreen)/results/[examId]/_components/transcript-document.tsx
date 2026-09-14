@@ -4,11 +4,13 @@ import { RecordingPlayer } from "@/app/_components/recording-player";
 import { TeacherIcon, UserIcon } from "@/app/_components/po/icons";
 import { Kicker } from "@/app/_components/po/tag";
 import { formatClock } from "@/lib/delf/phases";
-import type { TranscriptEntry, TranscriptPhase, TranscriptSpeaker } from "@/lib/delf/transcript";
+import type { TranscriptEntry, TranscriptSpeaker } from "@/lib/delf/transcript";
 import { cn } from "@/lib/ui/class-names";
 import {
   CORRECTION_TRANSCRIPT_COPY,
   correctionTranscriptView,
+  type CorrectionTranscriptSection,
+  type PlayableRecording,
   type CorrectionTranscriptTurn,
 } from "@/lib/ui/correction-transcript";
 import { speakerLabel, turnKey } from "@/lib/ui/debate-conversation";
@@ -52,12 +54,6 @@ import { speakerLabel, turnKey } from "@/lib/ui/debate-conversation";
  * stamps' anchor, which of the two "nothing was said" messages fires — is in
  * `lib/ui/correction-transcript.ts`, where it is tested.
  */
-
-export interface PlayableRecording {
-  phase: TranscriptPhase;
-  mimeType: string;
-  durationSeconds: number;
-}
 
 const SPEAKER_AVATAR: Record<TranscriptSpeaker, { Icon: typeof UserIcon; className: string }> = {
   candidate: { Icon: UserIcon, className: "bg-primary text-primary-foreground" },
@@ -150,6 +146,74 @@ function ExchangeBody({ turns }: { turns: readonly CorrectionTranscriptTurn[] })
   );
 }
 
+/**
+ * One part of the épreuve: its heading and duration, the recording above the
+ * words it produced (or the note that it is gone), then the words.
+ */
+function TranscriptSection({
+  section,
+  examId,
+}: {
+  section: CorrectionTranscriptSection;
+  examId: string;
+}) {
+  return (
+    <section className="border-border border-t pt-4 first:border-t-0 first:pt-0">
+      {/* `break-after-avoid`: a heading that lands as the last line of a
+          printed page sends the candidate over the fold to find out which
+          half they are reading. */}
+      <div className="flex break-inside-avoid break-after-avoid items-baseline justify-between gap-3">
+        {/* An `h3` wearing the kicker's recipe, not `Kicker` — that renders a
+            `<p>`, and these two labels are the only sub-headings under the
+            sheet's `h2`. A transcript set as a document has to be navigable as
+            one: losing them leaves a screen reader no way to jump from the
+            exposé to the débat. */}
+        <h3 className="text-muted-foreground text-[0.6875rem] font-semibold tracking-[0.16em] uppercase">
+          {section.heading}
+        </h3>
+        <span className="text-muted-foreground tabular shrink-0 text-[0.6875rem]">
+          {section.durationLabel}
+        </span>
+      </div>
+
+      {/* The recording, above the words it produced: play, then read along.
+          `no-print` is the player's own. */}
+      {section.recording && (
+        <RecordingPlayer
+          src={`/api/exams/${examId}/recordings/${section.phase}`}
+          deleteHref={`/api/exams/${examId}/recordings/${section.phase}`}
+          mimeType={section.recording.mimeType}
+          durationSeconds={section.recording.durationSeconds}
+          className="mt-3"
+        />
+      )}
+      {section.recordingNote && (
+        <p className="no-print text-muted-foreground mt-2.5 text-xs leading-relaxed italic">
+          {section.recordingNote}
+        </p>
+      )}
+
+      <SectionBody section={section} />
+    </section>
+  );
+}
+
+/** The words, set as the view decided: a quiet line, a monologue, or an exchange. */
+function SectionBody({ section }: { section: CorrectionTranscriptSection }) {
+  if (section.emptyNote) {
+    return (
+      <p className="text-muted-foreground mt-3 text-xs leading-relaxed italic">
+        {section.emptyNote}
+      </p>
+    );
+  }
+  return section.shape === "monologue" ? (
+    <MonologueBody turns={section.turns} />
+  ) : (
+    <ExchangeBody turns={section.turns} />
+  );
+}
+
 export function TranscriptDocument({
   examId,
   title,
@@ -176,14 +240,11 @@ export function TranscriptDocument({
    */
   drawerInset?: boolean;
 }) {
-  const { sections, silentNotice } = correctionTranscriptView(transcript, {
-    monologueSeconds,
-    debateSeconds,
-  });
-  const seconds: Record<TranscriptPhase, number> = {
-    monologue: monologueSeconds,
-    debate: debateSeconds,
-  };
+  const { sections, silentNotice } = correctionTranscriptView(
+    transcript,
+    { monologueSeconds, debateSeconds },
+    playable,
+  );
 
   return (
     /* The scroll is unconditional, not `lg:`-only: below `lg` this pane is
@@ -219,70 +280,9 @@ export function TranscriptDocument({
           )}
 
           <div className="mt-6 flex flex-col gap-5">
-            {sections.map((section) => {
-              const recording = playable.find((entry) => entry.phase === section.phase) ?? null;
-              // A part where nobody but the examiner spoke is a monologue only
-              // by accident; the shape follows who actually talked, so a
-              // silent sitting still reads as an exchange rather than as an
-              // empty exposé.
-              const isMonologue =
-                section.turns.length > 0 &&
-                section.turns.every((turn) => turn.entry.speaker === "candidate");
-
-              return (
-                <section
-                  key={section.phase}
-                  className="border-border border-t pt-4 first:border-t-0 first:pt-0"
-                >
-                  {/* `break-after-avoid`: a heading that lands as the last
-                      line of a printed page sends the candidate over the fold
-                      to find out which half they are reading. */}
-                  <div className="flex break-inside-avoid break-after-avoid items-baseline justify-between gap-3">
-                    {/* An `h3` wearing the kicker's recipe, not `Kicker` —
-                        that renders a `<p>`, and these two labels are the only
-                        sub-headings under the sheet's `h2`. A transcript set as
-                        a document has to be navigable as one: losing them
-                        leaves a screen reader no way to jump from the exposé to
-                        the débat. */}
-                    <h3 className="text-muted-foreground text-[0.6875rem] font-semibold tracking-[0.16em] uppercase">
-                      {section.heading}
-                    </h3>
-                    <span className="text-muted-foreground tabular shrink-0 text-[0.6875rem]">
-                      {section.durationLabel}
-                    </span>
-                  </div>
-
-                  {/* The recording, above the words it produced: play, then
-                      read along. `no-print` is the player's own. */}
-                  {recording ? (
-                    <RecordingPlayer
-                      src={`/api/exams/${examId}/recordings/${section.phase}`}
-                      deleteHref={`/api/exams/${examId}/recordings/${section.phase}`}
-                      mimeType={recording.mimeType}
-                      durationSeconds={recording.durationSeconds}
-                      className="mt-3"
-                    />
-                  ) : (
-                    seconds[section.phase] > 0 && (
-                      <p className="no-print text-muted-foreground mt-2.5 text-xs leading-relaxed italic">
-                        L&apos;enregistrement de cette partie n&apos;est plus disponible : il a été
-                        supprimé, ou il n&apos;a pas pu être conservé.
-                      </p>
-                    )
-                  )}
-
-                  {section.emptyNote ? (
-                    <p className="text-muted-foreground mt-3 text-xs leading-relaxed italic">
-                      {section.emptyNote}
-                    </p>
-                  ) : isMonologue ? (
-                    <MonologueBody turns={section.turns} />
-                  ) : (
-                    <ExchangeBody turns={section.turns} />
-                  )}
-                </section>
-              );
-            })}
+            {sections.map((section) => (
+              <TranscriptSection key={section.phase} section={section} examId={examId} />
+            ))}
           </div>
 
           <p className="border-border text-muted-foreground mt-6 border-t pt-3 text-[0.6875rem] leading-relaxed">

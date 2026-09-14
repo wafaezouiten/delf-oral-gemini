@@ -50,6 +50,11 @@ export function railPctFromPointer(clientX: number, rect: { left: number; width:
  * (the drag's own direction), right shrinks it, Home puts it back where it
  * rests. Anything else is not the divider's key and leaves it alone.
  */
+/** The keys the divider answers to; every other key is left to the page. */
+export function isRailKey(key: string): key is "ArrowLeft" | "ArrowRight" | "Home" {
+  return key === "ArrowLeft" || key === "ArrowRight" || key === "Home";
+}
+
 export function railPctAfterKey(current: number, key: string): number {
   switch (key) {
     case "ArrowLeft":

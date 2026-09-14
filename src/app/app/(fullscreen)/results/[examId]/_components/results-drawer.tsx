@@ -5,14 +5,15 @@ import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 
 import { cn } from "@/lib/ui/class-names";
 import {
   DRAWER_PEEK_PX,
+  beginDrawerGesture,
   clampDrawerY,
   drawerExposedHeight,
   drawerGeometry,
-  drawerReleaseVelocity,
-  drawerSettleAfterRelease,
-  drawerTapTarget,
-  isDrawerDrag,
+  drawerPlacementY,
   isDrawerOpen,
+  moveDrawerGesture,
+  releaseDrawerGesture,
+  type DrawerGesture,
 } from "@/lib/ui/results-drawer";
 
 /**
@@ -59,14 +60,6 @@ import {
 /** The settle: fast out of the finger, soft into place. */
 const SETTLE_TRANSITION = "transform 0.32s cubic-bezier(0.2, 0.8, 0.2, 1)";
 
-interface Gesture {
-  pointerId: number;
-  startClientY: number;
-  startY: number;
-  moved: boolean;
-  samples: Array<{ time: number; y: number }>;
-}
-
 export function ResultsDrawer({
   label,
   readout,
@@ -108,7 +101,7 @@ export function ResultsDrawer({
   const yRef = useRef(0);
   /** Whether the opening position has been applied — `initiallyOpen` fires once. */
   const placedRef = useRef(false);
-  const gestureRef = useRef<Gesture | null>(null);
+  const gestureRef = useRef<DrawerGesture | null>(null);
   const lastExposedRef = useRef(-1);
   const panelId = useId();
 
@@ -171,30 +164,25 @@ export function ResultsDrawer({
   );
 
   // Place the drawer on the first layout that has a viewport to measure, then
-  // keep the closed position correct when the viewport changes under it. An
-  // open drawer is left where the reader put it — only its lower limit is
-  // re-clamped. `openRef` rather than `isOpen` so this is a re-clamp on layout
-  // change, not a snap on state change.
+  // keep its position correct when the viewport changes under it — the rule
+  // is `drawerPlacementY`. `openRef` rather than `isOpen` so this runs on a
+  // layout change, not on a state change. On a viewport too short to open
+  // into, `isOpen` is left seeded and corrects itself on the first gesture:
+  // the body it exposes is sized to the visible slice, which is then nothing.
   useEffect(() => {
     if (!viewport) return;
-    const geometry = drawerGeometry(viewport);
     // Force the next report through: the geometry changed, so the cached
     // exposed height no longer describes the same layout.
     lastExposedRef.current = -1;
-
-    if (!placedRef.current) {
-      placedRef.current = true;
-      // A viewport too short to open into rests closed instead. `isOpen` is
-      // left seeded and corrects itself on the first gesture: the body it
-      // exposes is sized to the visible slice, which is then nothing.
-      if (initiallyOpen && geometry.canOpen) {
-        apply(geometry.defaultY, false);
-        return;
-      }
-    }
-
-    if (!openRef.current) apply(geometry.closedY, false);
-    else apply(Math.min(yRef.current, geometry.closedY), false);
+    const first = !placedRef.current;
+    placedRef.current = true;
+    apply(
+      drawerPlacementY(
+        { first, initiallyOpen, open: openRef.current, y: yRef.current },
+        drawerGeometry(viewport),
+      ),
+      false,
+    );
   }, [viewport, initiallyOpen, apply]);
 
   // Closing returns the body to the top, so re-opening starts at the score
@@ -206,26 +194,21 @@ export function ResultsDrawer({
   const onPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
     if (!viewport) return;
     event.currentTarget.setPointerCapture(event.pointerId);
-    gestureRef.current = {
-      pointerId: event.pointerId,
-      startClientY: event.clientY,
-      startY: yRef.current,
-      moved: false,
-      samples: [{ time: event.timeStamp, y: yRef.current }],
-    };
+    gestureRef.current = beginDrawerGesture(
+      event.pointerId,
+      event.clientY,
+      yRef.current,
+      event.timeStamp,
+    );
   };
 
   const onPointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
     const gesture = gestureRef.current;
     if (!gesture || gesture.pointerId !== event.pointerId) return;
-    const offset = event.clientY - gesture.startClientY;
-    // Any real movement makes this gesture a drag, so its release cannot count
-    // as a tap.
-    if (isDrawerDrag(offset)) gesture.moved = true;
-    const y = clampDrawerY(gesture.startY + offset, drawerGeometry(viewport));
-    apply(y, false);
-    gesture.samples.push({ time: event.timeStamp, y });
-    if (gesture.samples.length > 8) gesture.samples.shift();
+    apply(
+      moveDrawerGesture(gesture, event.clientY, event.timeStamp, drawerGeometry(viewport)),
+      false,
+    );
   };
 
   const release = (event: React.PointerEvent<HTMLDivElement>) => {
@@ -242,15 +225,7 @@ export function ResultsDrawer({
     const gesture = release(event);
     if (!gesture) return;
     const geometry = drawerGeometry(viewport);
-    if (!gesture.moved) {
-      settle(drawerTapTarget(yRef.current, geometry));
-      return;
-    }
-    // The release itself is the last sample: a finger that stopped and then
-    // lifted produced no moves since it stopped, and without this stamp its
-    // last movement would still read as the release speed.
-    gesture.samples.push({ time: event.timeStamp, y: yRef.current });
-    const target = drawerSettleAfterRelease(drawerReleaseVelocity(gesture.samples), geometry);
+    const target = releaseDrawerGesture(gesture, yRef.current, event.timeStamp, geometry);
     if (target !== null) settle(target);
     // Otherwise it simply stays where it was released — that is the point.
     else setOpen(isDrawerOpen(yRef.current, geometry));
