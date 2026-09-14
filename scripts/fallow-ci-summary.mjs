@@ -55,7 +55,18 @@ function metrics(combined) {
     maintainability: combined?.health?.summary?.average_maintainability ?? null,
     analyzed: combined?.health?.summary?.functions_analyzed ?? null,
     dupPct: combined?.dupes?.stats?.duplication_percentage ?? null,
+    // "istanbul" when a coverage map was handed over, "static_estimated" when
+    // CRAP was guessed from the module graph. Two columns scored on different
+    // models are not comparable, which is why the table names both.
+    coverage: combined?.health?.summary?.coverage_model ?? null,
   };
+}
+
+// The coverage model as a word a reader can act on.
+function coverageCell(model) {
+  if (model === "istanbul") return "measured";
+  if (model === "static_estimated") return "estimated";
+  return "n/a";
 }
 
 // ── HEAD (current branch) ───────────────────────────────────────────────
@@ -157,6 +168,7 @@ if (parsed && hasBase) {
     `| Dead-code issues | ${fmt(B.deadcode)} | ${fmt(H.deadcode)} | ${changeCell(B.deadcode, H.deadcode, { lowerBetter: true })} |`,
     `| Duplicate clone groups | ${fmt(B.dupes)} | ${fmt(H.dupes)} | ${changeCell(B.dupes, H.dupes, { lowerBetter: true })} |`,
     `| Complexity hotspots | ${fmt(B.complexity)} | ${fmt(H.complexity)} | ${changeCell(B.complexity, H.complexity, { lowerBetter: true })} |`,
+    `| Coverage behind CRAP | ${coverageCell(B.coverage)} | ${coverageCell(H.coverage)} | ${B.coverage === H.coverage ? "—" : "⚠️ not comparable"} |`,
     "",
     "_Report-only — does not affect the build status._",
     "",
@@ -173,6 +185,7 @@ if (parsed && hasBase) {
     `| Dead-code issues | ${fmt(H.deadcode)} |`,
     `| Duplicate clone groups | ${fmt(H.dupes)} |`,
     `| Complexity hotspots | ${fmt(H.complexity)} of ${fmt(H.analyzed)} functions above threshold |`,
+    `| Coverage behind CRAP | ${coverageCell(H.coverage)} |`,
     "",
     "_Report-only — does not affect the build status._",
     "",
