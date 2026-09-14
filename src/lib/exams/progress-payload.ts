@@ -60,5 +60,3 @@ export const progressPayloadSchema = z
     (report) => report.entries.every((entry) => entry.phase === report.phase),
     "every turn must belong to the phase being reported",
   );
-
-export type ProgressPayload = z.infer<typeof progressPayloadSchema>;
