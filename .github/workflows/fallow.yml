@@ -161,8 +161,12 @@ jobs:
           wc -c fallow.json fallow-badge.svg audit.json base.json base-badge.svg coverage-notes.txt 2>/dev/null
           [ -s coverage-notes.txt ] && cat coverage-notes.txt
           [ -s base.err ] && { echo "--- base run stderr:"; tail -n 20 base.err; }
+          # The coverage logs, for the tree that fell back — "see the job log"
+          # has to point at something.
+          [ -z "$COVERAGE_ARG" ] && [ -s coverage-head.log ] && { echo "--- head coverage run (tail):"; tail -n 40 coverage-head.log; }
+          [ -n "${BASE_LOG:-}" ] && [ -z "${BASE_COVERAGE_ARG:-}" ] && [ -s "$BASE_LOG" ] && { echo "--- base coverage run (tail):"; tail -n 40 "$BASE_LOG"; }
           for f in fallow.json base.json audit.json; do
-            [ -s "$f" ] && ! node -e "JSON.parse(require('fs').readFileSync('$f','utf8'))" 2>/dev/null               && { echo "--- $f is not JSON; first and last 200 bytes:"; head -c 200 "$f"; echo; tail -c 200 "$f"; echo; }
+            [ -s "$f" ] && ! node -e "JSON.parse(require('fs').readFileSync('$f','utf8'))" 2>/dev/null && { echo "--- $f is not JSON; first and last 200 bytes:"; head -c 200 "$f"; echo; tail -c 200 "$f"; echo; }
           done
           echo "::endgroup::"
 
