@@ -127,8 +127,8 @@ jobs:
                 else
                   echo "Before (\`$GITHUB_BASE_REF\`): coverage run failed — $(grep -m1 -E 'fail [1-9]|ERR|Error' coverage-base.log || echo 'see the job log') — scored on the estimate." >> coverage-notes.txt
                 fi
-                pnpm exec fallow --format json --quiet --root "$BASE_TREE" $BASE_COVERAGE_ARG > base.json 2>/dev/null
-                pnpm exec fallow health --format badge --quiet --root "$BASE_TREE" $BASE_COVERAGE_ARG > base-badge.svg 2>/dev/null
+                pnpm exec fallow --format json --quiet --root "$BASE_TREE" $BASE_COVERAGE_ARG > base.json 2>base.err
+                pnpm exec fallow health --format badge --quiet --root "$BASE_TREE" $BASE_COVERAGE_ARG > base-badge.svg 2>>base.err
                 rm -f "$BASE_TREE/node_modules"
                 git worktree remove "$BASE_TREE" --force >/dev/null 2>&1
                 [ -s base.json ] && BASE_ARG="base.json"
@@ -136,6 +136,14 @@ jobs:
               fi
             fi
           fi
+
+          # What the step produced, in the job log — every command above writes
+          # to a file, so without this a base run that failed leaves no trace.
+          echo "::group::Fallow outputs"
+          wc -c fallow.json fallow-badge.svg audit.json base.json base-badge.svg coverage-notes.txt 2>/dev/null
+          [ -s coverage-notes.txt ] && cat coverage-notes.txt
+          [ -s base.err ] && { echo "--- base run stderr:"; tail -n 20 base.err; }
+          echo "::endgroup::"
 
           node scripts/fallow-ci-summary.mjs fallow.json fallow-badge.svg "$AUDIT_ARG" "$BASE_ARG" "$BASE_BADGE_ARG" coverage-notes.txt >> "$GITHUB_OUTPUT"
 
