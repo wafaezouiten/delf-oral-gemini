@@ -71,16 +71,6 @@ export interface OralCriteriaScores {
   phonologie: number;
 }
 
-export const ORAL_RUBRIC_KEYS = [
-  "realisationTache",
-  "interaction",
-  "lexique",
-  "morphosyntaxe",
-  "phonologie",
-] as const;
-
-export type OralRubricKey = (typeof ORAL_RUBRIC_KEYS)[number];
-
 /** Clamp a single criterion to the valid 0–5 integer range. */
 export function clampCriterion(n: number): number {
   if (!Number.isFinite(n)) return 0;

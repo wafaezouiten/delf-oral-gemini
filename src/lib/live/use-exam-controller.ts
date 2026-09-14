@@ -25,8 +25,6 @@ import {
 } from "./exam-controller";
 import { ExamLiveSession } from "./session-manager";
 
-export type { ExamEvent, ExamState } from "./exam-controller";
-
 /**
  * Tell the server a phase has ended, and forget about it.
  *

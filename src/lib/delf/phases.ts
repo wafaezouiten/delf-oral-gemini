@@ -110,11 +110,6 @@ export function nextPhase(phase: OralPhase): OralPhase {
   return ORAL_PHASES[index + 1];
 }
 
-/** Whether the exam is over. */
-export function isTerminal(phase: OralPhase): boolean {
-  return phase === "finished";
-}
-
 /**
  * Whether a phase's clock has run out. Compared with `>=` so a phase whose
  * elapsed time is driven from a wall-clock delta (which can jump past the
@@ -162,14 +157,6 @@ export function canAdvanceEarly(phase: OralPhase): boolean {
 export function phaseUsesLiveSession(phase: OralPhase): boolean {
   return phase === "monologue" || phase === "debate";
 }
-
-/** Candidate-facing French label for a phase (UI chrome). */
-export const PHASE_LABELS: Record<OralPhase, string> = {
-  preparation: "Préparation",
-  monologue: "Monologue suivi",
-  debate: "Débat",
-  finished: "Épreuve terminée",
-};
 
 /**
  * Remaining seconds in a phase, floored at 0 and never NaN. Kept here rather
