@@ -97,11 +97,13 @@ const changedFiles = audit?.changed_files_count ?? "n/a";
 const baseRef = audit?.base_ref ?? "origin/develop";
 
 // Copy-paste command for devs to reproduce the PR-scoped findings locally.
-const fallowVersion = process.env.FALLOW_VERSION || "2.86.0";
+// `pnpm exec`, not `pnpm dlx fallow@<version>`: the analyzer is a pinned
+// devDependency, so the checkout's own copy is the version the workflow
+// scored with, and there is no second version string here to fall behind.
 const baseBranch =
   process.env.GITHUB_BASE_REF ||
   (typeof baseRef === "string" ? baseRef.replace(/^origin\//, "") : "develop");
-const reproduceCmd = `git fetch origin ${baseBranch} && pnpm dlx fallow@${fallowVersion} audit --base origin/${baseBranch}`;
+const reproduceCmd = `git fetch origin ${baseBranch} && pnpm exec fallow audit --base origin/${baseBranch}`;
 
 // ── GITHUB_OUTPUT scalars ───────────────────────────────────────────────
 const fields = {

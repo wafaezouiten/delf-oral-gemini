@@ -91,9 +91,11 @@
     // application. Their hotspots were 43 of 108. `public/worklets` is
     // shipped — but it runs on an AudioWorklet thread no test harness can
     // reach, so its CRAP can only ever be an estimate, and an unmeasurable
-    // estimate is noise rather than a finding. Tests are NOT ignored: a test
-    // body Fallow finds hard to follow is a real note.
-    "ignore": ["scripts/**", "experiments/**", "public/**"]
+    // estimate is noise rather than a finding. Only the worklets, matching
+    // `dynamicallyLoaded` above: a service worker dropped elsewhere under
+    // `public/` would be scored. Tests are NOT ignored: a test body Fallow
+    // finds hard to follow is a real note.
+    "ignore": ["scripts/**", "experiments/**", "public/worklets/**"]
   },
 
   "duplicates": {
