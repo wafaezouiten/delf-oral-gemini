@@ -23,6 +23,12 @@ on:
     # trend. The full-history checkout below makes each run one of the more
     # expensive in the repo, which is why this workflow went on the diet and
     # the build gate did not.
+    #
+    # Since #232 each run also installs and runs the unit suite — twice on a
+    # PR, once per tree, so both columns of the table are scored on measured
+    # coverage rather than a guess. That is ~25 s of tests and a cached
+    # install per tree, accepted: it is what makes the hotspot column mean
+    # something, and the diet above is what keeps it to one run per PR.
     types: [opened, reopened, ready_for_review]
 
 # Avoid piling up runs on rapid pushes to the same ref.
@@ -30,10 +36,9 @@ concurrency:
   group: fallow-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-# Pinned for reproducible scores — `pnpm dlx fallow` (unpinned) pulls latest and
-# the numbers drift between runs. Bump deliberately.
-env:
-  FALLOW_VERSION: "3.25.0"
+# The analyzer is a pinned devDependency (`fallow` in package.json, exact), so
+# the version the workflow scores with is the one `pnpm fallow` scores with —
+# one number to bump, and the numbers cannot drift between the two.
 
 jobs:
   fallow:
@@ -59,16 +64,48 @@ jobs:
           node-version: 22
           cache: pnpm
 
-      # No `pnpm install`: Fallow analyzes source (module graph + package.json),
-      # it does not need node_modules. pnpm dlx fetches the analyzer itself.
+      # Fallow reads source and needs no node_modules of its own — but the
+      # coverage it is handed does. Two of the three inputs to a "hotspot" are
+      # read off the code; the third, CRAP (complexity² × (1 − coverage)), is
+      # estimated from the module graph unless a coverage map is supplied, and
+      # the estimate read "untested" for functions with a 5 000-line test
+      # file. So the unit suite runs under c8 here and the Istanbul map is
+      # passed with `--coverage`. Coverage is best-effort: a run that fails
+      # leaves that tree scored on the estimate, and the summary says which.
+      # `continue-on-error` here too: this job never fails the build, and an
+      # install that cannot complete (a registry blip, a lockfile a PR left
+      # inconsistent) must not be the one thing that reds it. Without
+      # node_modules there is no coverage and no analyzer; the step below
+      # then produces nothing and the summary says so.
+      - name: Install dependencies
+        continue-on-error: true
+        run: pnpm install --frozen-lockfile
+
       - name: Run Fallow
         id: fallow
         continue-on-error: true # report-only — never break the build
         run: |
           set +e
+          # Coverage for the tree under test. `coverage/` is gitignored.
+          # Why a tree fell back to the estimate is written to coverage-notes.txt,
+          # which the summary prints: "estimated" alone cannot tell a failing
+          # suite on the base from a base that predates `test:coverage`.
+          : > coverage-notes.txt
+          COVERAGE_ARG=""
+          if pnpm test:coverage >coverage-head.log 2>&1 && [ -s coverage/coverage-final.json ]; then
+            COVERAGE_ARG="--coverage coverage/coverage-final.json"
+          else
+            echo "After (this branch): coverage run failed — $(grep -m1 -E 'fail [1-9]|ERR|Error|not found' coverage-head.log || echo 'see the job log') — scored on the estimate." >> coverage-notes.txt
+          fi
+
+          # The binary, not `pnpm exec`: pnpm checks node_modules against the
+          # lockfile before running anything and, finding it stale, reinstalls
+          # — onto stdout, into the JSON. Nothing but Fallow may write there.
+          FALLOW=./node_modules/.bin/fallow
+
           # Whole-project scores (pre-existing context).
-          pnpm dlx "fallow@${FALLOW_VERSION}" --format json --quiet > fallow.json 2>/dev/null
-          pnpm dlx "fallow@${FALLOW_VERSION}" health --format badge --quiet > fallow-badge.svg 2>/dev/null
+          $FALLOW --format json --quiet $COVERAGE_ARG > fallow.json 2>/dev/null
+          $FALLOW health --format badge --quiet $COVERAGE_ARG > fallow-badge.svg 2>/dev/null
 
           # On PRs, add two base-relative views:
           #   1. audit  → findings introduced vs inherited in changed files
@@ -79,27 +116,61 @@ jobs:
           BASE_BADGE_ARG=""
           if [ "$GITHUB_EVENT_NAME" = "pull_request" ] && [ -n "$GITHUB_BASE_REF" ]; then
             git fetch --no-tags origin "$GITHUB_BASE_REF" >/dev/null 2>&1
-            pnpm dlx "fallow@${FALLOW_VERSION}" audit --base "origin/${GITHUB_BASE_REF}" \
-              --format json --quiet > audit.json 2>/dev/null
+            $FALLOW audit --base "origin/${GITHUB_BASE_REF}" \
+              --format json --quiet $COVERAGE_ARG > audit.json 2>/dev/null
             [ -s audit.json ] && AUDIT_ARG="audit.json"
 
-            # Analyze the branch point in a throwaway worktree (no node_modules
-            # needed — Fallow reads source only) for the Before/After delta,
-            # including the composite health grade.
+            # Analyze the branch point in a throwaway worktree for the
+            # Before/After delta, including the composite health grade. The
+            # base gets its OWN coverage, from its own tests, so both columns
+            # are measured the same way — and its own install, from the pnpm
+            # store the head's install just filled. Not a symlink to the
+            # head's node_modules: pnpm verifies node_modules against the
+            # lockfile before every run, and through a link it "repairs" the
+            # head's install to the base's lockfile, taking c8 and fallow
+            # with it. Measured once, on this very PR.
             BASE_SHA=$(git merge-base "origin/${GITHUB_BASE_REF}" HEAD)
             if [ -n "$BASE_SHA" ]; then
               BASE_TREE="$(mktemp -d)"
+              # Absolute, because it is written from inside the worktree and
+              # read — and the worktree removed — from out here.
+              BASE_LOG="$PWD/coverage-base.log"
               if git worktree add --detach "$BASE_TREE" "$BASE_SHA" >/dev/null 2>&1; then
-                pnpm dlx "fallow@${FALLOW_VERSION}" --format json --quiet --root "$BASE_TREE" > base.json 2>/dev/null
-                pnpm dlx "fallow@${FALLOW_VERSION}" health --format badge --quiet --root "$BASE_TREE" > base-badge.svg 2>/dev/null
+                BASE_COVERAGE_ARG=""
+                if (cd "$BASE_TREE" && pnpm install --frozen-lockfile >"$BASE_LOG" 2>&1 && pnpm test:coverage >>"$BASE_LOG" 2>&1) && [ -s "$BASE_TREE/coverage/coverage-final.json" ]; then
+                  BASE_COVERAGE_ARG="--coverage $BASE_TREE/coverage/coverage-final.json"
+                elif ! grep -q '"test:coverage"' "$BASE_TREE/package.json"; then
+                  echo "Before (\`$GITHUB_BASE_REF\`): predates \`pnpm test:coverage\` — scored on the estimate." >> coverage-notes.txt
+                else
+                  echo "Before (\`$GITHUB_BASE_REF\`): coverage run failed — $(grep -m1 -E 'fail [1-9]|ERR|Error' "$BASE_LOG" || echo 'see the job log') — scored on the estimate." >> coverage-notes.txt
+                fi
+                $FALLOW --format json --quiet --root "$BASE_TREE" $BASE_COVERAGE_ARG > base.json 2>base.err
+                $FALLOW health --format badge --quiet --root "$BASE_TREE" $BASE_COVERAGE_ARG > base-badge.svg 2>>base.err
                 git worktree remove "$BASE_TREE" --force >/dev/null 2>&1
                 [ -s base.json ] && BASE_ARG="base.json"
                 [ -s base-badge.svg ] && BASE_BADGE_ARG="base-badge.svg"
+              else
+                rm -rf "$BASE_TREE"
               fi
             fi
           fi
 
-          node scripts/fallow-ci-summary.mjs fallow.json fallow-badge.svg "$AUDIT_ARG" "$BASE_ARG" "$BASE_BADGE_ARG" >> "$GITHUB_OUTPUT"
+          # What the step produced, in the job log — every command above writes
+          # to a file, so without this a base run that failed leaves no trace.
+          echo "::group::Fallow outputs"
+          wc -c fallow.json fallow-badge.svg audit.json base.json base-badge.svg coverage-notes.txt 2>/dev/null
+          [ -s coverage-notes.txt ] && cat coverage-notes.txt
+          [ -s base.err ] && { echo "--- base run stderr:"; tail -n 20 base.err; }
+          # The coverage logs, for the tree that fell back — "see the job log"
+          # has to point at something.
+          [ -z "$COVERAGE_ARG" ] && [ -s coverage-head.log ] && { echo "--- head coverage run (tail):"; tail -n 40 coverage-head.log; }
+          [ -n "${BASE_LOG:-}" ] && [ -z "${BASE_COVERAGE_ARG:-}" ] && [ -s "$BASE_LOG" ] && { echo "--- base coverage run (tail):"; tail -n 40 "$BASE_LOG"; }
+          for f in fallow.json base.json audit.json; do
+            [ -s "$f" ] && ! node -e "JSON.parse(require('fs').readFileSync('$f','utf8'))" 2>/dev/null && { echo "--- $f is not JSON; first and last 200 bytes:"; head -c 200 "$f"; echo; tail -c 200 "$f"; echo; }
+          done
+          echo "::endgroup::"
+
+          node scripts/fallow-ci-summary.mjs fallow.json fallow-badge.svg "$AUDIT_ARG" "$BASE_ARG" "$BASE_BADGE_ARG" coverage-notes.txt >> "$GITHUB_OUTPUT"
 
       - name: Write job summary
         if: always()

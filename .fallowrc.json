@@ -71,6 +71,33 @@
   // to four.
   "ignoreExportsUsedInFile": true,
 
+  "health": {
+    // Two of the three inputs to a hotspot are measured; the third is guessed
+    // unless told. Cyclomatic and cognitive complexity are read off the code.
+    // CRAP — complexity² × (1 − coverage) — needs coverage, and without a file
+    // Fallow estimates it from the module graph, which reads "this function
+    // is not reached by a test" for functions with a 5 000-line test file.
+    //
+    // Coverage is therefore handed over on the command line — `pnpm fallow`
+    // locally, `--coverage` in the workflow — and deliberately NOT named here:
+    // a `coverage` path in this file is a hard error when the file is absent,
+    // and it is absent in every checkout that has not just run
+    // `pnpm test:coverage`. Files no unit test can load — components, pages,
+    // routes — score at zero coverage either way, which is their honest number.
+
+    // The same drawer `entry` and `duplicates.ignore` name, for the same
+    // reason: probes and verifications run by hand are not shipped, and a
+    // 500-line `main` in one of them is not a maintenance risk of the
+    // application. Their hotspots were 43 of 108. `public/worklets` is
+    // shipped — but it runs on an AudioWorklet thread no test harness can
+    // reach, so its CRAP can only ever be an estimate, and an unmeasurable
+    // estimate is noise rather than a finding. Only the worklets, matching
+    // `dynamicallyLoaded` above: a service worker dropped elsewhere under
+    // `public/` would be scored. Tests are NOT ignored: a test body Fallow
+    // finds hard to follow is a real note.
+    "ignore": ["scripts/**", "experiments/**", "public/worklets/**"]
+  },
+
   "duplicates": {
     // `scripts/` for the reason above, and the tests for one more: an arrange
     // block SHOULD look like the last one. Repetition is how a case stays

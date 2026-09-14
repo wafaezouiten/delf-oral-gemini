@@ -4,7 +4,7 @@
 // fallbacks are `develop` rather than `main`.
 //
 // Usage:
-//   node scripts/fallow-ci-summary.mjs <head-json> <head-badge> [audit-json] [base-json] [base-badge]
+//   node scripts/fallow-ci-summary.mjs <head-json> <head-badge> [audit-json] [base-json] [base-badge] [coverage-notes]
 //
 // - <head-json>: `fallow --format json --quiet` run on the PR/branch HEAD
 // - <head-badge>: `fallow health --format badge --quiet` on HEAD (for the grade)
@@ -21,7 +21,10 @@
 
 import { readFileSync, writeFileSync } from "node:fs";
 
-const [jsonPath, badgePath, auditPath, basePath, baseBadgePath] = process.argv.slice(2);
+// - [coverage-notes]: one line per tree that fell back to estimated coverage,
+//   saying why — written by the workflow, printed under the table verbatim.
+const [jsonPath, badgePath, auditPath, basePath, baseBadgePath, coverageNotesPath] =
+  process.argv.slice(2);
 
 // `fallow health --format badge` aria-label is `fallow: <grade> (<score>)`.
 function parseBadge(svg) {
@@ -55,7 +58,18 @@ function metrics(combined) {
     maintainability: combined?.health?.summary?.average_maintainability ?? null,
     analyzed: combined?.health?.summary?.functions_analyzed ?? null,
     dupPct: combined?.dupes?.stats?.duplication_percentage ?? null,
+    // "istanbul" when a coverage map was handed over, "static_estimated" when
+    // CRAP was guessed from the module graph. Two columns scored on different
+    // models are not comparable, which is why the table names both.
+    coverage: combined?.health?.summary?.coverage_model ?? null,
   };
+}
+
+// The coverage model as a word a reader can act on.
+function coverageCell(model) {
+  if (model === "istanbul") return "measured";
+  if (model === "static_estimated") return "estimated";
+  return "n/a";
 }
 
 // ── HEAD (current branch) ───────────────────────────────────────────────
@@ -86,11 +100,13 @@ const changedFiles = audit?.changed_files_count ?? "n/a";
 const baseRef = audit?.base_ref ?? "origin/develop";
 
 // Copy-paste command for devs to reproduce the PR-scoped findings locally.
-const fallowVersion = process.env.FALLOW_VERSION || "2.86.0";
+// `pnpm exec`, not `pnpm dlx fallow@<version>`: the analyzer is a pinned
+// devDependency, so the checkout's own copy is the version the workflow
+// scored with, and there is no second version string here to fall behind.
 const baseBranch =
   process.env.GITHUB_BASE_REF ||
   (typeof baseRef === "string" ? baseRef.replace(/^origin\//, "") : "develop");
-const reproduceCmd = `git fetch origin ${baseBranch} && pnpm dlx fallow@${fallowVersion} audit --base origin/${baseBranch}`;
+const reproduceCmd = `git fetch origin ${baseBranch} && pnpm exec fallow audit --base origin/${baseBranch}`;
 
 // ── GITHUB_OUTPUT scalars ───────────────────────────────────────────────
 const fields = {
@@ -134,6 +150,12 @@ function gradeCell(badge) {
   return badge.grade != null ? `${badge.grade} (${badge.score})` : "n/a";
 }
 
+// Why a column reads "estimated", when it does. Empty when both were measured.
+const coverageNotes = safeRead(coverageNotesPath)
+  .split(/\r?\n/)
+  .filter((line) => line.trim() !== "")
+  .flatMap((line) => [`> ⚠️ ${line}`, ""]);
+
 const lines = [];
 
 if (auditParsed) {
@@ -157,7 +179,9 @@ if (parsed && hasBase) {
     `| Dead-code issues | ${fmt(B.deadcode)} | ${fmt(H.deadcode)} | ${changeCell(B.deadcode, H.deadcode, { lowerBetter: true })} |`,
     `| Duplicate clone groups | ${fmt(B.dupes)} | ${fmt(H.dupes)} | ${changeCell(B.dupes, H.dupes, { lowerBetter: true })} |`,
     `| Complexity hotspots | ${fmt(B.complexity)} | ${fmt(H.complexity)} | ${changeCell(B.complexity, H.complexity, { lowerBetter: true })} |`,
+    `| Coverage behind CRAP | ${coverageCell(B.coverage)} | ${coverageCell(H.coverage)} | ${B.coverage === H.coverage ? "—" : "⚠️ not comparable"} |`,
     "",
+    ...coverageNotes,
     "_Report-only — does not affect the build status._",
     "",
   );
@@ -173,7 +197,9 @@ if (parsed && hasBase) {
     `| Dead-code issues | ${fmt(H.deadcode)} |`,
     `| Duplicate clone groups | ${fmt(H.dupes)} |`,
     `| Complexity hotspots | ${fmt(H.complexity)} of ${fmt(H.analyzed)} functions above threshold |`,
+    `| Coverage behind CRAP | ${coverageCell(H.coverage)} |`,
     "",
+    ...coverageNotes,
     "_Report-only — does not affect the build status._",
     "",
   );
