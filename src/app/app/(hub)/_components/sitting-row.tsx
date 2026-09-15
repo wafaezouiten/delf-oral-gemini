@@ -5,15 +5,9 @@ import { ChevronDownIcon } from "@/app/_components/po/icons";
 import { Tag } from "@/app/_components/po/tag";
 import { ScoreTag } from "@/app/_components/score-band";
 import { COMPETENCY_MAX } from "@/lib/delf/constants";
-import { formatClock } from "@/lib/delf/phases";
-import { PHASE_HEADINGS } from "@/lib/ui/correction-transcript";
 import { formatScore25 } from "@/lib/ui/format-score";
-import {
-  describeOutcome,
-  formatSittingDate,
-  formatSittingDateTime,
-  type DashboardSitting,
-} from "@/lib/ui/dashboard-view";
+import type { DashboardSitting } from "@/lib/ui/dashboard-view";
+import { sittingRowView, type SittingPlayer } from "@/lib/ui/sitting-row";
 
 /**
  * One sitting on the candidate's record, shared by the tableau de bord's short
@@ -57,43 +51,24 @@ export function SittingRow({
   sitting: DashboardSitting;
   detailed?: boolean;
 }) {
-  const abandoned = sitting.outcome === "abandoned";
-  // A walk-out has nothing to play even when a phase row exists for it, and the
-  // dashboard's short list does not offer playback at all.
-  const playable = detailed && !abandoned ? sitting.recordings : [];
+  // What the row says — the link or not, the stamp, which players — is
+  // `lib/ui/sitting-row.ts`, tested. This prints it.
+  const view = sittingRowView(sitting, detailed);
+
+  const title = view.href ? (
+    <Link href={view.href} className="block truncate text-sm font-medium hover:underline">
+      {sitting.topicTitle}
+    </Link>
+  ) : (
+    <p className="text-muted-foreground truncate text-sm font-medium">{sitting.topicTitle}</p>
+  );
 
   return (
     <li className="px-4 py-3 sm:px-6">
       <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
         <div className="min-w-0 flex-1">
-          {abandoned ? (
-            <p className="text-muted-foreground truncate text-sm font-medium">
-              {sitting.topicTitle}
-            </p>
-          ) : (
-            <Link
-              href={`/app/results/${sitting.examId}`}
-              className="block truncate text-sm font-medium hover:underline"
-            >
-              {sitting.topicTitle}
-            </Link>
-          )}
-
-          <p className="text-muted-foreground mt-0.5 text-xs leading-relaxed">
-            {detailed ? formatSittingDateTime(sitting.endedAt) : formatSittingDate(sitting.endedAt)}
-            {detailed && (
-              <>
-                {" · "}
-                {describeOutcome(sitting)}
-                {/* Only where there is any: a walk-out during the préparation
-                  recorded nothing, and "0:00 de parole" beside it would read as
-                  a microphone failure rather than as a decision. */}
-                {sitting.spokenSeconds > 0 && ` · ${formatClock(sitting.spokenSeconds)} de parole`}
-              </>
-            )}
-            {!detailed && sitting.mode === "text" && " · corrigée sans l'audio"}
-            {!detailed && abandoned && " · abandonnée"}
-          </p>
+          {title}
+          <p className="text-muted-foreground mt-0.5 text-xs leading-relaxed">{view.stamp}</p>
         </div>
 
         {/* The mark and the word, never the tint alone: an abandoned zero and a
@@ -104,45 +79,51 @@ export function SittingRow({
           /25 scale. A walk-out scores 0/25 as a consequence, not as a grading, so
           it is not painted on the scale that grades one. It stays the em dash,
           and the line above says the word. */}
-        {abandoned ? (
+        {view.abandoned ? (
           <Tag tone="danger">
             <span aria-hidden>—</span>
             {formatScore25(sitting.score25)}/{COMPETENCY_MAX}
           </Tag>
         ) : (
-          <ScoreTag score25={sitting.score25} mark={sitting.meetsFloor ? "✓" : "✕"} />
+          <ScoreTag score25={sitting.score25} mark={view.mark} />
         )}
       </div>
 
-      {/* Closed until asked for. `group` + `open:` is the whole mechanism — no
-          state, no effect, and it survives this component staying a server one.
-          `no-print` like every player: a printed record is a list of marks. */}
-      {playable.length > 0 && (
-        <details className="no-print group mt-2">
-          <summary className="text-muted-foreground hover:text-foreground inline-flex cursor-pointer list-none items-center gap-1.5 text-xs font-semibold transition-colors [&::-webkit-details-marker]:hidden">
-            <ChevronDownIcon className="size-3.5 transition-transform group-open:rotate-180" />
-            Réécouter
-          </summary>
-          <div className="mt-2 flex flex-col gap-2.5">
-            {playable.map((recording) => (
-              <div key={recording.phase}>
-                <div className="flex items-baseline justify-between gap-3">
-                  <p className="text-xs font-semibold">{PHASE_HEADINGS[recording.phase]}</p>
-                  <span className="text-muted-foreground tabular shrink-0 text-[0.6875rem]">
-                    {formatClock(recording.durationSeconds)}
-                  </span>
-                </div>
-                <RecordingPlayer
-                  src={`/api/exams/${sitting.examId}/recordings/${recording.phase}`}
-                  mimeType={recording.mimeType}
-                  durationSeconds={recording.durationSeconds}
-                  className="mt-1.5"
-                />
-              </div>
-            ))}
-          </div>
-        </details>
-      )}
+      {view.players.length > 0 && <Players players={view.players} />}
     </li>
+  );
+}
+
+/**
+ * The players, closed until asked for. `group` + `open:` is the whole
+ * mechanism — no state, no effect, and it survives this component staying a
+ * server one. `no-print` like every player: a printed record is a list of marks.
+ */
+function Players({ players }: { players: readonly SittingPlayer[] }) {
+  return (
+    <details className="no-print group mt-2">
+      <summary className="text-muted-foreground hover:text-foreground inline-flex cursor-pointer list-none items-center gap-1.5 text-xs font-semibold transition-colors [&::-webkit-details-marker]:hidden">
+        <ChevronDownIcon className="size-3.5 transition-transform group-open:rotate-180" />
+        Réécouter
+      </summary>
+      <div className="mt-2 flex flex-col gap-2.5">
+        {players.map((player) => (
+          <div key={player.phase}>
+            <div className="flex items-baseline justify-between gap-3">
+              <p className="text-xs font-semibold">{player.heading}</p>
+              <span className="text-muted-foreground tabular shrink-0 text-[0.6875rem]">
+                {player.duration}
+              </span>
+            </div>
+            <RecordingPlayer
+              src={player.src}
+              mimeType={player.mimeType}
+              durationSeconds={player.durationSeconds}
+              className="mt-1.5"
+            />
+          </div>
+        ))}
+      </div>
+    </details>
   );
 }
