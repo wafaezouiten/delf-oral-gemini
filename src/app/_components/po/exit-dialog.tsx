@@ -3,6 +3,7 @@
 import { COMPETENCY_MAX } from "@/lib/delf/constants";
 import { dangerButton, secondaryButton } from "@/app/_components/button-styles";
 import { AlertIcon } from "./icons";
+import { pendingLabel } from "@/lib/ui/action-label";
 import { ExamDialog } from "./exam-dialog";
 
 /**
@@ -106,7 +107,7 @@ export function ExitDialog({
           </button>
         )}
         <button type="button" onClick={onConfirm} disabled={pending} className={dangerButton}>
-          {pending ? "Abandon en cours…" : failed ? "Réessayer" : "Abandonner"}
+          {pendingLabel({ pending, failed }, { idle: "Abandonner", pending: "Abandon en cours…" })}
         </button>
       </div>
     </ExamDialog>

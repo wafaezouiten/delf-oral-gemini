@@ -2,6 +2,9 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import {
+  DRAWER_SETTLE_TRANSITION,
+  drawerFrame,
+  drawerPanelBox,
   DRAWER_AT_DEFAULT_TOLERANCE_PX,
   DRAWER_FLING_VELOCITY,
   DRAWER_PEEK_PX,
@@ -186,5 +189,35 @@ describe("one drag of the handle, as data", () => {
       phone.closedY,
       "re-clamped to the new lower limit",
     );
+  });
+});
+
+describe("one frame of the panel", () => {
+  const geometry = drawerGeometry(800);
+
+  it("writes the clamped position, the settle only on a release, and the visible slice", () => {
+    const frame = drawerFrame(geometry.defaultY, geometry, true);
+    assert.equal(frame.y, geometry.defaultY);
+    assert.equal(frame.transform, `translateY(${geometry.defaultY}px)`);
+    assert.equal(frame.transition, DRAWER_SETTLE_TRANSITION);
+    assert.equal(frame.exposed, drawerExposedHeight(geometry.defaultY, geometry));
+    assert.equal(frame.bodyHeight, `${frame.exposed - DRAWER_PEEK_PX}px`);
+    assert.equal(drawerFrame(geometry.defaultY, geometry, false).transition, "none");
+  });
+
+  it("never sizes the body below zero, even past the closed position", () => {
+    const frame = drawerFrame(geometry.closedY + 500, geometry, false);
+    assert.equal(frame.y, geometry.closedY);
+    assert.equal(frame.bodyHeight, "0px");
+  });
+});
+
+describe("the panel's box", () => {
+  it("is hidden and unsized until there is a viewport, then the panel's full height", () => {
+    assert.deepEqual(drawerPanelBox(0), { height: undefined, visibility: "hidden" });
+    assert.deepEqual(drawerPanelBox(800), {
+      height: drawerGeometry(800).fullHeight,
+      visibility: undefined,
+    });
   });
 });

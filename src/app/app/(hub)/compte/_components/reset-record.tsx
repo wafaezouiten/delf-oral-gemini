@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 
 import { dangerButton } from "@/app/_components/button-styles";
 import { requestRecordReset } from "@/lib/account/reset";
+import { resetButtonLabel, resetFailure, resetSlot, type ResetSlot } from "@/lib/ui/reset-record";
 
 /**
  * « Réinitialiser » — the control, and what it says after (#69, #175).
@@ -72,13 +73,7 @@ export function ResetRecord() {
 
     setPending(false);
     if (!outcome.reset) {
-      setFailed(
-        outcome.reason === "unreachable"
-          ? "Votre connexion n'a pas permis d'enregistrer la réinitialisation. Réessayez."
-          : outcome.status === 401
-            ? "Votre session a expiré. Reconnectez-vous, puis réessayez."
-            : "La réinitialisation n'a pas pu être enregistrée. Réessayez dans un instant.",
-      );
+      setFailed(resetFailure(outcome));
       return;
     }
 
@@ -106,34 +101,39 @@ export function ResetRecord() {
           a class on it. */}
       <div className="flex w-full flex-col items-start gap-2 sm:w-auto sm:items-end">
         <button type="button" onClick={reset} disabled={pending} className={dangerButton}>
-          {pending ? "Réinitialisation…" : failed ? "Réessayer" : "Réinitialiser"}
+          {resetButtonLabel(pending, failed !== null)}
         </button>
-        {/* One slot under the button, three things it can say: what the button
-            does, what went wrong, what it archived. Capped, so the line wraps
-            into a short block instead of stretching the header cell and
-            dragging the button back in from the edge. */}
-        {failed ? (
-          <p role="alert" className="text-danger max-w-56 text-xs leading-relaxed sm:text-right">
-            {failed}
-          </p>
-        ) : archived !== null ? (
-          <p
-            role="status"
-            className="text-muted-foreground max-w-56 text-xs leading-relaxed sm:text-right"
-          >
-            {archived === 0
-              ? "Il n'y avait aucune épreuve à archiver."
-              : `${archived} épreuve${archived > 1 ? "s" : ""} ${archived > 1 ? "sont passées" : "est passée"} aux archives. Vous ${archived > 1 ? "les" : "la"} retrouvez dans l'historique.`}
-          </p>
-        ) : (
-          // The whole warning now — and it already says *archive* rather than
-          // *supprime*, which is the one thing a candidate has to know before
-          // pressing.
-          <p className="text-muted-foreground max-w-56 text-xs leading-relaxed sm:text-right">
-            Archive vos épreuves passées et remet vos tableaux de bord à zéro.
-          </p>
-        )}
+        <Slot slot={resetSlot(failed, archived)} />
       </div>
     </div>
+  );
+}
+
+const SLOT_ROLE: Record<ResetSlot["kind"], "alert" | "status" | undefined> = {
+  failed: "alert",
+  archived: "status",
+  idle: undefined,
+};
+
+const SLOT_INK: Record<ResetSlot["kind"], string> = {
+  failed: "text-danger",
+  archived: "text-muted-foreground",
+  idle: "text-muted-foreground",
+};
+
+/**
+ * One slot under the button, three things it can say: what the button does,
+ * what went wrong, what it archived — the words are `resetSlot`'s, tested.
+ * Capped, so the line wraps into a short block instead of stretching the
+ * header cell and dragging the button back in from the edge.
+ */
+function Slot({ slot }: { slot: ResetSlot }) {
+  return (
+    <p
+      role={SLOT_ROLE[slot.kind]}
+      className={`${SLOT_INK[slot.kind]} max-w-56 text-xs leading-relaxed sm:text-right`}
+    >
+      {slot.text}
+    </p>
   );
 }
