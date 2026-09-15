@@ -165,29 +165,31 @@ export function ExamClient({
       <PassationScreen
         phase={state.phase}
         topic={topic}
-        elapsed={state.elapsed}
-        phaseStartedAt={state.phaseStartedAt}
-        remaining={state.remaining}
-        recording={state.recording}
-        examinerSpeaking={state.examinerSpeaking}
-        openingQuestionPending={state.openingQuestionPending}
-        connected={state.connection === "connected"}
-        connecting={state.connection === "connecting"}
-        canAdvance={state.canAdvance}
-        awaitingStart={state.awaitingStart}
-        closing={state.closing}
-        onStart={() => controller.startSpeaking()}
-        notes={notes}
-        notesOpen={notesOpen}
-        onToggleNotes={() => setNotesOpen((open) => !open)}
-        transcript={state.transcript}
-        onAdvance={() => void controller.advanceEarly()}
-        onExit={() => exit.open(state)}
-        emptyTranscript={state.monologueHeld}
-        onRetryTranscription={() => controller.restartMonologue()}
+        state={{
+          elapsed: state.elapsed,
+          phaseStartedAt: state.phaseStartedAt,
+          remaining: state.remaining,
+          recording: state.recording,
+          examinerSpeaking: state.examinerSpeaking,
+          openingQuestionPending: state.openingQuestionPending,
+          connected: state.connection === "connected",
+          connecting: state.connection === "connecting",
+          canAdvance: state.canAdvance,
+          awaitingStart: state.awaitingStart,
+          closing: state.closing,
+          transcript: state.transcript,
+          emptyTranscript: state.monologueHeld,
+          awaitingConsigne,
+        }}
+        notes={{ text: notes, open: notesOpen, onToggle: () => setNotesOpen((open) => !open) }}
+        actions={{
+          start: () => controller.startSpeaking(),
+          advance: () => void controller.advanceEarly(),
+          exit: () => exit.open(state),
+          retryTranscription: () => controller.restartMonologue(),
+        }}
         notices={notices("passation")}
         announcement={announcement}
-        awaitingConsigne={awaitingConsigne}
         devPanel={
           DEV_TOOLS_ENABLED ? (
             <OralDevPanel

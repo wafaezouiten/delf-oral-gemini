@@ -3,6 +3,7 @@
 import { UserIcon } from "@/app/_components/po/icons";
 import { cn } from "@/lib/ui/class-names";
 import { formatClock } from "@/lib/delf/phases";
+import { progressPercent, turnAnnouncement } from "@/lib/ui/conversation-scene";
 
 /**
  * The débat's two protagonists: the examiner on the left, the candidate on the
@@ -65,14 +66,13 @@ export function ConversationScene({
   elapsed: number;
   total: number;
 }) {
-  const percent =
-    total <= 0 ? 0 : Math.min(100, Math.round((Math.min(elapsed, total) / total) * 100));
-
-  const turnAnnouncement = examinerSpeaking
-    ? `L'examinateur parle. ${examinerStatus}`
-    : candidateRecording
-      ? `À vous de parler. ${candidateStatus}`
-      : examinerStatus;
+  const percent = progressPercent(elapsed, total);
+  const announcement = turnAnnouncement({
+    examinerSpeaking,
+    examinerStatus,
+    candidateRecording,
+    candidateStatus,
+  });
 
   // `relative` on the row anchors the `sr-only` span — absolute, and without
   // a positioned ancestor it would anchor to the document and grow the page
@@ -80,7 +80,7 @@ export function ConversationScene({
   return (
     <div className="border-border bg-card relative flex shrink-0 items-center gap-3 rounded-lg border p-4 sm:gap-4 sm:px-5">
       <span aria-live="polite" className="sr-only">
-        {turnAnnouncement}
+        {announcement}
       </span>
 
       {/* Examiner */}
@@ -134,34 +134,41 @@ export function ConversationScene({
 }
 
 /**
+ * The ring is the speaker's colour. The candidate's own face goes red while
+ * their microphone is live, matching the recording badge rather than the
+ * brand: on this screen the question the colour answers is "am I being
+ * recorded?", and there is one answer to it in this product.
+ */
+const FACE: Record<"examiner" | "candidate", { ring: string; idle: string; active: string }> = {
+  examiner: {
+    ring: "border-primary",
+    idle: "bg-primary-subtle text-primary",
+    active: "bg-primary-subtle text-primary",
+  },
+  candidate: {
+    ring: "border-danger",
+    idle: "bg-muted text-muted-foreground",
+    active: "bg-danger-subtle text-danger",
+  },
+};
+
+/**
  * One protagonist's avatar, with a ring that pulses while they hold the floor.
  *
  * The ring is the reference's `motion.span` as a CSS class — see `.po-ring` in
  * globals.css for why that swap is deliberate rather than a shortcut.
  */
 function SpeakerFace({ active, tone }: { active: boolean; tone: "examiner" | "candidate" }) {
+  const face = FACE[tone];
   return (
     <span className="relative size-11 shrink-0 sm:size-[2.875rem]" aria-hidden>
       {active && (
-        <span
-          className={cn(
-            "po-ring absolute inset-0 rounded-full border-2",
-            tone === "examiner" ? "border-primary" : "border-danger",
-          )}
-        />
+        <span className={cn("po-ring absolute inset-0 rounded-full border-2", face.ring)} />
       )}
       <span
         className={cn(
           "absolute inset-0 flex items-center justify-center rounded-full",
-          tone === "examiner"
-            ? "bg-primary-subtle text-primary"
-            : // The candidate's own face goes red while their microphone is
-              // live, matching the recording badge rather than the brand: on
-              // this screen the question the colour answers is "am I being
-              // recorded?", and there is one answer to it in this product.
-              active
-              ? "bg-danger-subtle text-danger"
-              : "bg-muted text-muted-foreground",
+          active ? face.active : face.idle,
         )}
       >
         <UserIcon className="size-5" />
