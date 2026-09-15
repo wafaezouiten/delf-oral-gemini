@@ -9,12 +9,15 @@ import {
   MAX_EXAMINER_PROMPT_LENGTH,
   describeExaminerModel,
   describePrompt,
+  devPromptPanelView,
   isPromptModified,
   normaliseExaminerPrompt,
   promptSubmitDisabled,
   promptSubmitState,
+  parsePromptAnswer,
   parseSavedPrompt,
   savedPromptKey,
+  savedPromptSeed,
   savedPromptStale,
   serialiseSavedPrompt,
 } from "./dev-examiner-prompt";
@@ -237,5 +240,75 @@ describe("a prompt that outlives the sitting (#166)", () => {
       false,
       "a record written before the route reported a version",
     );
+  });
+});
+
+describe("reading the dev route's answer", () => {
+  it("takes the two strings and nothing else", () => {
+    assert.deepEqual(parsePromptAnswer({ prompt: "Tu es…", version: "v3" }), {
+      prompt: "Tu es…",
+      version: "v3",
+    });
+    assert.deepEqual(parsePromptAnswer({ prompt: 4, version: null }), { prompt: "", version: "" });
+    assert.deepEqual(parsePromptAnswer(null), { prompt: "", version: "" });
+    assert.deepEqual(parsePromptAnswer("html"), { prompt: "", version: "" });
+  });
+});
+
+describe("what the editor opens on", () => {
+  it("is the saved prompt, or nothing", () => {
+    assert.equal(savedPromptSeed({ prompt: "Tu es…", version: "v1" }), "Tu es…");
+    assert.equal(savedPromptSeed(null), "");
+  });
+});
+
+describe("the panel's footer", () => {
+  const base = {
+    modified: false,
+    examinerModel: LIVE_MODEL_OPTIONS[0].id,
+    loading: false,
+    failed: false,
+    sessionOpen: false,
+    saved: null,
+    version: "v3",
+  };
+
+  it("names the model, and adds the raw id only when the name is not it", () => {
+    const known = devPromptPanelView(base);
+    assert.equal(known.model.name, LIVE_MODEL_OPTIONS[0].label);
+    assert.equal(known.model.id, LIVE_MODEL_OPTIONS[0].id);
+    const unknown = devPromptPanelView({ ...base, examinerModel: "gemini-x" });
+    assert.equal(unknown.model.name, "gemini-x");
+    assert.equal(unknown.model.id, null);
+  });
+
+  it("holds the field while the text is missing, and says why", () => {
+    assert.equal(devPromptPanelView(base).fieldDisabled, false);
+    const loading = devPromptPanelView({ ...base, loading: true });
+    assert.equal(loading.fieldDisabled, true);
+    assert.match(loading.placeholder, /Chargement/);
+    assert.equal(devPromptPanelView({ ...base, failed: true }).fieldDisabled, true);
+  });
+
+  it("badges the prompt in force and warns of the restart only with a session open", () => {
+    assert.equal(devPromptPanelView(base).badge, "default");
+    assert.equal(devPromptPanelView({ ...base, modified: true }).badge, "modified");
+    assert.equal(devPromptPanelView(base).sessionNote, DEV_PROMPT_COPY.nextSessionNote);
+    assert.equal(
+      devPromptPanelView({ ...base, sessionOpen: true }).sessionNote,
+      DEV_PROMPT_COPY.restartWarning,
+    );
+  });
+
+  it("adds the saved line for a saved prompt, and the stale line once it has aged", () => {
+    assert.deepEqual(
+      [devPromptPanelView(base).savedNote, devPromptPanelView(base).staleNote],
+      [null, null],
+    );
+    const fresh = devPromptPanelView({ ...base, saved: { prompt: "p", version: "v3" } });
+    assert.notEqual(fresh.savedNote, null);
+    assert.equal(fresh.staleNote, null);
+    const stale = devPromptPanelView({ ...base, saved: { prompt: "p", version: "v2" } });
+    assert.match(stale.staleNote ?? "", /v2, actuelle v3/);
   });
 });

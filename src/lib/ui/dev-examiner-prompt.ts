@@ -300,3 +300,65 @@ export const SAVED_PROMPT_COPY = {
   stale: (saved: string, current: string) =>
     `Ce prompt a été enregistré sur une version antérieure de l'instruction (${saved}, actuelle ${current}) : il ne contient aucune des corrections apportées depuis.`,
 } as const;
+
+/**
+ * What `/api/dev/examiner-prompt` answered, read defensively: a body that is
+ * not the shape this expects is an empty prompt and no version, never a
+ * throw — the panel then shows an empty field rather than a crash.
+ */
+export function parsePromptAnswer(body: unknown): { prompt: string; version: string } {
+  const record = typeof body === "object" && body !== null ? (body as Record<string, unknown>) : {};
+  return {
+    prompt: typeof record.prompt === "string" ? record.prompt : "",
+    version: typeof record.version === "string" ? record.version : "",
+  };
+}
+
+/**
+ * What the editor opens on: the saved prompt when the sitting inherited one
+ * (#166), and otherwise nothing until the dev route answers.
+ */
+export function savedPromptSeed(saved: SavedExaminerPrompt | null): string {
+  return saved?.prompt ?? "";
+}
+
+/** The panel's footer, as the state decides it (#234). */
+export interface DevPromptPanelView {
+  badge: ActivePromptSource;
+  /** The readable name, and the raw id beside it only when the two differ. */
+  model: { name: string; id: string | null };
+  /** The field, and « Réinitialiser », are out while the text is missing. */
+  fieldDisabled: boolean;
+  placeholder: string;
+  /** Applying restarts an open session; otherwise it waits for the next one. */
+  sessionNote: string;
+  /** The two lines a saved prompt adds — the second only when it has aged. */
+  savedNote: string | null;
+  staleNote: string | null;
+}
+
+export function devPromptPanelView(input: {
+  modified: boolean;
+  examinerModel: string;
+  loading: boolean;
+  failed: boolean;
+  sessionOpen: boolean;
+  saved: SavedExaminerPrompt | null;
+  version: string;
+}): DevPromptPanelView {
+  const name = describeExaminerModel(input.examinerModel);
+  return {
+    badge: input.modified ? "modified" : "default",
+    model: { name, id: name === input.examinerModel ? null : input.examinerModel },
+    fieldDisabled: input.loading || input.failed,
+    placeholder: input.loading ? "Chargement du prompt…" : "Prompt système de l'examinateur.",
+    sessionNote: input.sessionOpen
+      ? DEV_PROMPT_COPY.restartWarning
+      : DEV_PROMPT_COPY.nextSessionNote,
+    savedNote: input.saved ? SAVED_PROMPT_COPY.saved : null,
+    staleNote:
+      input.saved && savedPromptStale(input.saved, input.version)
+        ? SAVED_PROMPT_COPY.stale(input.saved.version, input.version)
+        : null,
+  };
+}
