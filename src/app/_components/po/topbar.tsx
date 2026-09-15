@@ -3,6 +3,7 @@
 import type { ReactNode } from "react";
 
 import { cn } from "@/lib/ui/class-names";
+import { TOPBAR_STEPS, topbarStepView, type TopbarStepView } from "@/lib/ui/topbar-steps";
 import { ArrowLeftIcon } from "./icons";
 
 /**
@@ -32,8 +33,6 @@ import { ArrowLeftIcon } from "./icons";
  * candidate is, `aria-current="step"` is the attribute for saying so, and a
  * screen reader that meets it as a list can count it.
  */
-
-const STEP_LABELS = ["Préparation", "Exposé", "Débat"] as const;
 
 export function SimulatorTopBar({
   kicker,
@@ -68,42 +67,52 @@ export function SimulatorTopBar({
 
       <nav aria-label="Étapes de l'épreuve" className="hidden shrink-0 lg:block">
         <ol className="flex items-center gap-1">
-          {STEP_LABELS.map((label, index) => {
-            const current = index === currentStep;
-            const done = index < currentStep;
-            return (
-              <li key={label} className="flex items-center gap-1">
-                {index > 0 && <span className="bg-border h-px w-3" aria-hidden />}
-                <span
-                  aria-current={current ? "step" : undefined}
-                  className={cn(
-                    "flex h-6.5 items-center gap-1.5 rounded-full border px-2.5 text-[0.71875rem] font-medium",
-                    current
-                      ? "border-primary bg-primary text-primary-foreground"
-                      : "border-border bg-card text-muted-foreground",
-                  )}
-                >
-                  {/* Done is a tick, not merely a dimmer grey: the three states
-                      have to be distinguishable without colour, which is the
-                      rule `PhaseSteps` was already written under. */}
-                  <span
-                    className={cn(
-                      "tabular text-[0.625rem]",
-                      current ? "text-primary-foreground/70" : "text-muted-foreground/60",
-                    )}
-                    aria-hidden
-                  >
-                    {done ? "✓" : index + 1}
-                  </span>
-                  {label}
-                </span>
-              </li>
-            );
-          })}
+          {TOPBAR_STEPS.map((label, index) => (
+            <li key={label} className="flex items-center gap-1">
+              {index > 0 && <span className="bg-border h-px w-3" aria-hidden />}
+              <Step step={topbarStepView(index, currentStep)} />
+            </li>
+          ))}
         </ol>
       </nav>
 
       <div className="flex flex-1 items-center justify-end gap-2">{right}</div>
     </header>
+  );
+}
+
+// Done and to-do share a pill on purpose: the tick is what tells them apart,
+// so the colour is spent on the one step that is live.
+const STEP_PILL: Record<TopbarStepView["state"], string> = {
+  current: "border-primary bg-primary text-primary-foreground",
+  done: "border-border bg-card text-muted-foreground",
+  todo: "border-border bg-card text-muted-foreground",
+};
+
+const STEP_MARKER: Record<TopbarStepView["state"], string> = {
+  current: "text-primary-foreground/70",
+  done: "text-muted-foreground/60",
+  todo: "text-muted-foreground/60",
+};
+
+/**
+ * One step's pill. Done is a tick, not merely a dimmer grey: the three states
+ * have to be distinguishable without colour, which is the rule `PhaseSteps`
+ * was already written under — and `topbarStepView` decides which is which.
+ */
+function Step({ step }: { step: TopbarStepView }) {
+  return (
+    <span
+      aria-current={step.state === "current" ? "step" : undefined}
+      className={cn(
+        "flex h-6.5 items-center gap-1.5 rounded-full border px-2.5 text-[0.71875rem] font-medium",
+        STEP_PILL[step.state],
+      )}
+    >
+      <span className={cn("tabular text-[0.625rem]", STEP_MARKER[step.state])} aria-hidden>
+        {step.marker}
+      </span>
+      {step.label}
+    </span>
   );
 }

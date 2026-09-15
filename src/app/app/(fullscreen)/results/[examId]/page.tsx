@@ -28,26 +28,7 @@ import { ResultsClient } from "./results-client";
  */
 export default async function ResultsPage({ params }: PageProps<"/app/results/[examId]">) {
   const { examId } = await params;
-  // One id, one owner, and both are needed: the store scopes every statement to
-  // the owner rather than trusting the row id on its own. `auth()` is memoised
-  // per request, so this is not a second round trip to Clerk.
-  const userId = await requireUserId();
-  const owned = await requireExamAccess(examId);
-
-  if (owned === null) return <ResultsClient examId={examId} />;
-
-  // The subject comes back with the gate now, and this page still does not use
-  // it: `readSitting` reads the whole sitting anyway, and the slug it returns is
-  // from the same statement as everything else it renders.
-  const sitting = await neonSittingStore()
-    .readSitting({ examId: owned.examId, userId })
-    .catch((error: unknown) => {
-      // A results page that 500s on a database blip is worse than one that
-      // renders from the copy the browser is already holding.
-      console.error("[results] could not read sitting", owned.examId, error);
-      return null;
-    });
-
+  const sitting = await readOwnedSitting(examId);
   if (!sitting) return <ResultsClient examId={examId} />;
 
   // The correction is what `corrected` means, so the branch is written on the
@@ -81,6 +62,32 @@ export default async function ResultsPage({ params }: PageProps<"/app/results/[e
   const initial = storedResultFromSitting(sitting, correction, topic);
 
   return <ResultsClient examId={examId} initial={initial} />;
+}
+
+/**
+ * The sitting, if it is the candidate's and the database answers — null
+ * otherwise, and null means the browser's copy renders instead.
+ *
+ * One id, one owner, and both are needed: the store scopes every statement to
+ * the owner rather than trusting the row id on its own. `auth()` is memoised
+ * per request, so this is not a second round trip to Clerk. The subject comes
+ * back with the gate too, and this page still does not use it: `readSitting`
+ * reads the whole sitting anyway, and the slug it returns is from the same
+ * statement as everything else it renders.
+ */
+async function readOwnedSitting(examId: string): Promise<StoredSitting | null> {
+  const userId = await requireUserId();
+  const owned = await requireExamAccess(examId);
+  if (owned === null) return null;
+
+  return neonSittingStore()
+    .readSitting({ examId: owned.examId, userId })
+    .catch((error: unknown) => {
+      // A results page that 500s on a database blip is worse than one that
+      // renders from the copy the browser is already holding.
+      console.error("[results] could not read sitting", owned.examId, error);
+      return null;
+    });
 }
 
 /**

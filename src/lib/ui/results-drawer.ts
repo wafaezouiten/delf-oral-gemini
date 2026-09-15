@@ -78,6 +78,51 @@ export function drawerExposedHeight(y: number, geometry: DrawerGeometry): number
 }
 
 /**
+ * The panel's own box. Painted only once there is a viewport to place it
+ * against: before that the panel has no height and no position, and a frame
+ * of it at the top of the screen is the flash `visibility` hides.
+ */
+export function drawerPanelBox(viewportHeight: number): {
+  height: number | undefined;
+  visibility: "hidden" | undefined;
+} {
+  if (!viewportHeight) return { height: undefined, visibility: "hidden" };
+  return { height: drawerGeometry(viewportHeight).fullHeight, visibility: undefined };
+}
+
+/** The settle: fast out of the finger, soft into place. */
+export const DRAWER_SETTLE_TRANSITION = "transform 0.32s cubic-bezier(0.2, 0.8, 0.2, 1)";
+
+/** One frame of the panel: everything the component writes to the DOM for a `y`. */
+export interface DrawerFrame {
+  /** The `y` actually taken, clamped to the travel. */
+  y: number;
+  transform: string;
+  /** The settle for a release, none for a drag frame. */
+  transition: string;
+  exposed: number;
+  /** The body's height: the visible slice below the handle, never negative. */
+  bodyHeight: string;
+}
+
+export function drawerFrame(
+  y: number,
+  geometry: DrawerGeometry,
+  animate: boolean,
+  peekHeight: number = DRAWER_PEEK_PX,
+): DrawerFrame {
+  const clamped = clampDrawerY(y, geometry);
+  const exposed = drawerExposedHeight(clamped, geometry);
+  return {
+    y: clamped,
+    transform: `translateY(${clamped}px)`,
+    transition: animate ? DRAWER_SETTLE_TRANSITION : "none",
+    exposed,
+    bodyHeight: `${Math.max(0, exposed - peekHeight)}px`,
+  };
+}
+
+/**
  * Where a drag release leaves the drawer: an end, when the release was a
  * flick, and otherwise exactly where the finger let go (`null` — the point of
  * free positioning). Velocity is px/s, positive downwards.
