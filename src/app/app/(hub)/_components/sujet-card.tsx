@@ -3,7 +3,7 @@ import Link from "next/link";
 import { ArrowRightIcon } from "@/app/_components/po/icons";
 import { ScoreTag, scoreSurface } from "@/app/_components/score-band";
 import { cn } from "@/lib/ui/class-names";
-import type { HubSujet } from "@/lib/ui/epreuve-hub";
+import { formatSujetNumber, sujetCardVerb, type HubSujet } from "@/lib/ui/epreuve-hub";
 
 /**
  * One sujet, as a card — the same object on the hub's « Sujets à la une » and
@@ -56,11 +56,10 @@ export function SujetCard({
   | { href: string; onOpen?: undefined; ariaLabel?: undefined }
   | { onOpen: () => void; ariaLabel: string; href?: undefined }
 )) {
+  const score = sujet.score;
   const className = cn(
     "group sujet-card flex h-full w-full cursor-pointer flex-col items-start border p-5 text-left transition-colors sm:p-[22px]",
-    sujet.score === null
-      ? "border-paper-border bg-paper hover:border-primary/60"
-      : scoreSurface(sujet.score),
+    score !== null ? scoreSurface(score) : "border-paper-border bg-paper hover:border-primary/60",
   );
 
   const body = (
@@ -75,7 +74,7 @@ export function SujetCard({
         {/* No ✓ beside it: a tick on a 6/25 in a red pill reads as approval of
             the mark rather than as "already sat", and the footer's verb already
             says « Refaire » for that. */}
-        {sujet.score !== null && <ScoreTag score25={sujet.score} variant="chip" />}
+        {score !== null && <ScoreTag score25={score} variant="chip" />}
       </div>
 
       {/* Sans, not the serif: the serif is spent on the masthead and on the
@@ -92,7 +91,7 @@ export function SujetCard({
       <div className="mt-auto flex w-full items-center justify-between gap-2 pt-4">
         <span className="text-muted-foreground tabular text-[0.65625rem]">{sujet.meta}</span>
         <span className="text-primary inline-flex shrink-0 items-center gap-1 text-xs font-semibold">
-          {sujet.score === null ? "Lire le sujet" : "Refaire"}
+          {sujetCardVerb(score)}
           <ArrowRightIcon className="size-3.5 transition-transform group-hover:translate-x-0.5" />
         </span>
       </div>
@@ -117,9 +116,4 @@ export function SujetCard({
       {body}
     </button>
   );
-}
-
-/** « N° 03 » — the main project's numbering, zero-padded so a column of them aligns. */
-function formatSujetNumber(position: number): string {
-  return `N° ${String(position).padStart(2, "0")}`;
 }

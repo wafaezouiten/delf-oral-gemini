@@ -323,3 +323,31 @@ export function buildFeaturedSujets(
 ): HubSujet[] {
   return buildHubSujets(topics.slice(0, HUB_FEATURED_SUJETS), latestScores);
 }
+
+/** « N° 03 » — the main project's numbering, zero-padded so a column of them aligns. */
+export function formatSujetNumber(position: number): string {
+  return `N° ${String(position).padStart(2, "0")}`;
+}
+
+/**
+ * The card's verb follows the state, not the surface (#188): « Lire le sujet »
+ * on a sujet never sat and « Refaire » once it carries a score, on the hub as
+ * on the kiosk. The card opens the sheet either way; the sheet's own « Passer
+ * l'épreuve » is where the start lives (#131).
+ */
+export function sujetCardVerb(score: number | null): string {
+  return score === null ? "Lire le sujet" : "Refaire";
+}
+
+/**
+ * The hub's one personal line, or null when Clerk has no first name to greet
+ * by: « Bonjour Wafae. Vous avez déjà passé 3 épreuves. »
+ */
+export function hubGreeting(firstName: string | null | undefined, sittings: number): string | null {
+  if (!firstName) return null;
+  const standing =
+    sittings === 0
+      ? "Choisissez un sujet pour votre première épreuve."
+      : `Vous avez déjà passé ${sittings} épreuve${sittings > 1 ? "s" : ""}.`;
+  return `Bonjour ${firstName}. ${standing}`;
+}
