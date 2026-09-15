@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { AudioBars } from "@/app/_components/po/audio-bars";
 import { CheckCircleIcon } from "@/app/_components/po/icons";
 import { cn } from "@/lib/ui/class-names";
+import { examinerRow, micRow, retentionDetail, type MicCheckState } from "@/lib/ui/preflight";
 import { liveModelChoices } from "@/lib/gemini/constants";
 
 /**
@@ -35,9 +36,6 @@ import { liveModelChoices } from "@/lib/gemini/constants";
  *    for the compatible majority, as a green badge nobody needed to act on.
  */
 
-/** What a real `getUserMedia` call has told us so far. */
-type MicState = "idle" | "testing" | "tested" | "failed";
-
 /**
  * A genuine mic check: requests the microphone and reports whether the browser
  * granted it. The bars are a "listening" cue, not a level meter.
@@ -56,8 +54,8 @@ type MicState = "idle" | "testing" | "tested" | "failed";
  * `getUserMedia` cannot be cancelled, so a grant that lands after unmount still
  * has to be stopped on arrival; `liveRef` is what makes that decidable.
  */
-function useMicCheck(): [MicState, () => void] {
-  const [state, setState] = useState<MicState>("idle");
+function useMicCheck(): [MicCheckState, () => void] {
+  const [state, setState] = useState<MicCheckState>("idle");
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const liveRef = useRef(true);
@@ -109,13 +107,6 @@ function useMicCheck(): [MicState, () => void] {
   return [state, check];
 }
 
-const MIC_COPY: Record<MicState, string> = {
-  idle: "Vérifiez votre niveau d'entrée.",
-  testing: "Parlez normalement…",
-  tested: "Micro autorisé, vous êtes prêt.",
-  failed: "Autorisez le micro, puis réessayez.",
-};
-
 /**
  * The examiners on offer (#99). Computed once: the list is a build-time fact —
  * the verified allow-list, with the configured default first — and it cannot
@@ -129,24 +120,12 @@ export function PreflightCard({
   examinerError,
   onChooseExaminer,
 }: {
-  /**
-   * The examiner this sitting will hear, and the machinery to change it (#99).
-   *
-   * A pre-flight concern, which is why it lives on this card beside the
-   * microphone rather than anywhere near the clock: it is decided before the
-   * passation and immutable after it — the server refuses the write once the
-   * préparation ends. The value only advances when the row was written (or
-   * provably has no row), so what this shows is what will actually speak.
-   */
   examinerModel: string;
   examinerSaving: boolean;
-  /** The last change did not take; the shown model is still the sitting's. */
   examinerError: boolean;
   onChooseExaminer: (model: string) => void;
 }) {
   const [micState, checkMic] = useMicCheck();
-  /** The « Enregistrement audio » consent, on by default. Local until the
-   *  historique-recordings issue gives it something to govern — see its row. */
   const [keepAudio, setKeepAudio] = useState(true);
 
   return (
@@ -155,28 +134,7 @@ export function PreflightCard({
         Avant de commencer
       </h2>
 
-      <PreflightRow
-        title="Microphone"
-        detail={MIC_COPY[micState]}
-        right={
-          micState === "testing" ? (
-            <AudioBars heightClass="h-5" className="text-primary shrink-0 px-1.5" />
-          ) : micState === "tested" ? (
-            <span className="border-success/30 bg-success-subtle text-success inline-flex shrink-0 items-center gap-1.5 rounded-md border px-2.5 py-1 text-[0.6875rem] font-semibold">
-              <CheckCircleIcon className="size-3.5" />
-              Opérationnel
-            </span>
-          ) : (
-            <button
-              type="button"
-              onClick={checkMic}
-              className="border-border bg-card hover:bg-muted shrink-0 rounded-md border px-3 py-1.5 text-xs font-semibold transition-colors"
-            >
-              {micState === "failed" ? "Réessayer" : "Tester"}
-            </button>
-          )
-        }
-      />
+      <MicRow state={micState} onCheck={checkMic} />
 
       {/* The examiner, under the microphone: the two decisions a candidate can
           actually take on this card, together at its head. The <select> shows
@@ -184,38 +142,11 @@ export function PreflightCard({
           tooltip, and what the correction will print — a label alone would
           hide which model actually ran (#99). The row never advances on a
           failed write: what it shows is always what the sitting will hear. */}
-      <PreflightRow
-        title="Examinateur"
-        detail={
-          examinerError
-            ? "Le choix n'a pas pu être enregistré, réessayez."
-            : examinerSaving
-              ? "Enregistrement du choix…"
-              : (EXAMINER_CHOICES.find((choice) => choice.id === examinerModel)?.detail ??
-                examinerModel)
-        }
-        right={
-          <select
-            value={examinerModel}
-            onChange={(event) => onChooseExaminer(event.target.value)}
-            disabled={examinerSaving}
-            aria-label="Modèle de l'examinateur"
-            title={examinerModel}
-            className="border-border bg-card hover:bg-muted max-w-[11rem] shrink rounded-md border px-2 py-1.5 text-xs font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {EXAMINER_CHOICES.map((choice) => (
-              <option key={choice.id} value={choice.id}>
-                {choice.label}
-              </option>
-            ))}
-            {/* A sitting can name a model the list no longer carries — the row
-                outlives the catalogue. Shown under its raw id rather than
-                snapped to an option it never was. */}
-            {!EXAMINER_CHOICES.some((choice) => choice.id === examinerModel) && (
-              <option value={examinerModel}>{examinerModel}</option>
-            )}
-          </select>
-        }
+      <ExaminerRow
+        model={examinerModel}
+        saving={examinerSaving}
+        failed={examinerError}
+        onChoose={onChooseExaminer}
       />
 
       {/* Whether the candidate's voice is kept with the sitting. The switch is
@@ -228,14 +159,7 @@ export function PreflightCard({
           question already is. */}
       <PreflightRow
         title="Enregistrement audio"
-        // Tracks the switch: this is consent copy, and a sentence that keeps
-        // promising retention after the candidate has just refused it is the
-        // one sentence on this card that must not be false.
-        detail={
-          keepAudio
-            ? "Votre voix sera conservée avec vos résultats."
-            : "Votre voix ne sera pas conservée."
-        }
+        detail={retentionDetail(keepAudio)}
         right={
           <button
             type="button"
@@ -259,6 +183,76 @@ export function PreflightCard({
         }
       />
     </section>
+  );
+}
+
+/** The microphone check: a sentence, and the bars, the check or the button. */
+function MicRow({ state, onCheck }: { state: MicCheckState; onCheck: () => void }) {
+  const row = micRow(state);
+  return (
+    <PreflightRow
+      title="Microphone"
+      detail={row.detail}
+      right={
+        row.control === "bars" ? (
+          <AudioBars heightClass="h-5" className="text-primary shrink-0 px-1.5" />
+        ) : row.control === "check" ? (
+          <span className="border-success/30 bg-success-subtle text-success inline-flex shrink-0 items-center gap-1.5 rounded-md border px-2.5 py-1 text-[0.6875rem] font-semibold">
+            <CheckCircleIcon className="size-3.5" />
+            Opérationnel
+          </span>
+        ) : (
+          <button
+            type="button"
+            onClick={onCheck}
+            className="border-border bg-card hover:bg-muted shrink-0 rounded-md border px-3 py-1.5 text-xs font-semibold transition-colors"
+          >
+            {row.buttonLabel}
+          </button>
+        )
+      }
+    />
+  );
+}
+
+/** Which examiner (#99): readable names in the select, the raw id everywhere it is stored or printed. */
+function ExaminerRow({
+  model,
+  saving,
+  failed,
+  onChoose,
+}: {
+  model: string;
+  saving: boolean;
+  failed: boolean;
+  onChoose: (model: string) => void;
+}) {
+  const row = examinerRow(model, saving, failed, EXAMINER_CHOICES);
+  return (
+    <PreflightRow
+      title="Examinateur"
+      detail={row.detail}
+      right={
+        <select
+          value={model}
+          onChange={(event) => onChoose(event.target.value)}
+          disabled={saving}
+          aria-label="Modèle de l'examinateur"
+          title={model}
+          className="border-border bg-card hover:bg-muted max-w-[11rem] shrink rounded-md border px-2 py-1.5 text-xs font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {EXAMINER_CHOICES.map((choice) => (
+            <option key={choice.id} value={choice.id}>
+              {choice.label}
+            </option>
+          ))}
+          {/* A sitting can name a model the list no longer carries — the row
+                outlives the catalogue. Shown under its raw id rather than
+                snapped to an option it never was. */}
+          {row.unlisted && <option value={model}>{model}</option>}
+        </select>
+      }
+    />
   );
 }
 
