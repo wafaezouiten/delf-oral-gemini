@@ -1,4 +1,5 @@
 import { COMPETENCY_MAX } from "@/lib/delf/constants";
+import type { ScoreBand } from "@/lib/delf/grille";
 import {
   formatScoreDelta,
   type TrajectoryPoint,
@@ -14,6 +15,8 @@ export interface TrajectoryDelta {
 }
 
 export interface TrajectoryHeadline {
+  /** The newest simulation: the card's headline note, tinted on its band. */
+  latest: { score25: number; band: ScoreBand; date: string };
   /** Latest minus the simulation before, or null with one data point. */
   delta: TrajectoryDelta | null;
   /** « dernière simulation · 4 août », or « première » when there is nothing before it. */
@@ -31,6 +34,7 @@ export function trajectoryHeadline(trajectory: TrajectoryView): TrajectoryHeadli
   if (!latest) return null;
   const movement = delta === null ? null : deltaView(delta);
   return {
+    latest,
     delta: movement,
     dateLine: `${movement ? "dernière" : "première"} simulation · ${latest.date}`,
     axisEnd: points.length > 1 ? latest.date : null,
@@ -38,9 +42,10 @@ export function trajectoryHeadline(trajectory: TrajectoryView): TrajectoryHeadli
 }
 
 function deltaView(delta: number): TrajectoryDelta {
-  if (delta > 0) return { text: formatScoreDelta(delta), tone: "up", caret: "▲ " };
-  if (delta < 0) return { text: formatScoreDelta(delta), tone: "down", caret: "▼ " };
-  return { text: formatScoreDelta(delta), tone: "flat", caret: null };
+  const text = formatScoreDelta(delta);
+  if (delta > 0) return { text, tone: "up", caret: "▲ " };
+  if (delta < 0) return { text, tone: "down", caret: "▼ " };
+  return { text, tone: "flat", caret: null };
 }
 
 /**

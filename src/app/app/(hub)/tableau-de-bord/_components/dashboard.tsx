@@ -156,7 +156,7 @@ function TrajectoryCard({ trajectory }: { trajectory: TrajectoryView }) {
   // tested; this positions them.
   const headline = trajectoryHeadline(trajectory);
   if (!headline) return null;
-  const { points, latest } = trajectory;
+  const { points } = trajectory;
 
   return (
     <section className="border-border bg-card sheet mt-5 border">
@@ -179,7 +179,7 @@ function TrajectoryCard({ trajectory }: { trajectory: TrajectoryView }) {
             Score /{COMPETENCY_MAX} · par simulation
           </p>
         </div>
-        <Headline latest={latest!} headline={headline} />
+        <Headline headline={headline} />
       </div>
 
       <div className="flex gap-3 px-4 pt-4 pb-5 sm:px-6">
@@ -231,13 +231,8 @@ function TrajectoryCard({ trajectory }: { trajectory: TrajectoryView }) {
  * The standing at a glance: the latest note, its movement since the simulation
  * before, and its date.
  */
-function Headline({
-  latest,
-  headline,
-}: {
-  latest: NonNullable<TrajectoryView["latest"]>;
-  headline: TrajectoryHeadline;
-}) {
+function Headline({ headline }: { headline: TrajectoryHeadline }) {
+  const { latest } = headline;
   return (
     <div className="shrink-0 text-right">
       <p className="flex items-baseline justify-end gap-1.5 sm:gap-2">

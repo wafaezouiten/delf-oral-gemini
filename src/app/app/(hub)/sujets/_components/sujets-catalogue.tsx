@@ -5,6 +5,7 @@ import { useId, useMemo, useState } from "react";
 import { ClockIcon, CloseIcon, SearchIcon } from "@/app/_components/po/icons";
 import { Kicker, Tag } from "@/app/_components/po/tag";
 import { ScoreTag } from "@/app/_components/score-band";
+import { useModalDialog } from "@/app/_components/po/use-modal-dialog";
 import { StartExamButton } from "@/app/app/(hub)/_components/start-exam-button";
 import { SujetCard } from "@/app/app/(hub)/_components/sujet-card";
 import { COMPETENCY_MAX } from "@/lib/delf/constants";
@@ -12,7 +13,6 @@ import { PHASE_DURATIONS } from "@/lib/delf/phases";
 import type { OralTopic } from "@/lib/delf/topics";
 import type { HubSujet } from "@/lib/ui/epreuve-hub";
 import { catalogueFacts, filterSujets, resultCount } from "@/lib/ui/sujets-catalogue";
-import { useModalDialog } from "@/app/_components/po/use-modal-dialog";
 
 /**
  * The sujets kiosk: the catalogue and a sujet's full sheet, whose footer starts

@@ -38,8 +38,10 @@ describe("the trajectory's headline", () => {
   });
 
   it("calls a lone simulation the first, with no movement and no axis end", () => {
-    const headline = trajectoryHeadline(trajectory([point(12, "4 août")]));
+    const only = point(12, "4 août");
+    const headline = trajectoryHeadline(trajectory([only]));
     assert.deepEqual(headline, {
+      latest: { score25: 12, band: only.band, date: "4 août" },
       delta: null,
       dateLine: "première simulation · 4 août",
       axisEnd: null,
@@ -49,6 +51,7 @@ describe("the trajectory's headline", () => {
   it("carries the movement's direction on a caret and a tone, never on a band", () => {
     const up = trajectoryHeadline(trajectory([point(10, "1 août"), point(16, "4 août")]));
     assert.deepEqual(up?.delta, { text: "+6 pts", tone: "up", caret: "▲ " });
+    assert.equal(up?.latest.score25, 16);
     assert.equal(up?.dateLine, "dernière simulation · 4 août");
     assert.equal(up?.axisEnd, "4 août");
 
