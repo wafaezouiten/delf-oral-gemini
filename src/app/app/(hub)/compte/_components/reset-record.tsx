@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 
 import { dangerButton } from "@/app/_components/button-styles";
 import { requestRecordReset } from "@/lib/account/reset";
+import { cn } from "@/lib/ui/class-names";
 import { resetButtonLabel, resetFailure, resetSlot, type ResetSlot } from "@/lib/ui/reset-record";
 
 /**
@@ -131,7 +132,7 @@ function Slot({ slot }: { slot: ResetSlot }) {
   return (
     <p
       role={SLOT_ROLE[slot.kind]}
-      className={`${SLOT_INK[slot.kind]} max-w-56 text-xs leading-relaxed sm:text-right`}
+      className={cn(SLOT_INK[slot.kind], "max-w-56 text-xs leading-relaxed sm:text-right")}
     >
       {slot.text}
     </p>

@@ -49,13 +49,14 @@ describe("deleting in two presses", () => {
     assert.deepEqual(run(["arm", "start", "ok"]), { stage: "deleted", failed: false });
   });
 
-  it("disarms on a failure and keeps the sentence until the next attempt", () => {
+  it("disarms on a failure and keeps the sentence until the candidate arms again", () => {
     const failed = run(["arm", "start", "fail"]);
     assert.deepEqual(failed, { stage: "idle", failed: true });
-    assert.deepEqual(deletionReducer(failed, "arm"), { stage: "confirming", failed: true });
-    assert.deepEqual(deletionReducer(deletionReducer(failed, "arm"), "start"), {
-      stage: "deleting",
-      failed: false,
-    });
+    assert.deepEqual(
+      deletionReducer(failed, "cancel"),
+      failed,
+      "nothing to cancel; the sentence stays",
+    );
+    assert.deepEqual(deletionReducer(failed, "arm"), { stage: "confirming", failed: false });
   });
 });

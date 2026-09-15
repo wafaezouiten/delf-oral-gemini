@@ -37,7 +37,9 @@ export function seekKeyOffset(key: string): number | null {
 
 /**
  * « Supprimer », in two presses. One arms it, a second confirms; a failure
- * disarms and says so, and the sentence stays until the next attempt.
+ * disarms and says so, and the sentence stays until the candidate arms again —
+ * the warning and the failure are not shown together, since the second press
+ * is a new attempt and the first sentence has been read.
  */
 export interface DeletionState {
   stage: "idle" | "confirming" | "deleting" | "deleted";
@@ -51,7 +53,7 @@ export const DELETION_IDLE: DeletionState = { stage: "idle", failed: false };
 export function deletionReducer(state: DeletionState, event: DeletionEvent): DeletionState {
   switch (event) {
     case "arm":
-      return { ...state, stage: "confirming" };
+      return { stage: "confirming", failed: false };
     case "cancel":
       return { ...state, stage: "idle" };
     case "start":

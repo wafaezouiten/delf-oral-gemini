@@ -81,6 +81,8 @@ export function SimulatorTopBar({
   );
 }
 
+// Done and to-do share a pill on purpose: the tick is what tells them apart,
+// so the colour is spent on the one step that is live.
 const STEP_PILL: Record<TopbarStepView["state"], string> = {
   current: "border-primary bg-primary text-primary-foreground",
   done: "border-border bg-card text-muted-foreground",
