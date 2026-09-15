@@ -199,7 +199,46 @@ function PromptForm({
         event.preventDefault();
         if (!refused) onApply();
       }}
-
+      // A narrow column docked to the RIGHT at every breakpoint (#153,
+      // second pass). The first fix kept the full-width sub-`xl` layout
+      // and only capped the `xl` one, and the user's screenshot answered
+      // it: a panel spanning the window buries the épreuve it exists to
+      // test beside. So the panel is thin and right-anchored everywhere —
+      // the conversation stays visible on its left — and the viewport cap
+      // stays, so « Appliquer le prompt » can never be pushed off screen.
+      // The prompt itself gives nothing up: the textarea scrolls, resizes,
+      // and holds the same nine thousand characters at any width.
+      //
+      // The height cap is measured rather than guessed (#163). `100%` in a
+      // `max-height` resolves against the containing block — the corner
+      // cluster from `xl` up, the bar itself below it, and both are the
+      // bar's height since the cluster was made to span it. The bar's
+      // bottom edge IS the window's bottom edge, the épreuve being a
+      // `h-dvh` column, so `100dvh - 100%` is exactly the room above the
+      // bar whatever height the bar happens to be, and `4.5rem` pays for
+      // three things: the `mb-2` under the panel, the `h-14` top bar the
+      // épreuve draws above everything at `z-30`, and half a rem of gap
+      // between the two. The top bar is why the number is not `1.5rem`:
+      // stopping at the window's edge put the panel's header UNDER the
+      // clock and « Quitter », which is a header that is on screen and
+      // still cannot be read.
+      //
+      // The cap it replaces, `100vh - 6.5rem`, was the same sum with the
+      // bar's height written down as a constant and the gap left out of
+      // it. Measured in a replica of this bar: on any window short enough
+      // for the cap to bind it put the panel's top 8px above the window,
+      // and the whole overshoot again on every width where the bar's row
+      // wraps — which is where the header, the default/modifié badge and
+      // « ✕ » went.
+      //
+      // `min(22rem, …)` because clearing the top bar is not the same as
+      // staying away from it. A cap that is only the room available lets
+      // the panel take all of it — it opened against the header, which is
+      // legible and still wrong, since what is behind the panel is the
+      // épreuve it exists to be watched beside. 22rem is the ceiling that
+      // holds however tall the window is, or however far the field's own
+      // drag handle is pulled; the `dvh` term takes over below it, on a
+      // window with less than that to give.
       className="absolute right-4 bottom-full left-auto z-20 mb-2 flex max-h-[min(22rem,calc(100dvh-100%-4.5rem))] w-[min(22rem,calc(100vw-2rem))] flex-col gap-1.5 rounded-md border border-amber-300 bg-amber-50 p-2 shadow-lg xl:right-0"
     >
       <div className="flex items-center gap-1.5">
@@ -310,7 +349,22 @@ function PromptField({
       spellCheck={false}
       disabled={fieldDisabled}
       placeholder={view.placeholder}
-
+      // The field is the flexible part of a height-capped column (#153):
+      // the form's own ceiling is what keeps the header and « Appliquer »
+      // on screen, and this box gives way to it — down to `min-h-24` on
+      // a short window — instead of pushing its chrome past the top. It
+      // scrolls and resizes either way, so height is a starting point,
+      // not a cap on what can be read.
+      //
+      // `h-48` rather than `h-96` (#163). At 24rem the panel was tall
+      // enough to reach its own ceiling on an ordinary laptop, so it
+      // opened filling the screen from the top bar to the mic — and a
+      // dev tool that takes the whole window is one the épreuve behind
+      // it cannot be watched through. 12rem opens on a dozen lines of
+      // the instruction and leaves the panel a third of the window
+      // instead of all of it; the drag handle is right there for the one
+      // edit that wants more, and the form's `min()` ceiling is what
+      // that handle stops against.
       className="h-48 min-h-24 shrink resize-y rounded border border-amber-300 bg-white p-1.5 font-mono text-[0.625rem] leading-relaxed text-amber-950 outline-none placeholder:text-amber-700/60 focus:border-amber-500 disabled:bg-amber-100/60"
     />
   );
