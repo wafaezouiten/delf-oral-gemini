@@ -11,6 +11,7 @@ import {
   MIN_RECORDING_SECONDS,
   fitsInOneRequest,
   measureUploadedRecording,
+  readRecordings,
   selectDeliverable,
 } from "./uploaded-recording";
 
@@ -223,12 +224,16 @@ describe("what a stub of seconds is", () => {
   // to be re-argued rather than silently kept.
 
   it("sits far under the heaviest duration tier, so it can never change a mark", () => {
-    // A phase measuring under `SHORT_DEVELOPMENT_SECONDS` is in the bottom tier
-    // whether it reads 8 seconds or 0 — the drop turns one already-charged
-    // reading into the other, and nothing else. Were this floor ever to reach
-    // that threshold, dropping a recording could move a part between tiers,
-    // which is exactly what it must not do.
-    assert.ok(MIN_RECORDING_SECONDS < SHORT_DEVELOPMENT_SECONDS / 2);
+    // A phase measuring under its `SHORT_DEVELOPMENT_SECONDS` floor is in the
+    // bottom tier whether it reads 8 seconds or 0 — the drop turns one
+    // already-charged reading into the other, and nothing else. Were this floor
+    // ever to reach that threshold, dropping a recording could move a part
+    // between tiers, which is exactly what it must not do. Measured against the
+    // LOWER of the two floors, since the guarantee has to hold for both parts.
+    assert.ok(
+      MIN_RECORDING_SECONDS <
+        Math.min(SHORT_DEVELOPMENT_SECONDS.monologue, SHORT_DEVELOPMENT_SECONDS.debate) / 2,
+    );
   });
 
   it("still measures a stub — the floor is a decision about grading, not format", async () => {
@@ -239,5 +244,66 @@ describe("what a stub of seconds is", () => {
 
     assert.equal(measured?.mimeType, "audio/ogg");
     assert.ok((measured?.durationSeconds ?? NaN) < MIN_RECORDING_SECONDS);
+  });
+});
+
+describe("reading the recordings out of the finish form", () => {
+  const form = (parts: Record<string, Blob | string>) => {
+    const data = new FormData();
+    for (const [name, value] of Object.entries(parts)) data.set(name, value);
+    return data;
+  };
+  const quiet = <T>(fn: () => Promise<T>) => {
+    const { info } = console;
+    console.info = () => {};
+    return fn().finally(() => Object.assign(console, { info }));
+  };
+
+  it("measures each present phase from its own bytes, in phase order", async () => {
+    const read = await readRecordings(
+      form({
+        "audio-debate": new Blob([await wav(90)]),
+        "audio-monologue": new Blob([await opus(300)]),
+      }),
+    );
+    assert.ok("recordings" in read);
+    assert.deepEqual(
+      read.recordings.map((r) => [r.phase, r.mimeType, r.durationSeconds]),
+      [
+        ["monologue", "audio/ogg", 300],
+        ["debate", "audio/wav", 90],
+      ],
+    );
+    assert.equal(read.recordings[1].byteSize, read.recordings[1].blob.size);
+  });
+
+  it("treats a missing or empty phase as absent, not as an error", async () => {
+    const read = await readRecordings(form({ "audio-debate": new Blob([]) }));
+    assert.deepEqual(read, { recordings: [] });
+  });
+
+  it("refuses an oversized file before reading its bytes, naming the phase", async () => {
+    const read = await readRecordings(
+      form({ "audio-monologue": new Blob([new Uint8Array(MAX_RECORDING_BYTES + 1)]) }),
+    );
+    assert.deepEqual(read, { rejected: "monologue", reason: "too-large" });
+  });
+
+  it("refuses bytes it cannot measure, naming the phase", async () => {
+    const read = await readRecordings(form({ "audio-debate": new Blob([new Uint8Array(4096)]) }));
+    assert.deepEqual(read, { rejected: "debate", reason: "unreadable" });
+  });
+
+  it("folds a stub under the floor into absence (#73), keeping the other phase", async () => {
+    const parts = form({
+      "audio-monologue": new Blob([await wav(MIN_RECORDING_SECONDS - 1)]),
+      "audio-debate": new Blob([await wav(MIN_RECORDING_SECONDS + 1)]),
+    });
+    const read = await quiet(() => readRecordings(parts));
+    assert.ok("recordings" in read);
+    assert.deepEqual(
+      read.recordings.map((r) => r.phase),
+      ["debate"],
+    );
   });
 });

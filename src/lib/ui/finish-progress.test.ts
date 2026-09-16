@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { finishStage, finishStageMessage, uploadPercent } from "./finish-progress";
+import { CORRECTION_TIMED_OUT } from "./finish-failure";
+import { finishStage, finishStageMessage, finishedView, uploadPercent } from "./finish-progress";
 
 describe("which stage « Épreuve terminée » is in", () => {
   it("is compressing until the request has been built and sent", () => {
@@ -62,5 +63,76 @@ describe("the sentence and the figure", () => {
     assert.match(message, /Vous pouvez fermer cet onglet/);
     assert.doesNotMatch(message, /[Nn]e fermez pas/);
     assert.match(message, /historique/);
+  });
+});
+
+describe("what « Épreuve terminée » says", () => {
+  it("announces the stage's own sentence, with a bar only while uploading", () => {
+    const uploading = finishedView({ kind: "uploading", fraction: 0.5 }, null, []);
+    assert.equal(uploading.failed, false);
+    assert.equal(uploading.heading, "Épreuve terminée");
+    assert.equal(uploading.live, true);
+    assert.equal(uploading.percent, 50);
+    assert.equal(uploading.canLeaveWhileWaiting, false);
+    assert.equal(uploading.failure, null);
+    assert.equal(finishedView({ kind: "correcting" }, null, []).percent, null);
+  });
+
+  it("offers the way out only while the server is correcting behind an accepted sitting (#86)", () => {
+    assert.equal(finishedView({ kind: "awaiting" }, null, []).canLeaveWhileWaiting, true);
+    assert.equal(
+      finishedView({ kind: "awaiting" }, CORRECTION_TIMED_OUT, []).canLeaveWhileWaiting,
+      false,
+    );
+  });
+
+  it("names the recording that could not be sent, and both when both", () => {
+    assert.equal(finishedView({ kind: "correcting" }, null, []).dropped, null);
+    assert.match(
+      finishedView({ kind: "correcting" }, null, ["debate"]).dropped ?? "",
+      /^Votre débat était trop volumineux/,
+    );
+    assert.match(
+      finishedView({ kind: "correcting" }, null, ["monologue"]).dropped ?? "",
+      /^Votre monologue/,
+    );
+    assert.match(
+      finishedView({ kind: "correcting" }, null, ["monologue", "debate"]).dropped ?? "",
+      /^Vos deux prises de parole/,
+    );
+  });
+
+  it("words a retryable failure as an envoi to try again, and leaving as abandoning", () => {
+    const view = finishedView(
+      { kind: "uploading", fraction: null },
+      { message: "Réseau perdu.", retryable: true },
+      [],
+    );
+    assert.equal(view.failed, true);
+    assert.equal(view.live, false, "the notice announces; the sentence stops");
+    assert.equal(view.heading, "Correction interrompue");
+    assert.equal(view.lede, "Votre prestation attend d'être envoyée.");
+    assert.deepEqual(view.failure, {
+      title: "L'envoi a échoué",
+      message: "Réseau perdu.",
+      retryable: true,
+      leaveLabel: "Abandonner et revenir au tableau de bord",
+    });
+  });
+
+  it("words a terminal failure without a retry, and leaving as plain leaving", () => {
+    const view = finishedView({ kind: "correcting" }, { message: "Refusé.", retryable: false }, []);
+    assert.match(view.lede, /n'a pas pu être corrigée/);
+    assert.equal(view.failure?.title, "Cette épreuve ne peut pas être corrigée");
+    assert.equal(view.failure?.retryable, false);
+    assert.equal(view.failure?.leaveLabel, "Revenir au tableau de bord");
+  });
+
+  it("lets a failure override every word it carries, as the timeout does", () => {
+    const view = finishedView({ kind: "awaiting" }, CORRECTION_TIMED_OUT, []);
+    assert.equal(view.heading, CORRECTION_TIMED_OUT.heading);
+    assert.equal(view.lede, CORRECTION_TIMED_OUT.lede);
+    assert.equal(view.failure?.title, CORRECTION_TIMED_OUT.title);
+    assert.equal(view.failure?.leaveLabel, CORRECTION_TIMED_OUT.leaveLabel);
   });
 });

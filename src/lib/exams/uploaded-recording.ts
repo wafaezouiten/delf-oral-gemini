@@ -20,6 +20,8 @@
 
 import { checkOggOpusFormat, readOggOpus } from "@/lib/audio/ogg-opus";
 import { checkWavFormat, readWavFormat } from "@/lib/audio/pcm";
+import type { OralSpeakingPhase } from "@/lib/db/schema";
+import { INPUT_SAMPLE_RATE } from "@/lib/gemini/constants";
 
 /**
  * The largest single recording this endpoint will read.
@@ -153,8 +155,14 @@ export function selectDeliverable<T>(
   return kept.filter((recording) => !dropped.has(recording));
 }
 
-/** One artefact, as the server reads it rather than as the client labels it. */
-export interface MeasuredRecording {
+/**
+ * One artefact, as the server reads it rather than as the client labels it.
+ *
+ * Not `MeasuredRecording`: that name belongs to `sitting-persistence.ts`, where
+ * it is the row-shaped record (phase, byte size) the route builds *from* this
+ * measurement. Two types with one name is a trap for the next reader.
+ */
+export interface UploadedRecordingMeasure {
   /** Taken from the bytes, not from the multipart headers. */
   mimeType: "audio/ogg" | "audio/wav";
   /** Measured from the artefact's own contents. See the two readers. */
@@ -197,7 +205,7 @@ export interface MeasuredRecording {
 export function measureUploadedRecording(
   bytes: ArrayBuffer,
   sampleRate: number,
-): MeasuredRecording | null {
+): UploadedRecordingMeasure | null {
   const opus = readOggOpus(bytes);
   if (opus) {
     return checkOggOpusFormat(opus, sampleRate)
@@ -213,4 +221,81 @@ export function measureUploadedRecording(
   }
 
   return null;
+}
+
+const SPEAKING_PHASES = ["monologue", "debate"] as const satisfies readonly OralSpeakingPhase[];
+
+/** One uploaded artefact, with the duration read out of its own bytes. */
+export interface UploadedRecording {
+  phase: OralSpeakingPhase;
+  blob: Blob;
+  /** What the bytes turned out to be, which is not what the form claimed. */
+  mimeType: string;
+  byteSize: number;
+  durationSeconds: number;
+}
+
+/**
+ * Pull the per-phase recordings out of the form and measure each one.
+ *
+ * A phase with no file is simply absent: a candidate whose microphone was
+ * refused, or died during the débat, has audio for some phases and not others,
+ * and that is a state to report rather than to paper over with a zero-length
+ * placeholder.
+ *
+ * A file that is *present but unmeasurable* is a different thing entirely and is
+ * refused — see `measureUploadedRecording`, which decides the format from the
+ * bytes rather than from what the form said they were.
+ *
+ * And a file that measures under `MIN_RECORDING_SECONDS` is folded into the
+ * first case (#73): a stub of seconds is treated as the absence it effectively
+ * is, everywhere downstream at once — the grading mode, the corrector's
+ * attachments, the stored rows and the vault all see one consistent answer.
+ * The constant's own comment is where the threshold is argued for.
+ *
+ * One pass over the two phases, and the size check happens inside it — before
+ * the `arrayBuffer()` that is the expensive half. Two loops reading the same two
+ * form fields is one edit away from being two loops in the wrong order.
+ *
+ * Here rather than in the finish route so `node --test` can reach it with a
+ * `FormData` and no Clerk, database or model behind it (#234).
+ */
+export type RecordingRejection = {
+  rejected: OralSpeakingPhase;
+  reason: "too-large" | "unreadable";
+};
+
+export async function readRecordings(
+  form: FormData,
+): Promise<{ recordings: UploadedRecording[] } | RecordingRejection> {
+  const recordings: UploadedRecording[] = [];
+  for (const phase of SPEAKING_PHASES) {
+    const file = form.get(`audio-${phase}`);
+    if (!(file instanceof Blob) || file.size === 0) continue;
+    if (file.size > MAX_RECORDING_BYTES) return { rejected: phase, reason: "too-large" };
+
+    const measured = measureUploadedRecording(await file.arrayBuffer(), INPUT_SAMPLE_RATE);
+    if (!measured) return { rejected: phase, reason: "unreadable" };
+
+    // A measurable stub is treated as absence, not refused (#73): a skipped
+    // débat or a typed exposé (#51) legitimately produces one, so a 400 here
+    // would fail sittings that are fine. Logged because a silent drop would
+    // read as "no file arrived" to anyone chasing the very reports this serves.
+    if (measured.durationSeconds < MIN_RECORDING_SECONDS) {
+      console.info(
+        `[finish] dropping the ${phase} recording: ` +
+          `${measured.durationSeconds.toFixed(1)}s is under the ${MIN_RECORDING_SECONDS}s floor`,
+      );
+      continue;
+    }
+
+    recordings.push({
+      phase,
+      blob: file,
+      mimeType: measured.mimeType,
+      byteSize: file.size,
+      durationSeconds: measured.durationSeconds,
+    });
+  }
+  return { recordings };
 }

@@ -29,8 +29,8 @@
 
 import { NextResponse } from "next/server";
 
-import { EXAM_ACCESS_DENIALS } from "@/lib/auth/exam-access";
-import { authorizeExam } from "@/lib/auth/exam-guard";
+import { type ExamRequest, examRoute } from "@/lib/auth/exam-route";
+import type { OralSpeakingPhase } from "@/lib/db/schema";
 import { disposeRecording, findRecording } from "@/lib/db/sittings";
 import { decidePlayback, parseRecordedPhase } from "@/lib/exams/recording-playback";
 import { isRecordingVaultConfigured, recordingVault } from "@/lib/storage/recording-vault";
@@ -38,38 +38,51 @@ import { isRecordingVaultConfigured, recordingVault } from "@/lib/storage/record
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export async function GET(
-  request: Request,
-  context: { params: Promise<{ examId: string; phase: string }> },
-) {
-  const { examId, phase: phaseSegment } = await context.params;
+type RecordingParams = { examId: string; phase: string };
 
-  const access = await authorizeExam(examId);
-  if (access.status === "denied") {
-    const { status, error } = EXAM_ACCESS_DENIALS[access.reason];
-    return NextResponse.json({ error }, { status });
-  }
+type OwnedPhase =
+  | { ok: true; examId: number; userId: string; phase: OralSpeakingPhase }
+  | { ok: false; response: NextResponse };
 
-  // Before the row is read, not before the auth: an unowned caller learns
-  // nothing about which path shapes exist, same order as the finish route.
-  const phase = parseRecordedPhase(phaseSegment);
+/**
+ * The two questions both verbs ask after `examRoute` has asked the first, in
+ * the one order they may be asked in.
+ *
+ * Authorisation came first, so the path is only parsed for a caller who may
+ * see it: an unowned caller learns nothing about which path shapes exist. Then
+ * persistence: a sitting that was never persisted (no database, a degraded
+ * `local-…` id) has no recording row, so there is nothing either verb could
+ * ever do for it. The finish route grades those anyway; these two have no such
+ * fallback.
+ */
+function resolveOwnedPhase({ access, params }: ExamRequest<RecordingParams>): OwnedPhase {
+  const phase = parseRecordedPhase(params.phase);
   if (!phase) {
-    return NextResponse.json({ error: "Enregistrement inconnu" }, { status: 404 });
+    return {
+      ok: false,
+      response: NextResponse.json({ error: "Enregistrement inconnu" }, { status: 404 }),
+    };
   }
 
-  // A sitting that was never persisted (no database, a degraded `local-…` id)
-  // has no recording row, so there is nothing this route could ever serve for
-  // it. The finish route grades those anyway; this one has no such fallback.
   if (access.status !== "owned") {
-    return NextResponse.json({ error: "Enregistrement introuvable" }, { status: 404 });
+    return {
+      ok: false,
+      response: NextResponse.json({ error: "Enregistrement introuvable" }, { status: 404 }),
+    };
   }
 
-  const row = await findRecording({ examId: access.examId, userId: access.userId }, phase).catch(
-    (error: unknown) => {
-      console.error("[recordings] could not read recording row", access.examId, phase, error);
-      return null;
-    },
-  );
+  return { ok: true, examId: access.examId, userId: access.userId, phase };
+}
+
+export const GET = examRoute<RecordingParams>(async function playRecording(request, exam) {
+  const owned = resolveOwnedPhase(exam);
+  if (!owned.ok) return owned.response;
+  const { examId, userId, phase } = owned;
+
+  const row = await findRecording({ examId, userId }, phase).catch((error: unknown) => {
+    console.error("[recordings] could not read recording row", examId, phase, error);
+    return null;
+  });
 
   const decision = decidePlayback(row, isRecordingVaultConfigured());
   switch (decision.status) {
@@ -93,7 +106,7 @@ export async function GET(
   const opened = await recordingVault()
     ?.open(decision.uri, request.headers.get("if-none-match") ?? undefined)
     .catch((error: unknown) => {
-      console.error("[recordings] could not open recording", access.examId, phase, error);
+      console.error("[recordings] could not open recording", examId, phase, error);
       return null;
     });
   if (!opened) {
@@ -140,7 +153,7 @@ export async function GET(
       "Content-Disposition": "inline",
     },
   });
-}
+});
 
 /**
  * DELETE — the candidate removes one of their own recordings, for good (#98).
@@ -162,38 +175,18 @@ export async function GET(
  * already gone, and a repeated press — the candidate asked for an absence,
  * and an absence is what there is.
  */
-export async function DELETE(
-  _request: Request,
-  context: { params: Promise<{ examId: string; phase: string }> },
-) {
-  const { examId, phase: phaseSegment } = await context.params;
-
-  const access = await authorizeExam(examId);
-  if (access.status === "denied") {
-    const { status, error } = EXAM_ACCESS_DENIALS[access.reason];
-    return NextResponse.json({ error }, { status });
-  }
-
-  const phase = parseRecordedPhase(phaseSegment);
-  if (!phase) {
-    return NextResponse.json({ error: "Enregistrement inconnu" }, { status: 404 });
-  }
-
-  if (access.status !== "owned") {
-    return NextResponse.json({ error: "Enregistrement introuvable" }, { status: 404 });
-  }
+export const DELETE = examRoute<RecordingParams>(async function deleteRecording(_request, exam) {
+  const owned = resolveOwnedPhase(exam);
+  if (!owned.ok) return owned.response;
+  const { examId, userId, phase } = owned;
 
   let disposed: { uri: string } | null;
   try {
-    disposed = await disposeRecording(
-      { examId: access.examId, userId: access.userId },
-      phase,
-      new Date(),
-    );
+    disposed = await disposeRecording({ examId, userId }, phase, new Date());
   } catch (error) {
     // Nothing was stamped, so nothing is claimed: the recording is still
     // there, and the card must keep saying so.
-    console.error("[recordings] could not dispose recording", access.examId, phase, error);
+    console.error("[recordings] could not dispose recording", examId, phase, error);
     return NextResponse.json(
       { error: "La suppression a échoué. Réessayez dans un instant." },
       { status: 503 },
@@ -210,11 +203,11 @@ export async function DELETE(
     .catch((error: unknown) => {
       console.error(
         "[recordings] row stamped but the store still holds the bytes",
-        access.examId,
+        examId,
         phase,
         error,
       );
     });
 
   return NextResponse.json({ deleted: true });
-}
+});

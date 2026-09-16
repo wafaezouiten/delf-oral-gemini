@@ -21,14 +21,10 @@
  */
 
 import { ABANDON_TIMEOUT_MS } from "./abandon";
+import { type ExitOutcome, requestExitStamp } from "./exit-request";
 
 /** What happened — for the log line, since the candidate leaves either way. */
-export type PreparationExitOutcome =
-  | { recorded: true }
-  /** The server answered, and deliberately wrote nothing. */
-  | { recorded: false; reason: "refused"; status: number }
-  /** No answer: offline, a dropped connection, or slower than the wait allows. */
-  | { recorded: false; reason: "unreachable" };
+export type PreparationExitOutcome = ExitOutcome;
 
 /**
  * The abandon call's wait, borrowed with its rationale intact: the candidate has
@@ -43,31 +39,10 @@ export async function requestPreparationExit(
   fetchImpl: typeof fetch = fetch,
   timeoutMs: number = PREPARATION_EXIT_TIMEOUT_MS,
 ): Promise<PreparationExitOutcome> {
-  try {
-    const response = await fetchImpl(`/api/exams/${examId}/leave`, {
-      method: "POST",
-      signal: AbortSignal.timeout(timeoutMs),
-    });
-
-    if (!response.ok) {
-      return { recorded: false, reason: "refused", status: response.status };
-    }
-
-    /**
-     * A 200 does not mean it was written — the route answers 200 for a sitting
-     * already left, already walked out of, past the préparation, or never
-     * persisted at all. The body decides, and an unexpected shape reads as "not
-     * recorded" so the log line cannot claim a write on a guess.
-     */
-    const body = (await response.json().catch(() => null)) as { archived?: unknown } | null;
-
-    return body?.archived === true
-      ? { recorded: true }
-      : { recorded: false, reason: "refused", status: response.status };
-  } catch {
-    // `AbortSignal.timeout` rejects here too, and is deliberately not told
-    // apart from a network failure: both mean "no answer", and the caller does
-    // the same thing either way — logs it and leaves.
-    return { recorded: false, reason: "unreachable" };
-  }
+  /**
+   * The route answers 200 for a sitting already left, already walked out of,
+   * past the préparation, or never persisted at all. `archived` in the body is
+   * what decides, so the log line cannot claim a write on a guess.
+   */
+  return requestExitStamp(`/api/exams/${examId}/leave`, "archived", fetchImpl, timeoutMs);
 }

@@ -2,7 +2,15 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useId, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import {
+  useCallback,
+  useId,
+  useState,
+  useSyncExternalStore,
+  type Dispatch,
+  type ReactNode,
+  type SetStateAction,
+} from "react";
 
 import { Notice } from "@/app/_components/notice";
 import { secondaryButton } from "@/app/_components/button-styles";
@@ -17,41 +25,20 @@ import {
 } from "@/app/_components/po/icons";
 import { Kicker, Tag } from "@/app/_components/po/tag";
 import { scoreFill, scoreInk, scorePill } from "@/app/_components/score-band";
-import type { DurationCharge } from "@/lib/delf/orale-rubric";
 import { cn } from "@/lib/ui/class-names";
-import { correctionNotices, earlyClosingNotice } from "@/lib/ui/correction-notices";
-import { breakdownDeductions, scoreBreakdown } from "@/lib/ui/criterion-breakdown";
-import { formatScore25 } from "@/lib/ui/format-score";
 import { HUB_LINKS } from "@/lib/ui/epreuve-hub";
 import {
-  RESULTS_RAIL_DEFAULT_PCT,
-  RESULTS_RAIL_MAX_PCT,
-  RESULTS_RAIL_MIN_PCT,
-  clampRailPct,
-  railPctAfterKey,
-  railPctFromPointer,
-} from "@/lib/ui/results-rail";
-import { resultMetaLine, scoreToneLabel } from "@/lib/ui/score-verdict";
-import { COMPETENCY_FLOOR, COMPETENCY_MAX } from "@/lib/delf/constants";
-import {
-  ORAL_CRITERIA,
-  ORAL_CRITERIA_COMPETENCE,
-  ORAL_CRITERIA_LABELS,
-  ORAL_CRITERIA_SUMMARIES,
-  type OralCriterion,
-} from "@/lib/delf/criteria";
-import {
-  BAND_LABELS,
-  BAND_TONE,
-  scoreTone,
-  type BandTone,
-  type GrilleBand,
-} from "@/lib/delf/grille";
+  resultsView,
+  type CriterionRowView,
+  type ResultsView,
+  type TotalsView,
+} from "@/lib/ui/results-view";
+import { parseStoredResult, type StoredResult } from "@/lib/ui/stored-result";
+import type { OralCriterion } from "@/lib/delf/criteria";
+import type { BandTone } from "@/lib/delf/grille";
 import { PHASE_DURATIONS } from "@/lib/delf/phases";
-import { meetsCompetencyFloor } from "@/lib/delf/orale-rubric";
-import { type TranscriptEntry } from "@/lib/delf/transcript";
-import type { OralTopic } from "@/lib/delf/topics";
 import { ResultsDrawer } from "./_components/results-drawer";
+import { ResultsRailDivider, useResultsRail } from "./_components/results-rail";
 import { TranscriptDocument } from "./_components/transcript-document";
 
 /**
@@ -98,144 +85,6 @@ import { TranscriptDocument } from "./_components/transcript-document";
  * collide.
  */
 
-export interface StoredResult {
-  evaluation: {
-    mode: "text" | "audio";
-    criteria: Record<string, GrilleBand>;
-    rawScore25: number;
-    score25: number;
-    /**
-     * What the rubric docked for a short épreuve, and which halves were short.
-     *
-     * `durationPenalty` is what gates the explanation below the mark: #137
-     * removed the old « Note avant pénalité de durée » paragraph and left the
-     * penalty firing unexplained, and #189 reversed that on the user's call —
-     * « the candidate should know why he got penalized ». So this field is
-     * read, and `durationCharges` beside it carries the reason.
-     *
-     * `shortParts` is still the one nothing renders: it names which halves
-     * fell short without saying what that cost, which is the half of the
-     * sentence `durationCharges` now carries properly.
-     */
-    durationPenalty?: number;
-    shortParts?: Array<"monologue" | "debate">;
-    /** Where the duration charge landed, so the page can explain it (#189).
-     *  Optional like the rest of the corrector's working: a stash written
-     *  before the field existed carries nothing. */
-    durationCharges?: DurationCharge[];
-    /**
-     * What the halving cost, and which part never happened. Optional for the
-     * same reason as the two above, and the fallback matters more here: the
-     * old reading would attribute 13 points to a short épreuve, which is not
-     * what took them.
-     */
-    absencePenalty?: number;
-    absentParts?: Array<"monologue" | "debate">;
-    model: string;
-    /**
-     * Nullable because `evaluations.latency_seconds` is, and this object is
-     * built from that row as well as from a fresh finish response. Nothing
-     * renders it today; the type says `number | null` so that whatever renders
-     * it next has to decide what an unmeasured correction looks like, instead of
-     * inheriting a zero somebody coalesced to make the types line up.
-     */
-    latencySeconds: number | null;
-    feedback: {
-      justifications: Record<string, string>;
-      appreciationGlobale: string;
-      pointsForts: string[];
-      axesPrioritaires: string[];
-      conseil: string;
-      phonologieNonEvaluable: boolean;
-    };
-  };
-  topic: OralTopic;
-  transcript: TranscriptEntry[];
-  monologueSeconds: number;
-  debateSeconds: number;
-  reconnectCount: number;
-  /**
-   * How many times the examiner tried to close the épreuve mid-débat (#92).
-   * Optional for the same reason `examinerModel` is: a stash from before the
-   * field existed carries nothing, and a row from before the column reads 0.
-   * Absent or zero, nothing renders — those corrections were graded by a
-   * corrector that was never told, and the note would be false above them.
-   */
-  earlyClosingCount?: number;
-  /**
-   * The halves whose recording was kept and can be streamed back (#98), with
-   * the mime type each was measured to be — the player needs it to ask the
-   * browser `canPlayType` before offering a control that would only error.
-   *
-   * Optional because this object is also read back out of `sessionStorage`,
-   * where a stash from before the field existed carries nothing — and because
-   * the stash never carries it even now: the finish response holds no uris, so
-   * playback belongs to the server-read path alone. Absent or empty, the
-   * transcript renders its parts without players.
-   */
-  playable?: Array<{ phase: "monologue" | "debate"; mimeType: string; durationSeconds: number }>;
-  /**
-   * Which Live model played the examiner (#99). Optional for the same reason
-   * `durationPenalty` is: this object also comes back out of `sessionStorage`,
-   * where a sitting finished before the picker existed carries no such field.
-   * Absent or null, the provenance line names the corrector alone.
-   */
-  examinerModel?: string | null;
-}
-
-/**
- * sessionStorage is an external store, so it is read with the API meant for
- * external stores rather than mirrored into state from an effect. The server
- * snapshot is `undefined` (there is no sessionStorage during SSR), which renders
- * the loading state and lets the client fill it in on hydration without a
- * mismatch.
- *
- * Parsing is memoised on the raw string so a re-render does not re-parse, and so
- * `getSnapshot` returns a stable identity as `useSyncExternalStore` requires.
- */
-let parsedCache: { raw: string; value: StoredResult | null } | null = null;
-
-function parseStored(raw: string | null): StoredResult | null | undefined {
-  if (raw === null) return null;
-  if (parsedCache?.raw === raw) return parsedCache.value;
-  let value: StoredResult | null;
-  try {
-    value = JSON.parse(raw) as StoredResult;
-  } catch {
-    value = null;
-  }
-  parsedCache = { raw, value };
-  return value;
-}
-
-/**
- * The five criteria in their two grille groups, in the grille's order.
- *
- * Derived from `ORAL_CRITERIA_COMPETENCE` rather than written out, so a
- * criterion that moves competence on the official grid moves here too. No
- * subtotals: the official grid prints one per competence, but this project's
- * rubric returns five bands and a total, and inventing the two intermediate sums
- * in a component would be computing data the earlier phase does not produce.
- *
- * Keyed by competence rather than by comparing against the previous group. A
- * run-length grouping would be correct by coincidence, printing the same
- * competence header twice the day somebody reorders the list — nothing would
- * fail, the grille would just quietly grow a sixth row of headings.
- */
-const CRITERIA_GROUPS: ReadonlyArray<{
-  competence: string;
-  criteria: OralCriterion[];
-}> = (() => {
-  const groups = new Map<string, OralCriterion[]>();
-  for (const criterion of ORAL_CRITERIA) {
-    const competence = ORAL_CRITERIA_COMPETENCE[criterion];
-    const existing = groups.get(competence);
-    if (existing) existing.push(criterion);
-    else groups.set(competence, [criterion]);
-  }
-  return [...groups].map(([competence, criteria]) => ({ competence, criteria }));
-})();
-
 export function ResultsClient({
   examId,
   initial,
@@ -248,7 +97,7 @@ export function ResultsClient({
   initial?: StoredResult;
 }) {
   const getSnapshot = useCallback(
-    () => parseStored(sessionStorage.getItem(`delf-eval-${examId}`)),
+    () => parseStoredResult(sessionStorage.getItem(`delf-eval-${examId}`)),
     [examId],
   );
 
@@ -262,290 +111,22 @@ export function ResultsClient({
   // be the way this stops being true.
   const stashed = useSyncExternalStore(subscribe, getSnapshot, () => undefined);
   const [openKey, setOpenKey] = useState<OralCriterion | null>(null);
-
-  /** « Recommencer » (#165): a POST and then a navigation, not a link. */
-  const { start: startExam, pending: starting, error: startError } = useStartExam();
-
-  /**
-   * The split body, which two things write CSS variables onto: the divider
-   * writes `--po-rail` (the transcript rail's share of the split), the phone
-   * drawer writes `--po-drawer-inset` (how much of the screen it covers). Both
-   * go through the DOM rather than state — the divider reports on every
-   * pointer frame of a drag, the drawer on every frame of its slide, and a
-   * render per frame is what makes either stutter on a real machine. The ref
-   * keeps the rail's current share for the keyboard path, which nudges
-   * relatively.
-   */
-  const bodyRef = useRef<HTMLDivElement>(null);
-  const railHandleRef = useRef<HTMLDivElement>(null);
-  const railPctRef = useRef(RESULTS_RAIL_DEFAULT_PCT);
-  const railDragging = useRef(false);
-  const setRailPct = useCallback((pct: number) => {
-    const clamped = clampRailPct(pct);
-    railPctRef.current = clamped;
-    bodyRef.current?.style.setProperty("--po-rail", `${clamped}%`);
-    // aria-valuenow written the same way as the width: the ARIA
-    // window-splitter pattern wants the current split announced after every
-    // arrow press, and a render per drag frame is exactly what this avoids.
-    railHandleRef.current?.setAttribute("aria-valuenow", String(Math.round(clamped)));
-  }, []);
-  const handleDrawerExposed = useCallback((height: number) => {
-    bodyRef.current?.style.setProperty("--po-drawer-inset", `${height}px`);
-  }, []);
+  const { bodyRef, handleRef, onDrawerExposed, handlers } = useResultsRail();
 
   const result = initial ?? stashed;
 
-  if (result === null) {
-    return (
-      <CentredCard
-        tone="danger"
-        title="Résultat introuvable"
-        body="Cette correction n'a pas été retrouvée. Elle n'a pas été enregistrée, ou elle a été ouverte depuis un autre navigateur que celui où l'épreuve a été passée."
-        action={
-          <Link href="/app/sujets" className={secondaryButton}>
-            Passer une nouvelle épreuve
-          </Link>
-        }
-      />
-    );
-  }
+  if (result === null) return <NotFound />;
+  if (!result) return <Loading />;
 
-  if (!result) {
-    return (
-      <CentredCard
-        tone="loading"
-        title="Chargement du résultat…"
-        body="La correction de cette épreuve est en cours de lecture."
-      />
-    );
-  }
-
-  const { evaluation, topic, transcript, monologueSeconds, debateSeconds } = result;
-  const passed = meetsCompetencyFloor(evaluation.score25);
+  const { topic, transcript, monologueSeconds, debateSeconds } = result;
 
   /**
-   * Two separate facts about the same number (#50). `passed` is the DELF's
-   * elimination rule and it is binary — 5/25 clears the floor. `tone` is where
-   * the mark sits on the five-step scale, and 5/25 is in the reddest band. The
-   * pill names the band; the floor gets its own alert below, only when it is
-   * breached (`scoreToneLabel` words that one case).
+   * Everything the two panes print, decided in `lib/ui/results-view.ts` where
+   * `node --test` reads it: the verdict, the notes under it, the five rows with
+   * both their figures, whether the totals box prints, who is named at the
+   * foot. Nothing below chooses a word or a figure.
    */
-  const tone = scoreTone(evaluation.score25);
-  const meta = resultMetaLine({
-    criteriaCount: ORAL_CRITERIA.length,
-    totalSeconds: monologueSeconds + debateSeconds,
-  });
-
-  /**
-   * The paragraphs below the mark, built and tested in
-   * `lib/ui/correction-notices.ts`. Two can speak: the halving, and — since
-   * #189 reversed #137 on the user's call — the duration charge, which names
-   * the part that ran short, what it cost and which criterion it came off.
-   * Neither claims a band was lowered, because neither was.
-   */
-  const notices = correctionNotices(evaluation);
-
-  /**
-   * The examiner-fault note (#92) — the one sentence on this page keyed to the
-   * sitting rather than to the correction, because the count lives on
-   * `oral_exams`.
-   */
-  const earlyClosing = earlyClosingNotice(result.earlyClosingCount);
-
-  const phonoNote = evaluation.feedback.phonologieNonEvaluable
-    ? "La phonologie n'a pas pu être évaluée de façon fiable sur cette production."
-    : undefined;
-
-  /**
-   * The five rows and the subtractions under them, reconciled with the mark
-   * (#203). Built in `lib/ui/criterion-breakdown.ts`, where `node --test` can
-   * reach the arithmetic — this component prints figures, it does not compute
-   * them.
-   *
-   * Until #203 the rows showed the corrector's bands and nothing else, so a
-   * short épreuve printed five 5s above a 21/25 and left the reader to discover
-   * that the page does not add up. Each row now carries the band it earned AND
-   * the band the clock left it, and the footer names whatever no band could
-   * carry — the halving, or a penalty whose charges were never written down.
-   *
-   * `reconciles` false means the correction's own figures disagree with each
-   * other, which the stored-row path can produce (see the module). The footer
-   * then does not print: a page that shows less is recoverable, one that shows
-   * a wrong sum is not.
-   */
-  const breakdown = scoreBreakdown(evaluation);
-  const deductions = breakdownDeductions(breakdown);
-
-  /**
-   * The pane's two halves, built ONCE and rendered twice — the aside from
-   * `lg`, the drawer below it. Nodes rather than a duplicated block in each
-   * branch, so the two copies cannot drift apart.
-   */
-  const verdict = (
-    <div>
-      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-2">
-        <p
-          className={cn(
-            "tabular font-serif text-[2.875rem] leading-none font-semibold",
-            scoreInk(tone),
-          )}
-        >
-          {formatScore25(evaluation.score25)}
-          <span className="text-muted-foreground text-[1.375rem] font-semibold">
-            /{COMPETENCY_MAX}
-          </span>
-        </p>
-        {/* The level in a word as well as a colour — a candidate who cannot
-            tell the green pill from the red one still reads it. */}
-        <span
-          className={cn(
-            "inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-[0.71875rem] font-semibold",
-            scorePill(tone),
-          )}
-        >
-          <span className={cn("size-1.5 rounded-full", scoreFill(tone))} aria-hidden />
-          {scoreToneLabel(evaluation.score25)}
-        </span>
-      </div>
-
-      <p className="text-muted-foreground mt-2 text-xs">{meta}</p>
-
-      {/* Whole sentences, built and tested in `lib/ui/correction-notices.ts`.
-          The component chooses neither the wording nor the figure. */}
-      {notices.absence && <VerdictNote>{notices.absence}</VerdictNote>}
-      {notices.duration && <VerdictNote>{notices.duration}</VerdictNote>}
-      {earlyClosing && <VerdictNote>{earlyClosing}</VerdictNote>}
-
-      {evaluation.mode === "text" && (
-        <div className="mt-3">
-          <Notice tone="warning" title="Corrigé sans l'audio">
-            Aucun enregistrement n&apos;a pu être joint à cette épreuve. La correction a été faite à
-            partir de la transcription seule : votre prononciation n&apos;a pas été écoutée, et les
-            durées affichées sont celles de l&apos;audio effectivement reçu.
-          </Notice>
-        </div>
-      )}
-
-      {!passed && (
-        <div className="border-danger/40 bg-danger-subtle text-danger sheet mt-3 flex items-start gap-2.5 border p-3">
-          <AlertIcon className="mt-0.5 size-3.5 shrink-0" />
-          <span className="text-[0.71875rem] leading-snug">
-            Une note inférieure à {COMPETENCY_FLOOR}/{COMPETENCY_MAX} est éliminatoire au DELF,
-            quelle que soit la note globale.
-          </span>
-        </div>
-      )}
-    </div>
-  );
-
-  const evaluationPane = (
-    <>
-      <div className="flex flex-col gap-4">
-        {CRITERIA_GROUPS.map((group) => (
-          <div key={group.competence}>
-            <Kicker className="pb-2 text-[0.625rem]">{group.competence}</Kicker>
-            <div className="flex flex-col gap-2">
-              {group.criteria.map((key) => {
-                // Never missing in practice — the breakdown maps over
-                // `ORAL_CRITERIA` and these keys come from the same set — but
-                // `find` is typed as it should be, and the fallback is the
-                // reading this row had before the breakdown existed rather
-                // than a zero invented to satisfy the types.
-                const line = breakdown.lines.find((row) => row.criterion === key);
-                return (
-                  <CriterionRow
-                    key={key}
-                    label={ORAL_CRITERIA_LABELS[key]}
-                    description={ORAL_CRITERIA_SUMMARIES[key]}
-                    earned={line?.earned ?? evaluation.criteria[key] ?? 0}
-                    awarded={line?.awarded ?? evaluation.criteria[key] ?? 0}
-                    justification={evaluation.feedback.justifications[key]}
-                    note={key === "phonologie" ? phonoNote : undefined}
-                    open={openKey === key}
-                    onToggle={() => setOpenKey((current) => (current === key ? null : key))}
-                  />
-                );
-              })}
-            </div>
-          </div>
-        ))}
-      </div>
-
-      {/* Where the five figures actually land. Printed only when they add up
-          (see `breakdown` above for the one case where they cannot) AND only
-          when something happened between the rows and the mark: a charge that
-          moved a row, or a deduction no row could carry. On the ordinary
-          sitting the five bands already ARE the mark, and a « Total 25/25 »
-          under them would only restate the /25 at the top of the pane. */}
-      {breakdown.reconciles &&
-        (deductions.length > 0 || breakdown.lines.some((l) => l.charged)) && (
-          <div className="sheet border-border bg-card mt-4 border px-3.5 py-3">
-            {deductions.length > 0 && (
-              <>
-                <TotalRow
-                  label="Total des critères"
-                  value={`${formatScore25(breakdown.criteriaTotal)}/${COMPETENCY_MAX}`}
-                />
-                {deductions.map((deduction) => (
-                  <TotalRow
-                    key={deduction.key}
-                    label={deduction.label}
-                    value={`−${deduction.points}`}
-                    muted
-                  />
-                ))}
-              </>
-            )}
-            <TotalRow
-              label={deductions.length > 0 ? "Note finale" : "Total"}
-              value={`${formatScore25(breakdown.score25)}/${COMPETENCY_MAX}`}
-              strong={deductions.length > 0}
-            />
-          </div>
-        )}
-
-      <div className="mt-4 flex flex-col gap-2.5">
-        <FeedbackPanel
-          tone="success"
-          title="Points forts"
-          items={evaluation.feedback.pointsForts}
-          emptyLabel="Aucun point fort identifié."
-        />
-        <FeedbackPanel
-          tone="warning"
-          title="Axes prioritaires"
-          items={evaluation.feedback.axesPrioritaires}
-          emptyLabel="Rien à signaler, continuez ainsi."
-        />
-        {evaluation.feedback.appreciationGlobale && (
-          <AppreciationPanel text={evaluation.feedback.appreciationGlobale} />
-        )}
-        {evaluation.feedback.conseil && <ConseilPanel text={evaluation.feedback.conseil} />}
-      </div>
-
-      {passed && (
-        <p className="text-muted-foreground mt-3 flex items-center gap-2 px-1 text-[0.71875rem]">
-          <CheckCircleIcon className="text-success size-3.5 shrink-0" />
-          Note au-dessus du seuil éliminatoire du DELF ({COMPETENCY_FLOOR}/{COMPETENCY_MAX}).
-        </p>
-      )}
-
-      {/* Provenance, at the foot of the evaluation and on the printed sheet:
-          which model spoke and which one graded (#99). Raw ids on purpose — a
-          readable label here would make two sittings on the same sujet quietly
-          incomparable. The examiner is omitted rather than guessed on sittings
-          from before it was recorded. */}
-      <p className="text-muted-foreground border-border mt-4 border-t px-1 pt-3 text-[0.65625rem] leading-relaxed">
-        {result.examinerModel && (
-          <>
-            Examinateur&nbsp;: <span className="tabular">{result.examinerModel}</span>
-            {" · "}
-          </>
-        )}
-        Correcteur&nbsp;: <span className="tabular">{evaluation.model}</span>
-      </p>
-    </>
-  );
+  const view = resultsView(result);
 
   // `print:*` on every scroll container — the shell, the pane's scroller and
   // the transcript's. On screen each is a fixed-height box that scrolls, and a
@@ -555,11 +136,111 @@ export function ResultsClient({
   // width; the divider and the drawer have no printed form.
   return (
     <div className="bg-background text-foreground flex h-full min-h-0 flex-col overflow-hidden print:h-auto print:overflow-visible">
-      {/* Header. `no-print` on the actions only: the correction is the thing a
-          candidate keeps, so the sujet and the level stay on the printed sheet
-          while the buttons do not. Wraps below `sm` rather than truncating:
-          the row carries the sujet, the level and the two ways on, and on a
-          375 px screen they do not fit a single 56 px band. */}
+      <ResultsHeader topic={topic} />
+
+      {/* The split body. From `lg` the evaluation pane is DOMINANT on the
+          left and the transcript rests in a right rail at `--po-rail` (35 %,
+          resizable by the divider). Below `lg` the transcript is the only
+          child in flow — the aside is hidden and the drawer is `fixed`,
+          outside the grid entirely. The explicit `minmax(0,1fr)` row is what
+          bounds the panes' height so each scrolls inside itself. */}
+      <div
+        ref={bodyRef}
+        className="relative grid min-h-0 flex-1 grid-cols-1 grid-rows-[minmax(0,1fr)] lg:grid-cols-[minmax(0,1fr)_var(--po-rail,35%)] print:block"
+      >
+        {/* The evaluation pane, from `lg` up and on paper. First in the DOM so
+            the reading and tab order match the visual order. Its content is
+            centred on a 47.5 rem measure so a wide pane does not stretch the
+            criterion rows past readability. The same two halves are rendered
+            again in the drawer below — one definition, two places. */}
+        <aside className="border-border bg-card hidden min-h-0 flex-col lg:flex lg:border-r print:flex print:border-r-0">
+          <div className="border-border shrink-0 border-b px-5 pt-5 pb-4 sm:px-8">
+            <div className="mx-auto w-full max-w-[47.5rem]">
+              <Verdict view={view} />
+            </div>
+          </div>
+          <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4 sm:px-8 print:overflow-visible">
+            <div className="mx-auto w-full max-w-[47.5rem]">
+              <EvaluationPane view={view} openKey={openKey} setOpenKey={setOpenKey} />
+            </div>
+          </div>
+        </aside>
+
+        <ResultsRailDivider ref={handleRef} {...handlers} />
+
+        <TranscriptDocument
+          examId={examId}
+          title={topic.title}
+          transcript={transcript}
+          monologueSeconds={monologueSeconds}
+          debateSeconds={debateSeconds}
+          playable={view.playable}
+          drawerInset
+        />
+      </div>
+
+      {/* The phone's route to the same pane. The score leads, exactly as it
+          does in the aside, and the handle's readout carries it once the
+          reader closes the drawer — which is what lets it rest closed over the
+          transcript without hiding the result. `initiallyOpen`: the évaluation
+          is what finishing the épreuve asked for, so it is not put behind a
+          gesture the candidate has to discover first. */}
+      <ResultsDrawer
+        label="Évaluation"
+        readout={`${view.score25}/${view.outOf}`}
+        onExposedHeightChange={onDrawerExposed}
+        initiallyOpen
+      >
+        <div className="px-5 pt-1 pb-6">
+          <Verdict view={view} />
+          <div className="mt-4">
+            <EvaluationPane view={view} openKey={openKey} setOpenKey={setOpenKey} />
+          </div>
+        </div>
+      </ResultsDrawer>
+    </div>
+  );
+}
+
+function NotFound() {
+  return (
+    <CentredCard
+      tone="danger"
+      title="Résultat introuvable"
+      body="Cette correction n'a pas été retrouvée. Elle n'a pas été enregistrée, ou elle a été ouverte depuis un autre navigateur que celui où l'épreuve a été passée."
+      action={
+        <Link href="/app/sujets" className={secondaryButton}>
+          Passer une nouvelle épreuve
+        </Link>
+      }
+    />
+  );
+}
+
+function Loading() {
+  return (
+    <CentredCard
+      tone="loading"
+      title="Chargement du résultat…"
+      body="La correction de cette épreuve est en cours de lecture."
+    />
+  );
+}
+
+/**
+ * The slim header: sujet · level · « Correction IA » · the two ways on.
+ * `no-print` on the actions only: the correction is the thing a candidate
+ * keeps, so the sujet and the level stay on the printed sheet while the
+ * buttons do not. Wraps below `sm` rather than truncating: on a 375 px screen
+ * the row does not fit a single 56 px band.
+ */
+function ResultsHeader({ topic }: { topic: StoredResult["topic"] }) {
+  /** « Recommencer » (#165): a POST and then a navigation, not a link. */
+  const { start: startExam, pending: starting, error: startError } = useStartExam();
+  const clock = `La préparation (${PHASE_DURATIONS.preparation / 60} min) démarre dès l'ouverture.`;
+
+  return (
+    <>
       <header className="border-border bg-card z-20 flex min-h-14 shrink-0 flex-wrap items-center gap-x-3 gap-y-2 border-b px-4 py-2 sm:flex-nowrap sm:px-5 sm:py-0">
         <BackButton />
         {/* `flex-1` at every width: the title shrinks to leave the level its
@@ -590,8 +271,8 @@ export function ResultsClient({
             type="button"
             onClick={() => void startExam(topic.slug)}
             disabled={starting}
-            aria-label={`Recommencer : nouvelle épreuve sur le sujet « ${topic.title} ». La préparation (${PHASE_DURATIONS.preparation / 60} min) démarre dès l'ouverture.`}
-            title={`Nouvelle épreuve sur le même sujet. La préparation (${PHASE_DURATIONS.preparation / 60} min) démarre dès l'ouverture.`}
+            aria-label={`Recommencer : nouvelle épreuve sur le sujet « ${topic.title} ». ${clock}`}
+            title={`Nouvelle épreuve sur le même sujet. ${clock}`}
             className="bg-primary text-primary-foreground inline-flex h-8 items-center gap-1.5 rounded-full px-4 text-xs font-semibold transition-opacity hover:opacity-90 disabled:opacity-60"
           >
             <RefreshIcon className="size-3.5" />
@@ -616,110 +297,171 @@ export function ResultsClient({
           {startError}
         </p>
       )}
+    </>
+  );
+}
 
-      {/* The split body. From `lg` the evaluation pane is DOMINANT on the
-          left and the transcript rests in a right rail at `--po-rail` (35 %,
-          resizable by the divider). Below `lg` the transcript is the only
-          child in flow — the aside is hidden and the drawer is `fixed`,
-          outside the grid entirely. The explicit `minmax(0,1fr)` row is what
-          bounds the panes' height so each scrolls inside itself. */}
-      <div
-        ref={bodyRef}
-        className="relative grid min-h-0 flex-1 grid-cols-1 grid-rows-[minmax(0,1fr)] lg:grid-cols-[minmax(0,1fr)_var(--po-rail,35%)] print:block"
-      >
-        {/* The evaluation pane, from `lg` up and on paper. First in the DOM so
-            the reading and tab order match the visual order. Its content is
-            centred on a 47.5 rem measure so a wide pane does not stretch the
-            criterion rows past readability. */}
-        <aside className="border-border bg-card hidden min-h-0 flex-col lg:flex lg:border-r print:flex print:border-r-0">
-          <div className="border-border shrink-0 border-b px-5 pt-5 pb-4 sm:px-8">
-            <div className="mx-auto w-full max-w-[47.5rem]">{verdict}</div>
-          </div>
-          <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4 sm:px-8 print:overflow-visible">
-            <div className="mx-auto w-full max-w-[47.5rem]">{evaluationPane}</div>
-          </div>
-        </aside>
-
-        {/* The divider between the two panes, desktop only: dragging it (or
-            arrow keys, once focused) resizes the transcript rail. An overlay
-            centred on the panes' shared hairline rather than a third grid
-            track, so the grid stays two columns; the visible line only paints
-            on hover/focus — at rest the aside's own border is the divider. */}
-        <div
-          ref={railHandleRef}
-          role="separator"
-          aria-orientation="vertical"
-          aria-label="Redimensionner la transcription"
-          aria-valuemin={RESULTS_RAIL_MIN_PCT}
-          aria-valuemax={RESULTS_RAIL_MAX_PCT}
-          aria-valuenow={RESULTS_RAIL_DEFAULT_PCT}
-          tabIndex={0}
-          onPointerDown={(event) => {
-            // No text selection while dragging across the panes — and an
-            // explicit focus, because `preventDefault` here swallows the
-            // focus-on-click Safari would otherwise give it (#141).
-            event.preventDefault();
-            event.currentTarget.focus();
-            railDragging.current = true;
-            event.currentTarget.setPointerCapture(event.pointerId);
-          }}
-          onPointerMove={(event) => {
-            if (!railDragging.current) return;
-            const rect = bodyRef.current?.getBoundingClientRect();
-            if (rect) setRailPct(railPctFromPointer(event.clientX, rect));
-          }}
-          onPointerUp={(event) => {
-            railDragging.current = false;
-            if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-              event.currentTarget.releasePointerCapture(event.pointerId);
-            }
-          }}
-          onPointerCancel={() => {
-            railDragging.current = false;
-          }}
-          onKeyDown={(event) => {
-            if (event.key !== "ArrowLeft" && event.key !== "ArrowRight" && event.key !== "Home")
-              return;
-            event.preventDefault();
-            setRailPct(railPctAfterKey(railPctRef.current, event.key));
-          }}
-          style={{ right: `var(--po-rail, ${RESULTS_RAIL_DEFAULT_PCT}%)` }}
+/** The /25, its band in a word, the meta line, and the sentences under them. */
+function Verdict({ view }: { view: ResultsView }) {
+  return (
+    <div>
+      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-2">
+        <p
           className={cn(
-            "no-print absolute inset-y-0 z-10 hidden w-2.5 translate-x-1/2 cursor-col-resize touch-none outline-none select-none lg:block",
-            "after:absolute after:inset-y-0 after:left-1/2 after:w-0.5 after:-translate-x-1/2 after:rounded-full after:bg-transparent after:transition-colors",
-            "hover:after:bg-primary/40 focus-visible:after:bg-primary/60",
+            "tabular font-serif text-[2.875rem] leading-none font-semibold",
+            scoreInk(view.tone),
           )}
-        />
-
-        <TranscriptDocument
-          examId={examId}
-          title={topic.title}
-          transcript={transcript}
-          monologueSeconds={monologueSeconds}
-          debateSeconds={debateSeconds}
-          playable={result.playable ?? []}
-          drawerInset
-        />
+        >
+          {view.score25}
+          <span className="text-muted-foreground text-[1.375rem] font-semibold">/{view.outOf}</span>
+        </p>
+        {/* The level in a word as well as a colour — a candidate who cannot
+            tell the green pill from the red one still reads it. */}
+        <span
+          className={cn(
+            "inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-[0.71875rem] font-semibold",
+            scorePill(view.tone),
+          )}
+        >
+          <span className={cn("size-1.5 rounded-full", scoreFill(view.tone))} aria-hidden />
+          {view.toneLabel}
+        </span>
       </div>
 
-      {/* The phone's route to the same pane. The score leads, exactly as it
-          does in the aside, and the handle's readout carries it once the
-          reader closes the drawer — which is what lets it rest closed over the
-          transcript without hiding the result. `initiallyOpen`: the évaluation
-          is what finishing the épreuve asked for, so it is not put behind a
-          gesture the candidate has to discover first. */}
-      <ResultsDrawer
-        label="Évaluation"
-        readout={`${formatScore25(evaluation.score25)}/${COMPETENCY_MAX}`}
-        onExposedHeightChange={handleDrawerExposed}
-        initiallyOpen
-      >
-        <div className="px-5 pt-1 pb-6">
-          {verdict}
-          <div className="mt-4">{evaluationPane}</div>
+      <p className="text-muted-foreground mt-2 text-xs">{view.meta}</p>
+
+      {/* Whole sentences — the halving, the duration charge, the examiner's
+          early goodbyes — in the order the view built them. */}
+      {view.notes.map((note) => (
+        <VerdictNote key={note}>{note}</VerdictNote>
+      ))}
+
+      {view.textMode && (
+        <div className="mt-3">
+          <Notice tone="warning" title="Corrigé sans l'audio">
+            Aucun enregistrement n&apos;a pu être joint à cette épreuve. La correction a été faite à
+            partir de la transcription seule : votre prononciation n&apos;a pas été écoutée, et les
+            durées affichées sont celles de l&apos;audio effectivement reçu.
+          </Notice>
         </div>
-      </ResultsDrawer>
+      )}
+
+      {!view.passed && (
+        <div className="border-danger/40 bg-danger-subtle text-danger sheet mt-3 flex items-start gap-2.5 border p-3">
+          <AlertIcon className="mt-0.5 size-3.5 shrink-0" />
+          <span className="text-[0.71875rem] leading-snug">{view.floorNote}</span>
+        </div>
+      )}
     </div>
+  );
+}
+
+/** The rows, the totals under them, the feedback, and the provenance line. */
+function EvaluationPane({
+  view,
+  openKey,
+  setOpenKey,
+}: {
+  view: ResultsView;
+  openKey: OralCriterion | null;
+  setOpenKey: Dispatch<SetStateAction<OralCriterion | null>>;
+}) {
+  // One criterion open at a time, on either surface: both copies of the pane
+  // share the key, so opening a row in the drawer opens it in the aside too.
+  const toggle = (key: OralCriterion) => setOpenKey((current) => (current === key ? null : key));
+
+  return (
+    <>
+      <div className="flex flex-col gap-4">
+        {view.groups.map((group) => (
+          <div key={group.competence}>
+            <Kicker className="pb-2 text-[0.625rem]">{group.competence}</Kicker>
+            <div className="flex flex-col gap-2">
+              {group.rows.map((row) => (
+                <CriterionRow
+                  key={row.key}
+                  row={row}
+                  open={openKey === row.key}
+                  onToggle={() => toggle(row.key)}
+                />
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {view.totals && <TotalsBox totals={view.totals} />}
+
+      <div className="mt-4 flex flex-col gap-2.5">
+        <FeedbackPanel
+          tone="success"
+          title="Points forts"
+          items={view.feedback.pointsForts}
+          emptyLabel="Aucun point fort identifié."
+        />
+        <FeedbackPanel
+          tone="warning"
+          title="Axes prioritaires"
+          items={view.feedback.axesPrioritaires}
+          emptyLabel="Rien à signaler, continuez ainsi."
+        />
+        {view.feedback.appreciationGlobale && (
+          <AppreciationPanel text={view.feedback.appreciationGlobale} />
+        )}
+        {view.feedback.conseil && <ConseilPanel text={view.feedback.conseil} />}
+      </div>
+
+      <FloorAndProvenance view={view} />
+    </>
+  );
+}
+
+/**
+ * Where the five figures actually land — built only when they add up and
+ * something happened between the rows and the mark; see the view.
+ */
+function TotalsBox({ totals }: { totals: TotalsView }) {
+  const deducted = totals.deductions.length > 0;
+  return (
+    <div className="sheet border-border bg-card mt-4 border px-3.5 py-3">
+      {deducted && <TotalRow label="Total des critères" value={totals.criteriaTotal} />}
+      {totals.deductions.map((deduction) => (
+        <TotalRow
+          key={deduction.key}
+          label={deduction.label}
+          value={`−${deduction.points}`}
+          muted
+        />
+      ))}
+      <TotalRow label={totals.finalLabel} value={totals.final} strong={deducted} />
+    </div>
+  );
+}
+
+/**
+ * The floor line, only when it is cleared (the breach is said under the mark),
+ * and the provenance at the foot of the evaluation and on the printed sheet:
+ * which model spoke and which one graded (#99).
+ */
+function FloorAndProvenance({ view }: { view: ResultsView }) {
+  return (
+    <>
+      {view.passed && (
+        <p className="text-muted-foreground mt-3 flex items-center gap-2 px-1 text-[0.71875rem]">
+          <CheckCircleIcon className="text-success size-3.5 shrink-0" />
+          {view.floorNote}
+        </p>
+      )}
+      <p className="text-muted-foreground border-border mt-4 border-t px-1 pt-3 text-[0.65625rem] leading-relaxed">
+        {view.provenance.examinerModel && (
+          <>
+            Examinateur&nbsp;: <span className="tabular">{view.provenance.examinerModel}</span>
+            {" · "}
+          </>
+        )}
+        Correcteur&nbsp;: <span className="tabular">{view.provenance.correctorModel}</span>
+      </p>
+    </>
   );
 }
 
@@ -803,41 +545,26 @@ const BAND_CLASSES: Record<BandTone, { ink: string; fill: string; bar: string }>
  * phone-only `sr-only` name anchors to the row and is clipped by it (#114).
  */
 function CriterionRow({
-  label,
-  description,
-  earned,
-  awarded,
-  justification,
-  note,
+  row,
   open,
   onToggle,
 }: {
-  label: string;
-  description: string;
-  /** The band the corrector set, and the one `justification` is about. */
-  earned: GrilleBand;
-  /** The band after the duration charge, and the one the total is built from.
-   *  Equal to `earned` on every criterion the clock did not reach. */
-  awarded: GrilleBand;
-  justification?: string;
-  note?: string;
+  row: CriterionRowView;
   open: boolean;
   onToggle: () => void;
 }) {
   const panelId = useId();
   // Everything the row says about where the criterion LANDED — its colour, its
   // band name, the length of its bar — reads the awarded band, because that is
-  // the figure the mark was built from. The earned band appears beside it as a
-  // figure and nothing else (#203).
-  const tone = BAND_CLASSES[BAND_TONE[awarded]];
-  const low = awarded === 0;
-  const charged = earned - awarded;
+  // the figure the mark was built from (#203). The view decided which; this
+  // only maps the tone to classes.
+  const tone = BAND_CLASSES[row.tone];
 
   return (
     <div
       className={cn(
         "sheet relative overflow-hidden border",
-        low ? "border-danger/40 bg-danger-subtle" : "border-border bg-card",
+        row.low ? "border-danger/40 bg-danger-subtle" : "border-border bg-card",
       )}
     >
       <button
@@ -848,26 +575,22 @@ function CriterionRow({
         className="hover:bg-muted/40 block w-full px-3.5 py-3 text-left transition-colors"
       >
         <span className="flex items-center gap-2.5">
-          <span className="min-w-0 flex-1 truncate text-[0.8125rem] font-bold">{label}</span>
+          <span className="min-w-0 flex-1 truncate text-[0.8125rem] font-bold">{row.label}</span>
           {/* The two figures are shown, and SAID, separately: the visible pair
               reads « 5 → 1 » across two spans, so the spoken sentence is one
               `sr-only` span carrying both numbers itself rather than a fragment
               that only completes because of what happens to sit beside it. */}
-          <span className="sr-only">
-            {charged > 0
-              ? `note du correcteur ${earned} sur 5, note retenue ${awarded} sur 5`
-              : `${awarded} sur 5`}
-          </span>
-          {charged > 0 && (
+          <span className="sr-only">{row.spoken}</span>
+          {row.charged > 0 && (
             <span
               className="tabular text-muted-foreground shrink-0 text-xs font-semibold"
               aria-hidden
             >
-              {earned} →
+              {row.earned} →
             </span>
           )}
           <span className={cn("tabular shrink-0 text-xs font-semibold", tone.ink)} aria-hidden>
-            {awarded}/5
+            {row.awarded}/5
           </span>
           {/* The band's name: a pill from `sm`, read but not shown below it —
               a phone's row has no width for a fourth word. */}
@@ -878,9 +601,9 @@ function CriterionRow({
               tone.ink,
             )}
           >
-            {BAND_LABELS[awarded]}
+            {row.bandLabel}
           </span>
-          <span className="sr-only sm:hidden">{BAND_LABELS[awarded]}</span>
+          <span className="sr-only sm:hidden">{row.bandLabel}</span>
           <ChevronDownIcon
             className={cn(
               "text-muted-foreground size-3.5 shrink-0 transition-transform",
@@ -891,38 +614,46 @@ function CriterionRow({
         <span className="bg-muted mt-2.5 block h-1 overflow-hidden rounded-full" aria-hidden>
           <span
             className={cn("criterion-bar block h-full rounded-full", tone.bar)}
-            style={{ width: `${(awarded / 5) * 100}%` }}
+            style={{ width: `${row.barPercent}%` }}
           />
         </span>
       </button>
 
       <div id={panelId} hidden={!open} className="px-3.5 pb-3">
-        <p className="text-muted-foreground text-[0.71875rem] leading-relaxed">{description}</p>
-        {justification && (
-          <p className="border-border mt-2.5 border-t pt-2.5 text-xs leading-relaxed">
-            {justification}
-          </p>
-        )}
-        {/* Said inside the row because the justification above it is about the
-            EARNED band, and a reader who has just been told the exposé was
-            clear needs to know why the row reads lower (#203). The part and the
-            durations are in the paragraph under the mark; this is the
-            arithmetic, beside the two figures it connects. */}
-        {charged > 0 && (
-          <p className="border-border text-muted-foreground mt-2.5 border-t pt-2.5 text-[0.6875rem] leading-snug">
-            Note du correcteur&nbsp;: {earned}/5. La durée de l&apos;épreuve a coûté{" "}
-            {charged === 1 ? "1 point" : `${charged} points`} sur ce critère, d&apos;où {awarded}/5
-            dans le total.
-          </p>
-        )}
-        {note && (
-          <div className="border-border text-muted-foreground mt-2.5 flex items-start gap-2 border-t pt-2.5">
-            <AlertIcon className="mt-0.5 size-3 shrink-0" />
-            <span className="text-[0.6875rem] leading-snug">{note}</span>
-          </div>
-        )}
+        <CriterionDetails row={row} />
       </div>
     </div>
+  );
+}
+
+/**
+ * What the row says once opened: the criterion's description, the corrector's
+ * justification, the clock's arithmetic (#203) — said here because the
+ * justification above it is about the EARNED band, and a reader who has just
+ * been told the exposé was clear needs to know why the row reads lower — and
+ * the phonology note.
+ */
+function CriterionDetails({ row }: { row: CriterionRowView }) {
+  return (
+    <>
+      <p className="text-muted-foreground text-[0.71875rem] leading-relaxed">{row.description}</p>
+      {row.justification && (
+        <p className="border-border mt-2.5 border-t pt-2.5 text-xs leading-relaxed">
+          {row.justification}
+        </p>
+      )}
+      {row.chargeNote && (
+        <p className="border-border text-muted-foreground mt-2.5 border-t pt-2.5 text-[0.6875rem] leading-snug">
+          {row.chargeNote}
+        </p>
+      )}
+      {row.note && (
+        <div className="border-border text-muted-foreground mt-2.5 flex items-start gap-2 border-t pt-2.5">
+          <AlertIcon className="mt-0.5 size-3 shrink-0" />
+          <span className="text-[0.6875rem] leading-snug">{row.note}</span>
+        </div>
+      )}
+    </>
   );
 }
 

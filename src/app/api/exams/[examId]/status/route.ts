@@ -17,21 +17,13 @@
 
 import { NextResponse } from "next/server";
 
-import { EXAM_ACCESS_DENIALS } from "@/lib/auth/exam-access";
-import { authorizeExam } from "@/lib/auth/exam-guard";
+import { examRoute } from "@/lib/auth/exam-route";
 import { neonSittingStore } from "@/lib/db/sittings";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export async function GET(_request: Request, context: { params: Promise<{ examId: string }> }) {
-  const { examId } = await context.params;
-
-  const access = await authorizeExam(examId);
-  if (access.status === "denied") {
-    const { status, error } = EXAM_ACCESS_DENIALS[access.reason];
-    return NextResponse.json({ error }, { status });
-  }
+export const GET = examRoute(async function readCorrectionStatus(_request, { access }) {
   if (access.status !== "owned") {
     return NextResponse.json({ corrected: false });
   }
@@ -43,4 +35,4 @@ export async function GET(_request: Request, context: { params: Promise<{ examId
     .catch(() => null);
 
   return NextResponse.json({ corrected: correction !== null });
-}
+});

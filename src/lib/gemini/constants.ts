@@ -41,6 +41,20 @@ export interface LiveModelOption {
  * opens a socket and never speaks, and a retired id dies at the handshake with
  * 1011 and no diagnostic. Nothing goes in this list without a probe.
  *
+ * **One probe is not a sitting** (#218). Membership was established by minting a
+ * token and opening a session, which is exactly long enough to catch the two
+ * failure shapes above and far too short to catch the third: a session that
+ * works for three turns and then stops both speaking and listening, with the
+ * socket still open and nothing on it to react to.
+ * `gemini-2.5-flash-native-audio-preview-12-2025` does that after roughly 50
+ * seconds of its own speech, and did it again with context compression removed;
+ * the default examiner ran the same eight-turn script without a fault
+ * (`docs/GEMINI_LIVE_FINDINGS.md` §7). It stays on the list because
+ * `ExamController.checkSessionDeafness` now notices and reconnects — which was
+ * probed and works — and because a candidate choosing it is told, in the
+ * `detail` below, that their débat may be interrupted. What it must not be is
+ * on this list silently.
+ *
  * `gemini-2.5-flash-native-audio-latest` also ran, and is left out on purpose:
  * it is a moving alias, and a sitting that stores it cannot answer "which
  * examiner graded this?" once the alias moves — which is the whole reason the
@@ -55,7 +69,7 @@ export const LIVE_MODEL_OPTIONS: readonly LiveModelOption[] = [
   {
     id: "gemini-2.5-flash-native-audio-preview-12-2025",
     label: "Gemini 2.5 Native Audio",
-    detail: "Voix plus naturelle, génération précédente : le débit peut varier.",
+    detail: "Voix plus naturelle, mais moins stable : le débat peut être interrompu brièvement.",
   },
 ];
 

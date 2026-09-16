@@ -2,15 +2,22 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import {
+  DRAWER_SETTLE_TRANSITION,
+  drawerFrame,
+  drawerPanelBox,
   DRAWER_AT_DEFAULT_TOLERANCE_PX,
   DRAWER_FLING_VELOCITY,
   DRAWER_PEEK_PX,
+  beginDrawerGesture,
   clampDrawerY,
   drawerExposedHeight,
   drawerGeometry,
   drawerReleaseVelocity,
   drawerSettleAfterRelease,
+  drawerPlacementY,
   drawerTapTarget,
+  moveDrawerGesture,
+  releaseDrawerGesture,
   isDrawerDrag,
   isDrawerOpen,
 } from "./results-drawer";
@@ -106,5 +113,111 @@ describe("the correction's evaluation drawer (#190)", () => {
       ]),
       0,
     );
+  });
+});
+
+describe("one drag of the handle, as data", () => {
+  const phone = drawerGeometry(800);
+
+  it("is a tap until the finger moves past the slop, and a tap toggles", () => {
+    const gesture = beginDrawerGesture(1, 500, phone.closedY, 0);
+    moveDrawerGesture(gesture, 503, 16, phone);
+    assert.equal(gesture.moved, false, "within the slop");
+    assert.equal(releaseDrawerGesture(gesture, phone.closedY, 32, phone), phone.defaultY);
+  });
+
+  it("follows the finger, clamped to the panel's travel, once it is a drag", () => {
+    const gesture = beginDrawerGesture(1, 500, phone.defaultY, 0);
+    assert.equal(moveDrawerGesture(gesture, 540, 16, phone), phone.defaultY + 40);
+    assert.equal(gesture.moved, true);
+    assert.equal(moveDrawerGesture(gesture, 5000, 32, phone), phone.closedY, "no elasticity below");
+    assert.equal(moveDrawerGesture(gesture, -5000, 48, phone), 0, "nor above");
+  });
+
+  it("keeps only the trailing samples, so a long drag does not grow without bound", () => {
+    const gesture = beginDrawerGesture(1, 500, phone.defaultY, 0);
+    for (let i = 1; i <= 40; i += 1) moveDrawerGesture(gesture, 500 + i, i * 16, phone);
+    assert.equal(gesture.samples.length, 8);
+  });
+
+  it("settles a flick, and leaves a slow release where it was", () => {
+    const flick = beginDrawerGesture(1, 500, phone.defaultY, 0);
+    // 100 px in 50 ms downwards: well past the fling velocity.
+    moveDrawerGesture(flick, 550, 25, phone);
+    moveDrawerGesture(flick, 600, 50, phone);
+    assert.equal(releaseDrawerGesture(flick, phone.defaultY + 100, 50, phone), phone.closedY);
+
+    const slow = beginDrawerGesture(1, 500, phone.defaultY, 0);
+    moveDrawerGesture(slow, 520, 500, phone);
+    assert.equal(releaseDrawerGesture(slow, phone.defaultY + 20, 1000, phone), null);
+  });
+
+  it("reads the release itself as the last sample, so a finger that stopped is not still moving", () => {
+    const gesture = beginDrawerGesture(1, 500, phone.defaultY, 0);
+    moveDrawerGesture(gesture, 550, 25, phone);
+    moveDrawerGesture(gesture, 600, 50, phone);
+    // Held still for a second, then lifted: no flick.
+    assert.equal(releaseDrawerGesture(gesture, phone.defaultY + 100, 1050, phone), null);
+  });
+
+  it("places the drawer: open to the default first, then hold the reader's position", () => {
+    const seed = { first: true, initiallyOpen: true, open: true, y: 0 };
+    assert.equal(drawerPlacementY(seed, phone), phone.defaultY);
+    // Too short to open into: the default is refused, and the seeded open
+    // state then holds the panel at its seeded position — the top. What the
+    // component's own comment calls "rests closed" is, measured, y = 0; kept
+    // as it was, and worth deciding on its own.
+    assert.equal(drawerPlacementY(seed, drawerGeometry(100)), 0);
+    // `open` is seeded from `initiallyOpen`, so a drawer not asked to open
+    // starts closed.
+    assert.equal(
+      drawerPlacementY({ first: true, initiallyOpen: false, open: false, y: 0 }, phone),
+      phone.closedY,
+    );
+    assert.equal(
+      drawerPlacementY({ first: false, initiallyOpen: true, open: false, y: 200 }, phone),
+      phone.closedY,
+      "a closed drawer stays closed on a resize",
+    );
+    assert.equal(
+      drawerPlacementY({ first: false, initiallyOpen: true, open: true, y: 200 }, phone),
+      200,
+      "an open one is left where it was",
+    );
+    assert.equal(
+      drawerPlacementY({ first: false, initiallyOpen: true, open: true, y: 5000 }, phone),
+      phone.closedY,
+      "re-clamped to the new lower limit",
+    );
+  });
+});
+
+describe("one frame of the panel", () => {
+  const geometry = drawerGeometry(800);
+
+  it("writes the clamped position, the settle only on a release, and the visible slice", () => {
+    const frame = drawerFrame(geometry.defaultY, geometry, true);
+    assert.equal(frame.y, geometry.defaultY);
+    assert.equal(frame.transform, `translateY(${geometry.defaultY}px)`);
+    assert.equal(frame.transition, DRAWER_SETTLE_TRANSITION);
+    assert.equal(frame.exposed, drawerExposedHeight(geometry.defaultY, geometry));
+    assert.equal(frame.bodyHeight, `${frame.exposed - DRAWER_PEEK_PX}px`);
+    assert.equal(drawerFrame(geometry.defaultY, geometry, false).transition, "none");
+  });
+
+  it("never sizes the body below zero, even past the closed position", () => {
+    const frame = drawerFrame(geometry.closedY + 500, geometry, false);
+    assert.equal(frame.y, geometry.closedY);
+    assert.equal(frame.bodyHeight, "0px");
+  });
+});
+
+describe("the panel's box", () => {
+  it("is hidden and unsized until there is a viewport, then the panel's full height", () => {
+    assert.deepEqual(drawerPanelBox(0), { height: undefined, visibility: "hidden" });
+    assert.deepEqual(drawerPanelBox(800), {
+      height: drawerGeometry(800).fullHeight,
+      visibility: undefined,
+    });
   });
 });

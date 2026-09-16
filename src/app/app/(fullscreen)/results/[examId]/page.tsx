@@ -4,11 +4,10 @@ import { Notice } from "@/app/_components/notice";
 import { secondaryButton } from "@/app/_components/button-styles";
 import { requireExamAccess, requireUserId } from "@/lib/auth/exam-guard";
 import { neonSittingStore } from "@/lib/db/sittings";
-import { applySittingDurationPenalty, partsAbsent } from "@/lib/delf/orale-rubric";
 import { findTopic } from "@/lib/delf/topics";
-import { candidateWordCount } from "@/lib/delf/transcript";
 import type { StoredSitting } from "@/lib/exams/sitting-persistence";
-import { ResultsClient, type StoredResult } from "./results-client";
+import { storedResultFromSitting } from "@/lib/ui/stored-result";
+import { ResultsClient } from "./results-client";
 
 /**
  * Results, read back from Neon when there is a row, and from the browser when
@@ -29,26 +28,7 @@ import { ResultsClient, type StoredResult } from "./results-client";
  */
 export default async function ResultsPage({ params }: PageProps<"/app/results/[examId]">) {
   const { examId } = await params;
-  // One id, one owner, and both are needed: the store scopes every statement to
-  // the owner rather than trusting the row id on its own. `auth()` is memoised
-  // per request, so this is not a second round trip to Clerk.
-  const userId = await requireUserId();
-  const owned = await requireExamAccess(examId);
-
-  if (owned === null) return <ResultsClient examId={examId} />;
-
-  // The subject comes back with the gate now, and this page still does not use
-  // it: `readSitting` reads the whole sitting anyway, and the slug it returns is
-  // from the same statement as everything else it renders.
-  const sitting = await neonSittingStore()
-    .readSitting({ examId: owned.examId, userId })
-    .catch((error: unknown) => {
-      // A results page that 500s on a database blip is worse than one that
-      // renders from the copy the browser is already holding.
-      console.error("[results] could not read sitting", owned.examId, error);
-      return null;
-    });
-
+  const sitting = await readOwnedSitting(examId);
   if (!sitting) return <ResultsClient examId={examId} />;
 
   // The correction is what `corrected` means, so the branch is written on the
@@ -79,111 +59,35 @@ export default async function ResultsPage({ params }: PageProps<"/app/results/[e
    * nothing writes a recording without its phase report, but a row is cheaper to
    * fall back from than to assume.
    */
-  const measured = (phase: "monologue" | "debate") =>
-    sitting.phases.find((row) => row.phase === phase)?.spokenSeconds ??
-    sitting.recordings.find((row) => row.phase === phase)?.durationSeconds ??
-    0;
-
-  // The recordings whose bytes were kept (#98): a uri to serve and no purge
-  // stamp. Everything else — pre-#98 sittings, vaultless deployments, uploads
-  // that failed — renders exactly as before, a duration with nothing to play,
-  // which is the honest sentence for a recording that existed and is gone.
-  const playable = sitting.recordings
-    .filter((row) => row.uri !== null && row.deletedAt === null)
-    .map((row) => ({
-      phase: row.phase,
-      mimeType: row.mimeType,
-      // From the row, so the player can print « 0:00 / 1:38 » before a single
-      // byte has moved — its file stays unfetched until play is pressed.
-      durationSeconds: row.durationSeconds,
-    }));
-
-  const initial: StoredResult = {
-    evaluation: {
-      mode: correction.mode,
-      criteria: correction.criteria,
-      rawScore25: correction.rawScore25,
-      score25: correction.score25,
-      durationPenalty: correction.durationPenalty,
-      // No `shortParts`: which half ran short is the corrector's working and has
-      // no column. The client already treats it as optional, because a stored
-      // correction was always going to be the other thing it renders.
-      absencePenalty: correction.absencePenalty,
-      // `absentParts` has no column either, but unlike `shortParts` it can be
-      // recovered exactly: it was read off the transcript, and the transcript
-      // is stored. This is the rubric's own `partsAbsent`, over the same input
-      // it saw at grading time — not a second copy of the rule.
-      //
-      // Guarded on the penalty so a row written before the halving existed
-      // (`absence_penalty` defaults to 0) is never labelled with a charge it
-      // did not take.
-      //
-      // And minus the débat the examiner closed early (#92), exactly as the
-      // rubric dropped it at grading time: a positive count means the waiver
-      // was live (the column and the waiver shipped together, and old rows
-      // read 0), so a silent débat here was excused, not charged — leaving it
-      // in would caption a monologue-only halving as « aucune des deux
-      // parties ».
-      absentParts:
-        correction.absencePenalty > 0
-          ? partsAbsent({
-              monologueWords: candidateWordCount(sitting.transcript, "monologue"),
-              debateWords: candidateWordCount(sitting.transcript, "debate"),
-            }).filter((part) => part !== "debate" || sitting.earlyClosingCount === 0)
-          : [],
-      // `durationCharges` has no column either, and is recovered the way
-      // `absentParts` above is: by re-running the rubric's own function over
-      // the same inputs it saw at grading time — the stored bands, and the
-      // server's measurement of the recordings. Not a second copy of the rule.
-      //
-      // The score handed in is the stored raw: only `charges` is read from the
-      // result, and those depend on the bands and the durations, never on the
-      // running total.
-      //
-      // `excluded` has to be reconstructed too, or the sentence would name a
-      // part the rubric never charged: an absent part is dropped (the halving
-      // already answered for it) and so is a débat the examiner closed early.
-      // Both are the same reconstructions used just above.
-      durationCharges:
-        correction.durationPenalty > 0
-          ? applySittingDurationPenalty(
-              correction.rawScore25,
-              correction.criteria,
-              { monologueSeconds: measured("monologue"), debateSeconds: measured("debate") },
-              [
-                ...(correction.absencePenalty > 0
-                  ? partsAbsent({
-                      monologueWords: candidateWordCount(sitting.transcript, "monologue"),
-                      debateWords: candidateWordCount(sitting.transcript, "debate"),
-                    })
-                  : []),
-                ...(sitting.earlyClosingCount > 0 ? (["debate"] as const) : []),
-              ],
-            ).charges
-          : [],
-      model: correction.model,
-      latencySeconds: correction.latencySeconds,
-      feedback: correction.feedback,
-    },
-    topic,
-    transcript: sitting.transcript,
-    // The number the duration penalty was computed from — see `measured`.
-    monologueSeconds: measured("monologue"),
-    debateSeconds: measured("debate"),
-    reconnectCount: sitting.reconnectCount,
-    // The examiner's early goodbyes (#92) — unlike `reconnectCount` above,
-    // something actually renders this: the note explaining that the fault was
-    // not held against the candidate.
-    earlyClosingCount: sitting.earlyClosingCount,
-    playable,
-    // Which model spoke (#99) — the counterpart of `evaluation.model`, which
-    // names the one that graded. Null on sittings from before the column, and
-    // shown as nothing rather than guessed: today's default is not evidence
-    // about which examiner an old sitting heard.
-    examinerModel: sitting.examinerModel,
-  };
+  const initial = storedResultFromSitting(sitting, correction, topic);
 
   return <ResultsClient examId={examId} initial={initial} />;
+}
+
+/**
+ * The sitting, if it is the candidate's and the database answers — null
+ * otherwise, and null means the browser's copy renders instead.
+ *
+ * One id, one owner, and both are needed: the store scopes every statement to
+ * the owner rather than trusting the row id on its own. `auth()` is memoised
+ * per request, so this is not a second round trip to Clerk. The subject comes
+ * back with the gate too, and this page still does not use it: `readSitting`
+ * reads the whole sitting anyway, and the slug it returns is from the same
+ * statement as everything else it renders.
+ */
+async function readOwnedSitting(examId: string): Promise<StoredSitting | null> {
+  const userId = await requireUserId();
+  const owned = await requireExamAccess(examId);
+  if (owned === null) return null;
+
+  return neonSittingStore()
+    .readSitting({ examId: owned.examId, userId })
+    .catch((error: unknown) => {
+      // A results page that 500s on a database blip is worse than one that
+      // renders from the copy the browser is already holding.
+      console.error("[results] could not read sitting", owned.examId, error);
+      return null;
+    });
 }
 
 /**

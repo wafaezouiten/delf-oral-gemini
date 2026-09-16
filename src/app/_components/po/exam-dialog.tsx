@@ -1,6 +1,8 @@
 "use client";
 
-import { useEffect, useId, useRef, type ReactNode } from "react";
+import { useId, type ReactNode } from "react";
+
+import { useModalDialog } from "./use-modal-dialog";
 
 /**
  * The modal every exit confirmation is drawn in: the shell, and nothing that
@@ -25,9 +27,9 @@ import { useEffect, useId, useRef, type ReactNode } from "react";
  * stay with the dialog that means them.
  *
  * `showModal()` runs from an effect rather than by rendering the `open`
- * attribute, because that attribute produces a *non-modal* dialog — no backdrop,
- * no focus trap, no Escape — which looks identical until somebody tries to tab
- * out of it.
+ * attribute (`useModalDialog`, shared with the sujet sheet), because that
+ * attribute produces a *non-modal* dialog — no backdrop, no focus trap, no
+ * Escape — which looks identical until somebody tries to tab out of it.
  *
  * `useId()` rather than an id from the caller: `aria-labelledby` has to point at
  * the heading this renders, and three callers each inventing a unique string is
@@ -46,15 +48,8 @@ export function ExamDialog({
   onCancel: () => void;
   children: ReactNode;
 }) {
-  const ref = useRef<HTMLDialogElement>(null);
+  const ref = useModalDialog(open);
   const titleId = useId();
-
-  useEffect(() => {
-    const dialog = ref.current;
-    if (!dialog) return;
-    if (open && !dialog.open) dialog.showModal();
-    if (!open && dialog.open) dialog.close();
-  }, [open]);
 
   return (
     <dialog

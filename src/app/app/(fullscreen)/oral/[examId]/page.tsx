@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation";
 
 import { requireExamAccess } from "@/lib/auth/exam-guard";
-import { findTopic } from "@/lib/delf/topics";
+import { oralPageSubject } from "@/lib/ui/oral-page";
 import { ExamClient } from "./exam-client";
 
 /**
@@ -31,22 +31,13 @@ export default async function OralExamPage({
   // is read once rather than twice.
   const sitting = await requireExamAccess(examId);
 
-  const query = await searchParams;
-  const requestedSlug = typeof query.sujet === "string" ? query.sujet : undefined;
-
-  const slug = sitting?.topicSlug ?? requestedSlug;
-  const topic = slug ? findTopic(slug) : undefined;
-  if (!topic) notFound();
-
-  // The examiner recorded on the row (#99) — null both on rows that predate
-  // the column and on the degraded ids that have no row, and the client treats
-  // the two the same: the picker starts on the build default, which is what an
+  // The subject and the examiner are `oralPageSubject`'s rule, tested. The
+  // examiner recorded on the row (#99) is null both on rows that predate the
+  // column and on the degraded ids that have no row, and the client treats the
+  // two the same: the picker starts on the build default, which is what an
   // untouched sitting will actually hear.
-  return (
-    <ExamClient
-      examId={examId}
-      topic={topic}
-      storedExaminerModel={sitting?.examinerModel ?? null}
-    />
-  );
+  const page = oralPageSubject(sitting, await searchParams);
+  if (!page) notFound();
+
+  return <ExamClient examId={examId} {...page} />;
 }

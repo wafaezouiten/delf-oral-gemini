@@ -18,6 +18,7 @@ import {
   partsSpokenButUntranscribed,
   partsUnderFullDevelopment,
   PARTICIPATION_VOICED_FLOOR,
+  PARTICIPATION_VOICED_SHARE,
   PARTICIPATION_WORD_FLOOR,
   scoreSitting,
   snapCriteria,
@@ -130,15 +131,16 @@ const TOP_BANDS: CriteriaBands = {
   phonologie: 5,
 };
 
-test("each part has its own full-development time, and one shared floor", () => {
-  // #189's figures as corrected by the user: eight minutes for the debat, and
-  // for the exposé its own announced maximum, because seven is the longest it
-  // can run. They replaced 168 s and 312 s (40 % of each part's expected time).
-  // The whole argument is on `FULL_DEVELOPMENT_SECONDS`; the matrix that
-  // exercises it is in `duration-tiers.test.ts`.
-  assert.equal(FULL_DEVELOPMENT_SECONDS.monologue, 420);
+test("each part has its own full-development time and its own floor", () => {
+  // #189's figures as twice corrected by the user: ten minutes for the débat,
+  // four for the exposé, and a floor apiece. They replaced 168 s and 312 s
+  // (40 % of each part's expected time). The whole argument is on
+  // `FULL_DEVELOPMENT_SECONDS`; the matrix that exercises it is in
+  // `duration-tiers.test.ts`.
+  assert.equal(FULL_DEVELOPMENT_SECONDS.monologue, 240);
   assert.equal(FULL_DEVELOPMENT_SECONDS.debate, 600);
-  assert.equal(SHORT_DEVELOPMENT_SECONDS, 240);
+  assert.equal(SHORT_DEVELOPMENT_SECONDS.monologue, 150);
+  assert.equal(SHORT_DEVELOPMENT_SECONDS.debate, 240);
 });
 
 test("a part under the full threshold is short even when the other one is not", () => {
@@ -263,7 +265,7 @@ test("scoreSitting docks before it tests the floor", () => {
   // the other side of it. Testing the floor against the pre-penalty score would
   // pass a candidate the rubric has just failed.
   const scored = scoreSitting(bands(1), {
-    monologueSeconds: 400,
+    monologueSeconds: 180,
     debateSeconds: 10,
     ...SPOKE,
     phonologyHeard: true,
@@ -406,14 +408,14 @@ test("the duration penalty still applies on top of a capped phonologie", () => {
   // Two independent rules, and a sitting can earn both. Neither is allowed to
   // swallow the other.
   const scored = scoreSitting(bands(5), {
-    monologueSeconds: 400,
+    monologueSeconds: 180,
     debateSeconds: 10,
     ...SPOKE,
     phonologyHeard: false,
   });
 
   assert.equal(scored.rawScore25, 23, "capped before the sum");
-  // 400 s of monologue is now the middle tier (one band off réalisation de la
+  // 180 s of monologue is the middle tier (one band off réalisation de la
   // tâche, 5 → 3) and 10 s of débat the bottom one (interaction 5 → 1).
   assert.equal(scored.durationPenalty, 6);
   assert.equal(scored.score25, 17);
@@ -459,8 +461,27 @@ test("partsAbsent reads the word floor, not silence", () => {
  * of exposé at once — and every downstream rule then agreed the candidate had
  * not presented it, halved their mark, and printed a sentence saying so.
  */
+/**
+ * One sitting's audio evidence: voiced seconds per part, and — where a case
+ * cares — how long the candidate had to produce them.
+ *
+ * Both numbers are taken with the examiner silent, so `soloSeconds` is the
+ * candidate's OWN time and not the part's length. Omitted, the share is not
+ * asked and the floor decides alone, which is what a page from before the
+ * denominator existed sends.
+ */
+function heard(
+  monologue: [voiced: number, solo?: number],
+  debate: [voiced: number, solo?: number],
+) {
+  return {
+    monologue: { voicedSeconds: monologue[0], soloSeconds: monologue[1] },
+    debate: { voicedSeconds: debate[0], soloSeconds: debate[1] },
+  };
+}
+
 test("a part the microphone heard at length is not an absence", () => {
-  const spoke = { monologueSeconds: 300, debateSeconds: 400 };
+  const spoke = heard([300, 360], [400, 480]);
 
   // The failure this exists for: a full sitting, and one part's words gone.
   assert.deepEqual(partsSpokenButUntranscribed({ monologueWords: 0, debateWords: 300 }, spoke), [
@@ -484,7 +505,7 @@ test("a candidate who said nothing is still absent, whatever the room did", () =
   assert.deepEqual(
     partsSpokenButUntranscribed(
       { monologueWords: 400, debateWords: 2 },
-      { monologueSeconds: 300, debateSeconds: PARTICIPATION_VOICED_FLOOR - 1 },
+      heard([300, 360], [PARTICIPATION_VOICED_FLOOR - 1, 120]),
     ),
     [],
     "« euh… non, ça va » clears neither floor",
@@ -492,18 +513,106 @@ test("a candidate who said nothing is still absent, whatever the room did", () =
   assert.deepEqual(
     partsSpokenButUntranscribed(
       { monologueWords: 400, debateWords: PARTICIPATION_WORD_FLOOR },
-      { monologueSeconds: 300, debateSeconds: 400 },
+      heard([300, 360], [400, 480]),
     ),
     [],
     "at the word floor the part happened and there is nothing to explain",
   );
   assert.deepEqual(
-    partsSpokenButUntranscribed(
-      { monologueWords: 0, debateWords: 0 },
-      { monologueSeconds: 0, debateSeconds: 0 },
-    ),
+    partsSpokenButUntranscribed({ monologueWords: 0, debateWords: 0 }, heard([0, 0], [0, 0])),
     [],
     "no microphone is no evidence, and no evidence never accuses either way",
+  );
+});
+
+/**
+ * The share, which is the half of the test that survives a real room.
+ *
+ * Gating the measure on the examiner's voice took a walk-out's débat from
+ * ~570 "voiced" seconds to ~30. It did not take it under fifteen, because
+ * fifteen CUMULATIVE seconds is a small ask: most of a gap between two
+ * questions, and nothing at all of a débat. So the seconds are now weighed
+ * against the candidate's OWN time — the recording with nobody else audible —
+ * and a walk-out and a lost transcript separate by a wide margin there.
+ */
+test("a little noise in a lot of silence is not a part that was spoken", () => {
+  // The walk-out, measured: two minutes of gaps between the examiner's
+  // questions, thirty seconds of the room crossing the threshold in them.
+  // Over the floor, nowhere near the share.
+  assert.ok(30 >= PARTICIPATION_VOICED_FLOOR, "and this is why the floor alone was not enough");
+  assert.deepEqual(
+    partsSpokenButUntranscribed(
+      { monologueWords: 400, debateWords: 0 },
+      heard([300, 360], [30, 120]),
+    ),
+    [],
+    "a débat sat out is graded — halved — rather than refused",
+  );
+});
+
+test("a candidate who filled their own time is heard, however short it was", () => {
+  // The other population, and the one this must not start accusing (#206): a
+  // débat where the examiner did most of the talking, the candidate answered
+  // in the gaps, and the transcript lost it. Same thirty seconds as above,
+  // over a quarter of the opportunity.
+  assert.deepEqual(
+    partsSpokenButUntranscribed(
+      { monologueWords: 400, debateWords: 0 },
+      heard([300, 360], [30, 45]),
+    ),
+    ["debate"],
+  );
+  // And the monologue, where the failure was first found: seven minutes of
+  // exposé, nobody else audible, the words gone.
+  assert.deepEqual(
+    partsSpokenButUntranscribed(
+      { monologueWords: 0, debateWords: 300 },
+      heard([300, 420], [200, 260]),
+    ),
+    ["monologue"],
+  );
+});
+
+test("the share is a third, and the boundary is where it says it is", () => {
+  const opportunity = 300;
+  const atShare = opportunity * PARTICIPATION_VOICED_SHARE;
+  assert.ok(atShare >= PARTICIPATION_VOICED_FLOOR, "the floor is not what decides these two");
+
+  assert.deepEqual(
+    partsSpokenButUntranscribed(
+      { monologueWords: 0, debateWords: 300 },
+      heard([atShare, opportunity], [200, 260]),
+    ),
+    ["monologue"],
+    "at the share exactly, the part was heard",
+  );
+  assert.deepEqual(
+    partsSpokenButUntranscribed(
+      { monologueWords: 0, debateWords: 300 },
+      heard([atShare - 1, opportunity], [200, 260]),
+    ),
+    [],
+    "and a second under it, it was not",
+  );
+});
+
+test("a part with no opportunity accuses nobody", () => {
+  // Reachable: an examiner that never stopped talking, and a microphone that
+  // died at the phase boundary. Zero over zero is not a share, and the guard
+  // that answers it must not answer « heard ».
+  assert.deepEqual(
+    partsSpokenButUntranscribed({ monologueWords: 0, debateWords: 0 }, heard([300, 0], [0, 0])),
+    [],
+  );
+});
+
+test("without a denominator the floor decides alone, as it did before", () => {
+  // A page loaded before `soloSeconds` existed sends the numerator only. It
+  // must keep the #206 protection rather than lose it to a missing field —
+  // the walk-out it then mis-reads is the bug that page already has.
+  assert.deepEqual(
+    partsSpokenButUntranscribed({ monologueWords: 0, debateWords: 300 }, heard([300], [400])),
+    ["monologue"],
   );
 });
 

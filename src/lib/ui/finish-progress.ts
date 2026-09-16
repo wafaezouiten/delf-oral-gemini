@@ -1,3 +1,5 @@
+import type { FinishFailure } from "./finish-failure";
+
 /**
  * What « Épreuve terminée » should say while the correction is under way.
  *
@@ -78,4 +80,96 @@ export function finishStageMessage(stage: FinishStage): string {
 export function uploadPercent(stage: FinishStage): number | null {
   if (stage.kind !== "uploading" || stage.fraction === null) return null;
   return Math.round(stage.fraction * 100);
+}
+
+/**
+ * What « Épreuve terminée » says, decided here (#234): the heading and the
+ * sentence under it in each of the four states, the bar, whether the way out
+ * is offered while the correction is awaited, the sentence about a recording
+ * that could not be sent, and the failure notice with its two buttons. Every
+ * failure field has a fallback, because `FinishFailure` carries overrides
+ * only where a case needs its own words (#86).
+ */
+export interface FinishedView {
+  failed: boolean;
+  heading: string;
+  lede: string;
+  /** The sentence announces itself while it is progress; once the failure
+   *  notice below mounts assertively, it stops, so a screen reader is not
+   *  given two overlapping statements about one event. */
+  live: boolean;
+  percent: number | null;
+  /** Leaving while the server corrects (#86): the poll is cancelled, the
+   *  correction finishes either way, and the historique has it. */
+  canLeaveWhileWaiting: boolean;
+  /** Which recording could not be sent, in a sentence — or none. */
+  dropped: string | null;
+  failure: { title: string; message: string; retryable: boolean; leaveLabel: string } | null;
+}
+
+const PHASE_LABEL_FR: Record<"monologue" | "debate", string> = {
+  monologue: "monologue",
+  debate: "débat",
+};
+
+function droppedSentence(phases: ReadonlyArray<"monologue" | "debate">): string | null {
+  if (phases.length === 0) return null;
+  const which =
+    phases.length === 2
+      ? "Vos deux prises de parole étaient trop volumineuses pour être envoyées."
+      : `Votre ${PHASE_LABEL_FR[phases[0]]} était trop volumineux pour être envoyé.`;
+  return (
+    `${which} Cette partie sera corrigée à partir de sa transcription seule, sans écoute de ` +
+    "votre prononciation, et comptera comme une durée de zéro seconde dans la pénalité de durée."
+  );
+}
+
+export function finishedView(
+  stage: FinishStage,
+  failure: FinishFailure | null,
+  droppedPhases: ReadonlyArray<"monologue" | "debate">,
+): FinishedView {
+  const dropped = droppedSentence(droppedPhases);
+  if (!failure) {
+    return {
+      failed: false,
+      heading: "Épreuve terminée",
+      lede: finishStageMessage(stage),
+      live: true,
+      percent: uploadPercent(stage),
+      canLeaveWhileWaiting: stage.kind === "awaiting",
+      dropped,
+      failure: null,
+    };
+  }
+  return {
+    failed: true,
+    heading: failure.heading ?? "Correction interrompue",
+    lede:
+      failure.lede ??
+      (failure.retryable
+        ? "Votre prestation attend d'être envoyée."
+        : "Votre prestation a bien été enregistrée, mais elle n'a pas pu être corrigée."),
+    live: false,
+    percent: uploadPercent(stage),
+    canLeaveWhileWaiting: false,
+    dropped,
+    failure: {
+      title:
+        failure.title ??
+        (failure.retryable ? "L'envoi a échoué" : "Cette épreuve ne peut pas être corrigée"),
+      message: failure.message,
+      // A 413 or a 422 would send the same bytes to the same refusal, and the
+      // candidate would sit through it twice: no retry where none can help.
+      retryable: failure.retryable,
+      // « Abandonner » names what leaving costs — the épreuve. The timeout's
+      // override drops the word, because its sitting is accepted and may yet
+      // correct itself (#86).
+      leaveLabel:
+        failure.leaveLabel ??
+        (failure.retryable
+          ? "Abandonner et revenir au tableau de bord"
+          : "Revenir au tableau de bord"),
+    },
+  };
 }

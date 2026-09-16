@@ -48,10 +48,8 @@
 import { NextResponse, after } from "next/server";
 import { z } from "zod";
 
-import { INPUT_SAMPLE_RATE } from "@/lib/gemini/constants";
 import { DEV_TOOLS_ENABLED } from "@/lib/dev-tools";
-import { EXAM_ACCESS_DENIALS } from "@/lib/auth/exam-access";
-import { authorizeExam } from "@/lib/auth/exam-guard";
+import { examRoute } from "@/lib/auth/exam-route";
 import type { OralSpeakingPhase } from "@/lib/db";
 import { neonSittingStore } from "@/lib/db/sittings";
 import {
@@ -73,12 +71,7 @@ import { gradedPhaseSeconds } from "@/lib/exams/graded-duration";
 // between them — extracted so a test can hold the order. See its module comment.
 import { participationRefusal } from "@/lib/exams/participation-refusal";
 // The binary half of the same request, extracted for the same reason.
-import {
-  MAX_RECORDING_BYTES,
-  MAX_REQUEST_BYTES,
-  MIN_RECORDING_SECONDS,
-  measureUploadedRecording,
-} from "@/lib/exams/uploaded-recording";
+import { MAX_REQUEST_BYTES, readRecordings } from "@/lib/exams/uploaded-recording";
 import { evaluateExam, type EvaluationMode, type EvaluationResult } from "@/lib/gemini/evaluate";
 // Which part of the grading died, read off the tagged throw (#73).
 import { evaluationFailureReason } from "@/lib/gemini/evaluation-failure";
@@ -104,102 +97,25 @@ export const maxDuration = 300;
 // just above ours, so an oversized request is refused either way. What ours buys
 // is a refusal the candidate can read.
 
-const SPEAKING_PHASES = ["monologue", "debate"] as const satisfies readonly OralSpeakingPhase[];
-
-/** One uploaded artefact, with the duration read out of its own bytes. */
-interface UploadedRecording {
-  phase: OralSpeakingPhase;
-  blob: Blob;
-  /** What the bytes turned out to be, which is not what the form claimed. */
-  mimeType: string;
-  byteSize: number;
-  durationSeconds: number;
-}
-
 /**
- * Pull the per-phase recordings out of the form and measure each one.
+ * Ownership runs first — before validation, so a caller who does not own the
+ * sitting learns nothing about the payload it would have accepted, and the
+ * (paid, minutes-long) model call has not started yet. `examRoute` holds it.
  *
- * A phase with no file is simply absent: a candidate whose microphone was
- * refused, or died during the débat, has audio for some phases and not others,
- * and that is a state to report rather than to paper over with a zero-length
- * placeholder.
+ * `no-sitting` is not a refusal. The request is legal, it just addresses no
+ * row we can verify — no database, a degraded `local-…` id, or a lookup that
+ * failed — so the exam is graded and nothing is written. That is the same
+ * bargain the route has always made with a missing `DATABASE_URL`.
  *
- * A file that is *present but unmeasurable* is a different thing entirely and is
- * refused — see `measureUploadedRecording`, which decides the format from the
- * bytes rather than from what the form said they were.
- *
- * And a file that measures under `MIN_RECORDING_SECONDS` is folded into the
- * first case (#73): a stub of seconds is treated as the absence it effectively
- * is, everywhere downstream at once — the grading mode, the corrector's
- * attachments, the stored rows and the vault all see one consistent answer.
- * The constant's own comment is where the threshold is argued for.
- *
- * One pass over the two phases, and the size check happens inside it — before
- * the `arrayBuffer()` that is the expensive half. Two loops reading the same two
- * form fields is one edit away from being two loops in the wrong order.
+ * `receivedAt` is when the request reached the function, so the wait #86 is
+ * about can be read off the logs as its segments rather than argued about as
+ * one blur.
  */
-type RecordingRejection = { rejected: OralSpeakingPhase; reason: "too-large" | "unreadable" };
-
-async function readRecordings(
-  form: FormData,
-): Promise<{ recordings: UploadedRecording[] } | RecordingRejection> {
-  const recordings: UploadedRecording[] = [];
-  for (const phase of SPEAKING_PHASES) {
-    const file = form.get(`audio-${phase}`);
-    if (!(file instanceof Blob) || file.size === 0) continue;
-    if (file.size > MAX_RECORDING_BYTES) return { rejected: phase, reason: "too-large" };
-
-    const measured = measureUploadedRecording(await file.arrayBuffer(), INPUT_SAMPLE_RATE);
-    if (!measured) return { rejected: phase, reason: "unreadable" };
-
-    // A measurable stub is treated as absence, not refused (#73): a skipped
-    // débat or a typed exposé (#51) legitimately produces one, so a 400 here
-    // would fail sittings that are fine. Logged because a silent drop would
-    // read as "no file arrived" to anyone chasing the very reports this serves.
-    if (measured.durationSeconds < MIN_RECORDING_SECONDS) {
-      console.info(
-        `[finish] dropping the ${phase} recording: ` +
-          `${measured.durationSeconds.toFixed(1)}s is under the ${MIN_RECORDING_SECONDS}s floor`,
-      );
-      continue;
-    }
-
-    recordings.push({
-      phase,
-      blob: file,
-      mimeType: measured.mimeType,
-      byteSize: file.size,
-      durationSeconds: measured.durationSeconds,
-    });
-  }
-  return { recordings };
-}
-
-export async function POST(request: Request, context: { params: Promise<{ examId: string }> }) {
-  // When the request reached this function, so the wait #86 is about can be
-  // read off the logs as its segments rather than argued about as one blur.
-  const receivedAt = Date.now();
-  const { examId } = await context.params;
-
-  /**
-   * Authentication and ownership, before anything else this route does.
-   *
-   * Exam ids are sequential serials, so without the second check any signed-in
-   * user could finish — and overwrite the transcript of — a neighbouring id's
-   * exam. It runs first rather than after validation for two reasons: a caller
-   * who does not own the sitting learns nothing about the payload it would have
-   * accepted, and the (paid, minutes-long) model call has not started yet.
-   *
-   * `no-sitting` is not a refusal. The request is legal, it just addresses no
-   * row we can verify — no database, a degraded `local-…` id, or a lookup that
-   * failed — so the exam is graded and nothing is written. That is the same
-   * bargain the route has always made with a missing `DATABASE_URL`.
-   */
-  const access = await authorizeExam(examId);
-  if (access.status === "denied") {
-    const { status, error } = EXAM_ACCESS_DENIALS[access.reason];
-    return NextResponse.json({ error }, { status });
-  }
+export const POST = examRoute(async function finishSitting(
+  request,
+  { access, params, receivedAt },
+) {
+  const { examId } = params;
   const { userId } = access;
   const persistedExamId = access.status === "owned" ? access.examId : null;
 
@@ -256,10 +172,32 @@ export async function POST(request: Request, context: { params: Promise<{ examId
    * `participation-refusal.ts`. Asked here rather than after `readRecordings`
    * so a refusal is decided without spending the upload, and long before
    * anything paid is called.
+   *
+   * The evidence is `soloVoicedSeconds` over `soloSeconds` — voiced audio with
+   * the examiner silent, against the time the candidate had to produce it —
+   * and the numerator falls back to its predecessor only for a page loaded
+   * before that field existed. What arrives decides whether a candidate who sat
+   * out the débat is graded on half a mark or refused a mark at all; the
+   * schema's own comments carry the argument, and the rule itself is
+   * `partsSpokenButUntranscribed`.
+   *
+   * The two are resolved independently, and nothing in the schema ties them:
+   * a hand-built payload could pair the old `voicedSeconds` numerator, which
+   * counted the examiner's voice too, with the new `soloSeconds` denominator.
+   * Left that way on purpose. The mismatch inflates the share and so biases
+   * toward a refusal, never toward a mark — the safe direction a forged value
+   * is allowed to move in here — and the real client sends the pair together.
    */
+  const voiced = payload.soloVoicedSeconds ?? payload.voicedSeconds;
   const refusal = participationRefusal(payload.transcript, {
-    monologueSeconds: payload.voicedSeconds?.monologue ?? 0,
-    debateSeconds: payload.voicedSeconds?.debate ?? 0,
+    monologue: {
+      voicedSeconds: voiced?.monologue ?? 0,
+      soloSeconds: payload.soloSeconds?.monologue,
+    },
+    debate: {
+      voicedSeconds: voiced?.debate ?? 0,
+      soloSeconds: payload.soloSeconds?.debate,
+    },
   });
   if (refusal) {
     return NextResponse.json(
@@ -627,7 +565,7 @@ export async function POST(request: Request, context: { params: Promise<{ examId
       { status: 502 },
     );
   }
-}
+});
 
 /** The stored subset of a correction. The rest is diagnostic, not a column. */
 function toCorrectionRow(result: EvaluationResult): CorrectionRow {

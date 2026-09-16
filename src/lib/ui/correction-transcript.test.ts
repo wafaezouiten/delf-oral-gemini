@@ -272,3 +272,44 @@ describe("a directive the examiner read aloud, on a correction written before #1
     assert.equal(debate.turns[0].timeLabel, "0:00");
   });
 });
+
+describe("how each part is set, and what plays above it", () => {
+  it("sets a part as a monologue only when nobody but the candidate spoke in it", () => {
+    const [monologue, debate] = correctionTranscriptView(FULL, DURATIONS).sections;
+    assert.equal(monologue.shape, "exchange", "the examiner's « Vous pouvez commencer » is a turn");
+    assert.equal(debate.shape, "exchange");
+
+    const solo = correctionTranscriptView([FULL[1], FULL[3]], DURATIONS).sections;
+    assert.equal(solo[0].shape, "monologue");
+    assert.equal(solo[1].shape, "monologue", "who talked decides, not which phase it is");
+  });
+
+  it("reads an empty part as an exchange rather than as an empty exposé", () => {
+    const [monologue] = correctionTranscriptView([FULL[2], FULL[3]], DURATIONS).sections;
+    assert.equal(monologue.shape, "exchange");
+  });
+
+  it("pairs each part with the recording kept for it, and says so when there is none", () => {
+    const view = correctionTranscriptView(FULL, DURATIONS, [
+      { phase: "debate", mimeType: "audio/ogg", durationSeconds: 278 },
+    ]);
+    const [monologue, debate] = view.sections;
+    assert.deepEqual(debate.recording, {
+      phase: "debate",
+      mimeType: "audio/ogg",
+      durationSeconds: 278,
+    });
+    assert.equal(debate.recordingNote, null);
+    assert.equal(monologue.recording, null);
+    assert.equal(monologue.recordingNote, CORRECTION_TRANSCRIPT_COPY.recordingUnavailable);
+  });
+
+  it("says nothing about a recording for a part that never ran", () => {
+    const [, debate] = correctionTranscriptView([FULL[0], FULL[1]], {
+      monologueSeconds: 422,
+      debateSeconds: 0,
+    }).sections;
+    assert.equal(debate.recording, null);
+    assert.equal(debate.recordingNote, null, "there was no audio to lose");
+  });
+});

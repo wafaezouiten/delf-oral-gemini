@@ -58,7 +58,7 @@
  * not comparable with the incumbent's; everything else here still is.
  */
 
-import { COMPETENCY_MAX, COMPETENCY_FLOOR, getOralPartSpec } from "./constants";
+import { COMPETENCY_MAX, COMPETENCY_FLOOR } from "./constants";
 import { ORAL_CRITERIA, type OralCriterion } from "./criteria";
 import { GRILLE_BANDS, snapToBand, type GrilleBand } from "./grille";
 
@@ -70,16 +70,6 @@ export interface OralCriteriaScores {
   morphosyntaxe: number;
   phonologie: number;
 }
-
-export const ORAL_RUBRIC_KEYS = [
-  "realisationTache",
-  "interaction",
-  "lexique",
-  "morphosyntaxe",
-  "phonologie",
-] as const;
-
-export type OralRubricKey = (typeof ORAL_RUBRIC_KEYS)[number];
 
 /** Clamp a single criterion to the valid 0–5 integer range. */
 export function clampCriterion(n: number): number {
@@ -140,47 +130,28 @@ export function applyDurationPenalty(
   return { score25: Math.max(0, score25 - penalty), penalty };
 }
 
-/** The exposé's part number in `ORAL_PARTS_B2`. */
-const MONOLOGUE_TACHE = 1;
-
-/**
- * The duration the épreuve announces for a part, or a throw.
- *
- * Deliberately not `?? 7 * 60`. A default here would be a second copy of the
- * very number this reads from the spec so that the two cannot drift — and it
- * would spend itself silently: if `ORAL_PARTS_B2` ever stopped defining this
- * part, every sitting would be graded against a threshold nobody chose and
- * nothing would say so. The tests can pin today's 420 but cannot reach the
- * fallback path without breaking the source data, so the fallback is exactly
- * the branch that would never be noticed.
- *
- * A throw at module load fails the build instead, which is the right failure
- * for a constant that decides marks (raised in review of #196).
- */
-function announcedSeconds(tache: number): number {
-  const spec = getOralPartSpec(tache);
-  if (!spec) {
-    throw new Error(
-      `ORAL_PARTS_B2 defines no part ${tache}, so the duration rule has no announced length to read.`,
-    );
-  }
-  return spec.durationSeconds;
-}
-
 /**
  * How long each part has to run before it is developed enough to cost nothing.
  *
- * **The monologue's is its own announced maximum, and that is the user's
- * correction to #189.** The issue asked for eight minutes on both parts; the
- * exposé cannot last eight minutes, because the épreuve announces it to the
- * candidate as five to SEVEN (`ORAL_PARTS_B2`, 420 s). A threshold above the
- * longest the task can legally run would charge a band of « réalisation de la
- * tâche » to every candidate who did exactly what they were told, with no
- * length available to them that would avoid it. So the monologue's ceiling is
- * read off the part itself rather than written here: change the announced
- * duration and the threshold follows, because it IS the announced duration.
+ * **Four minutes for the exposé, and that is the user's second correction to
+ * #189.** The issue asked for eight minutes on both parts; the first correction
+ * cut the monologue's to its announced maximum, 420 s, on the ground that a
+ * threshold above the longest the task may legally run is a rule no candidate
+ * can satisfy. That fixed the impossible case and left a wrong one standing.
+ * The épreuve announces the exposé as « ~5–7 min » (`ORAL_PARTS_B2`), so a
+ * candidate who finished at 5:30 — inside the announced range, doing exactly
+ * what the consigne asked — was still charged a band of « réalisation de la
+ * tâche ». A real sitting hit it: an argued exposé, −2, and a page telling the
+ * candidate they owed seven minutes. The user's ruling is that anything past
+ * four minutes is a monologue that happened.
  *
- * **The débat's is ten minutes, and it is a different edge of its range.** The
+ * It also removes a perverse incentive the 420 s threshold created. The charge
+ * is priced off the recording's length, not off voiced speech, so a candidate
+ * who stopped talking at 5:30 and let the clock run silently to 7:00 paid
+ * nothing while one who pressed « Terminer » paid two points. Nothing about the
+ * exposé is better for the two minutes of silence.
+ *
+ * **The débat's is ten minutes, and it is the bottom of its own range.** The
  * épreuve announces the débat as ten to thirteen (`ORAL_PARTS_B2` carries 780 s,
  * the top of it), and the user's rule is that anywhere in that range is a débat
  * fully carried out: « the debat max is 13 but its okey to be between 10 and
@@ -188,37 +159,44 @@ function announcedSeconds(tache: number): number {
  * would charge almost every real sitting, which is the mistake the monologue's
  * eight minutes already made once.
  *
- * Hence the asymmetry, which is deliberate and not a leftover: the exposé is
- * measured against the TOP of its announced range and the débat against the
- * BOTTOM of its own. That is not a rule derived from the format — it is the
- * user's judgement about how much of each part is enough, and the format cannot
- * settle it either way. Both figures are here, in one place, so the next person
- * to disagree edits two lines and re-reads the tests that name them.
- *
- * The débat's is therefore written rather than read off the spec: 600 s is not
- * a number `ORAL_PARTS_B2` holds, since the spec carries one duration per part
- * and this is the other end of a range the spec does not model. The monologue's
- * IS read off the spec, because there the threshold and the announced duration
- * are the same number and must not drift.
+ * Both figures are now written here rather than read off `ORAL_PARTS_B2`. The
+ * monologue's used to be `announcedSeconds(1)`, tied to the spec so that the two
+ * could not drift; the correction severs that tie deliberately, because the
+ * threshold is no longer the announced duration and pretending otherwise would
+ * let a change to the consigne silently re-price every mark. These are the
+ * user's judgements about how much of each part is enough, in one place, so the
+ * next person to disagree edits two lines and re-reads the tests that name them.
  */
 export const FULL_DEVELOPMENT_SECONDS: Record<"monologue" | "debate", number> = {
-  monologue: announcedSeconds(MONOLOGUE_TACHE),
+  monologue: 4 * 60,
   debate: 10 * 60,
 };
 
 /**
- * And how short a part has to be to cost the most: four minutes, #189's figure,
- * the same for both parts. Untouched by the correction above — it is a floor
- * rather than a ceiling, and four minutes is under both parts' announced
- * lengths, so neither is being asked for something it cannot do.
+ * And how short a part has to be to cost the most — per part now, because the
+ * correction above moved the monologue's ceiling onto the figure that used to
+ * be the shared floor.
  *
- * What these replaced: `minDurationSeconds(tache)`, 40 % of each part's
- * expected time floored at 30 s — 168 s of monologue and 312 s of débat, a
- * single threshold per part with a flat −3 behind it. That function is still
- * the incumbent's rule and still exported from `constants.ts`; it is no longer
- * this project's, and nothing in `src/` computes a mark from it any more.
+ * Left as one number, four minutes for both, the monologue would have had no
+ * `moderate` tier at all: nothing falls between « under four minutes » and
+ * « four minutes or more », so a 3:59 exposé would drop two bands where a 4:00
+ * one drops none. The user asked for the three tiers to survive the change, so
+ * the exposé's floor moves down with its ceiling. 2:30 is the midpoint of what
+ * is left, and it keeps « développement insuffisant » meaning a part that ran
+ * roughly half of what was asked — which is what it means for the débat too
+ * (four minutes against ten).
+ *
+ * The débat's floor is untouched at four minutes, #189's original figure.
+ *
+ * What these replaced: the incumbent's `minDurationSeconds(tache)`, 40 % of
+ * each part's expected time floored at 30 s — 168 s of monologue and 312 s of
+ * débat, a single threshold per part with a flat −3 behind it. It is written
+ * down in `constants.ts` and no longer implemented anywhere in this tree.
  */
-export const SHORT_DEVELOPMENT_SECONDS = 4 * 60;
+export const SHORT_DEVELOPMENT_SECONDS: Record<"monologue" | "debate", number> = {
+  monologue: 150,
+  debate: 4 * 60,
+};
 
 /**
  * How developed a part was, in time: the three cases #189 asks for, named
@@ -235,9 +213,10 @@ export type DurationTier = "full" | "moderate" | "strong";
 /**
  * Which tier a part's measured seconds fall in.
  *
- * Takes the part, not just a number: since the user's correction the ceiling
- * differs between them ({@link FULL_DEVELOPMENT_SECONDS}), and a caller that
- * could ask "which tier is 400 seconds" without saying which half it belongs to
+ * Takes the part, not just a number: since the user's corrections neither the
+ * ceiling ({@link FULL_DEVELOPMENT_SECONDS}) nor the floor
+ * ({@link SHORT_DEVELOPMENT_SECONDS}) is shared between them, and a caller that
+ * could ask "which tier is 200 seconds" without saying which half it belongs to
  * would be asking a question that no longer has one answer.
  *
  * **The comparison is negated on purpose, and NaN is why.** Written
@@ -251,7 +230,7 @@ export type DurationTier = "full" | "moderate" | "strong";
  */
 export function durationTier(part: "monologue" | "debate", seconds: number): DurationTier {
   if (!(seconds < FULL_DEVELOPMENT_SECONDS[part])) return "full";
-  return seconds < SHORT_DEVELOPMENT_SECONDS ? "strong" : "moderate";
+  return seconds < SHORT_DEVELOPMENT_SECONDS[part] ? "strong" : "moderate";
 }
 
 /**
@@ -370,13 +349,99 @@ export const PARTICIPATION_WORD_FLOOR = 20;
  * Note this is VOICED seconds, not recorded ones. A recording's length is how
  * long the part ran and a silent candidate's is just as long as anybody's;
  * `audio/voice-activity.ts` is what makes this a claim about a person.
+ *
+ * **And note it is a FLOOR, not the whole test.** On its own it is a claim
+ * about an absolute quantity of noise with no sense of how long the part gave
+ * the candidate to make it — fifteen seconds is most of a thirty-second gap
+ * between two questions and 2.3% of a thirteen-minute débat. That is how a
+ * candidate who answered nothing came to be read as one the app had lost. The
+ * proportion is the other half; see {@link PARTICIPATION_VOICED_SHARE}.
  */
 export const PARTICIPATION_VOICED_FLOOR = 15;
 
-/** Seconds of voiced audio measured per part, from the microphone. */
+/**
+ * And how much of the candidate's OWN time that voiced audio has to fill.
+ *
+ * The second half of the test, and the half that survives a room. The floor
+ * above asks "was there enough of it?"; this asks "was there enough of it for
+ * how long they had?" — voiced seconds over
+ * `PhaseArchive.soloSeconds`, the time recorded with nobody else audible.
+ *
+ * **Why a share separates the two populations and a count does not.** Consider
+ * the débat, where the failure was. If the candidate never speaks, the
+ * examiner fills nearly all of it — relance after relance into the silence —
+ * so their own time is a couple of minutes of dead air, and what lands in it
+ * is room tone, a cough, a chair. If the candidate DOES speak, their own time
+ * is both much longer and mostly full, because the gaps in the examiner's
+ * airtime exist precisely because somebody else was holding the floor. The two
+ * cases differ by a factor of several in proportion while both can clear
+ * fifteen absolute seconds.
+ *
+ * **A third, and here is the width of the gap it sits in.** Conversational
+ * French leaves something like a fifth to a third of a turn under the RMS
+ * threshold — breaths, stops between clauses, the pause before an example — so
+ * a candidate genuinely holding the floor measures somewhere near 0.7, and a
+ * hesitant one well clear of 0.33. Intermittent room noise in the silences
+ * runs at a small fraction of them. A third is comfortably below the first
+ * population and comfortably above the second, which is the only property this
+ * number needs; it is not tuned to a measurement, and there is no measurement
+ * of a real cohort to tune it to.
+ *
+ * **Which way it fails.** Set too high, this re-creates the failure the whole
+ * rule exists to prevent (#206): a genuine exposé lost in transcription is
+ * called absent, the mark is halved, and the correction page tells someone who
+ * spoke for seven minutes that they did not. Set too low, a walk-out is
+ * refused a mark and the sitting is discarded. Both are real harms, which is
+ * why this sits in the middle of the gap rather than at either edge of it —
+ * and why it is ANDed with the floor rather than replacing it: a share is
+ * meaningless over two seconds of opportunity, and the floor is what stops a
+ * part nobody had time to speak in from satisfying a proportion.
+ */
+export const PARTICIPATION_VOICED_SHARE = 1 / 3;
+
+/**
+ * What the microphone measured about one part, as evidence about a person.
+ *
+ * Both numbers are taken with the examiner NOT audible — see
+ * `PhaseArchive.soloVoicedSeconds` for why anything else is a measurement of
+ * the room rather than of the candidate.
+ */
+export interface PartSpeechEvidence {
+  /** Seconds of voiced audio, with nobody else audible. */
+  voicedSeconds: number;
+  /**
+   * Seconds recorded with nobody else audible at all — the candidate's own
+   * time, and the denominator {@link PARTICIPATION_VOICED_SHARE} is taken
+   * against.
+   *
+   * Undefined where the client did not measure it, which is a page loaded
+   * before it existed. The share is then not asked and the floor decides
+   * alone, exactly as it did on that page.
+   */
+  soloSeconds?: number;
+}
+
+/** Voiced speech measured per part, from the microphone. */
 export interface SittingVoicedSpeech {
-  monologueSeconds: number;
-  debateSeconds: number;
+  monologue: PartSpeechEvidence;
+  debate: PartSpeechEvidence;
+}
+
+/**
+ * Whether one part's audio is enough to contradict an empty transcript.
+ *
+ * Both tests, in the order they are cheapest to read: enough voiced audio in
+ * absolute terms, and enough of it relative to the time the candidate had.
+ * A part with no opportunity at all cannot pass — it cannot pass the floor
+ * either, since the voiced seconds are a subset of the solo ones, so the guard
+ * on the division is a guard against `0 / 0` rather than a rule of its own.
+ */
+function heardAtLength(evidence: PartSpeechEvidence): boolean {
+  if (evidence.voicedSeconds < PARTICIPATION_VOICED_FLOOR) return false;
+  const opportunity = evidence.soloSeconds;
+  if (opportunity === undefined) return true;
+  if (!(opportunity > 0)) return false;
+  return evidence.voicedSeconds / opportunity >= PARTICIPATION_VOICED_SHARE;
 }
 
 /**
@@ -403,22 +468,24 @@ export interface SittingVoicedSpeech {
  * instead: no mark at all is the only honest output when half the evidence is
  * gone, and it is the same judgement the route already makes about a transcript
  * that is empty outright.
+ *
+ * **What « heard at length » had to become.** It was one comparison — fifteen
+ * cumulative voiced seconds — and it swallowed every walk-out, because a
+ * microphone left open through a débat hears the examiner, the room and the
+ * gain control long before it hears nothing at all. It is now two, over a
+ * measure that excludes the examiner in the first place: see
+ * {@link PARTICIPATION_VOICED_FLOOR} and {@link PARTICIPATION_VOICED_SHARE},
+ * and `PhaseArchive.soloVoicedSeconds` for how the number is taken.
  */
 export function partsSpokenButUntranscribed(
   participation: SittingParticipation,
   voiced: SittingVoicedSpeech,
 ): Array<"monologue" | "debate"> {
   const lost: Array<"monologue" | "debate"> = [];
-  if (
-    participation.monologueWords < PARTICIPATION_WORD_FLOOR &&
-    voiced.monologueSeconds >= PARTICIPATION_VOICED_FLOOR
-  ) {
+  if (participation.monologueWords < PARTICIPATION_WORD_FLOOR && heardAtLength(voiced.monologue)) {
     lost.push("monologue");
   }
-  if (
-    participation.debateWords < PARTICIPATION_WORD_FLOOR &&
-    voiced.debateSeconds >= PARTICIPATION_VOICED_FLOOR
-  ) {
+  if (participation.debateWords < PARTICIPATION_WORD_FLOOR && heardAtLength(voiced.debate)) {
     lost.push("debate");
   }
   return lost;

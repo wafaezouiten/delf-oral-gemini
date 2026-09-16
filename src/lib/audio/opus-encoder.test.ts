@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
-import { describe, it } from "node:test";
+import { after, before, describe, it } from "node:test";
 
+import { readOggOpus } from "./ogg-opus";
 import { readWavFormat } from "./pcm";
 import {
   RECORDING_BITRATE,
@@ -55,5 +56,147 @@ describe("the bitrate the ceiling was chosen against", () => {
     // nominal one, and the two agree to within the container's overhead.
     assert.equal(RECORDING_BITRATE, 16_000);
     assert.equal((RECORDING_BITRATE / 8) * 20 * 60, 2_400_000);
+  });
+});
+
+/**
+ * WebCodecs, faked just far enough for the encoder's own loop to run: the
+ * config probe, one packet out per 20 ms of input, a `dequeue` event so the
+ * back-pressure wait resolves, and the two ways an encoder can go wrong. Each
+ * packet is a real 20 ms CELT TOC byte followed by filler, which is all the
+ * muxer and `readOggOpus` need to rebuild a timeline from it.
+ */
+describe("a runtime that can encode Opus", () => {
+  const TWENTY_MS_CELT = 19 << 3;
+  const fake = {
+    supported: true,
+    /** Refuse the constant-bitrate config, so the probe has to fall back. */
+    refuseConstant: false,
+    /** Throw from `encode()` on this call (1-based), or never. */
+    failOn: null as number | null,
+    /** Report an asynchronous error through the callback after this many encodes. */
+    errorAfter: null as number | null,
+    /** Emit no packets at all. */
+    mute: false,
+    encodes: 0,
+    closed: 0,
+    configs: [] as unknown[],
+  };
+
+  class FakeAudioData {
+    numberOfFrames: number;
+    constructor(init: { numberOfFrames: number }) {
+      this.numberOfFrames = init.numberOfFrames;
+    }
+    close() {}
+  }
+
+  class FakeAudioEncoder extends EventTarget {
+    static async isConfigSupported(config: { bitrateMode?: string }) {
+      fake.configs.push(config);
+      const refused = fake.refuseConstant && config.bitrateMode === "constant";
+      return { supported: fake.supported && !refused };
+    }
+    state = "unconfigured";
+    encodeQueueSize = 0;
+    private readonly init: {
+      output: (chunk: { byteLength: number; copyTo(target: Uint8Array): void }) => void;
+      error: (error: unknown) => void;
+    };
+    constructor(init: FakeAudioEncoder["init"]) {
+      super();
+      this.init = init;
+    }
+    configure() {
+      this.state = "configured";
+    }
+    encode(data: FakeAudioData) {
+      fake.encodes += 1;
+      if (fake.failOn === fake.encodes) throw new Error("encode refused");
+      if (fake.errorAfter !== null && fake.encodes > fake.errorAfter) {
+        this.init.error(new DOMException("encoder reset", "EncodingError"));
+        return;
+      }
+      if (fake.mute) return;
+      // One packet per 20 ms of the block.
+      for (let i = 0; i < Math.round(data.numberOfFrames / 320); i += 1) {
+        const bytes = new Uint8Array([TWENTY_MS_CELT, 0x00, 0x11, 0x22]);
+        this.init.output({ byteLength: bytes.length, copyTo: (target) => target.set(bytes) });
+      }
+      this.dispatchEvent(new Event("dequeue"));
+    }
+    async flush() {}
+    close() {
+      this.state = "closed";
+      fake.closed += 1;
+    }
+  }
+
+  before(() => {
+    Object.assign(globalThis, { AudioEncoder: FakeAudioEncoder, AudioData: FakeAudioData });
+  });
+  after(() => {
+    delete (globalThis as { AudioEncoder?: unknown }).AudioEncoder;
+    delete (globalThis as { AudioData?: unknown }).AudioData;
+  });
+  const reset = () =>
+    Object.assign(fake, {
+      supported: true,
+      refuseConstant: false,
+      failOn: null,
+      errorAfter: null,
+      mute: false,
+      encodes: 0,
+      closed: 0,
+      configs: [],
+    });
+
+  it("asks for constant bitrate with DTX off, and encodes one block per second", async () => {
+    reset();
+    const three = new Int16Array(3 * 16_000).fill(1_000);
+    const blob = await encodePcm16ToOggOpus(three, 16_000);
+
+    assert.equal(fake.encodes, 3, "one block per second of input");
+    assert.equal(fake.closed, 1);
+    const config = fake.configs[0] as { bitrateMode?: string; opus?: { usedtx?: boolean } };
+    assert.equal(config.bitrateMode, "constant");
+    assert.equal(config.opus?.usedtx, false);
+
+    const read = readOggOpus(await blob.arrayBuffer());
+    assert.equal(read?.durationSeconds, 3, "the muxed file measures what went in");
+  });
+
+  it("closes the encoder and rethrows when a block is refused", async () => {
+    reset();
+    fake.failOn = 2;
+    await assert.rejects(
+      () => encodePcm16ToOggOpus(new Int16Array(3 * 16_000), 16_000),
+      /encode refused/,
+    );
+    assert.equal(fake.closed, 1, "closed on the way out, whatever happened");
+  });
+
+  it("surfaces an error the encoder reported asynchronously, at the next block", async () => {
+    reset();
+    fake.errorAfter = 1;
+    await assert.rejects(
+      () => encodePcm16ToOggOpus(new Int16Array(3 * 16_000), 16_000),
+      /encoder reset/,
+    );
+    assert.equal(fake.closed, 1);
+  });
+
+  it("refuses to hand back an empty file when the encoder produced nothing", async () => {
+    reset();
+    fake.mute = true;
+    await assert.rejects(() => encodePcm16ToOggOpus(pcm, 16_000), /produced nothing/);
+  });
+
+  it("falls back to the plain config when constant bitrate is refused", async () => {
+    reset();
+    fake.refuseConstant = true;
+    assert.equal(await isOpusEncodingSupported(16_000), true);
+    assert.equal(fake.configs.length, 2, "constant first, then without the mode");
+    assert.equal((fake.configs[1] as { bitrateMode?: string }).bitrateMode, undefined);
   });
 });

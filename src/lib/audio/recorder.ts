@@ -30,6 +30,7 @@
  */
 
 import { INPUT_SAMPLE_RATE } from "@/lib/gemini/constants";
+import type { RecorderLike } from "./ports";
 import {
   PhaseArchive,
   type PhaseRecording,
@@ -200,7 +201,7 @@ export interface MicRecorderOptions extends RecorderCallbacks {
   encodeRecording?: RecordingEncoder;
 }
 
-export class MicRecorder {
+export class MicRecorder implements RecorderLike {
   private capture: CaptureStream | null = null;
   private framer: PcmFramer | null = null;
 
@@ -384,6 +385,26 @@ export class MicRecorder {
    *  quiet room. See `PhaseArchive.voicedSeconds`. */
   voicedSeconds(phase: RecordedPhase): number {
     return this.archive.voicedSeconds(phase);
+  }
+
+  /** The same, counted only while the examiner was silent — the evidence the
+   *  finish route weighs against an empty transcript. See
+   *  `PhaseArchive.soloVoicedSeconds`, which is where the distinction is argued. */
+  soloVoicedSeconds(phase: RecordedPhase): number {
+    return this.archive.soloVoicedSeconds(phase);
+  }
+
+  /** And how long the candidate had to produce it — the seconds recorded with
+   *  the examiner silent, speech or not. See `PhaseArchive.soloSeconds`. */
+  soloSeconds(phase: RecordedPhase): number {
+    return this.archive.soloSeconds(phase);
+  }
+
+  /** Whether the examiner is audible right now, which the microphone cannot
+   *  tell from the candidate. Passed straight through; the archive owns what it
+   *  does with it. */
+  setPlaybackAudible(audible: boolean): void {
+    this.archive.setPlaybackAudible(audible);
   }
 
   /** The phase currently being recorded, or null between phases. */

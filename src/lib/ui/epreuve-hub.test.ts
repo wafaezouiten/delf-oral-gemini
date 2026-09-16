@@ -10,10 +10,13 @@ import {
   buildHubSujets,
   buildHubView,
   buildShapePill,
+  formatSujetNumber,
   HUB_FEATURED_SUJETS,
   HUB_LINKS,
+  hubGreeting,
   isNavLinkActive,
   latestScoreBySujet,
+  sujetCardVerb,
   sujetMeta,
   sujetTeaser,
 } from "./epreuve-hub";
@@ -269,5 +272,35 @@ describe("the score on a sujet card", () => {
 
   it("reads an empty history as no scores at all", () => {
     assert.equal(latestScoreBySujet([]).size, 0);
+  });
+});
+
+describe("the card's number and verb", () => {
+  it("zero-pads the number so a column aligns", () => {
+    assert.equal(formatSujetNumber(3), "N° 03");
+    assert.equal(formatSujetNumber(12), "N° 12");
+  });
+
+  it("offers to read a sujet never sat and to redo one that carries a score", () => {
+    assert.equal(sujetCardVerb(null), "Lire le sujet");
+    assert.equal(sujetCardVerb(0), "Refaire", "a walk-out's zero is a score");
+    assert.equal(sujetCardVerb(18), "Refaire");
+  });
+});
+
+describe("the hub's greeting", () => {
+  it("is nothing without a first name", () => {
+    assert.equal(hubGreeting(null, 3), null);
+    assert.equal(hubGreeting(undefined, 0), null);
+    assert.equal(hubGreeting("", 0), null);
+  });
+
+  it("points a new candidate at a first sujet and counts the others' épreuves", () => {
+    assert.equal(
+      hubGreeting("Wafae", 0),
+      "Bonjour Wafae. Choisissez un sujet pour votre première épreuve.",
+    );
+    assert.equal(hubGreeting("Wafae", 1), "Bonjour Wafae. Vous avez déjà passé 1 épreuve.");
+    assert.equal(hubGreeting("Wafae", 3), "Bonjour Wafae. Vous avez déjà passé 3 épreuves.");
   });
 });

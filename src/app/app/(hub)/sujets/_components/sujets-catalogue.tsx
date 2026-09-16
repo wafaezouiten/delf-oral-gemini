@@ -1,16 +1,18 @@
 "use client";
 
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { useId, useMemo, useState } from "react";
 
 import { ClockIcon, CloseIcon, SearchIcon } from "@/app/_components/po/icons";
 import { Kicker, Tag } from "@/app/_components/po/tag";
 import { ScoreTag } from "@/app/_components/score-band";
+import { useModalDialog } from "@/app/_components/po/use-modal-dialog";
 import { StartExamButton } from "@/app/app/(hub)/_components/start-exam-button";
 import { SujetCard } from "@/app/app/(hub)/_components/sujet-card";
 import { COMPETENCY_MAX } from "@/lib/delf/constants";
 import { PHASE_DURATIONS } from "@/lib/delf/phases";
 import type { OralTopic } from "@/lib/delf/topics";
 import type { HubSujet } from "@/lib/ui/epreuve-hub";
+import { catalogueFacts, filterSujets, resultCount } from "@/lib/ui/sujets-catalogue";
 
 /**
  * The sujets kiosk: the catalogue and a sujet's full sheet, whose footer starts
@@ -55,15 +57,8 @@ export function SujetsCatalogue({
   const [openSlug, setOpenSlug] = useState<string | null>(initialSlug ?? null);
   const searchId = useId();
 
-  const filtered = useMemo(() => {
-    const needle = normalise(query);
-    if (!needle) return sujets;
-    return sujets.filter(
-      (sujet) =>
-        normalise(sujet.title).includes(needle) || normalise(sujet.topic.document).includes(needle),
-    );
-  }, [query, sujets]);
-
+  // The search and the counts are `lib/ui/sujets-catalogue.ts`, tested.
+  const filtered = useMemo(() => filterSujets(sujets, query), [query, sujets]);
   const open = sujets.find((sujet) => sujet.slug === openSlug) ?? null;
 
   return (
@@ -86,11 +81,7 @@ export function SujetsCatalogue({
         <div className="mt-7">
           <div className="bg-border h-px" />
           <div className="text-muted-foreground tabular flex [scrollbar-width:none] items-center gap-x-3 overflow-x-auto py-3 text-[0.6875rem] font-medium tracking-[0.04em] whitespace-nowrap [&::-webkit-scrollbar]:hidden">
-            {[
-              `${sujets.length} sujets publiés`,
-              "Examinateur IA",
-              `Correction /${COMPETENCY_MAX}`,
-            ].map((fact, index) => (
+            {catalogueFacts(sujets.length).map((fact, index) => (
               <span key={fact} className="flex shrink-0 items-center gap-3">
                 {index > 0 && (
                   <span aria-hidden className="text-border">
@@ -125,9 +116,7 @@ export function SujetsCatalogue({
         {/* Polite, and counted rather than merely re-rendered: a candidate
             filtering a list they cannot see needs to hear that it changed. */}
         <p role="status" aria-live="polite" className="text-muted-foreground mt-2 text-xs">
-          {query
-            ? `${filtered.length} sujet${filtered.length > 1 ? "s" : ""} sur ${sujets.length}`
-            : `${sujets.length} sujets`}
+          {resultCount(query, filtered.length, sujets.length)}
         </p>
       </div>
 
@@ -136,22 +125,7 @@ export function SujetsCatalogue({
           Aucun sujet ne correspond à « {query} ».
         </p>
       ) : (
-        <ul className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {filtered.map((sujet) => (
-            <li key={sujet.slug} className="flex">
-              <SujetCard
-                sujet={sujet}
-                // The catalogue's own numbering, not the filtered list's: a
-                // search that renumbered the cards would make « N° 03 » mean
-                // something different for every query.
-                position={sujets.indexOf(sujet) + 1}
-                headingLevel="h2"
-                ariaLabel={`Lire le sujet : ${sujet.title}`}
-                onOpen={() => setOpenSlug(sujet.slug)}
-              />
-            </li>
-          ))}
-        </ul>
+        <SujetGrid sujets={sujets} shown={filtered} onOpen={setOpenSlug} />
       )}
 
       <SujetSheet sujet={open} onClose={() => setOpenSlug(null)} />
@@ -159,13 +133,34 @@ export function SujetsCatalogue({
   );
 }
 
-/** Accent- and case-insensitive, so "telelravail" finds « télétravail ». */
-function normalise(value: string): string {
-  return value
-    .normalize("NFD")
-    .replace(/\p{Diacritic}/gu, "")
-    .toLowerCase()
-    .trim();
+/** The cards, three across at the widest. */
+function SujetGrid({
+  sujets,
+  shown,
+  onOpen,
+}: {
+  sujets: readonly KioskSujet[];
+  shown: readonly KioskSujet[];
+  onOpen: (slug: string) => void;
+}) {
+  return (
+    <ul className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+      {shown.map((sujet) => (
+        <li key={sujet.slug} className="flex">
+          <SujetCard
+            sujet={sujet}
+            // The catalogue's own numbering, not the filtered list's: a
+            // search that renumbered the cards would make « N° 03 » mean
+            // something different for every query.
+            position={sujets.indexOf(sujet) + 1}
+            headingLevel="h2"
+            ariaLabel={`Lire le sujet : ${sujet.title}`}
+            onOpen={() => onOpen(sujet.slug)}
+          />
+        </li>
+      ))}
+    </ul>
+  );
 }
 
 /**
@@ -183,14 +178,7 @@ function normalise(value: string): string {
  * which is everything the dialog used to restate.
  */
 function SujetSheet({ sujet, onClose }: { sujet: KioskSujet | null; onClose: () => void }) {
-  const ref = useRef<HTMLDialogElement>(null);
-
-  useEffect(() => {
-    const dialog = ref.current;
-    if (!dialog) return;
-    if (sujet && !dialog.open) dialog.showModal();
-    if (!sujet && dialog.open) dialog.close();
-  }, [sujet]);
+  const ref = useModalDialog(sujet !== null);
 
   return (
     <dialog

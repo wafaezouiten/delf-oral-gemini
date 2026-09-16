@@ -9,12 +9,18 @@ import { COMPETENCY_FLOOR, COMPETENCY_MAX } from "@/lib/delf/constants";
 import { formatScore25 } from "@/lib/ui/format-score";
 import { HUB_LINKS } from "@/lib/ui/epreuve-hub";
 import {
-  formatScoreDelta,
   TRAJECTORY_TICKS,
   type DashboardView,
   type TrajectoryPoint,
   type TrajectoryView,
 } from "@/lib/ui/dashboard-view";
+import {
+  barAlign,
+  trajectoryBar,
+  trajectoryHeadline,
+  type TrajectoryDelta,
+  type TrajectoryHeadline,
+} from "@/lib/ui/trajectory-card";
 import { SittingRow } from "../../_components/sitting-row";
 
 /**
@@ -146,8 +152,11 @@ export function Dashboard({ view }: { view: DashboardView }) {
  * height would be invisible and the exit dialog promises it counts.
  */
 function TrajectoryCard({ trajectory }: { trajectory: TrajectoryView }) {
-  const { points, latest, delta } = trajectory;
-  if (!latest) return null;
+  // The headline's words and each bar's shape are `lib/ui/trajectory-card.ts`,
+  // tested; this positions them.
+  const headline = trajectoryHeadline(trajectory);
+  if (!headline) return null;
+  const { points } = trajectory;
 
   return (
     <section className="border-border bg-card sheet mt-5 border">
@@ -170,47 +179,7 @@ function TrajectoryCard({ trajectory }: { trajectory: TrajectoryView }) {
             Score /{COMPETENCY_MAX} · par simulation
           </p>
         </div>
-        <div className="shrink-0 text-right">
-          <p className="flex items-baseline justify-end gap-1.5 sm:gap-2">
-            {/* The note is a /25, so it is tinted on the /25 scale — the same
-                rule as the « Note moyenne » tile, band computed in the view
-                model. */}
-            <span
-              className={cn(
-                "tabular font-serif text-xl leading-none font-semibold sm:text-2xl",
-                scoreInk(latest.band.tone),
-              )}
-            >
-              {formatScore25(latest.score25)}
-              <span className="text-muted-foreground text-xs font-normal sm:text-sm">
-                /{COMPETENCY_MAX}
-              </span>
-            </span>
-            {/* The delta is a direction, not a mark: the caret and the sign
-                carry it, and the green/red is a redundant tint of that
-                direction — never of a band. */}
-            {delta !== null && (
-              <span
-                className={cn(
-                  "tabular text-xs font-semibold sm:text-sm",
-                  delta > 0 && "text-score-green",
-                  delta < 0 && "text-score-red",
-                  delta === 0 && "text-muted-foreground",
-                )}
-              >
-                {delta !== 0 && (
-                  <span aria-hidden className="text-[0.625rem]">
-                    {delta > 0 ? "▲ " : "▼ "}
-                  </span>
-                )}
-                {formatScoreDelta(delta)}
-              </span>
-            )}
-          </p>
-          <p className="text-muted-foreground mt-1 text-[0.6875rem] sm:text-xs">
-            {delta !== null ? "dernière simulation" : "première simulation"} · {latest.date}
-          </p>
-        </div>
+        <Headline headline={headline} />
       </div>
 
       <div className="flex gap-3 px-4 pt-4 pb-5 sm:px-6">
@@ -231,41 +200,13 @@ function TrajectoryCard({ trajectory }: { trajectory: TrajectoryView }) {
 
         <div className="min-w-0 flex-1">
           <div className="relative h-44">
-            {TRAJECTORY_TICKS.map((tick) => (
-              <div
-                key={tick}
-                aria-hidden
-                className="border-border absolute inset-x-0 border-t border-dashed"
-                style={{ top: `${100 - (tick / COMPETENCY_MAX) * 100}%` }}
-              />
-            ))}
-            {/* The seuil éliminatoire, on the same frame as the bars — the one
-                horizontal that is a rule rather than a ruler, so it carries its
-                name. */}
-            <div
-              aria-hidden
-              className="border-score-red/50 absolute inset-x-0 border-t border-dashed"
-              style={{ top: `${100 - (COMPETENCY_FLOOR / COMPETENCY_MAX) * 100}%` }}
-            >
-              <span className="text-score-red/70 absolute right-0 bottom-0.5 text-[0.625rem]">
-                Seuil {COMPETENCY_FLOOR}/{COMPETENCY_MAX}
-              </span>
-            </div>
+            <Gridlines />
             <div className="absolute inset-0 flex items-end gap-1.5">
               {points.map((point, index) => (
                 <TrajectoryBar
                   key={point.examId}
                   point={point}
-                  // The first and last bars anchor their tooltip to their own
-                  // side instead of their centre, so the sujets at the edges do
-                  // not run out of the card.
-                  align={
-                    index === 0
-                      ? "left-0"
-                      : index === points.length - 1
-                        ? "right-0"
-                        : "left-1/2 -translate-x-1/2"
-                  }
+                  align={barAlign(index, points.length)}
                 />
               ))}
             </div>
@@ -273,7 +214,7 @@ function TrajectoryCard({ trajectory }: { trajectory: TrajectoryView }) {
           {/* The x-axis in dates: where the record starts, and where it is. */}
           <div className="text-muted-foreground mt-2 flex justify-between text-xs">
             <span>{points[0].date}</span>
-            {points.length > 1 && <span>{latest.date}</span>}
+            {headline.axisEnd && <span>{headline.axisEnd}</span>}
           </div>
         </div>
       </div>
@@ -283,6 +224,87 @@ function TrajectoryCard({ trajectory }: { trajectory: TrajectoryView }) {
         voir le sujet et la note ; une épreuve abandonnée compte 0/{COMPETENCY_MAX}.
       </p>
     </section>
+  );
+}
+
+/**
+ * The standing at a glance: the latest note, its movement since the simulation
+ * before, and its date.
+ */
+function Headline({ headline }: { headline: TrajectoryHeadline }) {
+  const { latest } = headline;
+  return (
+    <div className="shrink-0 text-right">
+      <p className="flex items-baseline justify-end gap-1.5 sm:gap-2">
+        {/* The note is a /25, so it is tinted on the /25 scale — the same
+            rule as the « Note moyenne » tile, band computed in the view
+            model. */}
+        <span
+          className={cn(
+            "tabular font-serif text-xl leading-none font-semibold sm:text-2xl",
+            scoreInk(latest.band.tone),
+          )}
+        >
+          {formatScore25(latest.score25)}
+          <span className="text-muted-foreground text-xs font-normal sm:text-sm">
+            /{COMPETENCY_MAX}
+          </span>
+        </span>
+        {headline.delta && <Delta delta={headline.delta} />}
+      </p>
+      <p className="text-muted-foreground mt-1 text-[0.6875rem] sm:text-xs">{headline.dateLine}</p>
+    </div>
+  );
+}
+
+const DELTA_INK: Record<TrajectoryDelta["tone"], string> = {
+  up: "text-score-green",
+  down: "text-score-red",
+  flat: "text-muted-foreground",
+};
+
+/**
+ * The delta is a direction, not a mark: the caret and the sign carry it, and
+ * the green/red is a redundant tint of that direction — never of a band.
+ */
+function Delta({ delta }: { delta: TrajectoryDelta }) {
+  return (
+    <span className={cn("tabular text-xs font-semibold sm:text-sm", DELTA_INK[delta.tone])}>
+      {delta.caret && (
+        <span aria-hidden className="text-[0.625rem]">
+          {delta.caret}
+        </span>
+      )}
+      {delta.text}
+    </span>
+  );
+}
+
+/** The y-gridlines on the /25, and the seuil éliminatoire on the same frame. */
+function Gridlines() {
+  return (
+    <>
+      {TRAJECTORY_TICKS.map((tick) => (
+        <div
+          key={tick}
+          aria-hidden
+          className="border-border absolute inset-x-0 border-t border-dashed"
+          style={{ top: `${100 - (tick / COMPETENCY_MAX) * 100}%` }}
+        />
+      ))}
+      {/* The seuil éliminatoire, on the same frame as the bars — the one
+          horizontal that is a rule rather than a ruler, so it carries its
+          name. */}
+      <div
+        aria-hidden
+        className="border-score-red/50 absolute inset-x-0 border-t border-dashed"
+        style={{ top: `${100 - (COMPETENCY_FLOOR / COMPETENCY_MAX) * 100}%` }}
+      >
+        <span className="text-score-red/70 absolute right-0 bottom-0.5 text-[0.625rem]">
+          Seuil {COMPETENCY_FLOOR}/{COMPETENCY_MAX}
+        </span>
+      </div>
+    </>
   );
 }
 
@@ -299,6 +321,7 @@ function TrajectoryCard({ trajectory }: { trajectory: TrajectoryView }) {
  * focused bar reads aloud what the tooltip shows.
  */
 function TrajectoryBar({ point, align }: { point: TrajectoryPoint; align: string }) {
+  const bar = trajectoryBar(point);
   return (
     <div
       tabIndex={0}
@@ -306,19 +329,10 @@ function TrajectoryBar({ point, align }: { point: TrajectoryPoint; align: string
     >
       <div
         aria-hidden
-        className={cn(
-          "w-full rounded-t-md",
-          scoreFill(point.band.tone),
-          // A walk-out's 0/25 still shows: a red sliver on the floor beats an
-          // invisible bar the record swears is there.
-          point.percent === 0 && "h-0.5",
-        )}
-        style={point.percent > 0 ? { height: `${point.percent}%` } : undefined}
+        className={cn("w-full rounded-t-md", scoreFill(point.band.tone), bar.sliver && "h-0.5")}
+        style={bar.style}
       />
-      <span className="sr-only">
-        {point.topicTitle} — {point.score25}/{COMPETENCY_MAX}, {point.date}
-        {point.outcome === "abandoned" ? ", épreuve abandonnée" : ""}
-      </span>
+      <span className="sr-only">{bar.srText}</span>
       <div
         aria-hidden
         className={cn(
@@ -333,9 +347,7 @@ function TrajectoryBar({ point, align }: { point: TrajectoryPoint; align: string
             <ScoreTag score25={point.score25} />
             <span className="text-muted-foreground text-xs">{point.date}</span>
           </p>
-          {point.outcome === "abandoned" && (
-            <p className="text-muted-foreground mt-1 text-xs">Épreuve abandonnée</p>
-          )}
+          {bar.note && <p className="text-muted-foreground mt-1 text-xs">{bar.note}</p>}
         </div>
       </div>
     </div>

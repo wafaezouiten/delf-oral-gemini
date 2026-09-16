@@ -16,10 +16,21 @@
 import type { OralTopic } from "./topics";
 
 /**
- * Bumped whenever the wording below changes.
+ * Bumped whenever {@link buildExaminerInstruction}'s output changes — the
+ * identity block and the two phase instructions, and nothing else.
  *
- * **Nothing reads it yet, and the comment here used to claim otherwise.** It
- * said the version was "stored on every evaluation so an old result can be
+ * **Not the runtime directives** (#215). `closingInstruction`,
+ * `lastQuestionInstruction`, the relances and the recoveries are spoken wording
+ * too, and changing them deliberately leaves this alone. What reads the version
+ * is `/api/dev/examiner-prompt`, which serves it alongside a SYSTEM INSTRUCTION
+ * so the dev panel can tell a saved prompt that the shipped text has moved on
+ * under it (#166). A directive is not part of what was saved, so bumping this
+ * for one would mark every stored prompt stale over a change that is not in it
+ * — a warning that is false the first time and ignored the second.
+ *
+ * **What used to be here.** The comment said nothing read it, which was true
+ * when it was written and stopped being true with that panel. Before that it
+ * claimed the version was "stored on every evaluation so an old result can be
  * traced back to the examiner that produced it", which is not true and never
  * was: the `prompt_version` column on a correction is written from
  * `EVAL_PROMPT_VERSION` in `lib/gemini/evaluate.ts`, a different constant
@@ -388,6 +399,17 @@ export function resumeDebateInstruction(minutes: number, afterLastQuestion = fal
 }
 
 /**
+ * Why a part is ending, which is the only thing the closing sentence has to get
+ * right (#215).
+ *
+ * `time` is the clock reaching its deadline, and every part can end that way.
+ * `exchange` is the débat's own ending: the last question asked, answered, and
+ * the room settled, with minutes still on the clock. Nothing else distinguishes
+ * them — the handshake, the wait for the turn, the teardown are identical.
+ */
+export type ClosingReason = "time" | "exchange";
+
+/**
  * The line the examiner speaks when a phase's clock runs out — or, for the
  * débat, a few seconds before it does (#108): sent at 0:00 the examiner only
  * STARTS its sentence there, so « le temps est écoulé » was always heard after
@@ -409,9 +431,24 @@ export function resumeDebateInstruction(minutes: number, afterLastQuestion = fal
  * What the monologue's no longer does is announce the débat. The consigne that
  * follows it says so, in fixed words, and having both say it meant the handover
  * was narrated twice.
+ *
+ * The débat now has two of them, because it has two ways of ending (#215) and
+ * only one of them is the clock. « Le temps de l'épreuve est écoulé » is a
+ * statement about the world, and at 10:40 — the last question asked, answered,
+ * and the room settled — it is a false one. A candidate hearing it two and a
+ * half minutes before the clock they can see says zero has been told the app
+ * ran out of time, which is not what happened: the exchange finished. So the
+ * `exchange` variant says that instead, and is forbidden the vocabulary of
+ * time entirely, the identity block's one exception being written for the last
+ * question and not for this.
  */
-export function closingInstruction(phase: "monologue" | "debate"): string {
-  return phase === "monologue"
-    ? "[Le temps du monologue est écoulé. Remercie brièvement le candidat en une seule phrase. N'annonce pas la suite de l'épreuve, la consigne suivante s'en charge. N'évalue pas.]"
+export function closingInstruction(
+  phase: "monologue" | "debate",
+  reason: ClosingReason = "time",
+): string {
+  if (phase === "monologue")
+    return "[Le temps du monologue est écoulé. Remercie brièvement le candidat en une seule phrase. N'annonce pas la suite de l'épreuve, la consigne suivante s'en charge. N'évalue pas.]";
+  return reason === "exchange"
+    ? "[Le candidat a répondu à ta dernière question : l'entretien est terminé. Conclus en une phrase, remercie le candidat et prends congé de lui. Ne dis pas que le temps est écoulé, ne parle pas de la durée de l'épreuve et ne prononce aucun chiffre. Ne pose plus aucune question. N'évalue pas, ne donne aucune note.]"
     : "[Le temps de l'épreuve est écoulé. Conclus en une phrase, remercie le candidat et mets fin à l'entretien. N'évalue pas, ne donne aucune note.]";
 }

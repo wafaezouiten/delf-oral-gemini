@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import { cn } from "@/lib/ui/class-names";
+import { devFieldKeyDown } from "@/lib/ui/dev-field-keys";
 import {
   DEV_PANEL_COPY,
   DEV_SUBMIT_COPY,
@@ -173,19 +174,7 @@ export function DevTranscriptionPanel({
             ref={field}
             value={text}
             onChange={(event) => setText(event.target.value)}
-            onKeyDown={(event) => {
-              // Ctrl/Cmd+Enter sends; plain Enter breaks the line. The opposite
-              // of the one-line box this replaced, and deliberately: the field
-              // takes a pasted exposé of several paragraphs, where Enter-to-send
-              // truncates at the first blank line.
-              if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
-                event.preventDefault();
-                event.currentTarget.form?.requestSubmit();
-              }
-              // Escape closes, as it would for any popover — and closing is what
-              // hands the microphone back, so there is no state to get stuck in.
-              if (event.key === "Escape") onActiveChange(false);
-            }}
+            onKeyDown={devFieldKeyDown(() => onActiveChange(false))}
             rows={3}
             placeholder={DEV_PANEL_COPY.placeholder}
             className="min-h-14 resize-y rounded border border-amber-300 bg-white p-1.5 text-[0.6875rem] leading-relaxed text-amber-950 outline-none placeholder:text-amber-700/60 focus:border-amber-500"

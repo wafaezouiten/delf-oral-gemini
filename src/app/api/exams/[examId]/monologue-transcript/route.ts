@@ -21,8 +21,7 @@ import "server-only";
 
 import { NextResponse } from "next/server";
 
-import { authorizeExam } from "@/lib/auth/exam-guard";
-import { EXAM_ACCESS_DENIALS } from "@/lib/auth/exam-access";
+import { examRoute } from "@/lib/auth/exam-route";
 // The same number one phase's artefact is held to when this very blob reaches
 // the finish, with the platform arithmetic that sets it. The cap lives there
 // rather than in the transcriber for the reason that module gives.
@@ -40,23 +39,12 @@ export const dynamic = "force-dynamic";
  *  cannot outlive the consigne by much. The client stops waiting first. */
 export const maxDuration = 60;
 
-export async function POST(request: Request, context: { params: Promise<{ examId: string }> }) {
-  const { examId } = await context.params;
-
-  /**
-   * Ownership before anything else, exactly as the finish route argues it: exam
-   * ids are sequential serials, and without the second check any signed-in user
-   * could spend a model call against a neighbouring id's recording.
-   *
-   * `no-sitting` is not a refusal here either — a degraded `local-…` id has no
-   * row to check and still has an exposé to transcribe.
-   */
-  const access = await authorizeExam(examId);
-  if (access.status === "denied") {
-    const { status, error } = EXAM_ACCESS_DENIALS[access.reason];
-    return NextResponse.json({ error }, { status });
-  }
-
+/**
+ * `no-sitting` is not a refusal here: a degraded `local-…` id has no row to
+ * check and still has an exposé to transcribe, so `access` is taken for the
+ * denial `examRoute` already answered and nothing more.
+ */
+export const POST = examRoute(async function transcribeExpose(request) {
   const declaredLength = Number(request.headers.get("content-length"));
   if (Number.isFinite(declaredLength) && declaredLength > MAX_RECORDING_BYTES) {
     return NextResponse.json({ error: "Enregistrement trop volumineux" }, { status: 413 });
@@ -120,4 +108,4 @@ export async function POST(request: Request, context: { params: Promise<{ examId
     console.error(`[monologue-transcript] failed after ${Date.now() - startedAt}ms`, error);
     return NextResponse.json({ error: "La transcription a échoué" }, { status: 502 });
   }
-}
+});

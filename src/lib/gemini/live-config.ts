@@ -209,8 +209,21 @@ export function monologueConfig({
  * examiner's interventions are one to three sentences by prompt, the DELF
  * exercice en interaction never asks the candidate to interrupt, and the
  * app already owns every other way a turn can end (the silence watch, the time
- * cues, the closing handshake). Their speech during an examiner turn is still
- * captured and still transcribed; it simply does not cut the examiner short.
+ * cues, the closing handshake).
+ *
+ * **What it costs beyond that, measured (#220).** This comment used to say the
+ * candidate's speech during an examiner turn was "still captured and still
+ * transcribed". It is not: on `gemini-3.1-flash-live-preview` the service
+ * DROPS whatever arrives while it is generating — a sentence spoken entirely
+ * inside the turn was never transcribed and never answered, and one that ran
+ * past the turn's edge was transcribed from the edge onward, its opening
+ * clause gone (`scripts/probe-overlap.ts`, against the shipped config). The
+ * app answers that in `ExamLiveSession`, not here: the microphone is held
+ * while a turn is in flight and released as one burst at `turnComplete`,
+ * which the same probe showed the service transcribes whole. That hold is
+ * only correct BECAUSE of the setting below — under barge-in a held chunk
+ * would be an interruption the server never hears — so the two are pinned
+ * together in `live-config.test.ts`.
  */
 export function debateConfig({
   topic,

@@ -1,5 +1,3 @@
-"use client";
-
 import type { ReactNode } from "react";
 
 import { ExitIcon } from "@/app/_components/po/icons";
@@ -7,17 +5,12 @@ import { Kicker } from "@/app/_components/po/tag";
 import { SimulatorTopBar } from "@/app/_components/po/topbar";
 import { TimerRing } from "@/app/_components/po/timer-ring";
 import { cn } from "@/lib/ui/class-names";
-import { phaseDurationSeconds } from "@/lib/delf/phases";
 import type { OralTopic } from "@/lib/delf/topics";
 import type { TranscriptEntry } from "@/lib/delf/transcript";
+import { passationView, type PassationView } from "@/lib/ui/passation-view";
 import {
-  MONOLOGUE_TITLE,
-  DEBATE_TITLE,
   SITE_FOOTER,
-  candidateStatus,
-  examinerStatus,
   partieKicker,
-  passationStatus,
   poKicker,
   topbarStep,
   type SpeakingPhase,
@@ -68,130 +61,101 @@ import { NotesDrawer } from "./notes-drawer";
  * document you are about to argue from should not be charged to the seven minutes
  * you have to argue in, and the DELF grades how long you spoke.
  */
+/** The live part as the controller reports it, and what this screen reads of it. */
+export interface PassationState {
+  elapsed: number;
+  phaseStartedAt: number | null;
+  remaining: number;
+  recording: boolean;
+  examinerSpeaking: boolean;
+  openingQuestionPending: boolean;
+  connected: boolean;
+  connecting: boolean;
+  canAdvance: boolean;
+  awaitingStart: boolean;
+  closing: boolean;
+  transcript: readonly TranscriptEntry[];
+  /** The monologue came back with no words and the clock is held (#206). */
+  emptyTranscript: boolean;
+  /** The consigne is still being spoken; nothing starts until it is over. */
+  awaitingConsigne: boolean;
+}
+
+export interface PassationActions {
+  start: () => void;
+  advance: () => void;
+  exit: () => void;
+  retryTranscription: () => void;
+}
+
 export function PassationScreen({
   phase,
   topic,
-  elapsed,
-  phaseStartedAt,
-  remaining,
-  recording,
-  examinerSpeaking,
-  openingQuestionPending = false,
-  connected,
-  connecting,
-  canAdvance,
-  awaitingStart,
-  closing,
+  state,
   notes,
-  notesOpen,
-  onToggleNotes,
-  transcript,
-  onStart,
-  onAdvance,
-  onExit,
-  emptyTranscript = false,
-  onRetryTranscription,
-  awaitingConsigne = false,
+  actions,
   notices,
   announcement,
   devPanel,
 }: {
   phase: SpeakingPhase;
-  /** The sujet, on screen throughout. The reason this screen exists. */
   topic: OralTopic;
-  elapsed: number;
-  /** The current phase's start, in the transcript's time base — see `ExamState`. */
-  phaseStartedAt: number | null;
-  remaining: number;
-  recording: boolean;
-  /**
-   * The examiner holds the floor: their voice is streaming, or a consigne is
-   * playing (`ExamController` counts both). The débat's scene reads it, and it is
-   * the only thing on that screen that says whose turn it is (#60).
-   */
-  examinerSpeaking: boolean;
-  /**
-   * The débat's opening question is owed and not yet delivered (`ExamState`).
-   * The floor is the examiner's for that whole window — connecting, generating,
-   * speaking — even though nothing is audible yet, so the scene must not hand
-   * the parole to the candidate off `examinerSpeaking` alone.
-   */
-  openingQuestionPending?: boolean;
-  connected: boolean;
-  connecting: boolean;
-  canAdvance: boolean;
-  /** The part is armed and waiting for « Enregistrer ». */
-  awaitingStart: boolean;
-  /**
-   * The part has been ended and the examiner is giving its closing sentence
-   * (#55). Several seconds, during which the candidate's own click was the last
-   * thing that changed on this screen.
-   */
-  closing: boolean;
-  notes: string;
-  notesOpen: boolean;
-  onToggleNotes: () => void;
-  /**
-   * The whole exam transcript. Only the débat's half of it is ever printed here,
-   * and only the débat's streams turn by turn — see `DebateConversation`.
-   */
-  transcript: readonly TranscriptEntry[];
-  /** « Enregistrer » — starts the clock, the recording and the session. */
-  onStart: () => void;
-  onAdvance: () => void;
-  onExit: () => void;
-  /** The monologue was ended with no speech recorded — the advance was refused. */
-  emptyTranscript?: boolean;
-  onRetryTranscription?: () => void;
-  /** The consigne is still being given, so nothing has started yet (#37). */
-  awaitingConsigne?: boolean;
-  /** Controller failures — a lost connection, a dead microphone. */
+  state: PassationState;
+  /** The préparation's notes, and the drawer they open in. */
+  notes: { text: string; open: boolean; onToggle: () => void };
+  actions: PassationActions;
   notices?: ReactNode;
-  /** « Passer », for as long as this part's spoken consigne lasts (#37, #59). */
   announcement?: ReactNode;
-  /** Development-only diagnostics. Never rendered in production. */
   devPanel?: ReactNode;
 }) {
-  const total = phaseDurationSeconds(phase);
-  const status = passationStatus(phase, connected, awaitingConsigne || awaitingStart, closing);
-  const hasNotes = notes.trim().length > 0;
-  const partTitle = phase === "monologue" ? MONOLOGUE_TITLE : DEBATE_TITLE;
+  // Everything this screen decides — the part's name, the column, what each
+  // face says, whether the status line prints — is `lib/ui/passation-view.ts`,
+  // tested. This component sets it.
+  const view = passationView({ phase, ...state, notes: notes.text });
 
-  /**
-   * Which sujet this is, and the control for its spoken consigne.
-   *
-   * « Passer » beside the title, not under it (#59): the consigne is twenty-five
-   * seconds of the examiner talking about this sujet, and a control that pushed
-   * the document down the page for the length of a sentence would move the thing
-   * being read. The held state wraps to its own line — it is a paragraph, not a
-   * word.
-   */
-  const sujetHead = (
-    <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-3">
-      <div className="min-w-0">
-        <Kicker>{partieKicker(phase)}</Kicker>
-        <h1 className="mt-1.5 font-serif text-[1.375rem] leading-[1.25] font-semibold text-balance">
-          {topic.title}
-        </h1>
-      </div>
-      {announcement}
-    </div>
-  );
+  const sujetHead = <SujetHead phase={phase} title={topic.title} announcement={announcement} />;
+  // The exposé's column is wide enough for the plan beside the sujet; the
+  // débat's is the conversation's measure.
+  const { column, body } =
+    view.layout === "monologue"
+      ? {
+          column: "max-w-[64rem] pt-5",
+          body: <MonologueBody topic={topic} sujetHead={sujetHead} statusLine={view.statusLine} />,
+        }
+      : {
+          column: "max-w-[47.5rem] pt-4",
+          body: (
+            <DebateBody
+              view={view}
+              sujetHead={sujetHead}
+              elapsed={state.elapsed}
+              transcript={state.transcript}
+              phaseStartedAt={state.phaseStartedAt}
+            />
+          ),
+        };
+  // `shrink-0` because the débat's column no longer grows to fit its children:
+  // a notice that gave up height under pressure would be a notice the
+  // candidate reads half of.
+  const noticeSlot = notices ? <div className="shrink-0">{notices}</div> : null;
+  const drawer = view.hasNotes ? (
+    <NotesDrawer open={notes.open} notes={notes.text} onClose={notes.onToggle} />
+  ) : null;
 
   return (
     <div className="bg-background relative flex h-full min-h-0 flex-col overflow-hidden">
-      {/* The full part title, not the short label. There is room for it here —
+      {/* The topbar's kicker is the part's title in the site's own words —
           the stepper names the parts now, so the kicker no longer has to. */}
       <SimulatorTopBar
-        kicker={poKicker(partTitle)}
+        kicker={poKicker(view.partTitle)}
         currentStep={topbarStep(phase)}
-        onBack={onExit}
+        onBack={actions.exit}
         right={
           <>
-            <TimerRing remaining={remaining} total={total} phase={phase} />
+            <TimerRing remaining={state.remaining} total={view.total} phase={phase} />
             <button
               type="button"
-              onClick={onExit}
+              onClick={actions.exit}
               aria-label="Quitter l'épreuve"
               className="border-danger/30 text-danger hover:bg-danger-subtle flex size-8.5 shrink-0 items-center justify-center rounded-full border transition-colors"
             >
@@ -216,40 +180,122 @@ export function PassationScreen({
         <div
           className={cn(
             "mx-auto flex min-h-0 w-full flex-1 flex-col gap-4 overflow-y-auto px-4 pb-5 sm:px-6",
-            // The exposé carries two columns and needs the room for them; the
-            // débat is one column, and a document set in a wider measure than
-            // this is harder to read, not easier.
-            //
-            // The débat's `pt-4` is not a taste difference from the exposé's
-            // `pt-5`: it makes the column's top padding equal to its `gap-4`,
-            // which is what lets one 1rem band cover the strip above the sticky
-            // scene in both of the positions that strip can be in. See below.
-            phase === "monologue" ? "max-w-[64rem] pt-5" : "max-w-[47.5rem] pt-4",
+            column,
           )}
         >
-          {/* `shrink-0` because the débat's column no longer grows to fit its
-              children: a notice that gave up height under pressure would be a
-              notice the candidate reads half of. */}
-          {notices && <div className="shrink-0">{notices}</div>}
+          {noticeSlot}
+          {body}
+        </div>
 
-          {phase === "monologue" ? (
-            /* Sujet left, plan right. The four beats used to sit *under* the
+        <ConversationControls
+          phase={phase}
+          canAdvance={state.canAdvance}
+          connecting={state.connecting}
+          recording={state.recording}
+          awaitingStart={state.awaitingStart}
+          startDisabled={view.startDisabled}
+          closing={state.closing}
+          hasNotes={view.hasNotes}
+          notesOpen={notes.open}
+          onToggleNotes={notes.onToggle}
+          onStart={actions.start}
+          onAdvance={actions.advance}
+          emptyTranscript={state.emptyTranscript}
+          onRetryTranscription={actions.retryTranscription}
+          devPanel={devPanel}
+        />
+
+        <footer className="border-border bg-card text-muted-foreground shrink-0 border-t px-4 py-2 text-center text-[0.6875rem]">
+          {SITE_FOOTER}
+        </footer>
+
+        {drawer}
+      </main>
+    </div>
+  );
+}
+
+/** The part's kicker and the sujet's title, with the consigne's control beside them. */
+function SujetHead({
+  phase,
+  title,
+  announcement,
+}: {
+  phase: SpeakingPhase;
+  title: string;
+  announcement?: ReactNode;
+}) {
+  return (
+    <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-3">
+      <div className="min-w-0">
+        <Kicker>{partieKicker(phase)}</Kicker>
+        <h1 className="mt-1.5 font-serif text-[1.375rem] leading-[1.25] font-semibold text-balance">
+          {title}
+        </h1>
+      </div>
+      {announcement}
+    </div>
+  );
+}
+
+/** The exposé: the sujet with « Votre plan » beside it, and the one-line status under. */
+function MonologueBody({
+  topic,
+  sujetHead,
+  statusLine,
+}: {
+  topic: OralTopic;
+  sujetHead: ReactNode;
+  statusLine: string | null;
+}) {
+  return (
+    <>
+      {/* Sujet left, plan right. The four beats used to sit *under* the
                document, which meant a candidate who scrolled to re-read their
                source scrolled the plan off the screen — during the one part of
                the épreuve where following it is the whole task. Side by side,
                neither costs the other any height. Below `lg` the grid is one
                column and the plan falls back under the sujet, which is the only
-               order that fits a phone. */
-            <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_19rem] lg:items-start">
-              <section className="border-paper-border bg-paper rounded-lg border px-5 py-6 sm:px-7">
-                {sujetHead}
-                <p className="document-text mt-4">{topic.document}</p>
-              </section>
-              <ExposePlan />
-            </div>
-          ) : (
-            <>
-              {/* The title, and not the document. During the débat the candidate
+               order that fits a phone. */}
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_19rem] lg:items-start">
+        <section className="border-paper-border bg-paper rounded-lg border px-5 py-6 sm:px-7">
+          {sujetHead}
+          <p className="document-text mt-4">{topic.document}</p>
+        </section>
+        <ExposePlan />
+      </div>
+
+      {/* The exposé's line of guidance, under the plan rather than replacing
+              it: the plan is the thing to be looking at, and this is one
+              sentence saying whether the examiner is there yet. The débat has no
+              room for it and no need of it — the same sentence is what its
+              conversation panel prints while it is still empty. */}
+      {statusLine && (
+        <p role="status" className="text-muted-foreground text-center text-xs leading-relaxed">
+          {statusLine}
+        </p>
+      )}
+    </>
+  );
+}
+
+/** The débat: the sujet's name, the two faces pinned, and the exchange under them. */
+function DebateBody({
+  view,
+  sujetHead,
+  elapsed,
+  transcript,
+  phaseStartedAt,
+}: {
+  view: PassationView;
+  sujetHead: ReactNode;
+  elapsed: number;
+  transcript: readonly TranscriptEntry[];
+  phaseStartedAt: number | null;
+}) {
+  return (
+    <>
+      {/* The title, and not the document. During the débat the candidate
                   is answering the examiner, not reading — the paragraphs would
                   take a third of the viewport to be looked at by nobody, and the
                   exchange is what needs that room. The line stays so the sujet
@@ -259,11 +305,11 @@ export function PassationScreen({
                   A candidate looks for the sujet's name at the top, before the
                   conversation; three turns deep, what they need on screen is who
                   is speaking, not what the subject was called. */}
-              <section className="border-paper-border bg-paper shrink-0 rounded-lg border px-5 py-4 sm:px-7">
-                {sujetHead}
-              </section>
+      <section className="border-paper-border bg-paper shrink-0 rounded-lg border px-5 py-4 sm:px-7">
+        {sujetHead}
+      </section>
 
-              {/* Who is speaking, over what was said. The scene answers it at a
+      {/* Who is speaking, over what was said. The scene answers it at a
                   glance and the exchange answers "what did they just ask me",
                   which is the question a candidate actually has to answer.
 
@@ -287,90 +333,15 @@ export function PassationScreen({
                   Both bands are 1rem, which is why the column's `pt` was set to
                   match its `gap` above: one measurement, two strips, no third
                   number to keep in step. */}
-              <div className="bg-background before:bg-background sticky top-0 z-10 -mb-4 pb-4 before:absolute before:inset-x-0 before:bottom-full before:h-4">
-                <ConversationScene
-                  // The floor, not the speaker: the opening question counts as
-                  // the examiner's turn from the candidate's click, even while it
-                  // is still being generated and nothing is audible yet.
-                  examinerSpeaking={examinerSpeaking || openingQuestionPending}
-                  examinerStatus={examinerStatus({
-                    connected,
-                    connecting,
-                    speaking: examinerSpeaking,
-                    announcing: awaitingConsigne,
-                    closing,
-                    opening: openingQuestionPending,
-                  })}
-                  // Not simply `recording`: the microphone stays open while the
-                  // examiner interrupts, and two rings pulsing at once says the
-                  // one thing this screen exists to answer is "both of you".
-                  candidateRecording={recording && !examinerSpeaking && !openingQuestionPending}
-                  candidateStatus={candidateStatus({
-                    connected,
-                    examinerSpeaking: examinerSpeaking || openingQuestionPending,
-                    recording,
-                  })}
-                  candidateStatusUrgent={remaining <= 60}
-                  elapsed={elapsed}
-                  total={total}
-                />
-              </div>
+      <div className="bg-background before:bg-background sticky top-0 z-10 -mb-4 pb-4 before:absolute before:inset-x-0 before:bottom-full before:h-4">
+        <ConversationScene {...view.scene} elapsed={elapsed} total={view.total} />
+      </div>
 
-              <DebateConversation
-                transcript={transcript}
-                phaseStartedAt={phaseStartedAt}
-                hint={status.body}
-              />
-            </>
-          )}
-
-          {/* The exposé's line of guidance, under the plan rather than replacing
-              it: the plan is the thing to be looking at, and this is one
-              sentence saying whether the examiner is there yet. The débat has no
-              room for it and no need of it — the same sentence is what its
-              conversation panel prints while it is still empty. */}
-          {phase === "monologue" && !awaitingStart && !awaitingConsigne && (
-            // A live region, and permanently one: it carries the examiner's
-            // arrival and — since #55 — the close, and a region that only gets
-            // its role at the moment its text changes is a region a screen
-            // reader has no reason to have been watching. Its handful of states
-            // are all events worth hearing, unlike the countdown under the
-            // control below.
-            //
-            // The débat announces the same events through the scene's own polite
-            // region instead, which is why this is the exposé's line and not a
-            // shared one: two regions reporting one event is how a screen reader
-            // user hears it twice.
-            <p role="status" className="text-muted-foreground text-center text-xs leading-relaxed">
-              {status.body}
-            </p>
-          )}
-        </div>
-
-        <ConversationControls
-          phase={phase}
-          canAdvance={canAdvance}
-          connecting={connecting}
-          recording={recording}
-          awaitingStart={awaitingStart}
-          startDisabled={awaitingConsigne}
-          closing={closing}
-          hasNotes={hasNotes}
-          notesOpen={notesOpen}
-          onToggleNotes={onToggleNotes}
-          onStart={onStart}
-          onAdvance={onAdvance}
-          emptyTranscript={emptyTranscript}
-          onRetryTranscription={onRetryTranscription}
-          devPanel={devPanel}
-        />
-
-        <footer className="border-border bg-card text-muted-foreground shrink-0 border-t px-4 py-2 text-center text-[0.6875rem]">
-          {SITE_FOOTER}
-        </footer>
-
-        {hasNotes && <NotesDrawer open={notesOpen} notes={notes} onClose={onToggleNotes} />}
-      </main>
-    </div>
+      <DebateConversation
+        transcript={transcript}
+        phaseStartedAt={phaseStartedAt}
+        hint={view.statusBody}
+      />
+    </>
   );
 }

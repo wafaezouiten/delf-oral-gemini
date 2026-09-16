@@ -7,6 +7,7 @@ import {
   buildFeaturedSujets,
   buildHubView,
   HUB_LINKS,
+  hubGreeting,
   latestScoreBySujet,
 } from "@/lib/ui/epreuve-hub";
 import { HubCapabilities, HubFormat, HubMasthead, HubSujets } from "./_components/hub-sections";
@@ -44,20 +45,13 @@ export default async function ProductionOraleHub() {
   // The first three of the catalogue (#188), not the whole of it: the kiosk is
   // one click away for the rest.
   const sujets = buildFeaturedSujets(ORAL_TOPICS, latestScoreBySujet(history));
-  const firstName = user?.firstName;
+  const greeting = hubGreeting(user?.firstName, history.length);
 
   return (
     <main className="mx-auto w-full max-w-5xl px-4 py-6 sm:px-6 sm:py-8">
       <HubMasthead view={view} />
 
-      {firstName && (
-        <p className="text-muted-foreground mt-4 text-sm">
-          Bonjour {firstName}.{" "}
-          {history.length === 0
-            ? "Choisissez un sujet pour votre première épreuve."
-            : `Vous avez déjà passé ${history.length} épreuve${history.length > 1 ? "s" : ""}.`}
-        </p>
-      )}
+      {greeting && <p className="text-muted-foreground mt-4 text-sm">{greeting}</p>}
 
       <HubFormat view={view} />
       <HubSujets sujets={sujets} allSujetsHref={HUB_LINKS.sujets} />

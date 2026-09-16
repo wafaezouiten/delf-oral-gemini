@@ -5,18 +5,19 @@
  * PORT NOTE: assembled from two files in the reference implementation
  * (`delf-preps@chore/240-remove-unused-series-actions`):
  *
- *  - `src/lib/constants/orale.ts` → `OralPartSpec`, the **B2 rows only**, and
- *    `minDurationSeconds()`. The reproduction audit ("Simplify") keeps exactly
- *    those and drops the A1/A2/B1 definitions, `partCountForLevel()` and the
- *    whole `DelfLevel` generalisation — this project is B2-only, so the level
- *    parameter has nowhere to come from.
+ *  - `src/lib/constants/orale.ts` → `OralPartSpec`, the **B2 rows only**. The
+ *    reproduction audit ("Simplify") keeps exactly those and drops the
+ *    A1/A2/B1 definitions, `partCountForLevel()` and the whole `DelfLevel`
+ *    generalisation — this project is B2-only, so the level parameter has
+ *    nowhere to come from. `minDurationSeconds()` was ported too and has since
+ *    gone (#189); the rule it carried is written down below.
  *  - `src/lib/scoring.ts` → `COMPETENCY_MAX` and `COMPETENCY_FLOOR`, **extracted
  *    rather than imported**, because importing that file would drag in the whole
  *    multi-épreuve scoring model.
  *
  * The B2 numbers (420 s monologue after 1800 s of preparation; 780 s débat with
- * no preparation) and the 40 %-floored-at-30 s duration rule are DELF business
- * rules: reproduce them, do not re-derive them.
+ * no preparation) are DELF business rules: reproduce them, do not re-derive
+ * them.
  *
  * Sources: docs/DELF_EXAM_REFERENCE.md §4–5.
  */
@@ -82,26 +83,19 @@ export function getOralPartSpec(tache: number): OralPartSpec | null {
   return ORAL_PARTS_B2.find((p) => p.tache === tache) ?? null;
 }
 
-/**
- * The incumbent's minimum expected candidate duration per part, in seconds:
- * ~40 % of the expected speaking time, floored at 30 s. 168 s for the monologue
- * and 312 s for the débat.
+/*
+ * The incumbent's duration rule, for the record rather than for the code.
  *
- * **No longer this project's grading rule (#189), and kept deliberately.** It
- * was the single per-part threshold behind a flat −3; the sitting is now placed
- * in one of three tiers against `FULL_DEVELOPMENT_SECONDS` and
- * `SHORT_DEVELOPMENT_SECONDS` in `orale-rubric.ts`, which are absolute figures
- * rather than a fraction of the part. Nothing in `src/` computes a mark from
- * this function any more.
+ * `minDurationSeconds(tache)` — ~40 % of the part's expected speaking time,
+ * floored at 30 s: 168 s for the monologue, 312 s for the débat — was the single
+ * per-part threshold behind a flat −3. It stopped being this project's grading
+ * rule in #189, when the sitting began to be placed in one of three tiers
+ * against `FULL_DEVELOPMENT_SECONDS` and `SHORT_DEVELOPMENT_SECONDS` in
+ * `orale-rubric.ts`, absolute figures rather than a fraction of the part.
  *
- * It survives because it is the incumbent's rule, and `scripts/comparison`
- * exists to compare marks with the incumbent: deleting it would silently drop
- * the only statement in this tree of the threshold the other side still uses.
- * Do not wire it back into the rubric without reopening #189.
+ * The function itself was kept for a while as a statement of what the other
+ * side still uses; it is gone now because nothing here called it.
+ * `scripts/comparison/incumbent-runner.ts` runs inside the incumbent's own tree
+ * and reads the rule from there. Do not wire it back into the rubric without
+ * reopening #189.
  */
-export function minDurationSeconds(tache: number): number {
-  const spec = getOralPartSpec(tache);
-  if (!spec) return 30;
-  // ~40% of the expected speaking time, floored at 30s.
-  return Math.max(30, Math.round(spec.durationSeconds * 0.4));
-}

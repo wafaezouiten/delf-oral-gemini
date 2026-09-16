@@ -35,46 +35,18 @@
  * refuse the most ordinary walk-out there is. See `abandonSitting`.
  */
 
-import { NextResponse } from "next/server";
-
-import { EXAM_ACCESS_DENIALS } from "@/lib/auth/exam-access";
-import { authorizeExam } from "@/lib/auth/exam-guard";
 import { neonSittingStore } from "@/lib/db/sittings";
+import { exitStampRoute } from "@/lib/exams/exit-stamp-route";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export async function POST(_request: Request, context: { params: Promise<{ examId: string }> }) {
-  const { examId } = await context.params;
-
-  // Ownership before anything else, exactly as the progress and finish routes
-  // do it: exam ids are sequential serials, and this one writes a zero onto
-  // somebody's record.
-  const access = await authorizeExam(examId);
-  if (access.status === "denied") {
-    const { status, error } = EXAM_ACCESS_DENIALS[access.reason];
-    return NextResponse.json({ error }, { status });
-  }
-
-  // No row to mark — no database, a degraded `local-…` id, or an ownership
-  // question the database could not answer. The candidate still leaves.
-  if (access.status !== "owned") {
-    return NextResponse.json({ abandoned: false, persisted: false });
-  }
-
-  try {
-    const abandoned = await neonSittingStore().abandonSitting(
-      { examId: access.examId, userId: access.userId },
-      new Date(),
-    );
-    // `false` is not an error: it means the sitting was already abandoned, or a
-    // correction had landed and outranks the walk-out. 200 either way, so a
-    // client cannot be taught to retry on it.
-    return NextResponse.json({ abandoned, persisted: true });
-  } catch (error) {
-    // Logged rather than surfaced. The candidate is already leaving, and the
-    // cost is the record of the walk-out rather than anything they can fix.
-    console.error("[abandon] could not mark exam", examId, "as abandoned", error);
-    return NextResponse.json({ error: "Abandon non enregistré" }, { status: 503 });
-  }
-}
+export const POST = exitStampRoute({
+  flag: "abandoned",
+  // `false` is not an error: it means the sitting was already abandoned, or a
+  // correction had landed and outranks the walk-out. 200 either way, so a
+  // client cannot be taught to retry on it.
+  stamp: (ref, at) => neonSittingStore().abandonSitting(ref, at),
+  failure: (examId) => `[abandon] could not mark exam ${examId} as abandoned`,
+  failureBody: "Abandon non enregistré",
+});
